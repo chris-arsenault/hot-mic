@@ -7,7 +7,13 @@ public enum ParameterType
     Mute,
     Solo,
     PluginBypass,
-    PluginParameter
+    PluginParameter,
+    PluginCommand
+}
+
+public enum PluginCommandType
+{
+    LearnNoiseProfile
 }
 
 public sealed class ParameterChange
@@ -17,4 +23,5 @@ public sealed class ParameterChange
     public int PluginIndex { get; init; }
     public int ParameterIndex { get; init; }
     public float Value { get; init; }
+    public PluginCommandType Command { get; init; }
 }

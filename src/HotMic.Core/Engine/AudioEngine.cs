@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using HotMic.Common.Configuration;
+using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Threading;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
@@ -539,6 +540,9 @@ public sealed class AudioEngine : IDisposable
                     case ParameterType.PluginParameter:
                         ApplyPluginParameter(channel, change.PluginIndex, change.ParameterIndex, change.Value);
                         break;
+                    case ParameterType.PluginCommand:
+                        ApplyPluginCommand(channel, change.PluginIndex, change.Command);
+                        break;
                 }
             }
         }
@@ -568,6 +572,21 @@ public sealed class AudioEngine : IDisposable
 
             var plugin = slots[pluginIndex];
             plugin?.SetParameter(parameterIndex, value);
+        }
+
+        private static void ApplyPluginCommand(ChannelStrip channel, int pluginIndex, PluginCommandType command)
+        {
+            var slots = channel.PluginChain.GetSnapshot();
+            if ((uint)pluginIndex >= (uint)slots.Length)
+            {
+                return;
+            }
+
+            var plugin = slots[pluginIndex];
+            if (plugin is FFTNoiseRemovalPlugin noise && command == PluginCommandType.LearnNoiseProfile)
+            {
+                noise.LearnNoiseProfile();
+            }
         }
     }
 

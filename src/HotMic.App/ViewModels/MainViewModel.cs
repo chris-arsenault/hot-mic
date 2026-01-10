@@ -7,6 +7,7 @@ using HotMic.Common.Configuration;
 using HotMic.Common.Models;
 using HotMic.Core.Engine;
 using HotMic.Core.Plugins;
+using HotMic.Core.Plugins.BuiltIn;
 using HotMic.App.Models;
 using HotMic.App.Views;
 using HotMic.Vst3;
@@ -61,6 +62,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<AudioDevice> OutputDevices { get; }
 
+    public IReadOnlyList<int> SampleRateOptions { get; } = [44100, 48000];
+
+    public IReadOnlyList<int> BufferSizeOptions { get; } = [128, 256, 512, 1024];
+
     [ObservableProperty]
     private AudioDevice? selectedInputDevice1;
 
@@ -72,6 +77,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private AudioDevice? selectedMonitorDevice;
+
+    [ObservableProperty]
+    private int selectedSampleRate;
+
+    [ObservableProperty]
+    private int selectedBufferSize;
 
     [ObservableProperty]
     private bool isMinimalView;
@@ -89,10 +100,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private double windowY;
 
     [ObservableProperty]
-    private double windowWidth = 980;
+    private double windowWidth = 1020;
 
     [ObservableProperty]
-    private double windowHeight = 620;
+    private double windowHeight = 720;
 
     public string ViewToggleLabel => IsMinimalView ? "Full" : "Minimal";
 
@@ -114,8 +125,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         else
         {
-            WindowWidth = 980;
-            WindowHeight = 620;
+            WindowWidth = 1020;
+            WindowHeight = 720;
         }
     }
 
@@ -164,6 +175,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _config.AudioSettings.InputDevice2Id = SelectedInputDevice2?.Id ?? string.Empty;
         _config.AudioSettings.OutputDeviceId = SelectedOutputDevice?.Id ?? string.Empty;
         _config.AudioSettings.MonitorOutputDeviceId = SelectedMonitorDevice?.Id ?? string.Empty;
+        _config.AudioSettings.SampleRate = SelectedSampleRate;
+        _config.AudioSettings.BufferSize = SelectedBufferSize;
         _configManager.Save(_config);
 
         StatusMessage = string.Empty;
@@ -175,6 +188,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             StatusMessage = $"Audio start failed: {ex.Message}";
+        }
+
+        if (StatusMessage.Length == 0 && (_audioEngine.SampleRate != SelectedSampleRate || _audioEngine.BlockSize != SelectedBufferSize))
+        {
+            StatusMessage = "Sample rate/buffer changes apply on restart.";
         }
     }
 
@@ -189,6 +207,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var channel1Config = _config.Channels.ElementAtOrDefault(0);
         var channel2Config = _config.Channels.ElementAtOrDefault(1);
+
+        SelectedSampleRate = SampleRateOptions.Contains(_config.AudioSettings.SampleRate)
+            ? _config.AudioSettings.SampleRate
+            : SampleRateOptions[0];
+        SelectedBufferSize = BufferSizeOptions.Contains(_config.AudioSettings.BufferSize)
+            ? _config.AudioSettings.BufferSize
+            : BufferSizeOptions[1];
 
         if (channel1Config is not null)
         {
@@ -376,6 +401,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
         else
         {
+            if (plugin is Vst3PluginWrapper vst3)
+            {
+                ShowVst3Editor(vst3);
+                return;
+            }
+
             ShowPluginParameters(channelIndex, slotIndex, plugin);
         }
     }
@@ -463,12 +494,37 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 value => ApplyPluginParameter(channelIndex, slotIndex, parameter.Index, parameter.Name, value));
         }).ToList();
 
-        var viewModel = new PluginParametersViewModel(plugin.Name, parameterViewModels);
+        Func<float>? gainReductionProvider = plugin is CompressorPlugin compressor ? compressor.GetGainReductionDb : null;
+        Func<bool>? gateOpenProvider = plugin is NoiseGatePlugin gate ? gate.IsGateOpen : null;
+        Action? learnNoiseAction = plugin is FFTNoiseRemovalPlugin ? () => RequestNoiseLearn(channelIndex, slotIndex) : null;
+
+        var viewModel = new PluginParametersViewModel(plugin.Name, parameterViewModels, gainReductionProvider, gateOpenProvider, learnNoiseAction);
         var window = new PluginParametersWindow(viewModel)
         {
             Owner = Application.Current?.MainWindow
         };
         window.ShowDialog();
+    }
+
+    private static void ShowVst3Editor(Vst3PluginWrapper plugin)
+    {
+        var window = new Vst3EditorWindow(plugin)
+        {
+            Owner = Application.Current?.MainWindow,
+            Title = plugin.Name
+        };
+        window.Show();
+    }
+
+    private void RequestNoiseLearn(int channelIndex, int slotIndex)
+    {
+        _audioEngine.EnqueueParameterChange(new ParameterChange
+        {
+            ChannelId = channelIndex,
+            Type = ParameterType.PluginCommand,
+            PluginIndex = slotIndex,
+            Command = PluginCommandType.LearnNoiseProfile
+        });
     }
 
     private void ApplyPluginParameter(int channelIndex, int slotIndex, int parameterIndex, string parameterName, float value)

@@ -1,76 +1,27 @@
 <Window x:Class="HotMic.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:views="clr-namespace:HotMic.App.Views"
+        xmlns:skia="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         xmlns:vm="clr-namespace:HotMic.App.ViewModels"
         Title="HotMic"
         Width="{Binding WindowWidth}" Height="{Binding WindowHeight}"
         Left="{Binding WindowX}" Top="{Binding WindowY}"
-        Background="{DynamicResource BackgroundPrimary}"
-        Foreground="{DynamicResource TextPrimary}"
         WindowStartupLocation="Manual"
-        Topmost="{Binding AlwaysOnTop}">
+        Topmost="{Binding AlwaysOnTop}"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ResizeMode="NoResize">
   <Window.DataContext>
     <vm:MainViewModel />
   </Window.DataContext>
 
   <Grid>
-    <Grid.RowDefinitions>
-      <RowDefinition Height="52" />
-      <RowDefinition Height="*" />
-    </Grid.RowDefinitions>
-
-    <Border Grid.Row="0" Background="{DynamicResource BackgroundSecondary}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1">
-      <DockPanel LastChildFill="True" Margin="16,0">
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-          <TextBlock Text="HotMic" FontSize="20" FontWeight="SemiBold" Margin="0,0,12,0" />
-          <TextBlock Text="{Binding StatusMessage}" Foreground="Tomato" FontSize="12">
-            <TextBlock.Style>
-              <Style TargetType="TextBlock">
-                <Setter Property="Visibility" Value="Visible" />
-                <Style.Triggers>
-                  <DataTrigger Binding="{Binding StatusMessage}" Value="">
-                    <Setter Property="Visibility" Value="Collapsed" />
-                  </DataTrigger>
-                </Style.Triggers>
-              </Style>
-            </TextBlock.Style>
-          </TextBlock>
-        </StackPanel>
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" DockPanel.Dock="Right" VerticalAlignment="Center">
-          <Button Content="{Binding ViewToggleLabel}" Command="{Binding ToggleViewCommand}" Style="{DynamicResource SecondaryButtonStyle}" Margin="0,0,8,0" />
-          <Button Content="Settings" Command="{Binding OpenSettingsCommand}" Style="{DynamicResource SecondaryButtonStyle}" Margin="0,0,8,0" />
-          <Button Content="Pin" Command="{Binding ToggleAlwaysOnTopCommand}" Style="{DynamicResource SecondaryButtonStyle}" />
-        </StackPanel>
-      </DockPanel>
-    </Border>
-
-    <Grid Grid.Row="1" Margin="16">
-      <views:FullEditView>
-        <views:FullEditView.Style>
-          <Style TargetType="views:FullEditView">
-            <Setter Property="Visibility" Value="Visible" />
-            <Style.Triggers>
-              <DataTrigger Binding="{Binding IsMinimalView}" Value="True">
-                <Setter Property="Visibility" Value="Collapsed" />
-              </DataTrigger>
-            </Style.Triggers>
-          </Style>
-        </views:FullEditView.Style>
-      </views:FullEditView>
-
-      <views:MinimalView>
-        <views:MinimalView.Style>
-          <Style TargetType="views:MinimalView">
-            <Setter Property="Visibility" Value="Collapsed" />
-            <Style.Triggers>
-              <DataTrigger Binding="{Binding IsMinimalView}" Value="True">
-                <Setter Property="Visibility" Value="Visible" />
-              </DataTrigger>
-            </Style.Triggers>
-          </Style>
-        </views:MinimalView.Style>
-      </views:MinimalView>
-    </Grid>
+    <skia:SKElement x:Name="SkiaCanvas"
+                    PaintSurface="SkiaCanvas_PaintSurface"
+                    MouseDown="SkiaCanvas_MouseDown"
+                    MouseMove="SkiaCanvas_MouseMove"
+                    MouseUp="SkiaCanvas_MouseUp"
+                    MouseWheel="SkiaCanvas_MouseWheel" />
   </Grid>
 </Window>

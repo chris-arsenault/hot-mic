@@ -14,8 +14,8 @@ Status legend:
 | FR-1.1 | Implemented | Dual WASAPI capture wired for two inputs. |
 | FR-1.2 | Implemented | WASAPI capture via NAudio. |
 | FR-1.3 | Implemented | Device selection UI + DeviceManager. |
-| FR-1.4 | Partial | Config supports sample rate; no UI to select. |
-| FR-1.5 | Partial | Config supports buffer size; no UI to select. |
+| FR-1.4 | Implemented | UI selection persisted; takes effect on restart. |
+| FR-1.5 | Implemented | UI selection persisted; takes effect on restart. |
 
 ### FR-2: Audio Output
 | ID | Status | Notes |
@@ -55,15 +55,15 @@ Status legend:
 | FR-5.1.3 | Implemented | Attack range supported. |
 | FR-5.1.4 | Implemented | Release range supported. |
 | FR-5.1.5 | Implemented | Makeup gain supported. |
-| FR-5.1.6 | Partial | Gain reduction value exposed; no UI meter. |
+| FR-5.1.6 | Implemented | Gain reduction meter shown in compressor parameters. |
 | FR-5.2 | Implemented | Noise gate plugin exists. |
 | FR-5.2.1 | Implemented | Threshold range supported. |
 | FR-5.2.2 | Implemented | Attack range supported. |
 | FR-5.2.3 | Implemented | Hold range supported. |
 | FR-5.2.4 | Implemented | Release range supported. |
-| FR-5.2.5 | Partial | Gate open state exposed; no UI indicator. |
+| FR-5.2.5 | Implemented | Gate open indicator shown in noise gate parameters. |
 | FR-5.3 | Implemented | FFT noise removal plugin exists. |
-| FR-5.3.1 | Partial | Learn method exists; no UI button. |
+| FR-5.3.1 | Implemented | Learn noise profile action available in parameters. |
 | FR-5.3.2 | Implemented | Reduction parameter supported. |
 | FR-5.3.3 | Implemented | Sensitivity parameter supported. |
 | FR-5.4 | Implemented | 3-band EQ plugin exists. |
@@ -78,7 +78,7 @@ Status legend:
 | FR-6.1 | Partial | VST.NET host wrapper added; not validated with VST3 binaries. |
 | FR-6.2 | Implemented | Scans common VST3 directories. |
 | FR-6.3 | Implemented | Scan results cached to JSON. |
-| FR-6.4 | Not Started | Wrapper exposes editor methods; UI hosting not wired. |
+| FR-6.4 | Implemented | VST3 editor window hosts native plugin UI. |
 | FR-6.5 | Partial | Chunk/parameter state supported and persisted. |
 
 ### FR-7: Metering
@@ -88,18 +88,18 @@ Status legend:
 | FR-7.2 | Implemented | Peak shown as line. |
 | FR-7.3 | Implemented | RMS shown as filled bar. |
 | FR-7.4 | Implemented | Peak hold + decay in MeterProcessor. |
-| FR-7.5 | Implemented | UI updates ~30fps timer. |
+| FR-7.5 | Implemented | Meter update timer ~30fps; UI redraw targets ~60fps. |
 | FR-7.6 | Implemented | Tick marks + dB labels. |
 | FR-7.7 | Implemented | Red indicator at clipping. |
 
 ### FR-8: User Interface - General
 | ID | Status | Notes |
 | --- | --- | --- |
-| FR-8.1 | Partial | Dark UI implemented; aesthetic not validated. |
+| FR-8.1 | Implemented | Skia-rendered dark Ableton-style layout. |
 | FR-8.2 | Implemented | Always-on-top toggle wired. |
 | FR-8.3 | Implemented | Dark theme resources. |
-| FR-8.4 | Partial | Skia used for meters/knobs; rest is WPF. |
-| FR-8.5 | Partial | Architecture avoids UI/audio blocking; no profiling yet. |
+| FR-8.4 | Implemented | Core UI rendered via SkiaSharp; VST3 editors hosted natively. |
+| FR-8.5 | Partial | Skia-only rendering; responsiveness not profiled. |
 
 ### FR-9: User Interface - View Modes
 | ID | Status | Notes |
@@ -107,7 +107,7 @@ Status legend:
 | FR-9.1 | Implemented | Full edit view. |
 | FR-9.2 | Implemented | Channel strip controls in full view. |
 | FR-9.3 | Implemented | Drag/drop in full view. |
-| FR-9.4 | Implemented | Parameter window for plugin controls. |
+| FR-9.4 | Implemented | Skia parameter editor for plugin controls. |
 | FR-9.5 | Implemented | Minimal view. |
 | FR-9.6 | Implemented | Minimal view shows names + meters. |
 | FR-9.7 | Implemented | Minimal size enforced on toggle. |
@@ -142,7 +142,7 @@ Status legend:
 | --- | --- | --- |
 | NFR-2.1 | Needs Validation | Targets Windows; not tested on 10/11. |
 | NFR-2.2 | Implemented | net8.0-windows target. |
-| NFR-2.3 | Partial | x64 assumed; not enforced in project config. |
+| NFR-2.3 | Implemented | Platform target set to x64 in build props. |
 | NFR-2.4 | Implemented | VB-Cable required and validated. |
 
 ### NFR-3: Reliability

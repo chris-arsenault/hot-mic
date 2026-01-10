@@ -7,5 +7,7 @@
   <PropertyGroup>
     <BaseOutputPath>C:\Users\carse\RiderProjects\BuildMirror\bin\$(MSBuildProjectName)\</BaseOutputPath>
     <BaseIntermediateOutputPath>C:\Users\carse\RiderProjects\BuildMirror\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
   </PropertyGroup>
 </Project>
