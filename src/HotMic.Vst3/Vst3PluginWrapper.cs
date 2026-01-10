@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using HotMic.Core.Plugins;
@@ -73,7 +74,11 @@ public sealed class Vst3PluginWrapper : IPlugin
         _setSampleRate = CreateDelegate<Action<float>>(_commandStub, "SetSampleRate");
         _setBlockSize = CreateDelegate<Action<int>>(_commandStub, "SetBlockSize");
         _mainsChanged = CreateDelegate<Action<bool>>(_commandStub, "MainsChanged");
-        _processReplacing = CreateDelegate<ProcessReplacingDelegate>(_commandStub, "ProcessReplacing");
+        _processReplacing = CreateDelegate<ProcessReplacingDelegate>(
+            _commandStub,
+            "ProcessReplacing",
+            typeof(VstAudioBuffer[]),
+            typeof(VstAudioBuffer[]));
         _getChunk = CreateDelegate<GetChunkDelegate>(_commandStub, "GetChunk");
         _setChunk = CreateDelegate<SetChunkDelegate>(_commandStub, "SetChunk");
         _getParameter = CreateDelegate<GetParameterDelegate>(_commandStub, "GetParameter");
@@ -347,9 +352,9 @@ public sealed class Vst3PluginWrapper : IPlugin
         }
     }
 
-    private static T CreateDelegate<T>(object target, string methodName) where T : Delegate
+    private static T CreateDelegate<T>(object target, string methodName, params Type[] parameterTypes) where T : Delegate
     {
-        var method = target.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        var method = GetMethod(target, methodName, parameterTypes);
         if (method is null)
         {
             throw new InvalidOperationException($"VST3 plugin command stub is missing {methodName}.");
@@ -363,6 +368,47 @@ public sealed class Vst3PluginWrapper : IPlugin
         {
             throw new InvalidOperationException($"Failed to bind VST3 method {methodName}.", ex);
         }
+    }
+
+    private static MethodInfo? GetMethod(object target, string methodName, Type[] parameterTypes)
+    {
+        var methods = target.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(method => method.Name == methodName);
+
+        if (parameterTypes.Length > 0)
+        {
+            methods = methods.Where(method =>
+            {
+                var parameters = method.GetParameters();
+                if (parameters.Length != parameterTypes.Length)
+                {
+                    return false;
+                }
+
+                for (int i = 0; i < parameters.Length; i++)
+                {
+                    if (parameters[i].ParameterType != parameterTypes[i])
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            });
+        }
+
+        MethodInfo? match = null;
+        foreach (var method in methods)
+        {
+            if (match is not null)
+            {
+                throw new InvalidOperationException($"VST3 plugin command stub has multiple matches for {methodName}.");
+            }
+
+            match = method;
+        }
+
+        return match;
     }
 
     private static VstAudioBuffer[] GetBuffers(VstAudioBufferManager manager)
