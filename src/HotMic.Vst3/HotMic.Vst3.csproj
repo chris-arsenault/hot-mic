@@ -4,11 +4,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RuntimeIdentifier>win10-x64</RuntimeIdentifier>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Jacobi.Vst.Core" Version="2.0.0" />
-    <PackageReference Include="Jacobi.Vst.Host.Interop" Version="2.0.0" />
+    <PackageReference Include="Jacobi.Vst" Version="2.0.0-alpha" />
   </ItemGroup>
 
   <ItemGroup>

@@ -216,8 +216,7 @@ NAudio >= 2.2.0
 SkiaSharp >= 2.88.0
 SkiaSharp.Views.WPF >= 2.88.0
 MathNet.Numerics >= 5.0.0
-Jacobi.Vst.Core >= 2.0.0
-Jacobi.Vst.Host.Interop >= 2.0.0
+Jacobi.Vst >= 2.0.0-alpha
 CommunityToolkit.Mvvm >= 8.2.0
 ```
 
