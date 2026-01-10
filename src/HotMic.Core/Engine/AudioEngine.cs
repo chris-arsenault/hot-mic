@@ -49,6 +49,9 @@ public sealed class AudioEngine : IDisposable
     private int _input2BlockAlign;
     private float[] _input1MixBuffer = Array.Empty<float>();
     private float[] _input2MixBuffer = Array.Empty<float>();
+    private int _input1ChannelMode;
+    private int _input2ChannelMode;
+    private int _outputRoutingMode;
 
     private WasapiCapture? _capture1;
     private WasapiCapture? _capture2;
@@ -72,6 +75,9 @@ public sealed class AudioEngine : IDisposable
         _sampleRate = settings.SampleRate;
         _blockSize = settings.BufferSize;
         _latencyMs = Math.Max(20, (int)(1000.0 * _blockSize / _sampleRate));
+        _input1ChannelMode = (int)settings.Input1Channel;
+        _input2ChannelMode = (int)settings.Input2Channel;
+        _outputRoutingMode = (int)settings.OutputRouting;
 
         _inputBuffer1 = new LockFreeRingBuffer(_blockSize * 32);
         _inputBuffer2 = new LockFreeRingBuffer(_blockSize * 32);
@@ -98,6 +104,13 @@ public sealed class AudioEngine : IDisposable
         _monitorOutputId = monitorOutputId ?? string.Empty;
     }
 
+    public void ConfigureRouting(InputChannelMode input1Channel, InputChannelMode input2Channel, OutputRoutingMode outputRouting)
+    {
+        Volatile.Write(ref _input1ChannelMode, (int)input1Channel);
+        Volatile.Write(ref _input2ChannelMode, (int)input2Channel);
+        Volatile.Write(ref _outputRoutingMode, (int)outputRouting);
+    }
+
     public void Start()
     {
         if (string.IsNullOrWhiteSpace(_outputId))
@@ -118,6 +131,7 @@ public sealed class AudioEngine : IDisposable
             ReportOutputCallback,
             ReportOutputUnderflow1,
             ReportOutputUnderflow2,
+            () => (OutputRoutingMode)Volatile.Read(ref _outputRoutingMode),
             outputFormat);
 
         _output = new WasapiOut(outputDevice, AudioClientShareMode.Shared, true, _latencyMs);
@@ -299,12 +313,26 @@ public sealed class AudioEngine : IDisposable
         }
 
         var device = enumerator.GetDevice(deviceId);
+        int channels = GetPreferredInputChannels(device);
         var capture = new WasapiCapture(device)
         {
-            WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(_sampleRate, 1)
+            WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(_sampleRate, channels)
         };
 
         return capture;
+    }
+
+    private static int GetPreferredInputChannels(MMDevice device)
+    {
+        try
+        {
+            int channels = device.AudioClient.MixFormat.Channels;
+            return channels >= 2 ? 2 : 1;
+        }
+        catch
+        {
+            return 1;
+        }
     }
 
     private void CacheInputFormat(WasapiCapture capture, bool isFirst)
@@ -338,14 +366,28 @@ public sealed class AudioEngine : IDisposable
     {
         int frames = _input1BlockAlign > 0 ? e.BytesRecorded / _input1BlockAlign : e.BytesRecorded / sizeof(float);
         ReportInput1Callback(frames);
-        WriteInputBuffer(_inputBuffer1, e.Buffer.AsSpan(0, e.BytesRecorded), _input1Channels, _input1BlockAlign, _input1MixBuffer, ref _input1DroppedSamples);
+        WriteInputBuffer(
+            _inputBuffer1,
+            e.Buffer.AsSpan(0, e.BytesRecorded),
+            _input1Channels,
+            _input1BlockAlign,
+            _input1MixBuffer,
+            Volatile.Read(ref _input1ChannelMode),
+            ref _input1DroppedSamples);
     }
 
     private void OnInput2DataAvailable(object? sender, WaveInEventArgs e)
     {
         int frames = _input2BlockAlign > 0 ? e.BytesRecorded / _input2BlockAlign : e.BytesRecorded / sizeof(float);
         ReportInput2Callback(frames);
-        WriteInputBuffer(_inputBuffer2, e.Buffer.AsSpan(0, e.BytesRecorded), _input2Channels, _input2BlockAlign, _input2MixBuffer, ref _input2DroppedSamples);
+        WriteInputBuffer(
+            _inputBuffer2,
+            e.Buffer.AsSpan(0, e.BytesRecorded),
+            _input2Channels,
+            _input2BlockAlign,
+            _input2MixBuffer,
+            Volatile.Read(ref _input2ChannelMode),
+            ref _input2DroppedSamples);
     }
 
     private void OnInput1Stopped(object? sender, StoppedEventArgs e)
@@ -416,6 +458,7 @@ public sealed class AudioEngine : IDisposable
         int channels,
         int blockAlign,
         float[] mixBuffer,
+        int channelMode,
         ref long droppedSamples)
     {
         if (channels <= 1)
@@ -448,16 +491,28 @@ public sealed class AudioEngine : IDisposable
         while (remainingFrames > 0)
         {
             int chunk = Math.Min(remainingFrames, mixBuffer.Length);
-            for (int i = 0; i < chunk; i++)
+            if (channelMode == (int)InputChannelMode.Left || channelMode == (int)InputChannelMode.Right)
             {
-                float sum = 0f;
-                int baseIndex = (sourceIndex + i) * channels;
-                for (int ch = 0; ch < channels; ch++)
+                int channelIndex = channelMode == (int)InputChannelMode.Left ? 0 : Math.Min(1, channels - 1);
+                for (int i = 0; i < chunk; i++)
                 {
-                    sum += inputSamples[baseIndex + ch];
+                    int baseIndex = (sourceIndex + i) * channels;
+                    mixBuffer[i] = inputSamples[baseIndex + channelIndex];
                 }
+            }
+            else
+            {
+                for (int i = 0; i < chunk; i++)
+                {
+                    float sum = 0f;
+                    int baseIndex = (sourceIndex + i) * channels;
+                    for (int ch = 0; ch < channels; ch++)
+                    {
+                        sum += inputSamples[baseIndex + ch];
+                    }
 
-                mixBuffer[i] = sum / channels;
+                    mixBuffer[i] = sum / channels;
+                }
             }
 
             int written = buffer.Write(mixBuffer.AsSpan(0, chunk));
@@ -678,6 +733,7 @@ public sealed class AudioEngine : IDisposable
         private readonly Action<int> _reportOutput;
         private readonly Action<int> _reportUnderflow1;
         private readonly Action<int> _reportUnderflow2;
+        private readonly Func<OutputRoutingMode> _getRoutingMode;
 
         public OutputMixProvider(
             ChannelStrip[] channels,
@@ -688,6 +744,7 @@ public sealed class AudioEngine : IDisposable
             Action<int> reportOutput,
             Action<int> reportUnderflow1,
             Action<int> reportUnderflow2,
+            Func<OutputRoutingMode> getRoutingMode,
             WaveFormat waveFormat)
         {
             _channels = channels;
@@ -698,6 +755,7 @@ public sealed class AudioEngine : IDisposable
             _reportOutput = reportOutput;
             _reportUnderflow1 = reportUnderflow1;
             _reportUnderflow2 = reportUnderflow2;
+            _getRoutingMode = getRoutingMode;
             WaveFormat = waveFormat;
             _channel1Buffer = new float[blockSize];
             _channel2Buffer = new float[blockSize];
@@ -719,6 +777,7 @@ public sealed class AudioEngine : IDisposable
                 int chunk = Math.Min(_blockSize, totalFrames - processed);
                 var ch1Span = _channel1Buffer.AsSpan(0, chunk);
                 var ch2Span = _channel2Buffer.AsSpan(0, chunk);
+                var routingMode = _getRoutingMode();
 
                 int read1 = _input1.Read(ch1Span);
                 if (read1 < chunk)
@@ -739,11 +798,24 @@ public sealed class AudioEngine : IDisposable
                 _channels[1].Process(ch2Span, soloActive && !_channels[1].IsSoloed);
 
                 var outputSlice = output.Slice(processed * 2, chunk * 2);
-                for (int i = 0; i < chunk; i++)
+                if (routingMode == OutputRoutingMode.Sum)
                 {
-                    int baseIndex = i * 2;
-                    outputSlice[baseIndex] = ch1Span[i];
-                    outputSlice[baseIndex + 1] = ch2Span[i];
+                    for (int i = 0; i < chunk; i++)
+                    {
+                        int baseIndex = i * 2;
+                        float mix = 0.5f * (ch1Span[i] + ch2Span[i]);
+                        outputSlice[baseIndex] = mix;
+                        outputSlice[baseIndex + 1] = mix;
+                    }
+                }
+                else
+                {
+                    for (int i = 0; i < chunk; i++)
+                    {
+                        int baseIndex = i * 2;
+                        outputSlice[baseIndex] = ch1Span[i];
+                        outputSlice[baseIndex + 1] = ch2Span[i];
+                    }
                 }
 
                 _monitorBuffer?.Write(outputSlice);

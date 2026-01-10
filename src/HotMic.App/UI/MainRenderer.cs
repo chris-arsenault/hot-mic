@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using HotMic.App.ViewModels;
+using HotMic.Common.Configuration;
 using HotMic.Common.Models;
 using SkiaSharp;
 
@@ -15,7 +16,7 @@ public sealed class MainRenderer
     private const float PanelRadius = 10f;
     private const float PanelPadding = 12f;
     private const float ContentSpacing = 16f;
-    private const float DevicePanelHeight = 140f;
+    private const float DevicePanelHeight = 210f;
     private const float KnobSize = 68f;
     private const float KnobLabelHeight = 28f;
     private const float MeterWidth = 36f;
@@ -396,6 +397,7 @@ public sealed class MainRenderer
         float rowHeight = labelHeight + 6f + fieldHeight;
         float row1Top = rect.Top + PanelPadding;
         float row2Top = row1Top + rowHeight + rowSpacing;
+        float row3Top = row2Top + rowHeight + rowSpacing;
 
         float x = rect.Left + PanelPadding;
         float fieldsWidth = rect.Width - PanelPadding * 2 - applyWidth - columnSpacing;
@@ -426,6 +428,20 @@ public sealed class MainRenderer
         x += row2FieldWidth + columnSpacing;
         DrawPickerField(canvas, "Buffer", row2LabelY, $"{viewModel.SelectedBufferSize} samples",
             new SKRect(x, row2FieldTop, x + row2FieldWidth, row2FieldTop + fieldHeight), DevicePickerTarget.BufferSize);
+
+        float row3LabelY = row3Top + labelHeight;
+        float row3FieldTop = row3Top + labelHeight + 6f;
+        float row3FieldWidth = (rect.Width - PanelPadding * 2 - columnSpacing * 2) / 3f;
+        x = rect.Left + PanelPadding;
+
+        DrawPickerField(canvas, "Input 1 Chan", row3LabelY, FormatInputChannel(viewModel.SelectedInput1Channel),
+            new SKRect(x, row3FieldTop, x + row3FieldWidth, row3FieldTop + fieldHeight), DevicePickerTarget.Input1Channel);
+        x += row3FieldWidth + columnSpacing;
+        DrawPickerField(canvas, "Input 2 Chan", row3LabelY, FormatInputChannel(viewModel.SelectedInput2Channel),
+            new SKRect(x, row3FieldTop, x + row3FieldWidth, row3FieldTop + fieldHeight), DevicePickerTarget.Input2Channel);
+        x += row3FieldWidth + columnSpacing;
+        DrawPickerField(canvas, "Output Route", row3LabelY, FormatOutputRouting(viewModel.SelectedOutputRouting),
+            new SKRect(x, row3FieldTop, x + row3FieldWidth, row3FieldTop + fieldHeight), DevicePickerTarget.OutputRouting);
 
     }
 
@@ -521,6 +537,12 @@ public sealed class MainRenderer
                 return BuildOptionList(viewModel.SampleRateOptions, viewModel.SelectedSampleRate, FormatSampleRate, out selectedIndex);
             case DevicePickerTarget.BufferSize:
                 return BuildOptionList(viewModel.BufferSizeOptions, viewModel.SelectedBufferSize, size => $"{size} samples", out selectedIndex);
+            case DevicePickerTarget.Input1Channel:
+                return BuildEnumList(viewModel.InputChannelOptions, viewModel.SelectedInput1Channel, FormatInputChannel, out selectedIndex);
+            case DevicePickerTarget.Input2Channel:
+                return BuildEnumList(viewModel.InputChannelOptions, viewModel.SelectedInput2Channel, FormatInputChannel, out selectedIndex);
+            case DevicePickerTarget.OutputRouting:
+                return BuildEnumList(viewModel.OutputRoutingOptions, viewModel.SelectedOutputRouting, FormatOutputRouting, out selectedIndex);
             default:
                 return Array.Empty<string>();
         }
@@ -560,6 +582,24 @@ public sealed class MainRenderer
         return list;
     }
 
+    private static IReadOnlyList<string> BuildEnumList<T>(IReadOnlyList<T> options, T selected, Func<T, string> formatter, out int selectedIndex)
+        where T : struct
+    {
+        selectedIndex = -1;
+        var list = new List<string>(options.Count);
+        for (int i = 0; i < options.Count; i++)
+        {
+            var value = options[i];
+            list.Add(formatter(value));
+            if (EqualityComparer<T>.Default.Equals(value, selected))
+            {
+                selectedIndex = i;
+            }
+        }
+
+        return list;
+    }
+
     private static string FormatSampleRate(int value)
     {
         if (value >= 1000)
@@ -569,6 +609,19 @@ public sealed class MainRenderer
 
         return $"{value} Hz";
     }
+
+    private static string FormatInputChannel(InputChannelMode mode) => mode switch
+    {
+        InputChannelMode.Left => "Left",
+        InputChannelMode.Right => "Right",
+        _ => "Sum (L+R)"
+    };
+
+    private static string FormatOutputRouting(OutputRoutingMode mode) => mode switch
+    {
+        OutputRoutingMode.Sum => "Sum (L+R)",
+        _ => "Split (1=L, 2=R)"
+    };
 
     private void DrawChannelStrip(SKCanvas canvas, SKRect rect, ChannelStripViewModel channel, int channelIndex)
     {

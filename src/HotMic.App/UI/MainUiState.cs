@@ -17,7 +17,10 @@ public enum DevicePickerTarget
     Output,
     Monitor,
     SampleRate,
-    BufferSize
+    BufferSize,
+    Input1Channel,
+    Input2Channel,
+    OutputRouting
 }
 
 public enum KnobType

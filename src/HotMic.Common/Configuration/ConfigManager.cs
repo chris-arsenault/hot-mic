@@ -61,7 +61,10 @@ public sealed class ConfigManager
             AudioSettings = new AudioSettingsConfig
             {
                 SampleRate = 48000,
-                BufferSize = 256
+                BufferSize = 256,
+                Input1Channel = InputChannelMode.Sum,
+                Input2Channel = InputChannelMode.Sum,
+                OutputRouting = OutputRoutingMode.Split
             },
             Channels =
             {

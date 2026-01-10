@@ -343,6 +343,24 @@ public partial class MainWindow : Window
                     viewModel.SelectedBufferSize = viewModel.BufferSizeOptions[hit.Index];
                 }
                 break;
+            case DevicePickerTarget.Input1Channel:
+                if ((uint)hit.Index < (uint)viewModel.InputChannelOptions.Count)
+                {
+                    viewModel.SelectedInput1Channel = viewModel.InputChannelOptions[hit.Index];
+                }
+                break;
+            case DevicePickerTarget.Input2Channel:
+                if ((uint)hit.Index < (uint)viewModel.InputChannelOptions.Count)
+                {
+                    viewModel.SelectedInput2Channel = viewModel.InputChannelOptions[hit.Index];
+                }
+                break;
+            case DevicePickerTarget.OutputRouting:
+                if ((uint)hit.Index < (uint)viewModel.OutputRoutingOptions.Count)
+                {
+                    viewModel.SelectedOutputRouting = viewModel.OutputRoutingOptions[hit.Index];
+                }
+                break;
         }
     }
 

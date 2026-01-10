@@ -71,6 +71,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<int> BufferSizeOptions { get; } = [128, 256, 512, 1024];
 
+    public IReadOnlyList<InputChannelMode> InputChannelOptions { get; } =
+        [InputChannelMode.Sum, InputChannelMode.Left, InputChannelMode.Right];
+
+    public IReadOnlyList<OutputRoutingMode> OutputRoutingOptions { get; } =
+        [OutputRoutingMode.Split, OutputRoutingMode.Sum];
+
     [ObservableProperty]
     private AudioDevice? selectedInputDevice1;
 
@@ -88,6 +94,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private int selectedBufferSize;
+
+    [ObservableProperty]
+    private InputChannelMode selectedInput1Channel;
+
+    [ObservableProperty]
+    private InputChannelMode selectedInput2Channel;
+
+    [ObservableProperty]
+    private OutputRoutingMode selectedOutputRouting;
 
     [ObservableProperty]
     private bool isMinimalView;
@@ -185,10 +200,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _config.AudioSettings.MonitorOutputDeviceId = SelectedMonitorDevice?.Id ?? string.Empty;
         _config.AudioSettings.SampleRate = SelectedSampleRate;
         _config.AudioSettings.BufferSize = SelectedBufferSize;
+        _config.AudioSettings.Input1Channel = SelectedInput1Channel;
+        _config.AudioSettings.Input2Channel = SelectedInput2Channel;
+        _config.AudioSettings.OutputRouting = SelectedOutputRouting;
         _configManager.Save(_config);
 
         StatusMessage = string.Empty;
         _audioEngine.ConfigureDevices(_config.AudioSettings.InputDevice1Id, _config.AudioSettings.InputDevice2Id, _config.AudioSettings.OutputDeviceId, _config.AudioSettings.MonitorOutputDeviceId);
+        _audioEngine.ConfigureRouting(_config.AudioSettings.Input1Channel, _config.AudioSettings.Input2Channel, _config.AudioSettings.OutputRouting);
         try
         {
             _audioEngine.Start();
@@ -222,6 +241,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SelectedBufferSize = BufferSizeOptions.Contains(_config.AudioSettings.BufferSize)
             ? _config.AudioSettings.BufferSize
             : BufferSizeOptions[1];
+        SelectedInput1Channel = _config.AudioSettings.Input1Channel;
+        SelectedInput2Channel = _config.AudioSettings.Input2Channel;
+        SelectedOutputRouting = _config.AudioSettings.OutputRouting;
 
         if (channel1Config is not null)
         {
@@ -366,7 +388,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             $"Callbacks(ms): out={outputAge} in1={input1Age} in2={input2Age}",
             $"Buffers: in1 {diagnostics.Input1BufferedSamples}/{diagnostics.Input1BufferCapacity} in2 {diagnostics.Input2BufferedSamples}/{diagnostics.Input2BufferCapacity} mon {diagnostics.MonitorBufferedSamples}/{diagnostics.MonitorBufferCapacity}",
             $"Drops: in1 {diagnostics.Input1DroppedSamples} in2 {diagnostics.Input2DroppedSamples} under1 {diagnostics.OutputUnderflowSamples1} under2 {diagnostics.OutputUnderflowSamples2}",
-            $"Formats: in1 {diagnostics.Input1SampleRate}Hz/{diagnostics.Input1Channels}ch in2 {diagnostics.Input2SampleRate}Hz/{diagnostics.Input2Channels}ch out {SelectedSampleRate}Hz/2ch  UI {uiAge}ms"
+            $"Formats: in1 {diagnostics.Input1SampleRate}Hz/{diagnostics.Input1Channels}ch in2 {diagnostics.Input2SampleRate}Hz/{diagnostics.Input2Channels}ch out {SelectedSampleRate}Hz/2ch",
+            $"Routing: in1 {FormatInputChannel(SelectedInput1Channel)} in2 {FormatInputChannel(SelectedInput2Channel)} out {FormatOutputRouting(SelectedOutputRouting)}  UI {uiAge}ms"
         ];
     }
 
@@ -387,6 +410,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     private static string FormatFlag(bool value) => value ? "on" : "off";
+
+    private static string FormatInputChannel(InputChannelMode mode) => mode switch
+    {
+        InputChannelMode.Left => "L",
+        InputChannelMode.Right => "R",
+        _ => "Sum"
+    };
+
+    private static string FormatOutputRouting(OutputRoutingMode mode) => mode switch
+    {
+        OutputRoutingMode.Sum => "Sum",
+        _ => "Split"
+    };
 
     private void UpdateChannelConfig(int channelIndex, ChannelStripViewModel viewModel, string? propertyName)
     {
