@@ -554,6 +554,12 @@ public class Vst3PluginWrapper : IPlugin
 
 ---
 
+## WSL Build Mirror
+
+This repo uses a WSL source tree with build outputs redirected to a Windows NTFS path so JetBrains Rider on Windows can build/run while keeping all tooling in WSL. The mapping is defined in `Directory.Build.props` via `BaseOutputPath` and `BaseIntermediateOutputPath`.
+
+---
+
 ## Build & Run Commands
 
 ```bash
