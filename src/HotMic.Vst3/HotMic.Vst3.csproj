@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Jacobi.Vst.Core" Version="2.0.0" />
+    <PackageReference Include="Jacobi.Vst.Host.Interop" Version="2.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HotMic.Core\HotMic.Core.csproj" />
+    <ProjectReference Include="..\HotMic.Common\HotMic.Common.csproj" />
+  </ItemGroup>
+</Project>

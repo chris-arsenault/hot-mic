@@ -1,0 +1,378 @@
+using System.Runtime.InteropServices;
+using HotMic.Common.Configuration;
+using HotMic.Core.Threading;
+using NAudio.CoreAudioApi;
+using NAudio.Wave;
+
+namespace HotMic.Core.Engine;
+
+public sealed class AudioEngine : IDisposable
+{
+    private readonly DeviceManager _deviceManager = new();
+    private readonly LockFreeQueue<ParameterChange> _parameterQueue = new();
+    private readonly LockFreeRingBuffer _inputBuffer1;
+    private readonly LockFreeRingBuffer _inputBuffer2;
+    private LockFreeRingBuffer? _monitorBuffer;
+    private readonly ChannelStrip[] _channels;
+    private readonly int _sampleRate;
+    private readonly int _blockSize;
+    private readonly int _latencyMs;
+
+    private WasapiCapture? _capture1;
+    private WasapiCapture? _capture2;
+    private WasapiOut? _output;
+    private WasapiOut? _monitorOutput;
+    private OutputMixProvider? _outputProvider;
+
+    private string _input1Id = string.Empty;
+    private string _input2Id = string.Empty;
+    private string _outputId = string.Empty;
+    private string _monitorOutputId = string.Empty;
+
+    public AudioEngine(AudioSettingsConfig settings)
+    {
+        _sampleRate = settings.SampleRate;
+        _blockSize = settings.BufferSize;
+        _latencyMs = Math.Max(1, (int)(1000.0 * _blockSize / _sampleRate));
+
+        _inputBuffer1 = new LockFreeRingBuffer(_blockSize * 8);
+        _inputBuffer2 = new LockFreeRingBuffer(_blockSize * 8);
+        _channels =
+        [
+            new ChannelStrip(_sampleRate, _blockSize),
+            new ChannelStrip(_sampleRate, _blockSize)
+        ];
+
+        ConfigureDevices(settings.InputDevice1Id, settings.InputDevice2Id, settings.OutputDeviceId, settings.MonitorOutputDeviceId);
+    }
+
+    public IReadOnlyList<ChannelStrip> Channels => _channels;
+
+    public int SampleRate => _sampleRate;
+
+    public int BlockSize => _blockSize;
+
+    public void ConfigureDevices(string input1Id, string input2Id, string outputId, string? monitorOutputId)
+    {
+        _input1Id = input1Id;
+        _input2Id = input2Id;
+        _outputId = outputId;
+        _monitorOutputId = monitorOutputId ?? string.Empty;
+    }
+
+    public void Start()
+    {
+        if (string.IsNullOrWhiteSpace(_outputId))
+        {
+            throw new InvalidOperationException("Output device is not configured.");
+        }
+
+        using var enumerator = new MMDeviceEnumerator();
+
+        var outputDevice = enumerator.GetDevice(_outputId);
+        var outputFormat = WaveFormat.CreateIeeeFloatWaveFormat(_sampleRate, 2);
+        _outputProvider = new OutputMixProvider(_channels, _parameterQueue, _inputBuffer1, _inputBuffer2, _blockSize, outputFormat);
+
+        _output = new WasapiOut(outputDevice, AudioClientShareMode.Shared, true, _latencyMs);
+        _output.Init(_outputProvider);
+        _output.Play();
+
+        if (!string.IsNullOrWhiteSpace(_monitorOutputId))
+        {
+            _monitorBuffer = new LockFreeRingBuffer(_blockSize * 8 * 2);
+            var monitorDevice = enumerator.GetDevice(_monitorOutputId);
+            _monitorOutput = new WasapiOut(monitorDevice, AudioClientShareMode.Shared, true, _latencyMs);
+            _monitorOutput.Init(new MonitorWaveProvider(_monitorBuffer, outputFormat, _blockSize));
+            _outputProvider.SetMonitorBuffer(_monitorBuffer);
+            _monitorOutput.Play();
+        }
+
+        _capture1 = CreateCapture(enumerator, _input1Id);
+        _capture2 = CreateCapture(enumerator, _input2Id);
+
+        if (_capture1 is not null)
+        {
+            _capture1.DataAvailable += OnInput1DataAvailable;
+            try
+            {
+                _capture1.StartRecording();
+            }
+            catch
+            {
+                _capture1.DataAvailable -= OnInput1DataAvailable;
+                _capture1.Dispose();
+                _capture1 = null;
+            }
+        }
+
+        if (_capture2 is not null)
+        {
+            _capture2.DataAvailable += OnInput2DataAvailable;
+            try
+            {
+                _capture2.StartRecording();
+            }
+            catch
+            {
+                _capture2.DataAvailable -= OnInput2DataAvailable;
+                _capture2.Dispose();
+                _capture2 = null;
+            }
+        }
+    }
+
+    public void Stop()
+    {
+        if (_capture1 is not null)
+        {
+            _capture1.DataAvailable -= OnInput1DataAvailable;
+            _capture1.StopRecording();
+            _capture1.Dispose();
+            _capture1 = null;
+        }
+
+        if (_capture2 is not null)
+        {
+            _capture2.DataAvailable -= OnInput2DataAvailable;
+            _capture2.StopRecording();
+            _capture2.Dispose();
+            _capture2 = null;
+        }
+
+        _output?.Stop();
+        _output?.Dispose();
+        _output = null;
+
+        _monitorOutput?.Stop();
+        _monitorOutput?.Dispose();
+        _monitorOutput = null;
+
+        _inputBuffer1.Clear();
+        _inputBuffer2.Clear();
+        _monitorBuffer?.Clear();
+    }
+
+    public void EnqueueParameterChange(ParameterChange change)
+    {
+        _parameterQueue.Enqueue(change);
+    }
+
+    public bool IsVbCableInstalled()
+    {
+        return _deviceManager.FindVBCableOutput() is not null;
+    }
+
+    public void Dispose()
+    {
+        Stop();
+    }
+
+    private WasapiCapture? CreateCapture(MMDeviceEnumerator enumerator, string deviceId)
+    {
+        if (string.IsNullOrWhiteSpace(deviceId))
+        {
+            return null;
+        }
+
+        var device = enumerator.GetDevice(deviceId);
+        var capture = new WasapiCapture(device)
+        {
+            WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(_sampleRate, 1)
+        };
+
+        return capture;
+    }
+
+    private void OnInput1DataAvailable(object? sender, WaveInEventArgs e)
+    {
+        WriteInputBuffer(_inputBuffer1, e.Buffer.AsSpan(0, e.BytesRecorded));
+    }
+
+    private void OnInput2DataAvailable(object? sender, WaveInEventArgs e)
+    {
+        WriteInputBuffer(_inputBuffer2, e.Buffer.AsSpan(0, e.BytesRecorded));
+    }
+
+    private static void WriteInputBuffer(LockFreeRingBuffer buffer, ReadOnlySpan<byte> data)
+    {
+        var floatSpan = MemoryMarshal.Cast<byte, float>(data);
+        buffer.Write(floatSpan);
+    }
+
+    private sealed class OutputMixProvider : IWaveProvider
+    {
+        private readonly ChannelStrip[] _channels;
+        private readonly LockFreeQueue<ParameterChange> _parameterQueue;
+        private readonly LockFreeRingBuffer _input1;
+        private readonly LockFreeRingBuffer _input2;
+        private readonly int _blockSize;
+        private readonly float[] _channel1Buffer;
+        private readonly float[] _channel2Buffer;
+        private LockFreeRingBuffer? _monitorBuffer;
+
+        public OutputMixProvider(ChannelStrip[] channels, LockFreeQueue<ParameterChange> parameterQueue, LockFreeRingBuffer input1, LockFreeRingBuffer input2, int blockSize, WaveFormat waveFormat)
+        {
+            _channels = channels;
+            _parameterQueue = parameterQueue;
+            _input1 = input1;
+            _input2 = input2;
+            _blockSize = blockSize;
+            WaveFormat = waveFormat;
+            _channel1Buffer = new float[blockSize];
+            _channel2Buffer = new float[blockSize];
+        }
+
+        public WaveFormat WaveFormat { get; }
+
+        public int Read(byte[] buffer, int offset, int count)
+        {
+            ApplyParameterChanges();
+
+            var output = MemoryMarshal.Cast<byte, float>(buffer.AsSpan(offset, count));
+            int totalFrames = output.Length / 2;
+            int processed = 0;
+
+            while (processed < totalFrames)
+            {
+                int chunk = Math.Min(_blockSize, totalFrames - processed);
+                var ch1Span = _channel1Buffer.AsSpan(0, chunk);
+                var ch2Span = _channel2Buffer.AsSpan(0, chunk);
+
+                int read1 = _input1.Read(ch1Span);
+                if (read1 < chunk)
+                {
+                    ch1Span.Slice(read1).Clear();
+                }
+
+                int read2 = _input2.Read(ch2Span);
+                if (read2 < chunk)
+                {
+                    ch2Span.Slice(read2).Clear();
+                }
+
+                bool soloActive = _channels[0].IsSoloed || _channels[1].IsSoloed;
+                _channels[0].Process(ch1Span, soloActive && !_channels[0].IsSoloed);
+                _channels[1].Process(ch2Span, soloActive && !_channels[1].IsSoloed);
+
+                var outputSlice = output.Slice(processed * 2, chunk * 2);
+                for (int i = 0; i < chunk; i++)
+                {
+                    int baseIndex = i * 2;
+                    outputSlice[baseIndex] = ch1Span[i];
+                    outputSlice[baseIndex + 1] = ch2Span[i];
+                }
+
+                _monitorBuffer?.Write(outputSlice);
+                processed += chunk;
+            }
+
+            return count;
+        }
+
+        public void SetMonitorBuffer(LockFreeRingBuffer monitorBuffer)
+        {
+            _monitorBuffer = monitorBuffer;
+        }
+
+        private void ApplyParameterChanges()
+        {
+            while (_parameterQueue.TryDequeue(out var change))
+            {
+                if ((uint)change.ChannelId >= (uint)_channels.Length)
+                {
+                    continue;
+                }
+
+                var channel = _channels[change.ChannelId];
+                switch (change.Type)
+                {
+                    case ParameterType.InputGainDb:
+                        channel.SetInputGainDb(change.Value);
+                        break;
+                    case ParameterType.OutputGainDb:
+                        channel.SetOutputGainDb(change.Value);
+                        break;
+                    case ParameterType.Mute:
+                        channel.SetMuted(change.Value >= 0.5f);
+                        break;
+                    case ParameterType.Solo:
+                        channel.SetSoloed(change.Value >= 0.5f);
+                        break;
+                    case ParameterType.PluginBypass:
+                        ApplyPluginBypass(channel, change.PluginIndex, change.Value >= 0.5f);
+                        break;
+                    case ParameterType.PluginParameter:
+                        ApplyPluginParameter(channel, change.PluginIndex, change.ParameterIndex, change.Value);
+                        break;
+                }
+            }
+        }
+
+        private static void ApplyPluginBypass(ChannelStrip channel, int pluginIndex, bool bypass)
+        {
+            var slots = channel.PluginChain.GetSnapshot();
+            if ((uint)pluginIndex >= (uint)slots.Length)
+            {
+                return;
+            }
+
+            var plugin = slots[pluginIndex];
+            if (plugin is not null)
+            {
+                plugin.IsBypassed = bypass;
+            }
+        }
+
+        private static void ApplyPluginParameter(ChannelStrip channel, int pluginIndex, int parameterIndex, float value)
+        {
+            var slots = channel.PluginChain.GetSnapshot();
+            if ((uint)pluginIndex >= (uint)slots.Length)
+            {
+                return;
+            }
+
+            var plugin = slots[pluginIndex];
+            plugin?.SetParameter(parameterIndex, value);
+        }
+    }
+
+    private sealed class MonitorWaveProvider : IWaveProvider
+    {
+        private readonly LockFreeRingBuffer _buffer;
+        private readonly int _blockSize;
+        private readonly float[] _scratch;
+
+        public MonitorWaveProvider(LockFreeRingBuffer buffer, WaveFormat format, int blockSize)
+        {
+            _buffer = buffer;
+            _blockSize = blockSize;
+            WaveFormat = format;
+            _scratch = new float[blockSize * 2];
+        }
+
+        public WaveFormat WaveFormat { get; }
+
+        public int Read(byte[] buffer, int offset, int count)
+        {
+            var output = MemoryMarshal.Cast<byte, float>(buffer.AsSpan(offset, count));
+            int totalSamples = output.Length;
+            int processed = 0;
+
+            while (processed < totalSamples)
+            {
+                int chunk = Math.Min(_scratch.Length, totalSamples - processed);
+                var scratchSpan = _scratch.AsSpan(0, chunk);
+                int read = _buffer.Read(scratchSpan);
+                if (read < chunk)
+                {
+                    scratchSpan.Slice(read).Clear();
+                }
+
+                scratchSpan.CopyTo(output.Slice(processed, chunk));
+                processed += chunk;
+            }
+
+            return count;
+        }
+    }
+}

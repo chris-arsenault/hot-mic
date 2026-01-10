@@ -1,0 +1,41 @@
+<UserControl x:Class="HotMic.App.Controls.ChannelStripControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:HotMic.App.Controls">
+  <Border Background="{DynamicResource BackgroundSecondary}" CornerRadius="8" Padding="12" BorderBrush="{DynamicResource Border}" BorderThickness="1">
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="*" />
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="Auto" />
+      </Grid.RowDefinitions>
+
+      <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="SemiBold" Margin="4,0,0,8" />
+
+      <Grid Grid.Row="1" ColumnDefinitions="Auto,*" Margin="0,0,0,12">
+        <controls:KnobControl Width="90" Height="90" Label="INPUT" Value="{Binding InputGainDb, Mode=TwoWay}" MinValue="-60" MaxValue="12" />
+        <controls:MeterControl Grid.Column="1" Margin="12,0,0,0" PeakLevel="{Binding InputPeakLevel}" RmsLevel="{Binding InputRmsLevel}" />
+      </Grid>
+
+      <ListBox x:Name="PluginList" Grid.Row="2" ItemsSource="{Binding PluginSlots}" Margin="0,0,0,12" AllowDrop="True" Background="Transparent" BorderThickness="0" PreviewMouseMove="OnPluginListMouseMove" Drop="OnPluginListDrop">
+        <ListBox.ItemTemplate>
+          <DataTemplate>
+            <controls:PluginSlotControl />
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+
+      <Grid Grid.Row="3" ColumnDefinitions="Auto,*" Margin="0,0,0,12">
+        <controls:KnobControl Width="90" Height="90" Label="OUTPUT" Value="{Binding OutputGainDb, Mode=TwoWay}" MinValue="-60" MaxValue="12" />
+        <controls:MeterControl Grid.Column="1" Margin="12,0,0,0" PeakLevel="{Binding OutputPeakLevel}" RmsLevel="{Binding OutputRmsLevel}" />
+      </Grid>
+
+      <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Center">
+        <ToggleButton Content="M" IsChecked="{Binding IsMuted}" Style="{DynamicResource ToggleButtonStyle}" Margin="0,0,8,0" />
+        <ToggleButton Content="S" IsChecked="{Binding IsSoloed}" Style="{DynamicResource ToggleButtonStyle}" />
+      </StackPanel>
+    </Grid>
+  </Border>
+</UserControl>

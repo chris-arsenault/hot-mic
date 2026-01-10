@@ -1,0 +1,10 @@
+namespace HotMic.Common.Configuration;
+
+public sealed class AppConfig
+{
+    public AudioSettingsConfig AudioSettings { get; set; } = new();
+
+    public List<ChannelConfig> Channels { get; set; } = new();
+
+    public UiConfig Ui { get; set; } = new();
+}

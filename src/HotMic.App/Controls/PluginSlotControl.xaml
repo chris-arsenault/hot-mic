@@ -1,0 +1,35 @@
+<UserControl x:Class="HotMic.App.Controls.PluginSlotControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Border Background="{DynamicResource BackgroundTertiary}" CornerRadius="6" Padding="8" Margin="0,0,0,6">
+    <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto">
+      <TextBlock Text="{Binding DisplayName}" FontSize="13" FontWeight="SemiBold" />
+      <ToggleButton Grid.Column="1" Content="Bypass" IsChecked="{Binding IsBypassed}" Style="{DynamicResource ToggleButtonStyle}" Margin="8,0,0,0">
+        <ToggleButton.Style>
+          <Style TargetType="ToggleButton" BasedOn="{StaticResource ToggleButtonStyle}">
+            <Setter Property="Visibility" Value="Visible" />
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding IsEmpty}" Value="True">
+                <Setter Property="Visibility" Value="Collapsed" />
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </ToggleButton.Style>
+      </ToggleButton>
+      <Button Grid.Column="2" Content="X" Command="{Binding RemoveCommand}" Style="{DynamicResource IconButtonStyle}" Margin="8,0,0,0">
+        <Button.Style>
+          <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+            <Setter Property="Visibility" Value="Visible" />
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding IsEmpty}" Value="True">
+                <Setter Property="Visibility" Value="Collapsed" />
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </Button.Style>
+      </Button>
+
+      <Button Grid.Row="1" Grid.ColumnSpan="3" Content="{Binding ActionLabel}" Command="{Binding ActionCommand}" Style="{DynamicResource SecondaryButtonStyle}" Margin="0,8,0,0" />
+    </Grid>
+  </Border>
+</UserControl>
