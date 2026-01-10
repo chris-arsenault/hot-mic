@@ -6,12 +6,12 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <RuntimeIdentifier>win10-x64</RuntimeIdentifier>
     <JacobiVstVersion>2.0.0-alpha</JacobiVstVersion>
-    <JacobiVstRoot Condition="'$(PkgJacobi_Vst)' != ''">$(PkgJacobi_Vst)</JacobiVstRoot>
-    <JacobiVstRoot Condition="'$(JacobiVstRoot)' == ''">$(NuGetPackageRoot)jacobi.vst\$(JacobiVstVersion)\</JacobiVstRoot>
+    <NuGetPackageRoot Condition="'$(NuGetPackageRoot)' == ''">$(UserProfile)\.nuget\packages\</NuGetPackageRoot>
+    <JacobiVstRoot>$([System.IO.Path]::Combine($(NuGetPackageRoot), 'jacobi.vst', $(JacobiVstVersion)))\</JacobiVstRoot>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Jacobi.Vst" Version="$(JacobiVstVersion)" GeneratePathProperty="true" />
+    <PackageReference Include="Jacobi.Vst" Version="$(JacobiVstVersion)" />
   </ItemGroup>
 
   <ItemGroup>
