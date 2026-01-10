@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -22,6 +23,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly AudioEngine _audioEngine;
     private readonly DispatcherTimer _meterTimer;
     private AppConfig _config;
+    private long _lastMeterUpdateTicks;
+    private long _nextDebugUpdateTicks;
+    private static readonly long DebugUpdateIntervalTicks = Math.Max(1, Stopwatch.Frequency / 4);
 
     public MainViewModel()
     {
@@ -93,6 +97,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private string statusMessage = string.Empty;
+
+    [ObservableProperty]
+    private IReadOnlyList<string> debugLines = Array.Empty<string>();
 
     [ObservableProperty]
     private double windowX;
@@ -317,6 +324,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        long nowTicks = Stopwatch.GetTimestamp();
+
         var channel1 = _audioEngine.Channels[0];
         var channel2 = _audioEngine.Channels[1];
 
@@ -329,7 +338,54 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Channel2.InputRmsLevel = channel2.InputMeter.GetRmsLevel();
         Channel2.OutputPeakLevel = channel2.OutputMeter.GetPeakLevel();
         Channel2.OutputRmsLevel = channel2.OutputMeter.GetRmsLevel();
+
+        UpdateDebugInfo(nowTicks);
+        _lastMeterUpdateTicks = nowTicks;
     }
+
+    private void UpdateDebugInfo(long nowTicks)
+    {
+        if (nowTicks < _nextDebugUpdateTicks)
+        {
+            return;
+        }
+
+        _nextDebugUpdateTicks = nowTicks + DebugUpdateIntervalTicks;
+        var diagnostics = _audioEngine.GetDiagnosticsSnapshot();
+
+        string outputAge = FormatAgeMs(nowTicks, diagnostics.LastOutputCallbackTicks);
+        string input1Age = FormatAgeMs(nowTicks, diagnostics.LastInput1CallbackTicks);
+        string input2Age = FormatAgeMs(nowTicks, diagnostics.LastInput2CallbackTicks);
+        string uiAge = _lastMeterUpdateTicks == 0
+            ? "n/a"
+            : $"{Math.Max(0.0, (nowTicks - _lastMeterUpdateTicks) * 1000.0 / Stopwatch.Frequency):0}";
+
+        DebugLines =
+        [
+            $"Audio: out={FormatFlag(diagnostics.OutputActive)} in1={FormatFlag(diagnostics.Input1Active)} in2={FormatFlag(diagnostics.Input2Active)} mon={FormatFlag(diagnostics.MonitorActive)} recov={(diagnostics.IsRecovering ? "yes" : "no")}",
+            $"Callbacks(ms): out={outputAge} in1={input1Age} in2={input2Age}",
+            $"Buffers: in1 {diagnostics.Input1BufferedSamples}/{diagnostics.Input1BufferCapacity} in2 {diagnostics.Input2BufferedSamples}/{diagnostics.Input2BufferCapacity} mon {diagnostics.MonitorBufferedSamples}/{diagnostics.MonitorBufferCapacity}",
+            $"UI tick(ms): {uiAge}  SR {SelectedSampleRate}  BS {SelectedBufferSize}"
+        ];
+    }
+
+    private static string FormatAgeMs(long nowTicks, long lastTicks)
+    {
+        if (lastTicks == 0)
+        {
+            return "n/a";
+        }
+
+        double ms = (nowTicks - lastTicks) * 1000.0 / Stopwatch.Frequency;
+        if (ms < 0)
+        {
+            ms = 0;
+        }
+
+        return $"{ms:0}";
+    }
+
+    private static string FormatFlag(bool value) => value ? "on" : "off";
 
     private void UpdateChannelConfig(int channelIndex, ChannelStripViewModel viewModel, string? propertyName)
     {

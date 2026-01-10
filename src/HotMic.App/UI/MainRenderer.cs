@@ -25,6 +25,8 @@ public sealed class MainRenderer
     private const float MaxSlotHeight = 40f;
     private const float ToggleSize = 26f;
     private const float TopButtonSize = 26f;
+    private const float DebugPanelRadius = 8f;
+    private const float DebugLineHeight = 14f;
 
     private readonly HotMicTheme _theme = HotMicTheme.Default;
     private readonly SKPaint _backgroundPaint;
@@ -40,6 +42,9 @@ public sealed class MainRenderer
     private readonly SKPaint _buttonTextPaint;
     private readonly SKPaint _buttonFillPaint;
     private readonly SKPaint _buttonActivePaint;
+    private readonly SKPaint _debugPanelPaint;
+    private readonly SKPaint _debugBorderPaint;
+    private readonly SKPaint _debugTextPaint;
     private readonly SKPaint _meterGreenPaint;
     private readonly SKPaint _meterYellowPaint;
     private readonly SKPaint _meterRedPaint;
@@ -73,6 +78,9 @@ public sealed class MainRenderer
         _buttonTextPaint = CreateCenteredTextPaint(_theme.TextPrimary, 12f, SKFontStyle.Bold);
         _buttonFillPaint = CreateFillPaint(_theme.Surface);
         _buttonActivePaint = CreateFillPaint(_theme.Accent);
+        _debugPanelPaint = CreateFillPaint(new SKColor(0x16, 0x16, 0x16, 0xDD));
+        _debugBorderPaint = CreateStrokePaint(_theme.Border, 1f);
+        _debugTextPaint = CreateTextPaint(_theme.TextSecondary, 11f);
         _meterGreenPaint = CreateFillPaint(_theme.MeterGreen);
         _meterYellowPaint = CreateFillPaint(_theme.MeterYellow);
         _meterRedPaint = CreateFillPaint(_theme.MeterRed);
@@ -106,6 +114,8 @@ public sealed class MainRenderer
         {
             DrawFull(canvas, size, viewModel, uiState);
         }
+
+        DrawDebugOverlay(canvas, size, viewModel);
 
         canvas.Restore();
     }
@@ -302,6 +312,49 @@ public sealed class MainRenderer
 
         DrawMinimalRow(canvas, panelRect, startY, viewModel.Channel1);
         DrawMinimalRow(canvas, panelRect, startY + rowHeight + rowSpacing, viewModel.Channel2);
+    }
+
+    private void DrawDebugOverlay(SKCanvas canvas, SKSize size, MainViewModel viewModel)
+    {
+        var lines = viewModel.DebugLines;
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        float padding = 8f;
+        float maxWidth = 0f;
+        foreach (var line in lines)
+        {
+            float width = _debugTextPaint.MeasureText(line);
+            if (width > maxWidth)
+            {
+                maxWidth = width;
+            }
+        }
+
+        float panelWidth = MathF.Min(size.Width - Padding * 2f, MathF.Max(220f, maxWidth + padding * 2f));
+        float panelHeight = lines.Count * DebugLineHeight + padding * 2f;
+        float x = Padding;
+        float y = size.Height - Padding - panelHeight;
+        float minY = TitleBarHeight + Padding;
+        if (y < minY)
+        {
+            y = minY;
+        }
+
+        var rect = new SKRect(x, y, x + panelWidth, y + panelHeight);
+        var roundRect = new SKRoundRect(rect, DebugPanelRadius);
+        canvas.DrawRoundRect(roundRect, _debugPanelPaint);
+        canvas.DrawRoundRect(roundRect, _debugBorderPaint);
+
+        float textY = y + padding + DebugLineHeight - 3f;
+        float textX = x + padding;
+        foreach (var line in lines)
+        {
+            canvas.DrawText(line, textX, textY, _debugTextPaint);
+            textY += DebugLineHeight;
+        }
     }
 
     private void DrawMinimalRow(SKCanvas canvas, SKRect panelRect, float y, ChannelStripViewModel channel)
