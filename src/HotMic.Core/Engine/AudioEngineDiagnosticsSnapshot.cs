@@ -22,7 +22,15 @@ public readonly struct AudioEngineDiagnosticsSnapshot
         int monitorBufferedSamples,
         int input1BufferCapacity,
         int input2BufferCapacity,
-        int monitorBufferCapacity)
+        int monitorBufferCapacity,
+        int input1Channels,
+        int input2Channels,
+        int input1SampleRate,
+        int input2SampleRate,
+        long input1DroppedSamples,
+        long input2DroppedSamples,
+        long outputUnderflowSamples1,
+        long outputUnderflowSamples2)
     {
         OutputActive = outputActive;
         Input1Active = input1Active;
@@ -44,6 +52,14 @@ public readonly struct AudioEngineDiagnosticsSnapshot
         Input1BufferCapacity = input1BufferCapacity;
         Input2BufferCapacity = input2BufferCapacity;
         MonitorBufferCapacity = monitorBufferCapacity;
+        Input1Channels = input1Channels;
+        Input2Channels = input2Channels;
+        Input1SampleRate = input1SampleRate;
+        Input2SampleRate = input2SampleRate;
+        Input1DroppedSamples = input1DroppedSamples;
+        Input2DroppedSamples = input2DroppedSamples;
+        OutputUnderflowSamples1 = outputUnderflowSamples1;
+        OutputUnderflowSamples2 = outputUnderflowSamples2;
     }
 
     public bool OutputActive { get; }
@@ -66,4 +82,12 @@ public readonly struct AudioEngineDiagnosticsSnapshot
     public int Input1BufferCapacity { get; }
     public int Input2BufferCapacity { get; }
     public int MonitorBufferCapacity { get; }
+    public int Input1Channels { get; }
+    public int Input2Channels { get; }
+    public int Input1SampleRate { get; }
+    public int Input2SampleRate { get; }
+    public long Input1DroppedSamples { get; }
+    public long Input2DroppedSamples { get; }
+    public long OutputUnderflowSamples1 { get; }
+    public long OutputUnderflowSamples2 { get; }
 }

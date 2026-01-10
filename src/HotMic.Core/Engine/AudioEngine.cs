@@ -37,6 +37,18 @@ public sealed class AudioEngine : IDisposable
     private int _input1Active;
     private int _input2Active;
     private int _monitorActive;
+    private int _input1Channels = 1;
+    private int _input2Channels = 1;
+    private int _input1SampleRate;
+    private int _input2SampleRate;
+    private long _input1DroppedSamples;
+    private long _input2DroppedSamples;
+    private long _outputUnderflowSamples1;
+    private long _outputUnderflowSamples2;
+    private int _input1BlockAlign;
+    private int _input2BlockAlign;
+    private float[] _input1MixBuffer = Array.Empty<float>();
+    private float[] _input2MixBuffer = Array.Empty<float>();
 
     private WasapiCapture? _capture1;
     private WasapiCapture? _capture2;
@@ -59,10 +71,10 @@ public sealed class AudioEngine : IDisposable
     {
         _sampleRate = settings.SampleRate;
         _blockSize = settings.BufferSize;
-        _latencyMs = Math.Max(1, (int)(1000.0 * _blockSize / _sampleRate));
+        _latencyMs = Math.Max(20, (int)(1000.0 * _blockSize / _sampleRate));
 
-        _inputBuffer1 = new LockFreeRingBuffer(_blockSize * 8);
-        _inputBuffer2 = new LockFreeRingBuffer(_blockSize * 8);
+        _inputBuffer1 = new LockFreeRingBuffer(_blockSize * 32);
+        _inputBuffer2 = new LockFreeRingBuffer(_blockSize * 32);
         _channels =
         [
             new ChannelStrip(_sampleRate, _blockSize),
@@ -97,7 +109,16 @@ public sealed class AudioEngine : IDisposable
 
         var outputDevice = enumerator.GetDevice(_outputId);
         var outputFormat = WaveFormat.CreateIeeeFloatWaveFormat(_sampleRate, 2);
-        _outputProvider = new OutputMixProvider(_channels, _parameterQueue, _inputBuffer1, _inputBuffer2, _blockSize, ReportOutputCallback, outputFormat);
+        _outputProvider = new OutputMixProvider(
+            _channels,
+            _parameterQueue,
+            _inputBuffer1,
+            _inputBuffer2,
+            _blockSize,
+            ReportOutputCallback,
+            ReportOutputUnderflow1,
+            ReportOutputUnderflow2,
+            outputFormat);
 
         _output = new WasapiOut(outputDevice, AudioClientShareMode.Shared, true, _latencyMs);
         _output.Init(_outputProvider);
@@ -107,7 +128,7 @@ public sealed class AudioEngine : IDisposable
 
         if (!string.IsNullOrWhiteSpace(_monitorOutputId))
         {
-            _monitorBuffer = new LockFreeRingBuffer(_blockSize * 8 * 2);
+            _monitorBuffer = new LockFreeRingBuffer(_blockSize * 32 * 2);
             var monitorDevice = enumerator.GetDevice(_monitorOutputId);
             _monitorOutput = new WasapiOut(monitorDevice, AudioClientShareMode.Shared, true, _latencyMs);
             _monitorOutput.Init(new MonitorWaveProvider(_monitorBuffer, outputFormat, _blockSize));
@@ -122,11 +143,22 @@ public sealed class AudioEngine : IDisposable
 
         if (_capture1 is not null)
         {
+            CacheInputFormat(_capture1, isFirst: true);
+        }
+
+        if (_capture2 is not null)
+        {
+            CacheInputFormat(_capture2, isFirst: false);
+        }
+
+        if (_capture1 is not null)
+        {
             _capture1.DataAvailable += OnInput1DataAvailable;
             _capture1.RecordingStopped += OnInput1Stopped;
             try
             {
                 _capture1.StartRecording();
+                CacheInputFormat(_capture1, isFirst: true);
                 Interlocked.Exchange(ref _input1Active, 1);
             }
             catch
@@ -145,6 +177,7 @@ public sealed class AudioEngine : IDisposable
             try
             {
                 _capture2.StartRecording();
+                CacheInputFormat(_capture2, isFirst: false);
                 Interlocked.Exchange(ref _input2Active, 1);
             }
             catch
@@ -241,7 +274,15 @@ public sealed class AudioEngine : IDisposable
             monitorBufferedSamples: _monitorBuffer?.AvailableRead ?? 0,
             input1BufferCapacity: _inputBuffer1.Capacity,
             input2BufferCapacity: _inputBuffer2.Capacity,
-            monitorBufferCapacity: _monitorBuffer?.Capacity ?? 0);
+            monitorBufferCapacity: _monitorBuffer?.Capacity ?? 0,
+            input1Channels: Volatile.Read(ref _input1Channels),
+            input2Channels: Volatile.Read(ref _input2Channels),
+            input1SampleRate: Volatile.Read(ref _input1SampleRate),
+            input2SampleRate: Volatile.Read(ref _input2SampleRate),
+            input1DroppedSamples: Interlocked.Read(ref _input1DroppedSamples),
+            input2DroppedSamples: Interlocked.Read(ref _input2DroppedSamples),
+            outputUnderflowSamples1: Interlocked.Read(ref _outputUnderflowSamples1),
+            outputUnderflowSamples2: Interlocked.Read(ref _outputUnderflowSamples2));
     }
 
     public void Dispose()
@@ -266,16 +307,45 @@ public sealed class AudioEngine : IDisposable
         return capture;
     }
 
+    private void CacheInputFormat(WasapiCapture capture, bool isFirst)
+    {
+        int channels = capture.WaveFormat.Channels;
+        int sampleRate = capture.WaveFormat.SampleRate;
+        int blockAlign = capture.WaveFormat.BlockAlign;
+        int mixBufferSize = Math.Max(_blockSize * 8, sampleRate);
+        if (mixBufferSize < 1)
+        {
+            mixBufferSize = _blockSize * 8;
+        }
+
+        if (isFirst)
+        {
+            Interlocked.Exchange(ref _input1Channels, channels);
+            Interlocked.Exchange(ref _input1SampleRate, sampleRate);
+            _input1BlockAlign = blockAlign;
+            _input1MixBuffer = new float[mixBufferSize];
+        }
+        else
+        {
+            Interlocked.Exchange(ref _input2Channels, channels);
+            Interlocked.Exchange(ref _input2SampleRate, sampleRate);
+            _input2BlockAlign = blockAlign;
+            _input2MixBuffer = new float[mixBufferSize];
+        }
+    }
+
     private void OnInput1DataAvailable(object? sender, WaveInEventArgs e)
     {
-        ReportInput1Callback(e.BytesRecorded / sizeof(float));
-        WriteInputBuffer(_inputBuffer1, e.Buffer.AsSpan(0, e.BytesRecorded));
+        int frames = _input1BlockAlign > 0 ? e.BytesRecorded / _input1BlockAlign : e.BytesRecorded / sizeof(float);
+        ReportInput1Callback(frames);
+        WriteInputBuffer(_inputBuffer1, e.Buffer.AsSpan(0, e.BytesRecorded), _input1Channels, _input1BlockAlign, _input1MixBuffer, ref _input1DroppedSamples);
     }
 
     private void OnInput2DataAvailable(object? sender, WaveInEventArgs e)
     {
-        ReportInput2Callback(e.BytesRecorded / sizeof(float));
-        WriteInputBuffer(_inputBuffer2, e.Buffer.AsSpan(0, e.BytesRecorded));
+        int frames = _input2BlockAlign > 0 ? e.BytesRecorded / _input2BlockAlign : e.BytesRecorded / sizeof(float);
+        ReportInput2Callback(frames);
+        WriteInputBuffer(_inputBuffer2, e.Buffer.AsSpan(0, e.BytesRecorded), _input2Channels, _input2BlockAlign, _input2MixBuffer, ref _input2DroppedSamples);
     }
 
     private void OnInput1Stopped(object? sender, StoppedEventArgs e)
@@ -340,6 +410,68 @@ public sealed class AudioEngine : IDisposable
         buffer.Write(floatSpan);
     }
 
+    private static void WriteInputBuffer(
+        LockFreeRingBuffer buffer,
+        ReadOnlySpan<byte> data,
+        int channels,
+        int blockAlign,
+        float[] mixBuffer,
+        ref long droppedSamples)
+    {
+        if (channels <= 1)
+        {
+            var floatSpan = MemoryMarshal.Cast<byte, float>(data);
+            int written = buffer.Write(floatSpan);
+            int dropped = floatSpan.Length - written;
+            if (dropped > 0)
+            {
+                Interlocked.Add(ref droppedSamples, dropped);
+            }
+            return;
+        }
+
+        if (blockAlign <= 0)
+        {
+            return;
+        }
+
+        int frames = data.Length / blockAlign;
+        if (frames <= 0)
+        {
+            return;
+        }
+
+        var floatSpan = MemoryMarshal.Cast<byte, float>(data);
+        int remainingFrames = frames;
+        int sourceIndex = 0;
+
+        while (remainingFrames > 0)
+        {
+            int chunk = Math.Min(remainingFrames, mixBuffer.Length);
+            for (int i = 0; i < chunk; i++)
+            {
+                float sum = 0f;
+                int baseIndex = (sourceIndex + i) * channels;
+                for (int ch = 0; ch < channels; ch++)
+                {
+                    sum += floatSpan[baseIndex + ch];
+                }
+
+                mixBuffer[i] = sum / channels;
+            }
+
+            int written = buffer.Write(mixBuffer.AsSpan(0, chunk));
+            int dropped = chunk - written;
+            if (dropped > 0)
+            {
+                Interlocked.Add(ref droppedSamples, dropped);
+            }
+
+            sourceIndex += chunk;
+            remainingFrames -= chunk;
+        }
+    }
+
     private void ReportOutputCallback(int frames)
     {
         Interlocked.Exchange(ref _lastOutputFrames, frames);
@@ -359,6 +491,26 @@ public sealed class AudioEngine : IDisposable
         Interlocked.Exchange(ref _lastInput2Frames, frames);
         Interlocked.Exchange(ref _lastInput2CallbackTicks, Stopwatch.GetTimestamp());
         Interlocked.Increment(ref _input2CallbackCount);
+    }
+
+    private void ReportOutputUnderflow1(int missingFrames)
+    {
+        if (missingFrames <= 0)
+        {
+            return;
+        }
+
+        Interlocked.Add(ref _outputUnderflowSamples1, missingFrames);
+    }
+
+    private void ReportOutputUnderflow2(int missingFrames)
+    {
+        if (missingFrames <= 0)
+        {
+            return;
+        }
+
+        Interlocked.Add(ref _outputUnderflowSamples2, missingFrames);
     }
 
     private bool ShouldIgnoreStopEvent()
@@ -524,8 +676,19 @@ public sealed class AudioEngine : IDisposable
         private LockFreeRingBuffer? _monitorBuffer;
 
         private readonly Action<int> _reportOutput;
+        private readonly Action<int> _reportUnderflow1;
+        private readonly Action<int> _reportUnderflow2;
 
-        public OutputMixProvider(ChannelStrip[] channels, LockFreeQueue<ParameterChange> parameterQueue, LockFreeRingBuffer input1, LockFreeRingBuffer input2, int blockSize, Action<int> reportOutput, WaveFormat waveFormat)
+        public OutputMixProvider(
+            ChannelStrip[] channels,
+            LockFreeQueue<ParameterChange> parameterQueue,
+            LockFreeRingBuffer input1,
+            LockFreeRingBuffer input2,
+            int blockSize,
+            Action<int> reportOutput,
+            Action<int> reportUnderflow1,
+            Action<int> reportUnderflow2,
+            WaveFormat waveFormat)
         {
             _channels = channels;
             _parameterQueue = parameterQueue;
@@ -533,6 +696,8 @@ public sealed class AudioEngine : IDisposable
             _input2 = input2;
             _blockSize = blockSize;
             _reportOutput = reportOutput;
+            _reportUnderflow1 = reportUnderflow1;
+            _reportUnderflow2 = reportUnderflow2;
             WaveFormat = waveFormat;
             _channel1Buffer = new float[blockSize];
             _channel2Buffer = new float[blockSize];
@@ -559,12 +724,14 @@ public sealed class AudioEngine : IDisposable
                 if (read1 < chunk)
                 {
                     ch1Span.Slice(read1).Clear();
+                    _reportUnderflow1(chunk - read1);
                 }
 
                 int read2 = _input2.Read(ch2Span);
                 if (read2 < chunk)
                 {
                     ch2Span.Slice(read2).Clear();
+                    _reportUnderflow2(chunk - read2);
                 }
 
                 bool soloActive = _channels[0].IsSoloed || _channels[1].IsSoloed;
