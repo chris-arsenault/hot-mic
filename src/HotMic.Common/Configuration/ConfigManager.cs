@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace HotMic.Common.Configuration;
 
@@ -7,7 +8,8 @@ public sealed class ConfigManager
     private readonly string _configPath;
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
-        WriteIndented = true
+        WriteIndented = true,
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
     };
 
     public ConfigManager(string? configPath = null)
