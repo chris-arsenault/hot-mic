@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 
 namespace HotMic.Core.Threading;
 
@@ -11,7 +12,7 @@ public sealed class LockFreeQueue<T>
         _queue.Enqueue(item);
     }
 
-    public bool TryDequeue(out T item)
+    public bool TryDequeue([MaybeNullWhen(false)] out T item)
     {
         return _queue.TryDequeue(out item);
     }
