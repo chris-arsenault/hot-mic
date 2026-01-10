@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using HotMic.Common.Configuration;
 using HotMic.Core.Threading;
 using NAudio.CoreAudioApi;
@@ -8,6 +10,8 @@ namespace HotMic.Core.Engine;
 
 public sealed class AudioEngine : IDisposable
 {
+    private const int AudclntEDeviceInvalidated = unchecked((int)0x88890004);
+
     private readonly DeviceManager _deviceManager = new();
     private readonly LockFreeQueue<ParameterChange> _parameterQueue = new();
     private readonly LockFreeRingBuffer _inputBuffer1;
@@ -28,6 +32,12 @@ public sealed class AudioEngine : IDisposable
     private string _input2Id = string.Empty;
     private string _outputId = string.Empty;
     private string _monitorOutputId = string.Empty;
+    private CancellationTokenSource? _recoveryCts;
+    private int _isRecovering;
+    private int _isStopping;
+
+    public event EventHandler<DeviceDisconnectedEventArgs>? DeviceDisconnected;
+    public event EventHandler<DeviceRecoveredEventArgs>? DeviceRecovered;
 
     public AudioEngine(AudioSettingsConfig settings)
     {
@@ -75,6 +85,7 @@ public sealed class AudioEngine : IDisposable
 
         _output = new WasapiOut(outputDevice, AudioClientShareMode.Shared, true, _latencyMs);
         _output.Init(_outputProvider);
+        _output.PlaybackStopped += OnOutputStopped;
         _output.Play();
 
         if (!string.IsNullOrWhiteSpace(_monitorOutputId))
@@ -84,6 +95,7 @@ public sealed class AudioEngine : IDisposable
             _monitorOutput = new WasapiOut(monitorDevice, AudioClientShareMode.Shared, true, _latencyMs);
             _monitorOutput.Init(new MonitorWaveProvider(_monitorBuffer, outputFormat, _blockSize));
             _outputProvider.SetMonitorBuffer(_monitorBuffer);
+            _monitorOutput.PlaybackStopped += OnMonitorOutputStopped;
             _monitorOutput.Play();
         }
 
@@ -93,6 +105,7 @@ public sealed class AudioEngine : IDisposable
         if (_capture1 is not null)
         {
             _capture1.DataAvailable += OnInput1DataAvailable;
+            _capture1.RecordingStopped += OnInput1Stopped;
             try
             {
                 _capture1.StartRecording();
@@ -108,6 +121,7 @@ public sealed class AudioEngine : IDisposable
         if (_capture2 is not null)
         {
             _capture2.DataAvailable += OnInput2DataAvailable;
+            _capture2.RecordingStopped += OnInput2Stopped;
             try
             {
                 _capture2.StartRecording();
@@ -123,9 +137,15 @@ public sealed class AudioEngine : IDisposable
 
     public void Stop()
     {
+        if (Interlocked.Exchange(ref _isStopping, 1) == 1)
+        {
+            return;
+        }
+
         if (_capture1 is not null)
         {
             _capture1.DataAvailable -= OnInput1DataAvailable;
+            _capture1.RecordingStopped -= OnInput1Stopped;
             _capture1.StopRecording();
             _capture1.Dispose();
             _capture1 = null;
@@ -134,15 +154,24 @@ public sealed class AudioEngine : IDisposable
         if (_capture2 is not null)
         {
             _capture2.DataAvailable -= OnInput2DataAvailable;
+            _capture2.RecordingStopped -= OnInput2Stopped;
             _capture2.StopRecording();
             _capture2.Dispose();
             _capture2 = null;
         }
 
+        if (_output is not null)
+        {
+            _output.PlaybackStopped -= OnOutputStopped;
+        }
         _output?.Stop();
         _output?.Dispose();
         _output = null;
 
+        if (_monitorOutput is not null)
+        {
+            _monitorOutput.PlaybackStopped -= OnMonitorOutputStopped;
+        }
         _monitorOutput?.Stop();
         _monitorOutput?.Dispose();
         _monitorOutput = null;
@@ -150,6 +179,8 @@ public sealed class AudioEngine : IDisposable
         _inputBuffer1.Clear();
         _inputBuffer2.Clear();
         _monitorBuffer?.Clear();
+
+        Interlocked.Exchange(ref _isStopping, 0);
     }
 
     public void EnqueueParameterChange(ParameterChange change)
@@ -164,6 +195,7 @@ public sealed class AudioEngine : IDisposable
 
     public void Dispose()
     {
+        CancelRecovery();
         Stop();
     }
 
@@ -193,10 +225,213 @@ public sealed class AudioEngine : IDisposable
         WriteInputBuffer(_inputBuffer2, e.Buffer.AsSpan(0, e.BytesRecorded));
     }
 
+    private void OnInput1Stopped(object? sender, StoppedEventArgs e)
+    {
+        if (ShouldIgnoreStopEvent())
+        {
+            return;
+        }
+
+        if (IsDeviceInvalidated(e.Exception))
+        {
+            HandleDeviceInvalidated(_input1Id, "Input device disconnected.");
+        }
+    }
+
+    private void OnInput2Stopped(object? sender, StoppedEventArgs e)
+    {
+        if (ShouldIgnoreStopEvent())
+        {
+            return;
+        }
+
+        if (IsDeviceInvalidated(e.Exception))
+        {
+            HandleDeviceInvalidated(_input2Id, "Input device disconnected.");
+        }
+    }
+
+    private void OnOutputStopped(object? sender, StoppedEventArgs e)
+    {
+        if (ShouldIgnoreStopEvent())
+        {
+            return;
+        }
+
+        if (IsDeviceInvalidated(e.Exception))
+        {
+            HandleDeviceInvalidated(_outputId, "Output device disconnected.");
+        }
+    }
+
+    private void OnMonitorOutputStopped(object? sender, StoppedEventArgs e)
+    {
+        if (ShouldIgnoreStopEvent())
+        {
+            return;
+        }
+
+        if (IsDeviceInvalidated(e.Exception))
+        {
+            HandleDeviceInvalidated(_monitorOutputId, "Monitor device disconnected.");
+        }
+    }
+
     private static void WriteInputBuffer(LockFreeRingBuffer buffer, ReadOnlySpan<byte> data)
     {
         var floatSpan = MemoryMarshal.Cast<byte, float>(data);
         buffer.Write(floatSpan);
+    }
+
+    private bool ShouldIgnoreStopEvent()
+    {
+        return Volatile.Read(ref _isStopping) == 1;
+    }
+
+    private static bool IsDeviceInvalidated(Exception? exception)
+    {
+        return exception is COMException comException && comException.HResult == AudclntEDeviceInvalidated;
+    }
+
+    private void HandleDeviceInvalidated(string deviceId, string message)
+    {
+        if (Interlocked.CompareExchange(ref _isRecovering, 1, 0) != 0)
+        {
+            return;
+        }
+
+        Stop();
+        DeviceDisconnected?.Invoke(this, new DeviceDisconnectedEventArgs(deviceId, message));
+        StartRecoveryLoop();
+    }
+
+    private void StartRecoveryLoop()
+    {
+        _recoveryCts?.Cancel();
+        _recoveryCts?.Dispose();
+        _recoveryCts = new CancellationTokenSource();
+        var token = _recoveryCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            while (!token.IsCancellationRequested)
+            {
+                if (TryRecoverDevices())
+                {
+                    try
+                    {
+                        Start();
+                        DeviceRecovered?.Invoke(this, new DeviceRecoveredEventArgs(_input1Id, _input2Id, _outputId, _monitorOutputId));
+                        Interlocked.Exchange(ref _isRecovering, 0);
+                        return;
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                await Task.Delay(1000, token).ConfigureAwait(false);
+            }
+
+            Interlocked.Exchange(ref _isRecovering, 0);
+        }, token);
+    }
+
+    private bool TryRecoverDevices()
+    {
+        using var enumerator = new MMDeviceEnumerator();
+
+        if (!TryResolveOutputDevice(enumerator))
+        {
+            return false;
+        }
+
+        _input1Id = ResolveInputDevice(enumerator, _input1Id);
+        _input2Id = ResolveInputDevice(enumerator, _input2Id);
+        _monitorOutputId = ResolveMonitorDevice(enumerator, _monitorOutputId);
+        return true;
+    }
+
+    private bool TryResolveOutputDevice(MMDeviceEnumerator enumerator)
+    {
+        if (IsDeviceActive(enumerator, _outputId))
+        {
+            return true;
+        }
+
+        var devices = enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active);
+        foreach (var device in devices)
+        {
+            if (device.FriendlyName.Contains("VB-Cable", StringComparison.OrdinalIgnoreCase))
+            {
+                _outputId = device.ID;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string ResolveInputDevice(MMDeviceEnumerator enumerator, string currentId)
+    {
+        if (IsDeviceActive(enumerator, currentId))
+        {
+            return currentId;
+        }
+
+        try
+        {
+            var defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console);
+            return defaultDevice.ID;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string ResolveMonitorDevice(MMDeviceEnumerator enumerator, string currentId)
+    {
+        if (IsDeviceActive(enumerator, currentId))
+        {
+            return currentId;
+        }
+
+        try
+        {
+            var defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console);
+            return defaultDevice.ID;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static bool IsDeviceActive(MMDeviceEnumerator enumerator, string deviceId)
+    {
+        if (string.IsNullOrWhiteSpace(deviceId))
+        {
+            return false;
+        }
+
+        try
+        {
+            var device = enumerator.GetDevice(deviceId);
+            return device.State == DeviceState.Active;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void CancelRecovery()
+    {
+        _recoveryCts?.Cancel();
+        _recoveryCts?.Dispose();
+        _recoveryCts = null;
+        Interlocked.Exchange(ref _isRecovering, 0);
     }
 
     private sealed class OutputMixProvider : IWaveProvider
