@@ -1,11 +1,10 @@
 using System.Drawing;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using HotMic.Core.Plugins;
 using Jacobi.Vst.Core;
 using Jacobi.Vst.Core.Host;
-using Jacobi.Vst.Host.Interop;
+using Jacobi.Vst.Interop.Host;
 
 namespace HotMic.Vst3;
 
@@ -64,8 +63,8 @@ public sealed class Vst3PluginWrapper : IPlugin
 
         _inputBufferManager = new VstAudioBufferManager(_inputChannels, blockSize);
         _outputBufferManager = new VstAudioBufferManager(_outputChannels, blockSize);
-        _inputBuffers = _inputBufferManager.Buffers.ToArray();
-        _outputBuffers = _outputBufferManager.Buffers.ToArray();
+        _inputBuffers = _inputBufferManager.ToArray();
+        _outputBuffers = _outputBufferManager.ToArray();
         _parameters = BuildParameters();
     }
 
@@ -92,23 +91,13 @@ public sealed class Vst3PluginWrapper : IPlugin
 
             if (_inputChannels == 1)
             {
-                var inputSpan = _inputBuffers[0].AsSpan();
-                buffer.Slice(0, frames).CopyTo(inputSpan);
-                if (frames < inputSpan.Length)
-                {
-                    inputSpan.Slice(frames).Clear();
-                }
+                CopyToBuffer(buffer, _inputBuffers[0], frames);
             }
             else
             {
                 for (int channel = 0; channel < _inputChannels; channel++)
                 {
-                    var inputSpan = _inputBuffers[channel].AsSpan();
-                    buffer.Slice(0, frames).CopyTo(inputSpan);
-                    if (frames < inputSpan.Length)
-                    {
-                        inputSpan.Slice(frames).Clear();
-                    }
+                    CopyToBuffer(buffer, _inputBuffers[channel], frames);
                 }
             }
 
@@ -116,7 +105,7 @@ public sealed class Vst3PluginWrapper : IPlugin
 
             if (_outputChannels == 1)
             {
-                _outputBuffers[0].AsReadOnlySpan().Slice(0, frames).CopyTo(buffer);
+                CopyFromBuffer(_outputBuffers[0], buffer, frames);
             }
             else
             {
@@ -143,6 +132,31 @@ public sealed class Vst3PluginWrapper : IPlugin
         {
             IsBypassed = true;
             Interlocked.Exchange(ref _isFaulted, 1);
+        }
+    }
+
+    private static void CopyToBuffer(ReadOnlySpan<float> source, VstAudioBuffer destination, int frames)
+    {
+        int sampleCount = destination.SampleCount;
+        int copyCount = frames <= sampleCount ? frames : sampleCount;
+        for (int i = 0; i < copyCount; i++)
+        {
+            destination[i] = source[i];
+        }
+
+        for (int i = copyCount; i < sampleCount; i++)
+        {
+            destination[i] = 0f;
+        }
+    }
+
+    private static void CopyFromBuffer(VstAudioBuffer source, Span<float> destination, int frames)
+    {
+        int sampleCount = source.SampleCount;
+        int copyCount = frames <= sampleCount ? frames : sampleCount;
+        for (int i = 0; i < copyCount; i++)
+        {
+            destination[i] = source[i];
         }
     }
 
