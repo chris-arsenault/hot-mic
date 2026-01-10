@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.IO;
+using System.Reflection;
 using System.Threading;
 using HotMic.Core.Plugins;
 using Jacobi.Vst.Core;
@@ -11,7 +12,24 @@ public sealed class Vst3PluginWrapper : IPlugin
 {
     private readonly Vst3PluginInfo _info;
     private VstPluginContext? _context;
-    private VstPluginCommandStub? _commandStub;
+    private object? _commandStub;
+    private Action? _open;
+    private Action? _close;
+    private Action<float>? _setSampleRate;
+    private Action<int>? _setBlockSize;
+    private Action<bool>? _mainsChanged;
+    private ProcessReplacingDelegate? _processReplacing;
+    private GetChunkDelegate? _getChunk;
+    private SetChunkDelegate? _setChunk;
+    private GetParameterDelegate? _getParameter;
+    private SetParameterDelegate? _setParameter;
+    private GetParameterTextDelegate? _getParameterName;
+    private GetParameterTextDelegate? _getParameterLabel;
+    private GetParameterTextDelegate? _getParameterDisplay;
+    private EditorGetRectDelegate? _editorGetRect;
+    private EditorOpenDelegate? _editorOpenDelegate;
+    private Action? _editorClose;
+    private Action? _editorIdle;
     private Vst3PluginHost? _host;
     private VstAudioBufferManager? _inputBufferManager;
     private VstAudioBufferManager? _outputBufferManager;
@@ -44,16 +62,34 @@ public sealed class Vst3PluginWrapper : IPlugin
         _blockSize = blockSize;
         _host = new Vst3PluginHost(sampleRate, blockSize, Path.GetDirectoryName(_info.Path) ?? string.Empty);
         _context = VstPluginContext.Create(_info.Path, _host);
-        _commandStub = _context.PluginCommandStub as VstPluginCommandStub;
+        _commandStub = _context.PluginCommandStub;
         if (_commandStub is null)
         {
             throw new InvalidOperationException("VST3 plugin command stub is not available.");
         }
 
-        _commandStub.Open();
-        _commandStub.SetSampleRate(sampleRate);
-        _commandStub.SetBlockSize(blockSize);
-        _commandStub.MainsChanged(true);
+        _open = CreateDelegate<Action>(_commandStub, "Open");
+        _close = CreateDelegate<Action>(_commandStub, "Close");
+        _setSampleRate = CreateDelegate<Action<float>>(_commandStub, "SetSampleRate");
+        _setBlockSize = CreateDelegate<Action<int>>(_commandStub, "SetBlockSize");
+        _mainsChanged = CreateDelegate<Action<bool>>(_commandStub, "MainsChanged");
+        _processReplacing = CreateDelegate<ProcessReplacingDelegate>(_commandStub, "ProcessReplacing");
+        _getChunk = CreateDelegate<GetChunkDelegate>(_commandStub, "GetChunk");
+        _setChunk = CreateDelegate<SetChunkDelegate>(_commandStub, "SetChunk");
+        _getParameter = CreateDelegate<GetParameterDelegate>(_commandStub, "GetParameter");
+        _setParameter = CreateDelegate<SetParameterDelegate>(_commandStub, "SetParameter");
+        _getParameterName = CreateDelegate<GetParameterTextDelegate>(_commandStub, "GetParameterName");
+        _getParameterLabel = CreateDelegate<GetParameterTextDelegate>(_commandStub, "GetParameterLabel");
+        _getParameterDisplay = CreateDelegate<GetParameterTextDelegate>(_commandStub, "GetParameterDisplay");
+        _editorGetRect = CreateDelegate<EditorGetRectDelegate>(_commandStub, "EditorGetRect");
+        _editorOpenDelegate = CreateDelegate<EditorOpenDelegate>(_commandStub, "EditorOpen");
+        _editorClose = CreateDelegate<Action>(_commandStub, "EditorClose");
+        _editorIdle = CreateDelegate<Action>(_commandStub, "EditorIdle");
+
+        _open();
+        _setSampleRate(sampleRate);
+        _setBlockSize(blockSize);
+        _mainsChanged(true);
 
         _inputChannels = Math.Max(1, _context.PluginInfo.AudioInputCount);
         _outputChannels = Math.Max(1, _context.PluginInfo.AudioOutputCount);
@@ -67,7 +103,7 @@ public sealed class Vst3PluginWrapper : IPlugin
 
     public void Process(Span<float> buffer)
     {
-        if (IsBypassed || _commandStub is null || IsFaulted)
+        if (IsBypassed || _processReplacing is null || IsFaulted)
         {
             return;
         }
@@ -98,7 +134,7 @@ public sealed class Vst3PluginWrapper : IPlugin
                 }
             }
 
-            _commandStub.ProcessReplacing(_inputBuffers, _outputBuffers);
+            _processReplacing(_inputBuffers, _outputBuffers);
 
             if (_outputChannels == 1)
             {
@@ -159,17 +195,17 @@ public sealed class Vst3PluginWrapper : IPlugin
 
     public void SetParameter(int index, float value)
     {
-        _commandStub?.SetParameter(index, Math.Clamp(value, 0f, 1f));
+        _setParameter?.Invoke(index, Math.Clamp(value, 0f, 1f));
     }
 
     public byte[] GetState()
     {
-        if (_commandStub is null)
+        if (_getChunk is null)
         {
             return Array.Empty<byte>();
         }
 
-        var data = _commandStub.GetChunk(false);
+        var data = _getChunk(false);
         if (data is not null && data.Length > 0)
         {
             return data;
@@ -180,12 +216,12 @@ public sealed class Vst3PluginWrapper : IPlugin
 
     public void SetState(byte[] state)
     {
-        if (_commandStub is null || state.Length == 0)
+        if (_setChunk is null || state.Length == 0)
         {
             return;
         }
 
-        int read = _commandStub.SetChunk(state, false);
+        int read = _setChunk(state, false);
         if (read <= 0)
         {
             ApplyParameterState(state);
@@ -195,48 +231,48 @@ public sealed class Vst3PluginWrapper : IPlugin
     public bool TryGetEditorRect(out Rectangle rect)
     {
         rect = Rectangle.Empty;
-        return _commandStub is not null && _commandStub.EditorGetRect(out rect);
+        return _editorGetRect is not null && _editorGetRect(out rect);
     }
 
     public bool OpenEditor(IntPtr parentHandle)
     {
-        if (_commandStub is null)
+        if (_editorOpenDelegate is null)
         {
             return false;
         }
 
-        _editorOpen = _commandStub.EditorOpen(parentHandle);
+        _editorOpen = _editorOpenDelegate(parentHandle);
         return _editorOpen;
     }
 
     public void CloseEditor()
     {
-        if (_commandStub is null || !_editorOpen)
+        if (_editorClose is null || !_editorOpen)
         {
             return;
         }
 
-        _commandStub.EditorClose();
+        _editorClose();
         _editorOpen = false;
     }
 
     public void EditorIdle()
     {
-        if (_commandStub is null || !_editorOpen)
+        if (_editorIdle is null || !_editorOpen)
         {
             return;
         }
 
-        _commandStub.EditorIdle();
+        _editorIdle();
     }
 
     public void Dispose()
     {
         CloseEditor();
-        if (_commandStub is not null)
+        if (_mainsChanged is not null && _close is not null)
         {
-            _commandStub.MainsChanged(false);
-            _commandStub.Close();
+            _mainsChanged(false);
+            _close();
         }
 
         _inputBufferManager?.Dispose();
@@ -246,7 +282,7 @@ public sealed class Vst3PluginWrapper : IPlugin
 
     private PluginParameter[] BuildParameters()
     {
-        if (_context is null || _commandStub is null)
+        if (_context is null || _getParameter is null || _getParameterName is null || _getParameterLabel is null || _getParameterDisplay is null)
         {
             return Array.Empty<PluginParameter>();
         }
@@ -261,9 +297,9 @@ public sealed class Vst3PluginWrapper : IPlugin
         for (int i = 0; i < count; i++)
         {
             int index = i;
-            string name = _commandStub.GetParameterName(index) ?? string.Empty;
-            string label = _commandStub.GetParameterLabel(index) ?? string.Empty;
-            float defaultValue = _commandStub.GetParameter(index);
+            string name = _getParameterName(index) ?? string.Empty;
+            string label = _getParameterLabel(index) ?? string.Empty;
+            float defaultValue = _getParameter(index);
             parameters[index] = new PluginParameter
             {
                 Index = index,
@@ -272,7 +308,7 @@ public sealed class Vst3PluginWrapper : IPlugin
                 MaxValue = 1f,
                 DefaultValue = defaultValue,
                 Unit = label,
-                FormatValue = _ => _commandStub.GetParameterDisplay(index) ?? string.Empty
+                FormatValue = _ => _getParameterDisplay(index) ?? string.Empty
             };
         }
 
@@ -281,7 +317,7 @@ public sealed class Vst3PluginWrapper : IPlugin
 
     private byte[] GetParameterState()
     {
-        if (_commandStub is null || _parameters.Length == 0)
+        if (_getParameter is null || _parameters.Length == 0)
         {
             return Array.Empty<byte>();
         }
@@ -289,7 +325,7 @@ public sealed class Vst3PluginWrapper : IPlugin
         var bytes = new byte[_parameters.Length * sizeof(float)];
         for (int i = 0; i < _parameters.Length; i++)
         {
-            float value = _commandStub.GetParameter(i);
+            float value = _getParameter(i);
             Buffer.BlockCopy(BitConverter.GetBytes(value), 0, bytes, i * sizeof(float), sizeof(float));
         }
 
@@ -298,7 +334,7 @@ public sealed class Vst3PluginWrapper : IPlugin
 
     private void ApplyParameterState(byte[] state)
     {
-        if (_commandStub is null || _parameters.Length == 0)
+        if (_setParameter is null || _parameters.Length == 0)
         {
             return;
         }
@@ -307,7 +343,25 @@ public sealed class Vst3PluginWrapper : IPlugin
         for (int i = 0; i < count; i++)
         {
             float value = BitConverter.ToSingle(state, i * sizeof(float));
-            _commandStub.SetParameter(i, Math.Clamp(value, 0f, 1f));
+            _setParameter(i, Math.Clamp(value, 0f, 1f));
+        }
+    }
+
+    private static T CreateDelegate<T>(object target, string methodName) where T : Delegate
+    {
+        var method = target.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (method is null)
+        {
+            throw new InvalidOperationException($"VST3 plugin command stub is missing {methodName}.");
+        }
+
+        try
+        {
+            return (T)method.CreateDelegate(typeof(T), target);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Failed to bind VST3 method {methodName}.", ex);
         }
     }
 
@@ -327,4 +381,20 @@ public sealed class Vst3PluginWrapper : IPlugin
 
         return buffers;
     }
+
+    private delegate void ProcessReplacingDelegate(VstAudioBuffer[] inputs, VstAudioBuffer[] outputs);
+
+    private delegate byte[]? GetChunkDelegate(bool isPreset);
+
+    private delegate int SetChunkDelegate(byte[] data, bool isPreset);
+
+    private delegate float GetParameterDelegate(int index);
+
+    private delegate void SetParameterDelegate(int index, float value);
+
+    private delegate string? GetParameterTextDelegate(int index);
+
+    private delegate bool EditorGetRectDelegate(out Rectangle rect);
+
+    private delegate bool EditorOpenDelegate(IntPtr parentHandle);
 }
