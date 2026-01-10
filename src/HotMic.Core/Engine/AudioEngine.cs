@@ -441,7 +441,7 @@ public sealed class AudioEngine : IDisposable
             return;
         }
 
-        var floatSpan = MemoryMarshal.Cast<byte, float>(data);
+        var inputSamples = MemoryMarshal.Cast<byte, float>(data);
         int remainingFrames = frames;
         int sourceIndex = 0;
 
@@ -454,7 +454,7 @@ public sealed class AudioEngine : IDisposable
                 int baseIndex = (sourceIndex + i) * channels;
                 for (int ch = 0; ch < channels; ch++)
                 {
-                    sum += floatSpan[baseIndex + ch];
+                    sum += inputSamples[baseIndex + ch];
                 }
 
                 mixBuffer[i] = sum / channels;
