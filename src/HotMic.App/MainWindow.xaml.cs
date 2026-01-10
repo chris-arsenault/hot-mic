@@ -136,7 +136,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void SkiaCanvas_MouseMove(object sender, MouseEventArgs e)
+    private void SkiaCanvas_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
         if (DataContext is not MainViewModel viewModel)
         {

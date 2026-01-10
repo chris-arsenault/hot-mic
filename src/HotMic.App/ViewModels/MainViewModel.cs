@@ -479,7 +479,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var viewModel = new PluginBrowserViewModel(choices);
         var window = new PluginBrowserWindow(viewModel)
         {
-            Owner = Application.Current?.MainWindow
+            Owner = System.Windows.Application.Current?.MainWindow
         };
 
         return window.ShowDialog() == true ? viewModel.SelectedChoice : null;
@@ -501,7 +501,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var viewModel = new PluginParametersViewModel(plugin.Name, parameterViewModels, gainReductionProvider, gateOpenProvider, learnNoiseAction);
         var window = new PluginParametersWindow(viewModel)
         {
-            Owner = Application.Current?.MainWindow
+            Owner = System.Windows.Application.Current?.MainWindow
         };
         window.ShowDialog();
     }
@@ -510,7 +510,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var window = new Vst3EditorWindow(plugin)
         {
-            Owner = Application.Current?.MainWindow,
+            Owner = System.Windows.Application.Current?.MainWindow,
             Title = plugin.Name
         };
         window.Show();

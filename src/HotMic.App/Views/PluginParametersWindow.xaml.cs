@@ -83,7 +83,7 @@ public partial class PluginParametersWindow : Window
         }
     }
 
-    private void SkiaCanvas_MouseMove(object sender, MouseEventArgs e)
+    private void SkiaCanvas_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
         if (DataContext is not PluginParametersViewModel viewModel || _activeParameterIndex < 0 || e.LeftButton != MouseButtonState.Pressed)
         {
