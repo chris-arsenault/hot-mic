@@ -294,6 +294,8 @@ public sealed class MainRenderer
 
         DrawChannelStrip(canvas, channel1Rect, viewModel.Channel1, 0);
         DrawChannelStrip(canvas, channel2Rect, viewModel.Channel2, 1);
+
+        DrawDeviceListOverlay(canvas, viewModel, uiState);
     }
 
     private void DrawMinimal(SKCanvas canvas, SKSize size, MainViewModel viewModel)
@@ -425,7 +427,16 @@ public sealed class MainRenderer
         DrawPickerField(canvas, "Buffer", row2LabelY, $"{viewModel.SelectedBufferSize} samples",
             new SKRect(x, row2FieldTop, x + row2FieldWidth, row2FieldTop + fieldHeight), DevicePickerTarget.BufferSize);
 
-        if (uiState.ActiveDevicePicker != DevicePickerTarget.None && _devicePickerRects.TryGetValue(uiState.ActiveDevicePicker, out var fieldRect))
+    }
+
+    private void DrawDeviceListOverlay(SKCanvas canvas, MainViewModel viewModel, MainUiState uiState)
+    {
+        if (uiState.ActiveDevicePicker == DevicePickerTarget.None)
+        {
+            return;
+        }
+
+        if (_devicePickerRects.TryGetValue(uiState.ActiveDevicePicker, out var fieldRect))
         {
             DrawDeviceList(canvas, fieldRect, viewModel, uiState);
         }

@@ -33,6 +33,27 @@ public sealed class DeviceManager
 
     public AudioDevice? FindVBCableOutput()
     {
-        return GetOutputDevices().FirstOrDefault(device => device.Name.Contains("VB-Cable", StringComparison.OrdinalIgnoreCase));
+        return GetOutputDevices().FirstOrDefault(device => IsVbCableDeviceName(device.Name));
+    }
+
+    public static bool IsVbCableDeviceName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        if (name.Contains("VB-Cable", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (name.Contains("Virtual Cable", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return name.Contains("VB", StringComparison.OrdinalIgnoreCase) &&
+               name.Contains("Cable", StringComparison.OrdinalIgnoreCase);
     }
 }

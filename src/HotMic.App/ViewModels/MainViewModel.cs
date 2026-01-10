@@ -173,7 +173,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (!SelectedOutputDevice.Name.Contains("VB-Cable", StringComparison.OrdinalIgnoreCase))
+        if (!DeviceManager.IsVbCableDeviceName(SelectedOutputDevice.Name))
         {
             StatusMessage = "Output must be set to VB-Cable.";
             return;
