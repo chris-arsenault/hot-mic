@@ -16,7 +16,7 @@ public sealed class GainPlugin : IPlugin, IQualityConfigurablePlugin
     private float _phaseMultiplier = 1f;
     private float _smoothingMs = 5f;
     private int _sampleRate;
-    private readonly LinearSmoother _gainSmoother = new();
+    private LinearSmoother _gainSmoother = new();
 
     private int _inputLevelBits;
     private int _outputLevelBits;

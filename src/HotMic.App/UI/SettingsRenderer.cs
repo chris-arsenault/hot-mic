@@ -37,6 +37,8 @@ public sealed class SettingsRenderer
     private SKRect _cancelButtonRect;
     private SKRect _titleBarRect;
     private SKRect _dropdownListRect;
+    private SKRect _vstCheckboxRect;
+    private SKRect _midiCheckboxRect;
 
     public SettingsRenderer()
     {
@@ -123,13 +125,48 @@ public sealed class SettingsRenderer
         DrawFieldRow(canvas, "Input 1 Channel", FormatInputChannel(viewModel.SelectedInput1Channel), Padding, y, thirdWidth, SettingsField.Input1Channel);
         DrawFieldRow(canvas, "Input 2 Channel", FormatInputChannel(viewModel.SelectedInput2Channel), Padding + thirdWidth + ColumnSpacing, y, thirdWidth, SettingsField.Input2Channel);
         DrawFieldRow(canvas, "Output Routing", FormatOutputRouting(viewModel.SelectedOutputRouting), Padding + (thirdWidth + ColumnSpacing) * 2f, y, thirdWidth, SettingsField.OutputRouting);
-        y += LabelHeight + 6f + FieldHeight + RowSpacing + 8f;
+        y += LabelHeight + 6f + FieldHeight + RowSpacing;
+
+        // Row 5: VST Plugins checkbox + MIDI checkbox
+        DrawCheckbox(canvas, "Enable VST Plugins", viewModel.EnableVstPlugins, Padding, y, out _vstCheckboxRect);
+        DrawCheckbox(canvas, "Enable MIDI", viewModel.EnableMidi, Padding + halfWidth + ColumnSpacing, y, out _midiCheckboxRect);
+        y += FieldHeight + RowSpacing;
+
+        // Row 6: MIDI Device dropdown (only if MIDI enabled)
+        if (viewModel.EnableMidi)
+        {
+            DrawFieldRow(canvas, "MIDI Device", viewModel.SelectedMidiDevice ?? "Select...", Padding, y, halfWidth, SettingsField.MidiDevice);
+            y += LabelHeight + 6f + FieldHeight + RowSpacing;
+        }
+
+        y += 8f;
 
         // Buttons
         float buttonWidth = 100f;
         float buttonsX = size.Width - Padding - buttonWidth * 2f - ColumnSpacing;
         DrawButton(canvas, "Cancel", buttonsX, y, buttonWidth, false, out _cancelButtonRect);
         DrawButton(canvas, "Apply", buttonsX + buttonWidth + ColumnSpacing, y, buttonWidth, true, out _applyButtonRect);
+    }
+
+    private void DrawCheckbox(SKCanvas canvas, string label, bool isChecked, float x, float y, out SKRect checkboxRect)
+    {
+        const float checkboxSize = 20f;
+        checkboxRect = new SKRect(x, y, x + checkboxSize, y + checkboxSize);
+
+        var roundRect = new SKRoundRect(checkboxRect, 4f);
+        canvas.DrawRoundRect(roundRect, isChecked ? _buttonAccentPaint : _fieldPaint);
+        canvas.DrawRoundRect(roundRect, _fieldBorderPaint);
+
+        if (isChecked)
+        {
+            using var checkPaint = CreateStrokePaint(new SKColor(0x12, 0x12, 0x14), 2f);
+            float cx = checkboxRect.MidX;
+            float cy = checkboxRect.MidY;
+            canvas.DrawLine(cx - 4f, cy, cx - 1f, cy + 3f, checkPaint);
+            canvas.DrawLine(cx - 1f, cy + 3f, cx + 5f, cy - 4f, checkPaint);
+        }
+
+        canvas.DrawText(label, x + checkboxSize + 10f, y + checkboxSize / 2f + 4f, _textPaint);
     }
 
     private void DrawFieldRow(SKCanvas canvas, string label, string value, float x, float y, float width, SettingsField field)
@@ -234,8 +271,24 @@ public sealed class SettingsRenderer
             SettingsField.Input1Channel => BuildEnumList(viewModel.InputChannelOptions, viewModel.SelectedInput1Channel, FormatInputChannel, out selectedIndex),
             SettingsField.Input2Channel => BuildEnumList(viewModel.InputChannelOptions, viewModel.SelectedInput2Channel, FormatInputChannel, out selectedIndex),
             SettingsField.OutputRouting => BuildEnumList(viewModel.OutputRoutingOptions, viewModel.SelectedOutputRouting, FormatOutputRouting, out selectedIndex),
+            SettingsField.MidiDevice => BuildMidiDeviceList(viewModel.MidiDevices, viewModel.SelectedMidiDevice, out selectedIndex),
             _ => []
         };
+    }
+
+    private static IReadOnlyList<string> BuildMidiDeviceList(IReadOnlyList<string> devices, string? selected, out int selectedIndex)
+    {
+        selectedIndex = -1;
+        var list = new List<string>(devices.Count);
+        for (int i = 0; i < devices.Count; i++)
+        {
+            list.Add(devices[i]);
+            if (devices[i] == selected)
+            {
+                selectedIndex = i;
+            }
+        }
+        return list;
     }
 
     private static IReadOnlyList<string> BuildDeviceList(IReadOnlyList<AudioDevice> devices, AudioDevice? selected, out int selectedIndex)
@@ -320,6 +373,8 @@ public sealed class SettingsRenderer
         _applyButtonRect = SKRect.Empty;
         _cancelButtonRect = SKRect.Empty;
         _dropdownListRect = SKRect.Empty;
+        _vstCheckboxRect = SKRect.Empty;
+        _midiCheckboxRect = SKRect.Empty;
     }
 
     public SettingsField HitTestField(float x, float y)
@@ -340,6 +395,8 @@ public sealed class SettingsRenderer
     public bool HitTestCancel(float x, float y) => _cancelButtonRect.Contains(x, y);
     public bool HitTestTitleBar(float x, float y) => _titleBarRect.Contains(x, y);
     public bool HitTestDropdownList(float x, float y) => !_dropdownListRect.IsEmpty && _dropdownListRect.Contains(x, y);
+    public bool HitTestVstCheckbox(float x, float y) => _vstCheckboxRect.Contains(x, y);
+    public bool HitTestMidiCheckbox(float x, float y) => _midiCheckboxRect.Contains(x, y);
 
     private static SKPaint CreateFillPaint(SKColor color) => new() { Color = color, IsAntialias = true, Style = SKPaintStyle.Fill };
     private static SKPaint CreateStrokePaint(SKColor color, float width) => new() { Color = color, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = width };
@@ -362,7 +419,8 @@ public enum SettingsField
     None,
     Input1, Input2, Output, Monitor,
     SampleRate, BufferSize,
-    Input1Channel, Input2Channel, OutputRouting
+    Input1Channel, Input2Channel, OutputRouting,
+    MidiDevice
 }
 
 public readonly record struct DropdownItemHit(SettingsField Field, int Index);

@@ -15,6 +15,7 @@ public partial class PluginBrowserWindow : Window
     private readonly PluginBrowserRenderer _renderer = new();
     private readonly DispatcherTimer _renderTimer;
     private float _scrollOffset;
+    private bool _isSearchFocused;
 
     public PluginBrowserWindow(PluginBrowserViewModel viewModel)
     {
@@ -25,6 +26,9 @@ public partial class PluginBrowserWindow : Window
         _renderTimer.Tick += (_, _) => SkiaCanvas.InvalidateVisual();
         Loaded += (_, _) => _renderTimer.Start();
         Closed += (_, _) => _renderTimer.Stop();
+
+        PreviewKeyDown += OnPreviewKeyDown;
+        PreviewTextInput += OnPreviewTextInput;
     }
 
     private void SkiaCanvas_PaintSurface(object sender, SKPaintSurfaceEventArgs e)
@@ -37,6 +41,7 @@ public partial class PluginBrowserWindow : Window
         var canvas = e.Surface.Canvas;
         var size = new SKSize(e.Info.Width, e.Info.Height);
         float dpiScale = GetDpiScale();
+        _renderer.IsSearchBoxFocused = _isSearchFocused;
         _renderer.Render(canvas, size, viewModel, dpiScale, _scrollOffset);
     }
 
@@ -58,6 +63,15 @@ public partial class PluginBrowserWindow : Window
             return;
         }
 
+        if (_renderer.HitTestSearchBox(x, y))
+        {
+            _isSearchFocused = true;
+            e.Handled = true;
+            return;
+        }
+
+        _isSearchFocused = false;
+
         if (_renderer.HitTestAdd(x, y))
         {
             if (viewModel.SelectedChoice is not null)
@@ -77,10 +91,10 @@ public partial class PluginBrowserWindow : Window
             return;
         }
 
-        int index = _renderer.HitTestItem(x, y);
-        if (index >= 0 && index < viewModel.Choices.Count)
+        var plugin = _renderer.HitTestPlugin(x, y);
+        if (plugin is not null)
         {
-            viewModel.SelectedChoice = viewModel.Choices[index];
+            viewModel.SelectedChoice = plugin;
             e.Handled = true;
         }
     }
@@ -91,6 +105,71 @@ public partial class PluginBrowserWindow : Window
         float next = _scrollOffset - e.Delta / 4f;
         _scrollOffset = Math.Clamp(next, 0f, maxScroll);
         e.Handled = true;
+    }
+
+    private void OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (DataContext is not PluginBrowserViewModel viewModel)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            if (_isSearchFocused && !string.IsNullOrEmpty(viewModel.SearchText))
+            {
+                viewModel.SearchText = string.Empty;
+                _scrollOffset = 0f;
+            }
+            else
+            {
+                DialogResult = false;
+                Close();
+            }
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Enter)
+        {
+            if (viewModel.SelectedChoice is not null)
+            {
+                DialogResult = true;
+                Close();
+            }
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Back && _isSearchFocused && viewModel.SearchText.Length > 0)
+        {
+            viewModel.SearchText = viewModel.SearchText[..^1];
+            _scrollOffset = 0f;
+            e.Handled = true;
+            return;
+        }
+
+        // Any key press activates search
+        if (!_isSearchFocused && e.Key >= Key.A && e.Key <= Key.Z)
+        {
+            _isSearchFocused = true;
+        }
+    }
+
+    private void OnPreviewTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (DataContext is not PluginBrowserViewModel viewModel)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(e.Text) && !char.IsControl(e.Text[0]))
+        {
+            _isSearchFocused = true;
+            viewModel.SearchText += e.Text;
+            _scrollOffset = 0f;
+            e.Handled = true;
+        }
     }
 
     private float GetDpiScale()

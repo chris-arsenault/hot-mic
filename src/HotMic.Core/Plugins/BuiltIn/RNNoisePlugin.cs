@@ -18,7 +18,7 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
     private readonly float[] _dryRing = new float[FrameSize];
     private readonly float[] _frameIn = new float[FrameSize];
     private readonly float[] _frameOut = new float[FrameSize];
-    private readonly LinearSmoother _mixSmoother = new();
+    private LinearSmoother _mixSmoother = new();
 
     private IntPtr _state = IntPtr.Zero;
     private int _ringIndex;

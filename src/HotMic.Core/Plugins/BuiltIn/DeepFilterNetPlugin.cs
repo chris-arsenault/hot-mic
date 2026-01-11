@@ -14,7 +14,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
     private const float MixSmoothingMs = 8f;
 
-    private readonly LinearSmoother _mixSmoother = new();
+    private LinearSmoother _mixSmoother = new();
     private readonly object _workerLock = new();
     private DeepFilterNetProcessor? _processor;
     private LockFreeRingBuffer? _inputBuffer;

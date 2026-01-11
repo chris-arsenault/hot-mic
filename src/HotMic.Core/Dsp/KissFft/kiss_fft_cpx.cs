@@ -18,6 +18,6 @@ internal sealed class kiss_fft_cpx<kiss_fft_scalar>
         i = imag;
     }
 
-    public kiss_fft_scalar r;
-    public kiss_fft_scalar i;
+    public kiss_fft_scalar r = default!;
+    public kiss_fft_scalar i = default!;
 }

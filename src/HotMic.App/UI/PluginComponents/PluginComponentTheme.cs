@@ -49,4 +49,8 @@ public sealed class PluginComponentTheme
     // Labels
     public SKColor LabelBackground { get; } = new(0x22, 0x22, 0x28);
     public SKColor LabelBorder { get; } = new(0x3A, 0x3A, 0x44);
+
+    // Meters
+    public SKColor MeterBackground { get; } = new(0x12, 0x12, 0x16);
+    public SKColor AccentSecondary { get; } = new(0x80, 0x40, 0xFF);
 }

@@ -16,6 +16,7 @@ public static class PluginFactory
             "builtin:rnnoise" => new RNNoisePlugin(),
             "builtin:deepfilternet" => new DeepFilterNetPlugin(),
             "builtin:voice-gate" => new SileroVoiceGatePlugin(),
+            "builtin:reverb" => new ConvolutionReverbPlugin(),
             _ => null
         };
     }

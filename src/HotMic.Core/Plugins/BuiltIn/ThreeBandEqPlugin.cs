@@ -44,15 +44,15 @@ public sealed class ThreeBandEqPlugin : IPlugin, IQualityConfigurablePlugin
     private float _parameterSmoothingMs = DefaultSmoothingMs;
     private int _coefficientUpdateStride = DefaultCoefficientUpdateStride;
 
-    private readonly LinearSmoother _lowGainSmoother = new();
-    private readonly LinearSmoother _lowFreqSmoother = new();
-    private readonly LinearSmoother _lowQSmoother = new();
-    private readonly LinearSmoother _midGainSmoother = new();
-    private readonly LinearSmoother _midFreqSmoother = new();
-    private readonly LinearSmoother _midQSmoother = new();
-    private readonly LinearSmoother _highGainSmoother = new();
-    private readonly LinearSmoother _highFreqSmoother = new();
-    private readonly LinearSmoother _highQSmoother = new();
+    private LinearSmoother _lowGainSmoother = new();
+    private LinearSmoother _lowFreqSmoother = new();
+    private LinearSmoother _lowQSmoother = new();
+    private LinearSmoother _midGainSmoother = new();
+    private LinearSmoother _midFreqSmoother = new();
+    private LinearSmoother _midQSmoother = new();
+    private LinearSmoother _highGainSmoother = new();
+    private LinearSmoother _highFreqSmoother = new();
+    private LinearSmoother _highQSmoother = new();
 
     // Spectrum analysis - 32 bands with peak hold (computed on UI thread).
     public const int SpectrumBins = 32;
