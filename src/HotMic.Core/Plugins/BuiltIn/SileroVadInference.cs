@@ -47,13 +47,21 @@ internal sealed class SileroVadInference : IDisposable
         _inputBuffer = new float[_frameSize];
         _inputTensor = new DenseTensor<float>(_inputBuffer, _inputShape);
 
-        if (_stateShape is not null && _stateHName is not null && _stateCName is not null)
+        if (_stateShape is not null && _stateHName is not null)
         {
-            int stateLen = _stateShape[0] * _stateShape[1] * _stateShape[2];
+            int stateLen = 1;
+            for (int i = 0; i < _stateShape.Length; i++)
+            {
+                stateLen *= Math.Max(1, _stateShape[i]);
+            }
+
             _stateH = new float[stateLen];
-            _stateC = new float[stateLen];
             _stateHTensor = new DenseTensor<float>(_stateH, _stateShape);
-            _stateCTensor = new DenseTensor<float>(_stateC, _stateShape);
+            if (_stateCName is not null)
+            {
+                _stateC = new float[stateLen];
+                _stateCTensor = new DenseTensor<float>(_stateC, _stateShape);
+            }
         }
     }
 
@@ -90,9 +98,12 @@ internal sealed class SileroVadInference : IDisposable
             inputs.Add(CreateSampleRateInput(_sampleRateName, _sampleRateType, _sampleRateShape));
         }
 
-        if (_stateHTensor is not null && _stateCTensor is not null && _stateHName is not null && _stateCName is not null)
+        if (_stateHTensor is not null && _stateHName is not null)
         {
             inputs.Add(NamedOnnxValue.CreateFromTensor(_stateHName, _stateHTensor));
+        }
+        if (_stateCTensor is not null && _stateCName is not null)
+        {
             inputs.Add(NamedOnnxValue.CreateFromTensor(_stateCName, _stateCTensor));
         }
 
@@ -219,6 +230,11 @@ internal sealed class SileroVadInference : IDisposable
         }
 
         inputShape = NormalizeInputShape(inputShape, frameSize);
+        if (inputShape.Length != 2)
+        {
+            // Silero VAD expects [batch, samples].
+            inputShape = new[] { 1, frameSize };
+        }
         if (sampleRateShape is not null)
         {
             sampleRateShape = NormalizeSampleRateShape(sampleRateShape);
@@ -297,9 +313,17 @@ internal sealed class SileroVadInference : IDisposable
     private static NamedOnnxValue CreateSampleRateInput(string name, Type type, int[]? shape)
     {
         int[] dims = shape is null || shape.Length == 0 ? Array.Empty<int>() : shape;
-        return type == typeof(long)
-            ? NamedOnnxValue.CreateFromTensor(name, new DenseTensor<long>(new[] { 16000L }, dims))
-            : NamedOnnxValue.CreateFromTensor(name, new DenseTensor<float>(new[] { 16000f }, dims));
+        if (type == typeof(long))
+        {
+            return NamedOnnxValue.CreateFromTensor(name, new DenseTensor<long>(new[] { 16000L }, dims));
+        }
+
+        if (type == typeof(int))
+        {
+            return NamedOnnxValue.CreateFromTensor(name, new DenseTensor<int>(new[] { 16000 }, dims));
+        }
+
+        return NamedOnnxValue.CreateFromTensor(name, new DenseTensor<float>(new[] { 16000f }, dims));
     }
 
     private static float ReadScalar(IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results, string name)
@@ -309,11 +333,11 @@ internal sealed class SileroVadInference : IDisposable
             if (item.Name == name)
             {
                 var tensor = item.AsTensor<float>();
-                if (tensor is DenseTensor<float> denseTensor)
+                foreach (var value in tensor)
                 {
-                    return denseTensor.Buffer.Span[0];
+                    return value;
                 }
-                return tensor.GetValue(0);
+                return 0f;
             }
         }
 
@@ -330,27 +354,18 @@ internal sealed class SileroVadInference : IDisposable
             }
 
             var tensor = item.AsTensor<float>();
-            if (tensor is DenseTensor<float> denseTensor)
+            int count = 0;
+            foreach (var value in tensor)
             {
-                var span = denseTensor.Buffer.Span;
-                int count = Math.Min(destination.Length, span.Length);
-                span[..count].CopyTo(destination);
-                if (count < destination.Length)
+                if (count >= destination.Length)
                 {
-                    Array.Clear(destination, count, destination.Length - count);
+                    break;
                 }
+                destination[count++] = value;
             }
-            else
+            if (count < destination.Length)
             {
-                int count = Math.Min(destination.Length, (int)tensor.Length);
-                for (int i = 0; i < count; i++)
-                {
-                    destination[i] = tensor.GetValue(i);
-                }
-                if (count < destination.Length)
-                {
-                    Array.Clear(destination, count, destination.Length - count);
-                }
+                Array.Clear(destination, count, destination.Length - count);
             }
             return;
         }
@@ -358,26 +373,35 @@ internal sealed class SileroVadInference : IDisposable
 
     private static bool IsSampleRateInput(NodeMetadata meta, int[] dims)
     {
-        return meta.ElementType == typeof(long) && (dims.Length == 0 || dims.Length == 1);
+        return (meta.ElementType == typeof(long) || meta.ElementType == typeof(int)) &&
+               (dims.Length == 0 || dims.Length == 1);
     }
 
     private static bool IsAudioInput(int[] dims)
     {
+        if (dims.Length == 2)
+        {
+            return dims[1] == 256 || dims[1] == 512 || dims[1] == 768 || dims[1] == -1;
+        }
         return dims.Length == 3 && (dims[2] == 256 || dims[2] == 512 || dims[2] == 768 || dims[2] == -1);
     }
 
     private static bool IsStateInput(int[] dims)
     {
-        return dims.Length == 3 && dims[0] == 2;
+        return (dims.Length == 3 && dims[0] == 2) || (dims.Length == 2 && dims[0] == 2);
     }
 
     private static bool IsStateOutput(int[] dims)
     {
-        return dims.Length == 3 && dims[0] == 2;
+        return (dims.Length == 3 && dims[0] == 2) || (dims.Length == 2 && dims[0] == 2);
     }
 
     private static int ResolveFrameSize(int[] dims)
     {
+        if (dims.Length >= 2 && dims[1] > 0)
+        {
+            return dims[1];
+        }
         if (dims.Length >= 3 && dims[2] > 0)
         {
             return dims[2];
@@ -388,6 +412,24 @@ internal sealed class SileroVadInference : IDisposable
 
     private static int[] NormalizeInputShape(int[] dims, int frameSize)
     {
+        if (dims.Length == 0)
+        {
+            return new[] { 1, frameSize };
+        }
+
+        if (dims.Length == 1)
+        {
+            int d0 = dims[0] > 0 ? dims[0] : frameSize;
+            return new[] { 1, d0 };
+        }
+
+        if (dims.Length == 2)
+        {
+            int d0 = dims[0] > 0 ? dims[0] : 1;
+            int d1 = dims[1] > 0 ? dims[1] : frameSize;
+            return new[] { d0, d1 };
+        }
+
         if (dims.Length != 3)
         {
             return new[] { 1, 1, frameSize };
@@ -401,6 +443,13 @@ internal sealed class SileroVadInference : IDisposable
 
     private static int[] NormalizeStateShape(int[] dims)
     {
+        if (dims.Length == 2)
+        {
+            int d0 = dims[0] > 0 ? dims[0] : 2;
+            int d1 = dims[1] > 0 ? dims[1] : 64;
+            return new[] { d0, d1 };
+        }
+
         if (dims.Length != 3)
         {
             return new[] { 2, 1, 64 };
