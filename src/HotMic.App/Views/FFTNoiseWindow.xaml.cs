@@ -32,8 +32,7 @@ public partial class FFTNoiseWindow : Window
     // Knob parameter mapping: index -> (paramIndex, minValue, maxValue)
     private static readonly (int paramIndex, float min, float max)[] KnobParams =
     {
-        (FFTNoiseRemovalPlugin.ReductionIndex, 0f, 1f),      // 0: Reduction
-        (FFTNoiseRemovalPlugin.SensitivityIndex, -80f, 0f)   // 1: Sensitivity
+        (FFTNoiseRemovalPlugin.ReductionIndex, 0f, 1f)      // 0: Reduction
     };
 
     public FFTNoiseWindow(FFTNoiseRemovalPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
@@ -73,7 +72,6 @@ public partial class FFTNoiseWindow : Window
 
         var state = new FFTNoiseState(
             Reduction: _plugin.Reduction,
-            SensitivityDb: _plugin.SensitivityDb,
             IsLearning: _plugin.IsLearning,
             LearningProgress: _plugin.LearningProgress,
             LearningTotal: _plugin.LearningTotal,
@@ -192,7 +190,6 @@ public partial class FFTNoiseWindow : Window
         return paramIndex switch
         {
             FFTNoiseRemovalPlugin.ReductionIndex => _plugin.Reduction,
-            FFTNoiseRemovalPlugin.SensitivityIndex => _plugin.SensitivityDb,
             _ => 0f
         };
     }

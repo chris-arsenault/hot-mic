@@ -54,7 +54,6 @@ public sealed class FFTNoiseRenderer : IDisposable
     private SKRect _spectrumRect;
     private SKRect _learnButtonRect;
     private SKPoint _reductionKnob;
-    private SKPoint _sensitivityKnob;
 
     public FFTNoiseRenderer(PluginComponentTheme? theme = null)
     {
@@ -539,7 +538,7 @@ public sealed class FFTNoiseRenderer : IDisposable
 
     private void DrawControls(SKCanvas canvas, float x, float y, float width, float height, FFTNoiseState state)
     {
-        float sectionWidth = width / 3f;
+        float sectionWidth = width / 2f;
 
         // Learn button
         float learnWidth = 100f;
@@ -573,13 +572,6 @@ public sealed class FFTNoiseRenderer : IDisposable
         _reductionKnob = new SKPoint(reductionX, reductionY);
         DrawKnob(canvas, _reductionKnob, state.Reduction, 0f, 1f, "REDUCTION", $"{state.Reduction * 100:0}%",
             state.HoveredKnob == 0);
-
-        // Sensitivity knob
-        float sensitivityX = x + sectionWidth * 2 + sectionWidth / 2;
-        float sensitivityY = y + height / 2;
-        _sensitivityKnob = new SKPoint(sensitivityX, sensitivityY);
-        DrawKnob(canvas, _sensitivityKnob, state.SensitivityDb, -80f, 0f, "SENSITIVITY", $"{state.SensitivityDb:0} dB",
-            state.HoveredKnob == 1);
     }
 
     private void DrawKnob(SKCanvas canvas, SKPoint center, float value, float minValue, float maxValue,
@@ -684,9 +676,6 @@ public sealed class FFTNoiseRenderer : IDisposable
         if (IsInKnob(x, y, _reductionKnob))
             return new FFTNoiseHitTest(FFTNoiseHitArea.Knob, 0);
 
-        if (IsInKnob(x, y, _sensitivityKnob))
-            return new FFTNoiseHitTest(FFTNoiseHitArea.Knob, 1);
-
         if (_titleBarRect.Contains(x, y))
             return new FFTNoiseHitTest(FFTNoiseHitArea.TitleBar, -1);
 
@@ -732,7 +721,6 @@ public sealed class FFTNoiseRenderer : IDisposable
 
 public record struct FFTNoiseState(
     float Reduction,
-    float SensitivityDb,
     bool IsLearning,
     int LearningProgress,
     int LearningTotal,

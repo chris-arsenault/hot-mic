@@ -6,7 +6,6 @@ namespace HotMic.Core.Plugins.BuiltIn;
 public sealed class FFTNoiseRemovalPlugin : IPlugin
 {
     public const int ReductionIndex = 0;
-    public const int SensitivityIndex = 1;
 
     private const int FftSize = 2048;
     private const int HopSize = FftSize / 4;  // 75% overlap for smoother reconstruction
@@ -44,8 +43,6 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
     private bool _learning;
     private int _noiseFrames;
     private float _reduction = 0.5f;
-    private float _sensitivityDb = -60f;
-    private float _sensitivityLinear;
     private int _sampleRate;
 
     public FFTNoiseRemovalPlugin()
@@ -77,11 +74,8 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
 
         Parameters =
         [
-            new PluginParameter { Index = ReductionIndex, Name = "Reduction", MinValue = 0f, MaxValue = 1f, DefaultValue = 0.5f, Unit = "%" },
-            new PluginParameter { Index = SensitivityIndex, Name = "Sensitivity", MinValue = -80f, MaxValue = 0f, DefaultValue = -60f, Unit = "dB" }
+            new PluginParameter { Index = ReductionIndex, Name = "Reduction", MinValue = 0f, MaxValue = 1f, DefaultValue = 0.5f, Unit = "%" }
         ];
-
-        UpdateSensitivity();
     }
 
     public string Id => "builtin:fft-noise";
@@ -94,7 +88,6 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
 
     // Property getters for UI binding
     public float Reduction => _reduction;
-    public float SensitivityDb => _sensitivityDb;
     public bool IsLearning => _learning;
     public int LearningProgress => _noiseFrames;
     public int LearningTotal => NoiseFramesToLearn;
@@ -159,36 +152,23 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
 
     public void SetParameter(int index, float value)
     {
-        switch (index)
+        if (index == ReductionIndex)
         {
-            case ReductionIndex:
-                _reduction = Math.Clamp(value, 0f, 1f);
-                break;
-            case SensitivityIndex:
-                _sensitivityDb = value;
-                UpdateSensitivity();
-                break;
+            _reduction = Math.Clamp(value, 0f, 1f);
         }
     }
 
     public byte[] GetState()
     {
-        var bytes = new byte[sizeof(float) * 2];
-        Buffer.BlockCopy(BitConverter.GetBytes(_reduction), 0, bytes, 0, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_sensitivityDb), 0, bytes, 4, 4);
-        return bytes;
+        return BitConverter.GetBytes(_reduction);
     }
 
     public void SetState(byte[] state)
     {
-        if (state.Length < sizeof(float) * 2)
+        if (state.Length >= sizeof(float))
         {
-            return;
+            _reduction = BitConverter.ToSingle(state, 0);
         }
-
-        _reduction = BitConverter.ToSingle(state, 0);
-        _sensitivityDb = BitConverter.ToSingle(state, 4);
-        UpdateSensitivity();
     }
 
     public void Dispose()
@@ -234,20 +214,13 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
             // Wiener gain: (signal^2 - noise^2) / signal^2
             // This gives smooth attenuation rather than hard subtraction
             float gain;
-            if (magnitude > _sensitivityLinear)
+            if (magnitudeSq > noisePower)
             {
-                if (magnitudeSq > noisePower)
-                {
-                    gain = MathF.Sqrt((magnitudeSq - noisePower) / magnitudeSq);
-                }
-                else
-                {
-                    gain = 0f;  // Below noise floor, fully attenuate
-                }
+                gain = MathF.Sqrt((magnitudeSq - noisePower) / magnitudeSq);
             }
             else
             {
-                gain = 1f;  // Below sensitivity, don't modify
+                gain = 0f;  // Below noise floor, fully attenuate
             }
 
             gains[i] = gain;
@@ -410,10 +383,5 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
             // RMS magnitude, normalized to match spectrum scale
             _displayNoiseProfile[displayBin] = count > 0 ? MathF.Sqrt(sumSq / count) * normalizationFactor : 0f;
         }
-    }
-
-    private void UpdateSensitivity()
-    {
-        _sensitivityLinear = MathF.Pow(10f, _sensitivityDb / 20f);
     }
 }
