@@ -203,7 +203,7 @@ Channels:        Mono per input, processed independently
 | UI Framework | WPF |
 | UI Rendering | SkiaSharp (SkiaSharp.Views.WPF) |
 | Audio I/O | NAudio (WASAPI) |
-| DSP Foundation | NAudio.Dsp, Math.NET Numerics |
+| DSP Foundation | Custom in-place DSP (biquad, FFT) |
 | VST3 Hosting | VST.NET (Jacobi.Vst.Core, Jacobi.Vst.Host.Interop) |
 | MVVM | CommunityToolkit.Mvvm |
 | Configuration | System.Text.Json |
@@ -215,9 +215,7 @@ Channels:        Mono per input, processed independently
 NAudio >= 2.2.0
 SkiaSharp >= 2.88.0
 SkiaSharp.Views.WPF >= 2.88.0
-MathNet.Numerics >= 5.0.0
-Jacobi.Vst.Core >= 2.0.0
-Jacobi.Vst.Host.Interop >= 2.0.0
+Jacobi.Vst >= 2.0.0-alpha
 CommunityToolkit.Mvvm >= 8.2.0
 ```
 

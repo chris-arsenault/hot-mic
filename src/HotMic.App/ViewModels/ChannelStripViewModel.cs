@@ -1,0 +1,165 @@
+using System.Collections.ObjectModel;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using HotMic.App.Models;
+
+namespace HotMic.App.ViewModels;
+
+public partial class ChannelStripViewModel : ObservableObject
+{
+    private readonly Action<HotMic.Core.Engine.ParameterChange>? _parameterSink;
+    private readonly Action<int>? _pluginActionSink;
+    private readonly Action<int>? _pluginRemoveSink;
+    private readonly Action<int, int>? _pluginReorderSink;
+    private readonly Action<int, bool>? _pluginBypassConfigSink;
+
+    public ChannelStripViewModel(int channelId, string name, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int>? pluginActionSink = null, Action<int>? pluginRemoveSink = null, Action<int, int>? pluginReorderSink = null, Action<int, bool>? pluginBypassConfigSink = null)
+    {
+        ChannelId = channelId;
+        Name = name;
+        _parameterSink = parameterSink;
+        _pluginActionSink = pluginActionSink;
+        _pluginRemoveSink = pluginRemoveSink;
+        _pluginReorderSink = pluginReorderSink;
+        _pluginBypassConfigSink = pluginBypassConfigSink;
+        PluginSlots = new ObservableCollection<PluginViewModel>();
+
+        // Start with just one add placeholder
+        PluginSlots.Add(PluginViewModel.CreateEmpty(ChannelId, 1, () => _pluginActionSink?.Invoke(0), () => _pluginRemoveSink?.Invoke(0), _parameterSink, (index, value) => _pluginBypassConfigSink?.Invoke(index, value)));
+
+        ToggleMuteCommand = new RelayCommand(() => IsMuted = !IsMuted);
+        ToggleSoloCommand = new RelayCommand(() => IsSoloed = !IsSoloed);
+    }
+
+    public int ChannelId { get; }
+
+    public string Name { get; private set; }
+
+    public ObservableCollection<PluginViewModel> PluginSlots { get; }
+
+    [ObservableProperty]
+    private float inputGainDb;
+
+    [ObservableProperty]
+    private float outputGainDb;
+
+    [ObservableProperty]
+    private float inputPeakLevel;
+
+    [ObservableProperty]
+    private float inputRmsLevel;
+
+    [ObservableProperty]
+    private float outputPeakLevel;
+
+    [ObservableProperty]
+    private float outputRmsLevel;
+
+    [ObservableProperty]
+    private bool isMuted;
+
+    [ObservableProperty]
+    private bool isSoloed;
+
+    public string PeakDbLabel => $"{ToDb(OutputPeakLevel):0} dB";
+
+    public IRelayCommand ToggleMuteCommand { get; }
+
+    public IRelayCommand ToggleSoloCommand { get; }
+
+    partial void OnOutputPeakLevelChanged(float value)
+    {
+        OnPropertyChanged(nameof(PeakDbLabel));
+    }
+
+    partial void OnInputGainDbChanged(float value)
+    {
+        _parameterSink?.Invoke(new HotMic.Core.Engine.ParameterChange
+        {
+            ChannelId = ChannelId,
+            Type = HotMic.Core.Engine.ParameterType.InputGainDb,
+            Value = value
+        });
+    }
+
+    partial void OnOutputGainDbChanged(float value)
+    {
+        _parameterSink?.Invoke(new HotMic.Core.Engine.ParameterChange
+        {
+            ChannelId = ChannelId,
+            Type = HotMic.Core.Engine.ParameterType.OutputGainDb,
+            Value = value
+        });
+    }
+
+    partial void OnIsMutedChanged(bool value)
+    {
+        _parameterSink?.Invoke(new HotMic.Core.Engine.ParameterChange
+        {
+            ChannelId = ChannelId,
+            Type = HotMic.Core.Engine.ParameterType.Mute,
+            Value = value ? 1f : 0f
+        });
+    }
+
+    partial void OnIsSoloedChanged(bool value)
+    {
+        _parameterSink?.Invoke(new HotMic.Core.Engine.ParameterChange
+        {
+            ChannelId = ChannelId,
+            Type = HotMic.Core.Engine.ParameterType.Solo,
+            Value = value ? 1f : 0f
+        });
+    }
+
+    private static float ToDb(float linear)
+    {
+        if (linear <= 0f)
+        {
+            return -60f;
+        }
+
+        return 20f * MathF.Log10(linear + 1e-6f);
+    }
+
+    public void UpdateName(string name)
+    {
+        Name = name;
+        OnPropertyChanged(nameof(Name));
+    }
+
+    public void UpdatePlugins(IReadOnlyList<PluginSlotInfo> slots)
+    {
+        PluginSlots.Clear();
+
+        // Add actual plugins
+        for (int i = 0; i < slots.Count; i++)
+        {
+            if (!string.IsNullOrWhiteSpace(slots[i].Name))
+            {
+                int slotIndex = i + 1;
+                int slot = i;
+                var viewModel = PluginViewModel.CreateFilled(ChannelId, slotIndex, slots[i].Name, slots[i].LatencyMs, () => _pluginActionSink?.Invoke(slot), () => _pluginRemoveSink?.Invoke(slot), _parameterSink, (index, value) => _pluginBypassConfigSink?.Invoke(index, value));
+                viewModel.IsBypassed = slots[i].IsBypassed;
+                PluginSlots.Add(viewModel);
+            }
+        }
+
+        // Add the "+1" add placeholder at the end
+        int addSlotIndex = slots.Count;
+        PluginSlots.Add(PluginViewModel.CreateEmpty(ChannelId, addSlotIndex + 1, () => _pluginActionSink?.Invoke(addSlotIndex), () => { }, _parameterSink, (index, value) => { }));
+    }
+
+    public void MovePlugin(int fromIndex, int toIndex)
+    {
+        if ((uint)fromIndex >= (uint)PluginSlots.Count || (uint)toIndex >= (uint)PluginSlots.Count)
+        {
+            return;
+        }
+
+        var item = PluginSlots[fromIndex];
+        PluginSlots.RemoveAt(fromIndex);
+        PluginSlots.Insert(toIndex, item);
+        _pluginReorderSink?.Invoke(fromIndex, toIndex);
+    }
+}

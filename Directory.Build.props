@@ -1,0 +1,13 @@
+<Project>
+  <!--
+    WSL Build Configuration
+    Source lives in WSL for tooling (Codex/Claude, git, etc.)
+    Build output goes to NTFS so Windows executables run correctly in Rider
+  -->
+  <PropertyGroup>
+    <BaseOutputPath>C:\Users\carse\RiderProjects\BuildMirror\bin\$(MSBuildProjectName)\</BaseOutputPath>
+    <BaseIntermediateOutputPath>C:\Users\carse\RiderProjects\BuildMirror\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+  </PropertyGroup>
+</Project>

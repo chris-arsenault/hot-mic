@@ -1,0 +1,36 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.8.34309.116
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HotMic.App", "src/HotMic.App/HotMic.App.csproj", "{DC2F3DFF-EE77-439D-9CD3-8B5B133F7C1E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HotMic.Core", "src/HotMic.Core/HotMic.Core.csproj", "{1DFD2BCE-A65E-43E1-B6E1-1953EB3A0B55}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HotMic.Common", "src/HotMic.Common/HotMic.Common.csproj", "{C1B4E105-1510-4B4A-8162-F4F918671480}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HotMic.Vst3", "src/HotMic.Vst3/HotMic.Vst3.csproj", "{0E24617B-2FC2-4D88-A36F-E1C0180D58FD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{DC2F3DFF-EE77-439D-9CD3-8B5B133F7C1E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DC2F3DFF-EE77-439D-9CD3-8B5B133F7C1E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DC2F3DFF-EE77-439D-9CD3-8B5B133F7C1E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DC2F3DFF-EE77-439D-9CD3-8B5B133F7C1E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1DFD2BCE-A65E-43E1-B6E1-1953EB3A0B55}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1DFD2BCE-A65E-43E1-B6E1-1953EB3A0B55}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1DFD2BCE-A65E-43E1-B6E1-1953EB3A0B55}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1DFD2BCE-A65E-43E1-B6E1-1953EB3A0B55}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C1B4E105-1510-4B4A-8162-F4F918671480}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C1B4E105-1510-4B4A-8162-F4F918671480}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C1B4E105-1510-4B4A-8162-F4F918671480}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C1B4E105-1510-4B4A-8162-F4F918671480}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0E24617B-2FC2-4D88-A36F-E1C0180D58FD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0E24617B-2FC2-4D88-A36F-E1C0180D58FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0E24617B-2FC2-4D88-A36F-E1C0180D58FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0E24617B-2FC2-4D88-A36F-E1C0180D58FD}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RuntimeIdentifier>win10-x64</RuntimeIdentifier>
+    <JacobiVstVersion>2.0.0-alpha</JacobiVstVersion>
+    <NuGetPackageRoot Condition="'$(NuGetPackageRoot)' == ''">$(UserProfile)\.nuget\packages\</NuGetPackageRoot>
+    <JacobiVstRoot>$([System.IO.Path]::Combine($(NuGetPackageRoot), 'jacobi.vst', $(JacobiVstVersion)))\</JacobiVstRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Jacobi.Vst" Version="$(JacobiVstVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Jacobi.Vst.Core" HintPath="$(JacobiVstRoot)runtimes\win10-x64\lib\netcoreapp3.1\Jacobi.Vst.Core.dll" />
+    <Reference Include="Jacobi.Vst.Interop" HintPath="$(JacobiVstRoot)runtimes\win10-x64\lib\netcoreapp3.1\Jacobi.Vst.Interop.dll" />
+    <Reference Include="Jacobi.Vst.Framework" HintPath="$(JacobiVstRoot)runtimes\win10-x64\lib\netcoreapp3.1\Jacobi.Vst.Framework.dll" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(JacobiVstRoot)runtimes\win10-x64\native\Ijwhost.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HotMic.Core\HotMic.Core.csproj" />
+    <ProjectReference Include="..\HotMic.Common\HotMic.Common.csproj" />
+  </ItemGroup>
+</Project>
