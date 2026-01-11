@@ -473,10 +473,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         strip.PluginChain.ReplaceAll(slots);
         for (int i = 0; i < slots.Length; i++)
         {
+            float latencyMs = 0f;
+            if (slots[i] is not null && _audioEngine.SampleRate > 0)
+            {
+                latencyMs = slots[i]!.LatencySamples * 1000f / _audioEngine.SampleRate;
+            }
+
             slotInfos.Add(new PluginSlotInfo
             {
                 Name = slots[i]?.Name ?? string.Empty,
-                IsBypassed = slots[i]?.IsBypassed ?? false
+                IsBypassed = slots[i]?.IsBypassed ?? false,
+                LatencyMs = latencyMs
             });
         }
 
@@ -507,7 +514,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         // Update hotbar stats and diagnostics
         Diagnostics = _audioEngine.GetDiagnosticsSnapshot();
-        LatencyMs = SelectedBufferSize * 1000f / Math.Max(1, SelectedSampleRate);
+        int sampleRate = Math.Max(1, _audioEngine.SampleRate);
+        float baseLatencyMs = SelectedBufferSize * 1000f / sampleRate;
+        int chainLatencySamples = Math.Max(GetChainLatencySamples(channel1), GetChainLatencySamples(channel2));
+        float chainLatencyMs = chainLatencySamples * 1000f / sampleRate;
+        LatencyMs = baseLatencyMs + chainLatencyMs;
         TotalDrops = Diagnostics.Input1DroppedSamples + Diagnostics.Input2DroppedSamples +
                      Diagnostics.OutputUnderflowSamples1 + Diagnostics.OutputUnderflowSamples2;
 
@@ -807,7 +818,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         Action? learnNoiseAction = plugin is FFTNoiseRemovalPlugin ? () => RequestNoiseLearn(channelIndex, slotIndex) : null;
 
-        var viewModel = new PluginParametersViewModel(plugin.Name, parameterViewModels, null, null, learnNoiseAction);
+        float latencyMs = _audioEngine.SampleRate > 0
+            ? plugin.LatencySamples * 1000f / _audioEngine.SampleRate
+            : 0f;
+        var viewModel = new PluginParametersViewModel(plugin.Name, parameterViewModels, null, null, learnNoiseAction, latencyMs);
         var window = new PluginParametersWindow(viewModel)
         {
             Owner = System.Windows.Application.Current?.MainWindow
@@ -964,6 +978,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Channel2.UpdatePlugins(slotInfos);
         }
+    }
+
+    private static int GetChainLatencySamples(ChannelStrip channel)
+    {
+        var slots = channel.PluginChain.GetSnapshot();
+        int latency = 0;
+        for (int i = 0; i < slots.Length; i++)
+        {
+            var plugin = slots[i];
+            if (plugin is null || plugin.IsBypassed)
+            {
+                continue;
+            }
+
+            latency += Math.Max(0, plugin.LatencySamples);
+        }
+
+        return latency;
     }
 
     private ChannelConfig GetOrCreateChannelConfig(int channelIndex)

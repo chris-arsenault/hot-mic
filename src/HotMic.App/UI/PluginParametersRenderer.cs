@@ -26,6 +26,7 @@ public sealed class PluginParametersRenderer
     private readonly SKPaint _buttonTextPaint;
     private readonly SKPaint _sliderTrackPaint;
     private readonly SKPaint _sliderFillPaint;
+    private readonly SKPaint _latencyPaint;
 
     private readonly List<ParameterRect> _parameterRects = new();
     private SKRect _closeButtonRect;
@@ -44,6 +45,7 @@ public sealed class PluginParametersRenderer
         _buttonTextPaint = CreateTextPaint(_theme.TextPrimary, 12f, SKFontStyle.Bold, SKTextAlign.Center);
         _sliderTrackPaint = CreateFillPaint(_theme.Surface);
         _sliderFillPaint = CreateFillPaint(_theme.Accent);
+        _latencyPaint = CreateTextPaint(_theme.TextMuted, 10f, align: SKTextAlign.Right);
     }
 
     public float ListContentHeight { get; private set; }
@@ -70,6 +72,12 @@ public sealed class PluginParametersRenderer
 
         string title = string.IsNullOrWhiteSpace(viewModel.PluginName) ? "Parameters" : viewModel.PluginName;
         canvas.DrawText(title, Padding, TitleBarHeight / 2f + _titlePaint.TextSize / 2.5f, _titlePaint);
+
+        if (viewModel.LatencyMs >= 0f)
+        {
+            string latencyLabel = $"LAT {viewModel.LatencyMs:0.0}ms";
+            canvas.DrawText(latencyLabel, size.Width - Padding, TitleBarHeight / 2f + _latencyPaint.TextSize / 2.5f, _latencyPaint);
+        }
 
         bool showGain = viewModel.GainReductionProvider is not null;
         bool showGate = viewModel.GateOpenProvider is not null;

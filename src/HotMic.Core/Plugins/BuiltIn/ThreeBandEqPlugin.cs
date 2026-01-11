@@ -17,6 +17,8 @@ public sealed class ThreeBandEqPlugin : IPlugin
     public const int HighQIndex = 8;
 
     private const int AnalysisSize = 1024;
+    private const float ParameterSmoothingMs = 15f;
+    private const int CoefficientUpdateStride = 16; // Throttle coefficient updates to avoid per-sample trig work.
 
     private readonly BiquadFilter _low = new();
     private readonly BiquadFilter _mid = new();
@@ -34,6 +36,18 @@ public sealed class ThreeBandEqPlugin : IPlugin
     private int _sampleRate;
     private int _inputLevelBits;
     private int _outputLevelBits;
+    private int _coeffUpdateCounter;
+    private bool _filtersDirty;
+
+    private readonly LinearSmoother _lowGainSmoother = new();
+    private readonly LinearSmoother _lowFreqSmoother = new();
+    private readonly LinearSmoother _lowQSmoother = new();
+    private readonly LinearSmoother _midGainSmoother = new();
+    private readonly LinearSmoother _midFreqSmoother = new();
+    private readonly LinearSmoother _midQSmoother = new();
+    private readonly LinearSmoother _highGainSmoother = new();
+    private readonly LinearSmoother _highFreqSmoother = new();
+    private readonly LinearSmoother _highQSmoother = new();
 
     // Spectrum analysis - 32 bands with peak hold (computed on UI thread).
     public const int SpectrumBins = 32;
@@ -118,46 +132,79 @@ public sealed class ThreeBandEqPlugin : IPlugin
     public void Initialize(int sampleRate, int blockSize)
     {
         _sampleRate = sampleRate;
-        UpdateFilters();
+        ConfigureSmoothers();
     }
 
     public void Process(Span<float> buffer)
     {
         float maxInput = 0f;
+        bool bypassed = IsBypassed;
+        bool smoothingActive = AnySmootherActive();
+        bool smoothingWasActive = smoothingActive;
+
+        if (_filtersDirty && !smoothingActive)
+        {
+            UpdateFiltersFromSmoothers();
+            _filtersDirty = false;
+        }
+        else if (_filtersDirty)
+        {
+            _filtersDirty = false;
+            _coeffUpdateCounter = 0;
+        }
+
+        float maxOutput = 0f;
+        int updateCounter = _coeffUpdateCounter;
+
         for (int i = 0; i < buffer.Length; i++)
         {
-            float abs = MathF.Abs(buffer[i]);
+            float sample = buffer[i];
+            float abs = MathF.Abs(sample);
             if (abs > maxInput)
             {
                 maxInput = abs;
             }
-        }
 
-        Interlocked.Exchange(ref _inputLevelBits, BitConverter.SingleToInt32Bits(maxInput));
-
-        if (IsBypassed)
-        {
-            _analysisBuffer.Write(buffer);
-            return;
-        }
-
-        float maxOutput = 0f;
-        for (int i = 0; i < buffer.Length; i++)
-        {
-            float sample = buffer[i];
-            sample = _low.Process(sample);
-            sample = _mid.Process(sample);
-            sample = _high.Process(sample);
-            buffer[i] = sample;
-
-            float abs = MathF.Abs(sample);
-            if (abs > maxOutput)
+            if (smoothingActive)
             {
-                maxOutput = abs;
+                AdvanceSmoothers();
+                if (updateCounter <= 0)
+                {
+                    UpdateFiltersFromSmoothers();
+                    updateCounter = CoefficientUpdateStride;
+                }
+                updateCounter--;
+            }
+
+            if (!bypassed)
+            {
+                sample = _low.Process(sample);
+                sample = _mid.Process(sample);
+                sample = _high.Process(sample);
+                buffer[i] = sample;
+
+                float absOut = MathF.Abs(sample);
+                if (absOut > maxOutput)
+                {
+                    maxOutput = absOut;
+                }
             }
         }
 
-        Interlocked.Exchange(ref _outputLevelBits, BitConverter.SingleToInt32Bits(maxOutput));
+        if (smoothingWasActive && !AnySmootherActive())
+        {
+            UpdateFiltersFromSmoothers();
+            updateCounter = 0;
+        }
+
+        _coeffUpdateCounter = updateCounter;
+
+        Interlocked.Exchange(ref _inputLevelBits, BitConverter.SingleToInt32Bits(maxInput));
+        if (!bypassed)
+        {
+            Interlocked.Exchange(ref _outputLevelBits, BitConverter.SingleToInt32Bits(maxOutput));
+        }
+
         _analysisBuffer.Write(buffer);
     }
 
@@ -167,34 +214,43 @@ public sealed class ThreeBandEqPlugin : IPlugin
         {
             case LowGainIndex:
                 _lowGainDb = value;
+                _lowGainSmoother.SetTarget(value);
                 break;
             case LowFreqIndex:
                 _lowFreq = value;
+                _lowFreqSmoother.SetTarget(value);
                 break;
             case LowQIndex:
                 _lowQ = value;
+                _lowQSmoother.SetTarget(value);
                 break;
             case MidGainIndex:
                 _midGainDb = value;
+                _midGainSmoother.SetTarget(value);
                 break;
             case MidFreqIndex:
                 _midFreq = value;
+                _midFreqSmoother.SetTarget(value);
                 break;
             case MidQIndex:
                 _midQ = value;
+                _midQSmoother.SetTarget(value);
                 break;
             case HighGainIndex:
                 _highGainDb = value;
+                _highGainSmoother.SetTarget(value);
                 break;
             case HighFreqIndex:
                 _highFreq = value;
+                _highFreqSmoother.SetTarget(value);
                 break;
             case HighQIndex:
                 _highQ = value;
+                _highQSmoother.SetTarget(value);
                 break;
         }
 
-        UpdateFilters();
+        MarkFiltersDirty();
     }
 
     public byte[] GetState()
@@ -228,23 +284,77 @@ public sealed class ThreeBandEqPlugin : IPlugin
         _highGainDb = BitConverter.ToSingle(state, 24);
         _highFreq = BitConverter.ToSingle(state, 28);
         _highQ = BitConverter.ToSingle(state, 32);
-        UpdateFilters();
+        ConfigureSmoothers();
     }
 
     public void Dispose()
     {
     }
 
-    private void UpdateFilters()
+    private void UpdateFiltersFromSmoothers()
     {
         if (_sampleRate <= 0)
         {
             return;
         }
 
-        _low.SetLowShelf(_sampleRate, _lowFreq, _lowGainDb, _lowQ);
-        _mid.SetPeaking(_sampleRate, _midFreq, _midGainDb, _midQ);
-        _high.SetHighShelf(_sampleRate, _highFreq, _highGainDb, _highQ);
+        _low.SetLowShelf(_sampleRate, _lowFreqSmoother.Current, _lowGainSmoother.Current, _lowQSmoother.Current);
+        _mid.SetPeaking(_sampleRate, _midFreqSmoother.Current, _midGainSmoother.Current, _midQSmoother.Current);
+        _high.SetHighShelf(_sampleRate, _highFreqSmoother.Current, _highGainSmoother.Current, _highQSmoother.Current);
+    }
+
+    private void ConfigureSmoothers()
+    {
+        if (_sampleRate <= 0)
+        {
+            return;
+        }
+
+        _lowGainSmoother.Configure(_sampleRate, ParameterSmoothingMs, _lowGainDb);
+        _lowFreqSmoother.Configure(_sampleRate, ParameterSmoothingMs, _lowFreq);
+        _lowQSmoother.Configure(_sampleRate, ParameterSmoothingMs, _lowQ);
+        _midGainSmoother.Configure(_sampleRate, ParameterSmoothingMs, _midGainDb);
+        _midFreqSmoother.Configure(_sampleRate, ParameterSmoothingMs, _midFreq);
+        _midQSmoother.Configure(_sampleRate, ParameterSmoothingMs, _midQ);
+        _highGainSmoother.Configure(_sampleRate, ParameterSmoothingMs, _highGainDb);
+        _highFreqSmoother.Configure(_sampleRate, ParameterSmoothingMs, _highFreq);
+        _highQSmoother.Configure(_sampleRate, ParameterSmoothingMs, _highQ);
+
+        UpdateFiltersFromSmoothers();
+        _filtersDirty = false;
+        _coeffUpdateCounter = 0;
+    }
+
+    private void MarkFiltersDirty()
+    {
+        _filtersDirty = true;
+        _coeffUpdateCounter = 0;
+    }
+
+    private bool AnySmootherActive()
+    {
+        return _lowGainSmoother.IsSmoothing ||
+               _lowFreqSmoother.IsSmoothing ||
+               _lowQSmoother.IsSmoothing ||
+               _midGainSmoother.IsSmoothing ||
+               _midFreqSmoother.IsSmoothing ||
+               _midQSmoother.IsSmoothing ||
+               _highGainSmoother.IsSmoothing ||
+               _highFreqSmoother.IsSmoothing ||
+               _highQSmoother.IsSmoothing;
+    }
+
+    private void AdvanceSmoothers()
+    {
+        if (_lowGainSmoother.IsSmoothing) _lowGainSmoother.Next();
+        if (_lowFreqSmoother.IsSmoothing) _lowFreqSmoother.Next();
+        if (_lowQSmoother.IsSmoothing) _lowQSmoother.Next();
+        if (_midGainSmoother.IsSmoothing) _midGainSmoother.Next();
+        if (_midFreqSmoother.IsSmoothing) _midFreqSmoother.Next();
+        if (_midQSmoother.IsSmoothing) _midQSmoother.Next();
+        if (_highGainSmoother.IsSmoothing) _highGainSmoother.Next();
+        if (_highFreqSmoother.IsSmoothing) _highFreqSmoother.Next();
+        if (_highQSmoother.IsSmoothing) _highQSmoother.Next();
     }
 
     private void UpdateSpectrum()

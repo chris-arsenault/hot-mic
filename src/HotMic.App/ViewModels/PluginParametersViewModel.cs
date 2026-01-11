@@ -7,17 +7,20 @@ namespace HotMic.App.ViewModels;
 public partial class PluginParametersViewModel : ObservableObject
 {
     public PluginParametersViewModel(string pluginName, IEnumerable<PluginParameterViewModel> parameters,
-        Func<float>? gainReductionProvider = null, Func<bool>? gateOpenProvider = null, Action? learnNoiseAction = null)
+        Func<float>? gainReductionProvider = null, Func<bool>? gateOpenProvider = null, Action? learnNoiseAction = null, float latencyMs = 0f)
     {
         PluginName = pluginName;
         Parameters = new ObservableCollection<PluginParameterViewModel>(parameters);
         GainReductionProvider = gainReductionProvider;
         GateOpenProvider = gateOpenProvider;
         LearnNoiseAction = learnNoiseAction;
+        LatencyMs = latencyMs;
         CloseCommand = new RelayCommand(() => CloseRequested?.Invoke());
     }
 
     public string PluginName { get; }
+
+    public float LatencyMs { get; }
 
     public ObservableCollection<PluginParameterViewModel> Parameters { get; }
 
