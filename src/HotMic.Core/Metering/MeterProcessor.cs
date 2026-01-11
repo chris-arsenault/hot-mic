@@ -5,16 +5,25 @@ namespace HotMic.Core.Metering;
 public sealed class MeterProcessor
 {
     private readonly int _holdSamples;
-    private readonly float _decayPerSample;
+    private readonly float _peakDecayPerSample;
+    private readonly float _rmsAttackCoeff;
+    private readonly float _rmsReleaseCoeff;
     private int _peakBits;
     private int _rmsBits;
     private float _peakHold;
+    private float _rmsSmoothed;
     private int _holdSamplesLeft;
 
-    public MeterProcessor(int sampleRate, float peakHoldSeconds = 1.5f, float decayPerSecond = 0.5f)
+    public MeterProcessor(int sampleRate, float peakHoldSeconds = 0.5f, float peakDecayPerSecond = 2f)
     {
         _holdSamples = (int)(sampleRate * peakHoldSeconds);
-        _decayPerSample = decayPerSecond / sampleRate;
+        _peakDecayPerSample = peakDecayPerSecond / sampleRate;
+
+        // RMS smoothing: ~50ms attack, ~150ms release for responsive but smooth display
+        float rmsAttackMs = 50f;
+        float rmsReleaseMs = 150f;
+        _rmsAttackCoeff = 1f - MathF.Exp(-1f / (rmsAttackMs * 0.001f * sampleRate));
+        _rmsReleaseCoeff = 1f - MathF.Exp(-1f / (rmsReleaseMs * 0.001f * sampleRate));
     }
 
     public void Process(Span<float> buffer)
@@ -38,11 +47,19 @@ public sealed class MeterProcessor
             sumSquares += abs * abs;
         }
 
-        float rms = MathF.Sqrt((float)(sumSquares / buffer.Length));
+        // Calculate instantaneous RMS for this buffer
+        float instantRms = MathF.Sqrt((float)(sumSquares / buffer.Length));
+
+        // Smooth RMS with attack/release envelope follower
+        float rmsCoeff = instantRms > _rmsSmoothed ? _rmsAttackCoeff : _rmsReleaseCoeff;
+        // Apply coefficient for the number of samples processed (approximate)
+        float effectiveCoeff = 1f - MathF.Pow(1f - rmsCoeff, buffer.Length);
+        _rmsSmoothed += effectiveCoeff * (instantRms - _rmsSmoothed);
+
         UpdatePeakHold(peak, buffer.Length);
 
         Interlocked.Exchange(ref _peakBits, BitConverter.SingleToInt32Bits(_peakHold));
-        Interlocked.Exchange(ref _rmsBits, BitConverter.SingleToInt32Bits(rms));
+        Interlocked.Exchange(ref _rmsBits, BitConverter.SingleToInt32Bits(_rmsSmoothed));
     }
 
     public float GetPeakLevel()
@@ -74,6 +91,6 @@ public sealed class MeterProcessor
             return;
         }
 
-        _peakHold = MathF.Max(0f, _peakHold - _decayPerSample * samples);
+        _peakHold = MathF.Max(0f, _peakHold - _peakDecayPerSample * samples);
     }
 }

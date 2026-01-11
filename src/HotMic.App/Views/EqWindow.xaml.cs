@@ -14,6 +14,7 @@ public partial class EqWindow : Window
     private readonly EqRenderer _renderer = new();
     private readonly ThreeBandEqPlugin _plugin;
     private readonly Action<int, float> _parameterCallback;
+    private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
 
     private int _activeKnob = -1;
@@ -38,11 +39,12 @@ public partial class EqWindow : Window
         (ThreeBandEqPlugin.HighFreqIndex, 2000f, 20000f, true) // 5: High Freq
     };
 
-    public EqWindow(ThreeBandEqPlugin plugin, Action<int, float> parameterCallback)
+    public EqWindow(ThreeBandEqPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
         InitializeComponent();
         _plugin = plugin;
         _parameterCallback = parameterCallback;
+        _bypassCallback = bypassCallback;
 
         var preferredSize = EqRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -123,7 +125,7 @@ public partial class EqWindow : Window
                 break;
 
             case EqHitArea.BypassButton:
-                _plugin.IsBypassed = !_plugin.IsBypassed;
+                _bypassCallback(!_plugin.IsBypassed);
                 e.Handled = true;
                 break;
 

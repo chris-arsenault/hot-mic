@@ -817,11 +817,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void ShowNoiseGateWindow(int channelIndex, int slotIndex, NoiseGatePlugin plugin)
     {
-        var window = new NoiseGateWindow(plugin, (paramIndex, value) =>
-        {
-            string paramName = plugin.Parameters[paramIndex].Name;
-            ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
-        })
+        var window = new NoiseGateWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
@@ -830,11 +832,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void ShowCompressorWindow(int channelIndex, int slotIndex, CompressorPlugin plugin)
     {
-        var window = new CompressorWindow(plugin, (paramIndex, value) =>
-        {
-            string paramName = plugin.Parameters[paramIndex].Name;
-            ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
-        })
+        var window = new CompressorWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
@@ -843,11 +847,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void ShowGainWindow(int channelIndex, int slotIndex, GainPlugin plugin)
     {
-        var window = new GainWindow(plugin, (paramIndex, value) =>
-        {
-            string paramName = plugin.Parameters[paramIndex].Name;
-            ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
-        })
+        var window = new GainWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
@@ -856,11 +862,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void ShowEqWindow(int channelIndex, int slotIndex, ThreeBandEqPlugin plugin)
     {
-        var window = new EqWindow(plugin, (paramIndex, value) =>
-        {
-            string paramName = plugin.Parameters[paramIndex].Name;
-            ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
-        })
+        var window = new EqWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
@@ -869,15 +877,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void ShowFFTNoiseWindow(int channelIndex, int slotIndex, FFTNoiseRemovalPlugin plugin)
     {
-        var window = new FFTNoiseWindow(plugin, (paramIndex, value) =>
-        {
-            string paramName = plugin.Parameters[paramIndex].Name;
-            ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
-        })
+        var window = new FFTNoiseWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.ShowDialog();
+    }
+
+    private void SetPluginBypass(int channelIndex, int slotIndex, bool bypassed)
+    {
+        var channel = channelIndex == 0 ? Channel1 : Channel2;
+        if (slotIndex < channel.PluginSlots.Count)
+        {
+            channel.PluginSlots[slotIndex].IsBypassed = bypassed;
+        }
     }
 
     private static void ShowVst3Editor(Vst3PluginWrapper plugin)

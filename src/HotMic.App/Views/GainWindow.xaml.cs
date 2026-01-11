@@ -15,6 +15,7 @@ public partial class GainWindow : Window
     private readonly GainRenderer _renderer = new();
     private readonly GainPlugin _plugin;
     private readonly Action<int, float> _parameterCallback;
+    private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
 
     private bool _isKnobActive;
@@ -24,11 +25,12 @@ public partial class GainWindow : Window
     private float _smoothedInputLevel;
     private float _smoothedOutputLevel;
 
-    public GainWindow(GainPlugin plugin, Action<int, float> parameterCallback)
+    public GainWindow(GainPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
         InitializeComponent();
         _plugin = plugin;
         _parameterCallback = parameterCallback;
+        _bypassCallback = bypassCallback;
 
         var preferredSize = GainRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -97,7 +99,7 @@ public partial class GainWindow : Window
                 break;
 
             case GainHitArea.BypassButton:
-                _plugin.IsBypassed = !_plugin.IsBypassed;
+                _bypassCallback(!_plugin.IsBypassed);
                 e.Handled = true;
                 break;
 

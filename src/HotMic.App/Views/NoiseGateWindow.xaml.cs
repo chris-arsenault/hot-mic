@@ -15,6 +15,7 @@ public partial class NoiseGateWindow : Window
     private readonly NoiseGateRenderer _renderer = new();
     private readonly NoiseGatePlugin _plugin;
     private readonly Action<int, float> _parameterCallback;
+    private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
 
     private int _activeKnob = -1;
@@ -22,11 +23,12 @@ public partial class NoiseGateWindow : Window
     private float _dragStartValue;
     private int _hoveredKnob = -1;
 
-    public NoiseGateWindow(NoiseGatePlugin plugin, Action<int, float> parameterCallback)
+    public NoiseGateWindow(NoiseGatePlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
         InitializeComponent();
         _plugin = plugin;
         _parameterCallback = parameterCallback;
+        _bypassCallback = bypassCallback;
 
         var preferredSize = NoiseGateRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -96,7 +98,7 @@ public partial class NoiseGateWindow : Window
                 break;
 
             case NoiseGateHitArea.BypassButton:
-                _plugin.IsBypassed = !_plugin.IsBypassed;
+                _bypassCallback(!_plugin.IsBypassed);
                 e.Handled = true;
                 break;
 

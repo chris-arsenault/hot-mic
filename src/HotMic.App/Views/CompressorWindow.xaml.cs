@@ -15,6 +15,7 @@ public partial class CompressorWindow : Window
     private readonly CompressorRenderer _renderer = new();
     private readonly CompressorPlugin _plugin;
     private readonly Action<int, float> _parameterCallback;
+    private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
 
     private int _activeKnob = -1;
@@ -23,11 +24,12 @@ public partial class CompressorWindow : Window
     private int _hoveredKnob = -1;
     private float _smoothedInputLevel;
 
-    public CompressorWindow(CompressorPlugin plugin, Action<int, float> parameterCallback)
+    public CompressorWindow(CompressorPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
         InitializeComponent();
         _plugin = plugin;
         _parameterCallback = parameterCallback;
+        _bypassCallback = bypassCallback;
 
         var preferredSize = CompressorRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -97,7 +99,7 @@ public partial class CompressorWindow : Window
                 break;
 
             case NoiseGateHitArea.BypassButton:
-                _plugin.IsBypassed = !_plugin.IsBypassed;
+                _bypassCallback(!_plugin.IsBypassed);
                 e.Handled = true;
                 break;
 
