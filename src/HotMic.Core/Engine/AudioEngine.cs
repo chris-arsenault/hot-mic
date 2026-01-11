@@ -111,6 +111,11 @@ public sealed class AudioEngine : IDisposable
         Volatile.Write(ref _outputRoutingMode, (int)outputRouting);
     }
 
+    public void SetMasterMute(bool muted)
+    {
+        _outputProvider?.SetMasterMute(muted);
+    }
+
     public void Start()
     {
         if (string.IsNullOrWhiteSpace(_outputId))
@@ -729,6 +734,7 @@ public sealed class AudioEngine : IDisposable
         private readonly float[] _channel1Buffer;
         private readonly float[] _channel2Buffer;
         private LockFreeRingBuffer? _monitorBuffer;
+        private int _masterMuted;
 
         private readonly Action<int> _reportOutput;
         private readonly Action<int> _reportUnderflow1;
@@ -798,7 +804,13 @@ public sealed class AudioEngine : IDisposable
                 _channels[1].Process(ch2Span, soloActive && !_channels[1].IsSoloed);
 
                 var outputSlice = output.Slice(processed * 2, chunk * 2);
-                if (routingMode == OutputRoutingMode.Sum)
+                bool muted = Volatile.Read(ref _masterMuted) != 0;
+
+                if (muted)
+                {
+                    outputSlice.Clear();
+                }
+                else if (routingMode == OutputRoutingMode.Sum)
                 {
                     for (int i = 0; i < chunk; i++)
                     {
@@ -828,6 +840,11 @@ public sealed class AudioEngine : IDisposable
         public void SetMonitorBuffer(LockFreeRingBuffer monitorBuffer)
         {
             _monitorBuffer = monitorBuffer;
+        }
+
+        public void SetMasterMute(bool muted)
+        {
+            Volatile.Write(ref _masterMuted, muted ? 1 : 0);
         }
 
         private void ApplyParameterChanges()

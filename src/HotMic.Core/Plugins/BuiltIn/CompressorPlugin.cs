@@ -26,6 +26,7 @@ public sealed class CompressorPlugin : IPlugin
     private int _sampleRate;
     private int _blockSize;
     private int _gainReductionBits;
+    private float _inputLevel;
 
     public CompressorPlugin()
     {
@@ -84,9 +85,23 @@ public sealed class CompressorPlugin : IPlugin
 
             float gainLinear = MathF.Pow(10f, -gainDb / 20f) * _makeupLinear;
             buffer[i] = input * gainLinear;
+
+            // Track peak input level for metering
+            if (inputAbs > _inputLevel)
+                _inputLevel = inputAbs;
         }
 
         Interlocked.Exchange(ref _gainReductionBits, BitConverter.SingleToInt32Bits(maxReduction));
+    }
+
+    /// <summary>
+    /// Gets the current input level (peak) and resets it.
+    /// </summary>
+    public float GetAndResetInputLevel()
+    {
+        float level = _inputLevel;
+        _inputLevel = 0f;
+        return level;
     }
 
     public void SetParameter(int index, float value)
@@ -117,6 +132,13 @@ public sealed class CompressorPlugin : IPlugin
     {
         return BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _gainReductionBits, 0, 0));
     }
+
+    // Current parameter values for UI binding
+    public float ThresholdDb => _thresholdDb;
+    public float Ratio => _ratio;
+    public float AttackMs => _attackMs;
+    public float ReleaseMs => _releaseMs;
+    public float MakeupDb => _makeupDb;
 
     public byte[] GetState()
     {

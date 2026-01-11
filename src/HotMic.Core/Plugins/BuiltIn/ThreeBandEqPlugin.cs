@@ -28,6 +28,17 @@ public sealed class ThreeBandEqPlugin : IPlugin
     private float _highFreq = 8000f;
     private float _highQ = 0.7f;
     private int _sampleRate;
+    private float _inputLevel;
+    private float _outputLevel;
+
+    // Spectrum analysis - 32 bands with peak hold
+    public const int SpectrumBins = 32;
+    private readonly float[] _spectrumLevels = new float[SpectrumBins];
+    private readonly float[] _spectrumPeaks = new float[SpectrumBins];
+    private readonly float[] _sampleBuffer = new float[512];
+    private int _sampleBufferIndex;
+    private const float SpectrumDecay = 0.92f;
+    private const float PeakDecay = 0.985f;
 
     public ThreeBandEqPlugin()
     {
@@ -53,6 +64,44 @@ public sealed class ThreeBandEqPlugin : IPlugin
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
+    // Property getters for UI binding
+    public float LowGainDb => _lowGainDb;
+    public float LowFreq => _lowFreq;
+    public float LowQ => _lowQ;
+    public float MidGainDb => _midGainDb;
+    public float MidFreq => _midFreq;
+    public float MidQ => _midQ;
+    public float HighGainDb => _highGainDb;
+    public float HighFreq => _highFreq;
+    public float HighQ => _highQ;
+    public int SampleRate => _sampleRate;
+
+    public float GetAndResetInputLevel()
+    {
+        float level = _inputLevel;
+        _inputLevel = 0f;
+        return level;
+    }
+
+    public float GetAndResetOutputLevel()
+    {
+        float level = _outputLevel;
+        _outputLevel = 0f;
+        return level;
+    }
+
+    /// <summary>
+    /// Gets the current spectrum levels and peaks. Caller must provide arrays of size SpectrumBins.
+    /// </summary>
+    public void GetSpectrum(float[] levels, float[] peaks)
+    {
+        if (levels.Length >= SpectrumBins && peaks.Length >= SpectrumBins)
+        {
+            Array.Copy(_spectrumLevels, levels, SpectrumBins);
+            Array.Copy(_spectrumPeaks, peaks, SpectrumBins);
+        }
+    }
+
     public void Initialize(int sampleRate, int blockSize)
     {
         _sampleRate = sampleRate;
@@ -61,11 +110,23 @@ public sealed class ThreeBandEqPlugin : IPlugin
 
     public void Process(Span<float> buffer)
     {
+        // Track input level
+        float maxInput = 0f;
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            float abs = MathF.Abs(buffer[i]);
+            if (abs > maxInput) maxInput = abs;
+        }
+        if (maxInput > _inputLevel) _inputLevel = maxInput;
+
         if (IsBypassed)
         {
+            // Still update spectrum with input when bypassed
+            UpdateSampleBuffer(buffer);
             return;
         }
 
+        float maxOutput = 0f;
         for (int i = 0; i < buffer.Length; i++)
         {
             float sample = buffer[i];
@@ -73,6 +134,69 @@ public sealed class ThreeBandEqPlugin : IPlugin
             sample = _mid.Process(sample);
             sample = _high.Process(sample);
             buffer[i] = sample;
+
+            float abs = MathF.Abs(sample);
+            if (abs > maxOutput) maxOutput = abs;
+        }
+        if (maxOutput > _outputLevel) _outputLevel = maxOutput;
+
+        // Update spectrum with output
+        UpdateSampleBuffer(buffer);
+    }
+
+    private void UpdateSampleBuffer(Span<float> buffer)
+    {
+        // Copy samples to ring buffer
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            _sampleBuffer[_sampleBufferIndex] = buffer[i];
+            _sampleBufferIndex = (_sampleBufferIndex + 1) % _sampleBuffer.Length;
+        }
+
+        // Compute spectrum using simple DFT for each bin
+        // Bins are logarithmically spaced from 20Hz to Nyquist
+        float minFreq = 20f;
+        float maxFreq = _sampleRate > 0 ? _sampleRate / 2f : 20000f;
+        int bufferLen = _sampleBuffer.Length;
+
+        for (int bin = 0; bin < SpectrumBins; bin++)
+        {
+            // Logarithmic frequency for this bin
+            float t = bin / (float)(SpectrumBins - 1);
+            float freq = minFreq * MathF.Pow(maxFreq / minFreq, t);
+
+            // Simple Goertzel-like magnitude calculation
+            float omega = 2f * MathF.PI * freq / _sampleRate;
+            float cosOmega = MathF.Cos(omega);
+            float sinOmega = MathF.Sin(omega);
+
+            float real = 0f;
+            float imag = 0f;
+            int readIdx = _sampleBufferIndex;
+
+            for (int i = 0; i < bufferLen; i++)
+            {
+                float sample = _sampleBuffer[readIdx];
+                float phase = omega * i;
+                real += sample * MathF.Cos(phase);
+                imag += sample * MathF.Sin(phase);
+                readIdx = (readIdx + 1) % bufferLen;
+            }
+
+            float magnitude = MathF.Sqrt(real * real + imag * imag) / bufferLen;
+
+            // Apply decay to current level
+            _spectrumLevels[bin] = MathF.Max(_spectrumLevels[bin] * SpectrumDecay, magnitude);
+
+            // Update peak with slower decay
+            if (magnitude > _spectrumPeaks[bin])
+            {
+                _spectrumPeaks[bin] = magnitude;
+            }
+            else
+            {
+                _spectrumPeaks[bin] *= PeakDecay;
+            }
         }
     }
 

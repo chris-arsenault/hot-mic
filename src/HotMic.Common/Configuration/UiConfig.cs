@@ -4,6 +4,7 @@ public sealed class UiConfig
 {
     public string ViewMode { get; set; } = "full";
     public bool AlwaysOnTop { get; set; }
+    public bool MeterScaleVox { get; set; }
     public WindowPositionConfig WindowPosition { get; set; } = new();
     public WindowSizeConfig WindowSize { get; set; } = new();
 }
@@ -16,6 +17,6 @@ public sealed class WindowPositionConfig
 
 public sealed class WindowSizeConfig
 {
-    public double Width { get; set; } = 980;
-    public double Height { get; set; } = 620;
+    public double Width { get; set; } = 920;
+    public double Height { get; set; } = 290;
 }

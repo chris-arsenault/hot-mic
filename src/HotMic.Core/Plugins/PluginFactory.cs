@@ -12,6 +12,7 @@ public static class PluginFactory
             "builtin:noisegate" => new NoiseGatePlugin(),
             "builtin:eq3" => new ThreeBandEqPlugin(),
             "builtin:fft-noise" => new FFTNoiseRemovalPlugin(),
+            "builtin:gain" => new GainPlugin(),
             _ => null
         };
     }

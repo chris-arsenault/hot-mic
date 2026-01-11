@@ -27,6 +27,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private long _nextDebugUpdateTicks;
     private static readonly long DebugUpdateIntervalTicks = Math.Max(1, Stopwatch.Frequency / 4);
 
+    // 30-second rolling window for drop tracking
+    private readonly Queue<(long ticks, long input1, long input2, long underflow1, long underflow2)> _dropHistory = new();
+    private static readonly long ThirtySecondsInTicks = Stopwatch.Frequency * 30;
+
     public MainViewModel()
     {
         _config = _configManager.LoadOrDefault();
@@ -123,10 +127,59 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private double windowY;
 
     [ObservableProperty]
-    private double windowWidth = 900;
+    private double windowWidth = 920;
 
     [ObservableProperty]
-    private double windowHeight = 320;
+    private double windowHeight = 290;
+
+    // Mono/Stereo controls (Stereo: Ch1=Left, Ch2=Right; Mono: Sum)
+    [ObservableProperty]
+    private bool input1IsStereo;
+
+    [ObservableProperty]
+    private bool input2IsStereo;
+
+    [ObservableProperty]
+    private bool masterIsStereo = true;
+
+    [ObservableProperty]
+    private bool masterMuted;
+
+    // Meter scale mode (false = default, true = vox +20dB)
+    [ObservableProperty]
+    private bool meterScaleVox;
+
+    // Hotbar stats
+    [ObservableProperty]
+    private float cpuUsage;
+
+    [ObservableProperty]
+    private float latencyMs;
+
+    [ObservableProperty]
+    private long totalDrops;
+
+    [ObservableProperty]
+    private long drops30Sec;
+
+    [ObservableProperty]
+    private long input1Drops30Sec;
+
+    [ObservableProperty]
+    private long input2Drops30Sec;
+
+    [ObservableProperty]
+    private long underflow1Drops30Sec;
+
+    [ObservableProperty]
+    private long underflow2Drops30Sec;
+
+    // Debug overlay
+    [ObservableProperty]
+    private bool showDebugOverlay;
+
+    [ObservableProperty]
+    private AudioEngineDiagnosticsSnapshot diagnostics;
 
     public string ViewToggleLabel => IsMinimalView ? "Full" : "Minimal";
 
@@ -141,16 +194,37 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void ToggleView()
     {
         IsMinimalView = !IsMinimalView;
-        if (IsMinimalView)
-        {
-            WindowWidth = 400;
-            WindowHeight = 160;
-        }
-        else
-        {
-            WindowWidth = 900;
-            WindowHeight = 320;
-        }
+        WindowWidth = IsMinimalView ? MinimalViewWidth : FullViewWidth;
+        WindowHeight = IsMinimalView ? MinimalViewHeight : FullViewHeight;
+    }
+
+    partial void OnInput1IsStereoChanged(bool value)
+    {
+        SelectedInput1Channel = value ? InputChannelMode.Left : InputChannelMode.Sum;
+        _audioEngine.ConfigureRouting(SelectedInput1Channel, SelectedInput2Channel, SelectedOutputRouting);
+        _config.AudioSettings.Input1Channel = SelectedInput1Channel;
+        _configManager.Save(_config);
+    }
+
+    partial void OnInput2IsStereoChanged(bool value)
+    {
+        SelectedInput2Channel = value ? InputChannelMode.Right : InputChannelMode.Sum;
+        _audioEngine.ConfigureRouting(SelectedInput1Channel, SelectedInput2Channel, SelectedOutputRouting);
+        _config.AudioSettings.Input2Channel = SelectedInput2Channel;
+        _configManager.Save(_config);
+    }
+
+    partial void OnMasterIsStereoChanged(bool value)
+    {
+        SelectedOutputRouting = value ? OutputRoutingMode.Split : OutputRoutingMode.Sum;
+        _audioEngine.ConfigureRouting(SelectedInput1Channel, SelectedInput2Channel, SelectedOutputRouting);
+        _config.AudioSettings.OutputRouting = SelectedOutputRouting;
+        _configManager.Save(_config);
+    }
+
+    partial void OnMasterMutedChanged(bool value)
+    {
+        _audioEngine.SetMasterMute(value);
     }
 
     private void OpenSettings()
@@ -200,6 +274,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnAlwaysOnTopChanged(bool value)
     {
         _config.Ui.AlwaysOnTop = value;
+        _configManager.Save(_config);
+    }
+
+    partial void OnMeterScaleVoxChanged(bool value)
+    {
+        _config.Ui.MeterScaleVox = value;
         _configManager.Save(_config);
     }
 
@@ -260,14 +340,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    // Window size constants (must match MainRenderer layout calculations)
+    private const double FullViewWidth = 920;
+    private const double FullViewHeight = 290;
+    private const double MinimalViewWidth = 400;
+    private const double MinimalViewHeight = 140;
+
     private void ApplyConfigToViewModels()
     {
         IsMinimalView = string.Equals(_config.Ui.ViewMode, "minimal", StringComparison.OrdinalIgnoreCase);
         AlwaysOnTop = _config.Ui.AlwaysOnTop;
+        MeterScaleVox = _config.Ui.MeterScaleVox;
         WindowX = _config.Ui.WindowPosition.X;
         WindowY = _config.Ui.WindowPosition.Y;
-        WindowWidth = _config.Ui.WindowSize.Width;
-        WindowHeight = _config.Ui.WindowSize.Height;
+
+        // Force correct window size based on view mode (ignore saved values)
+        WindowWidth = IsMinimalView ? MinimalViewWidth : FullViewWidth;
+        WindowHeight = IsMinimalView ? MinimalViewHeight : FullViewHeight;
 
         var channel1Config = _config.Channels.ElementAtOrDefault(0);
         var channel2Config = _config.Channels.ElementAtOrDefault(1);
@@ -281,6 +370,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SelectedInput1Channel = _config.AudioSettings.Input1Channel;
         SelectedInput2Channel = _config.AudioSettings.Input2Channel;
         SelectedOutputRouting = _config.AudioSettings.OutputRouting;
+
+        // Initialize stereo settings from channel modes
+        Input1IsStereo = _config.AudioSettings.Input1Channel == InputChannelMode.Left;
+        Input2IsStereo = _config.AudioSettings.Input2Channel == InputChannelMode.Right;
+        MasterIsStereo = _config.AudioSettings.OutputRouting == OutputRoutingMode.Split;
 
         if (channel1Config is not null)
         {
@@ -401,6 +495,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Channel2.InputRmsLevel = channel2.InputMeter.GetRmsLevel();
         Channel2.OutputPeakLevel = channel2.OutputMeter.GetPeakLevel();
         Channel2.OutputRmsLevel = channel2.OutputMeter.GetRmsLevel();
+
+        // Update hotbar stats and diagnostics
+        Diagnostics = _audioEngine.GetDiagnosticsSnapshot();
+        LatencyMs = SelectedBufferSize * 1000f / Math.Max(1, SelectedSampleRate);
+        TotalDrops = Diagnostics.Input1DroppedSamples + Diagnostics.Input2DroppedSamples +
+                     Diagnostics.OutputUnderflowSamples1 + Diagnostics.OutputUnderflowSamples2;
+
+        // Track drops over 30-second rolling window
+        _dropHistory.Enqueue((nowTicks, Diagnostics.Input1DroppedSamples, Diagnostics.Input2DroppedSamples,
+                              Diagnostics.OutputUnderflowSamples1, Diagnostics.OutputUnderflowSamples2));
+
+        // Remove entries older than 30 seconds
+        long cutoffTicks = nowTicks - ThirtySecondsInTicks;
+        while (_dropHistory.Count > 0 && _dropHistory.Peek().ticks < cutoffTicks)
+        {
+            _dropHistory.Dequeue();
+        }
+
+        // Calculate 30-second drops (current - oldest in window)
+        if (_dropHistory.Count > 0)
+        {
+            var oldest = _dropHistory.Peek();
+            Input1Drops30Sec = Diagnostics.Input1DroppedSamples - oldest.input1;
+            Input2Drops30Sec = Diagnostics.Input2DroppedSamples - oldest.input2;
+            Underflow1Drops30Sec = Diagnostics.OutputUnderflowSamples1 - oldest.underflow1;
+            Underflow2Drops30Sec = Diagnostics.OutputUnderflowSamples2 - oldest.underflow2;
+            Drops30Sec = Input1Drops30Sec + Input2Drops30Sec + Underflow1Drops30Sec + Underflow2Drops30Sec;
+        }
 
         UpdateDebugInfo(nowTicks);
         _lastMeterUpdateTicks = nowTicks;
@@ -599,6 +721,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var choices = new List<PluginChoice>
         {
+            new() { Id = "builtin:gain", Name = "Gain", IsVst3 = false },
             new() { Id = "builtin:compressor", Name = "Compressor", IsVst3 = false },
             new() { Id = "builtin:noisegate", Name = "Noise Gate", IsVst3 = false },
             new() { Id = "builtin:eq3", Name = "3-Band EQ", IsVst3 = false },
@@ -631,6 +754,41 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void ShowPluginParameters(int channelIndex, int slotIndex, IPlugin plugin)
     {
+        // Use specialized window for noise gate
+        if (plugin is NoiseGatePlugin noiseGate)
+        {
+            ShowNoiseGateWindow(channelIndex, slotIndex, noiseGate);
+            return;
+        }
+
+        // Use specialized window for compressor
+        if (plugin is CompressorPlugin compressor)
+        {
+            ShowCompressorWindow(channelIndex, slotIndex, compressor);
+            return;
+        }
+
+        // Use specialized window for gain
+        if (plugin is GainPlugin gain)
+        {
+            ShowGainWindow(channelIndex, slotIndex, gain);
+            return;
+        }
+
+        // Use specialized window for 3-band EQ
+        if (plugin is ThreeBandEqPlugin eq)
+        {
+            ShowEqWindow(channelIndex, slotIndex, eq);
+            return;
+        }
+
+        // Use specialized window for FFT noise removal
+        if (plugin is FFTNoiseRemovalPlugin fftNoise)
+        {
+            ShowFFTNoiseWindow(channelIndex, slotIndex, fftNoise);
+            return;
+        }
+
         var parameterViewModels = plugin.Parameters.Select(parameter =>
         {
             float currentValue = GetPluginParameterValue(channelIndex, slotIndex, parameter.Name, parameter.DefaultValue);
@@ -638,12 +796,75 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 value => ApplyPluginParameter(channelIndex, slotIndex, parameter.Index, parameter.Name, value));
         }).ToList();
 
-        Func<float>? gainReductionProvider = plugin is CompressorPlugin compressor ? compressor.GetGainReductionDb : null;
-        Func<bool>? gateOpenProvider = plugin is NoiseGatePlugin gate ? gate.IsGateOpen : null;
         Action? learnNoiseAction = plugin is FFTNoiseRemovalPlugin ? () => RequestNoiseLearn(channelIndex, slotIndex) : null;
 
-        var viewModel = new PluginParametersViewModel(plugin.Name, parameterViewModels, gainReductionProvider, gateOpenProvider, learnNoiseAction);
+        var viewModel = new PluginParametersViewModel(plugin.Name, parameterViewModels, null, null, learnNoiseAction);
         var window = new PluginParametersWindow(viewModel)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.ShowDialog();
+    }
+
+    private void ShowNoiseGateWindow(int channelIndex, int slotIndex, NoiseGatePlugin plugin)
+    {
+        var window = new NoiseGateWindow(plugin, (paramIndex, value) =>
+        {
+            string paramName = plugin.Parameters[paramIndex].Name;
+            ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+        })
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.ShowDialog();
+    }
+
+    private void ShowCompressorWindow(int channelIndex, int slotIndex, CompressorPlugin plugin)
+    {
+        var window = new CompressorWindow(plugin, (paramIndex, value) =>
+        {
+            string paramName = plugin.Parameters[paramIndex].Name;
+            ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+        })
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.ShowDialog();
+    }
+
+    private void ShowGainWindow(int channelIndex, int slotIndex, GainPlugin plugin)
+    {
+        var window = new GainWindow(plugin, (paramIndex, value) =>
+        {
+            string paramName = plugin.Parameters[paramIndex].Name;
+            ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+        })
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.ShowDialog();
+    }
+
+    private void ShowEqWindow(int channelIndex, int slotIndex, ThreeBandEqPlugin plugin)
+    {
+        var window = new EqWindow(plugin, (paramIndex, value) =>
+        {
+            string paramName = plugin.Parameters[paramIndex].Name;
+            ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+        })
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.ShowDialog();
+    }
+
+    private void ShowFFTNoiseWindow(int channelIndex, int slotIndex, FFTNoiseRemovalPlugin plugin)
+    {
+        var window = new FFTNoiseWindow(plugin, (paramIndex, value) =>
+        {
+            string paramName = plugin.Parameters[paramIndex].Name;
+            ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+        })
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };

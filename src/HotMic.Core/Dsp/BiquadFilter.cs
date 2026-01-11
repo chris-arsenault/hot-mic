@@ -18,7 +18,8 @@ public sealed class BiquadFilter
         _freq = freq;
         _gainDb = gainDb;
         _q = q;
-        _filter = BiQuadFilter.LowShelf(sampleRate, freq, gainDb, q);
+        // NAudio's LowShelf signature: (sampleRate, cutoffFrequency, shelfSlope, dbGain)
+        _filter = BiQuadFilter.LowShelf(sampleRate, freq, q, gainDb);
     }
 
     public void SetHighShelf(float sampleRate, float freq, float gainDb, float q)
@@ -28,7 +29,8 @@ public sealed class BiquadFilter
         _freq = freq;
         _gainDb = gainDb;
         _q = q;
-        _filter = BiQuadFilter.HighShelf(sampleRate, freq, gainDb, q);
+        // NAudio's HighShelf signature: (sampleRate, cutoffFrequency, shelfSlope, dbGain)
+        _filter = BiQuadFilter.HighShelf(sampleRate, freq, q, gainDb);
     }
 
     public void SetPeaking(float sampleRate, float freq, float gainDb, float q)
@@ -55,8 +57,8 @@ public sealed class BiquadFilter
     {
         _filter = _mode switch
         {
-            FilterMode.LowShelf => BiQuadFilter.LowShelf(_sampleRate, _freq, _gainDb, _q),
-            FilterMode.HighShelf => BiQuadFilter.HighShelf(_sampleRate, _freq, _gainDb, _q),
+            FilterMode.LowShelf => BiQuadFilter.LowShelf(_sampleRate, _freq, _q, _gainDb),
+            FilterMode.HighShelf => BiQuadFilter.HighShelf(_sampleRate, _freq, _q, _gainDb),
             FilterMode.Peaking => BiQuadFilter.PeakingEQ(_sampleRate, _freq, _q, _gainDb),
             _ => null
         };

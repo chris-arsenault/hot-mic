@@ -80,6 +80,22 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Meter scale toggle in hotbar
+        if (_renderer.HitTestMeterScaleToggle(x, y))
+        {
+            viewModel.MeterScaleVox = !viewModel.MeterScaleVox;
+            e.Handled = true;
+            return;
+        }
+
+        // Stats area click toggles debug overlay
+        if (_renderer.HitTestStatsArea(x, y))
+        {
+            viewModel.ShowDebugOverlay = !viewModel.ShowDebugOverlay;
+            e.Handled = true;
+            return;
+        }
+
         var knobHit = _renderer.HitTestKnob(x, y);
         if (knobHit.HasValue)
         {
@@ -92,7 +108,7 @@ public partial class MainWindow : Window
         var toggleHit = _renderer.HitTestToggle(x, y);
         if (toggleHit.HasValue)
         {
-            ToggleMuteSolo(viewModel, toggleHit.Value);
+            HandleToggle(viewModel, toggleHit.Value);
             e.Handled = true;
             return;
         }
@@ -276,16 +292,30 @@ public partial class MainWindow : Window
         }
     }
 
-    private static void ToggleMuteSolo(MainViewModel viewModel, ToggleHit toggle)
+    private static void HandleToggle(MainViewModel viewModel, ToggleHit toggle)
     {
-        var channel = GetChannel(viewModel, toggle.ChannelIndex);
-        if (toggle.ToggleType == ToggleType.Mute)
+        switch (toggle.ToggleType)
         {
-            channel.IsMuted = !channel.IsMuted;
-        }
-        else
-        {
-            channel.IsSoloed = !channel.IsSoloed;
+            case ToggleType.Mute:
+                var channel = GetChannel(viewModel, toggle.ChannelIndex);
+                channel.IsMuted = !channel.IsMuted;
+                break;
+            case ToggleType.Solo:
+                channel = GetChannel(viewModel, toggle.ChannelIndex);
+                channel.IsSoloed = !channel.IsSoloed;
+                break;
+            case ToggleType.InputStereo when toggle.ChannelIndex == 0:
+                viewModel.Input1IsStereo = !viewModel.Input1IsStereo;
+                break;
+            case ToggleType.InputStereo when toggle.ChannelIndex == 1:
+                viewModel.Input2IsStereo = !viewModel.Input2IsStereo;
+                break;
+            case ToggleType.MasterStereo:
+                viewModel.MasterIsStereo = !viewModel.MasterIsStereo;
+                break;
+            case ToggleType.MasterMute:
+                viewModel.MasterMuted = !viewModel.MasterMuted;
+                break;
         }
     }
 

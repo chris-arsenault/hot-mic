@@ -32,7 +32,10 @@ public enum KnobType
 public enum ToggleType
 {
     Mute,
-    Solo
+    Solo,
+    InputStereo,
+    MasterStereo,
+    MasterMute
 }
 
 public sealed class MainUiState
