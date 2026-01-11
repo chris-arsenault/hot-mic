@@ -34,6 +34,9 @@ public partial class PluginViewModel : ObservableObject
     [ObservableProperty]
     private bool isEmpty;
 
+    [ObservableProperty]
+    private float latencyMs;
+
     public string ActionLabel => IsEmpty ? "Add Plugin" : "Edit Parameters";
 
     public IRelayCommand ActionCommand { get; }
@@ -45,18 +48,20 @@ public partial class PluginViewModel : ObservableObject
         var viewModel = new PluginViewModel(channelId, slotIndex, action, remove, parameterSink, bypassConfigSink)
         {
             IsEmpty = true,
-            DisplayName = $"Slot {slotIndex}"
+            DisplayName = $"Slot {slotIndex}",
+            LatencyMs = 0f
         };
 
         return viewModel;
     }
 
-    public static PluginViewModel CreateFilled(int channelId, int slotIndex, string name, Action? action = null, Action? remove = null, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int, bool>? bypassConfigSink = null)
+    public static PluginViewModel CreateFilled(int channelId, int slotIndex, string name, float latencyMs, Action? action = null, Action? remove = null, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int, bool>? bypassConfigSink = null)
     {
         var viewModel = new PluginViewModel(channelId, slotIndex, action, remove, parameterSink, bypassConfigSink)
         {
             IsEmpty = false,
-            DisplayName = name
+            DisplayName = name,
+            LatencyMs = latencyMs
         };
 
         return viewModel;

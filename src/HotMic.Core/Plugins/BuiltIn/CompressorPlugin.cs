@@ -11,22 +11,32 @@ public sealed class CompressorPlugin : IPlugin
     public const int ReleaseIndex = 3;
     public const int MakeupIndex = 4;
 
+    private const float KneeDb = 6f;
+    private const float RmsBlend = 0.7f;
+    private const float ReleaseShape = 0.15f;
+    private const float SidechainHpfHz = 80f;
+
     private float _thresholdDb = -20f;
     private float _ratio = 4f;
     private float _attackMs = 10f;
     private float _releaseMs = 100f;
     private float _makeupDb;
 
-    private float _thresholdLinear;
     private float _makeupLinear = 1f;
     private float _attackCoeff;
     private float _releaseCoeff;
+    private float _detectorAttackCoeff;
+    private float _detectorReleaseCoeff;
+
+    private float _rmsPower;
     private float _envelope;
+    private float _gainReductionDb;
 
     private int _sampleRate;
-    private int _blockSize;
     private int _gainReductionBits;
-    private float _inputLevel;
+    private int _inputLevelBits;
+
+    private readonly OnePoleHighPass _sidechainFilter = new();
 
     public CompressorPlugin()
     {
@@ -46,12 +56,15 @@ public sealed class CompressorPlugin : IPlugin
 
     public bool IsBypassed { get; set; }
 
+    public int LatencySamples => 0;
+
     public IReadOnlyList<PluginParameter> Parameters { get; }
+
+    public int SampleRate => _sampleRate;
 
     public void Initialize(int sampleRate, int blockSize)
     {
         _sampleRate = sampleRate;
-        _blockSize = blockSize;
         UpdateCoefficients();
     }
 
@@ -63,35 +76,64 @@ public sealed class CompressorPlugin : IPlugin
         }
 
         float maxReduction = 0f;
+        float peakInput = 0f;
+
         for (int i = 0; i < buffer.Length; i++)
         {
             float input = buffer[i];
-            float inputAbs = MathF.Abs(input);
-
-            float coeff = inputAbs > _envelope ? _attackCoeff : _releaseCoeff;
-            _envelope += coeff * (inputAbs - _envelope);
-
-            float gainDb = 0f;
-            if (_envelope > _thresholdLinear)
+            float absInput = MathF.Abs(input);
+            if (absInput > peakInput)
             {
-                float overDb = 20f * MathF.Log10(_envelope / _thresholdLinear);
-                gainDb = overDb * (1f - 1f / _ratio);
+                peakInput = absInput;
             }
 
-            if (gainDb > maxReduction)
+            float sidechain = _sidechainFilter.Process(input);
+            float absSidechain = MathF.Abs(sidechain);
+            float power = absSidechain * absSidechain;
+
+            // RMS detector with attack/release ballistics.
+            float detectorCoeff = power > _rmsPower ? _detectorAttackCoeff : _detectorReleaseCoeff;
+            _rmsPower += detectorCoeff * (power - _rmsPower);
+            float rms = MathF.Sqrt(_rmsPower + 1e-12f);
+
+            float detector = absSidechain * (1f - RmsBlend) + rms * RmsBlend;
+            float envCoeff = detector > _envelope ? _attackCoeff : _releaseCoeff;
+            _envelope += envCoeff * (detector - _envelope);
+
+            float envDb = DspUtils.LinearToDb(_envelope);
+            float delta = envDb - _thresholdDb;
+
+            float desiredReductionDb;
+            if (delta <= -KneeDb * 0.5f)
             {
-                maxReduction = gainDb;
+                desiredReductionDb = 0f;
+            }
+            else if (delta >= KneeDb * 0.5f)
+            {
+                desiredReductionDb = delta * (1f - 1f / _ratio);
+            }
+            else
+            {
+                float x = delta + KneeDb * 0.5f;
+                desiredReductionDb = (1f - 1f / _ratio) * x * x / (2f * KneeDb);
             }
 
-            float gainLinear = MathF.Pow(10f, -gainDb / 20f) * _makeupLinear;
+            // Program-dependent release: heavier gain reduction releases more slowly.
+            float shapedRelease = _releaseCoeff / (1f + ReleaseShape * _gainReductionDb);
+            float gainCoeff = desiredReductionDb > _gainReductionDb ? _attackCoeff : shapedRelease;
+            _gainReductionDb += gainCoeff * (desiredReductionDb - _gainReductionDb);
+
+            if (_gainReductionDb > maxReduction)
+            {
+                maxReduction = _gainReductionDb;
+            }
+
+            float gainLinear = DspUtils.DbToLinear(-_gainReductionDb) * _makeupLinear;
             buffer[i] = input * gainLinear;
-
-            // Track peak input level for metering
-            if (inputAbs > _inputLevel)
-                _inputLevel = inputAbs;
         }
 
         Interlocked.Exchange(ref _gainReductionBits, BitConverter.SingleToInt32Bits(maxReduction));
+        Interlocked.Exchange(ref _inputLevelBits, BitConverter.SingleToInt32Bits(peakInput));
     }
 
     /// <summary>
@@ -99,9 +141,7 @@ public sealed class CompressorPlugin : IPlugin
     /// </summary>
     public float GetAndResetInputLevel()
     {
-        float level = _inputLevel;
-        _inputLevel = 0f;
-        return level;
+        return BitConverter.Int32BitsToSingle(Interlocked.Exchange(ref _inputLevelBits, 0));
     }
 
     public void SetParameter(int index, float value)
@@ -177,9 +217,11 @@ public sealed class CompressorPlugin : IPlugin
             return;
         }
 
-        _thresholdLinear = DspUtils.DbToLinear(_thresholdDb);
         _makeupLinear = DspUtils.DbToLinear(_makeupDb);
         _attackCoeff = DspUtils.TimeToCoefficient(_attackMs, _sampleRate);
         _releaseCoeff = DspUtils.TimeToCoefficient(_releaseMs, _sampleRate);
+        _detectorAttackCoeff = _attackCoeff;
+        _detectorReleaseCoeff = _releaseCoeff;
+        _sidechainFilter.Configure(SidechainHpfHz, _sampleRate);
     }
 }

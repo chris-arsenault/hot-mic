@@ -13,7 +13,8 @@ public enum ParameterType
 
 public enum PluginCommandType
 {
-    LearnNoiseProfile
+    LearnNoiseProfile,
+    ToggleNoiseLearn
 }
 
 public sealed class ParameterChange

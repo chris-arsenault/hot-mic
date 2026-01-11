@@ -66,6 +66,7 @@ public partial class NoiseGateWindow : Window
             AttackMs: _plugin.AttackMs,
             HoldMs: _plugin.HoldMs,
             ReleaseMs: _plugin.ReleaseMs,
+            LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsGateOpen: _plugin.IsGateOpen(),
             IsBypassed: _plugin.IsBypassed,
             HoveredKnob: _hoveredKnob

@@ -36,6 +36,7 @@ public sealed class GainRenderer : IDisposable
     private readonly SKPaint _unitPaint;
     private readonly SKPaint _phaseButtonPaint;
     private readonly SKPaint _phaseActivePaint;
+    private readonly SKPaint _latencyPaint;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
@@ -202,6 +203,15 @@ public sealed class GainRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
+
+        _latencyPaint = new SKPaint
+        {
+            Color = _theme.TextMuted,
+            IsAntialias = true,
+            TextSize = 9f,
+            TextAlign = SKTextAlign.Right,
+            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
+        };
     }
 
     public void Render(
@@ -256,6 +266,12 @@ public sealed class GainRenderer : IDisposable
             Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
         };
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
+
+        if (state.LatencyMs >= 0f)
+        {
+            string latencyLabel = $"LAT {state.LatencyMs:0.0}ms";
+            canvas.DrawText(latencyLabel, _bypassButtonRect.Left - 6f, TitleBarHeight / 2f + 4, _latencyPaint);
+        }
 
         // Close button
         _closeButtonRect = new SKRect(size.Width - Padding - 24, (TitleBarHeight - 24) / 2,
@@ -538,6 +554,7 @@ public sealed class GainRenderer : IDisposable
         _unitPaint.Dispose();
         _phaseButtonPaint.Dispose();
         _phaseActivePaint.Dispose();
+        _latencyPaint.Dispose();
     }
 }
 
@@ -549,6 +566,7 @@ public record struct GainState(
     float InputLevel,
     float OutputLevel,
     bool IsPhaseInverted,
+    float LatencyMs,
     bool IsBypassed,
     bool IsKnobHovered = false);
 

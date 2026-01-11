@@ -2,14 +2,17 @@ namespace HotMic.Core.Dsp;
 
 public static class DspUtils
 {
+    private const float Ln10Over20 = 0.115129254f;
+    private const float InvLn10Over20 = 8.68588964f;
+
     public static float DbToLinear(float db)
     {
-        return MathF.Pow(10f, db / 20f);
+        return MathF.Exp(db * Ln10Over20);
     }
 
     public static float LinearToDb(float linear)
     {
-        return 20f * MathF.Log10(linear + 1e-10f);
+        return MathF.Log(MathF.Max(linear, 1e-10f)) * InvLn10Over20;
     }
 
     public static float TimeToCoefficient(float timeMs, int sampleRate)

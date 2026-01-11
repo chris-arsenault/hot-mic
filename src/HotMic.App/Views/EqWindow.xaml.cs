@@ -92,6 +92,7 @@ public partial class EqWindow : Window
             InputLevel: _smoothedInputLevel,
             OutputLevel: _smoothedOutputLevel,
             SampleRate: _plugin.SampleRate,
+            LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
             SpectrumLevels: _spectrumLevels,
             SpectrumPeaks: _spectrumPeaks,

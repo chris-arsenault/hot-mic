@@ -352,6 +352,9 @@ public sealed class MainRenderer
         }
         else
         {
+            string latencyLabel = $"{slot.LatencyMs:0.0}ms";
+            canvas.DrawText(latencyLabel, x + 3f, y + 20f, _tinyTextPaint);
+
             canvas.Save();
             canvas.RotateDegrees(-90f, x + 14f, y + height - 4f);
             var textPaint = slot.IsBypassed ? _tinyTextPaint : _smallTextPaint;

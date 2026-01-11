@@ -5,6 +5,7 @@ public interface IPlugin : IDisposable
     string Id { get; }
     string Name { get; }
     bool IsBypassed { get; set; }
+    int LatencySamples { get; }
 
     IReadOnlyList<PluginParameter> Parameters { get; }
 

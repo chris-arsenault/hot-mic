@@ -15,6 +15,7 @@ public partial class FFTNoiseWindow : Window
     private readonly FFTNoiseRemovalPlugin _plugin;
     private readonly Action<int, float> _parameterCallback;
     private readonly Action<bool> _bypassCallback;
+    private readonly Action _learnToggleCallback;
     private readonly DispatcherTimer _renderTimer;
 
     private int _activeKnob = -1;
@@ -35,12 +36,13 @@ public partial class FFTNoiseWindow : Window
         (FFTNoiseRemovalPlugin.ReductionIndex, 0f, 1f)      // 0: Reduction
     };
 
-    public FFTNoiseWindow(FFTNoiseRemovalPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
+    public FFTNoiseWindow(FFTNoiseRemovalPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback, Action learnToggleCallback)
     {
         InitializeComponent();
         _plugin = plugin;
         _parameterCallback = parameterCallback;
         _bypassCallback = bypassCallback;
+        _learnToggleCallback = learnToggleCallback;
 
         var preferredSize = FFTNoiseRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -78,6 +80,7 @@ public partial class FFTNoiseWindow : Window
             HasNoiseProfile: _plugin.HasNoiseProfile,
             IsBypassed: _plugin.IsBypassed,
             SampleRate: _plugin.SampleRate,
+            LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             InputSpectrum: _inputSpectrum,
             InputPeaks: _inputPeaks,
             OutputSpectrum: _outputSpectrum,
@@ -118,10 +121,7 @@ public partial class FFTNoiseWindow : Window
                 break;
 
             case FFTNoiseHitArea.LearnButton:
-                if (!_plugin.IsLearning)
-                {
-                    _plugin.LearnNoiseProfile();
-                }
+                _learnToggleCallback();
                 e.Handled = true;
                 break;
 

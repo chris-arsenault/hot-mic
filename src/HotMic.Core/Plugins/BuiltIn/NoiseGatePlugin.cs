@@ -19,17 +19,23 @@ public sealed class NoiseGatePlugin : IPlugin
 
     private float _thresholdLinear;
     private float _closeThresholdLinear;
-    private float _attackCoeff;
-    private float _releaseCoeff;
+    private float _detectorAttackCoeff;
+    private float _detectorReleaseCoeff;
+    private float _gainAttackCoeff;
+    private float _gainReleaseCoeff;
     private float _gain;
     private int _holdSamples;
     private int _holdSamplesLeft;
     private int _sampleRate;
     private bool _gateOpen;
     private int _gateOpenBits;
-    private float _inputLevel;
+    private int _inputLevelBits;
 
-    private readonly EnvelopeFollower _envelope = new();
+    private float _detector;
+    private readonly OnePoleHighPass _sidechainFilter = new();
+    private const float SidechainHpfHz = 80f;
+    private const float GateRatio = 3f;
+    private const float MaxRangeDb = 24f;
 
     public NoiseGatePlugin()
     {
@@ -49,7 +55,11 @@ public sealed class NoiseGatePlugin : IPlugin
 
     public bool IsBypassed { get; set; }
 
+    public int LatencySamples => 0;
+
     public IReadOnlyList<PluginParameter> Parameters { get; }
+
+    public int SampleRate => _sampleRate;
 
     public void Initialize(int sampleRate, int blockSize)
     {
@@ -64,17 +74,27 @@ public sealed class NoiseGatePlugin : IPlugin
             return;
         }
 
+        float peak = 0f;
         for (int i = 0; i < buffer.Length; i++)
         {
             float sample = buffer[i];
-            float env = _envelope.Process(sample);
+            // Voice-friendly detector: HPF sidechain + RMS smoothing to reduce plosive bias.
+            float sidechain = _sidechainFilter.Process(sample);
+            float power = sidechain * sidechain;
+
+            float detectorCoeff = power > _detector ? _detectorAttackCoeff : _detectorReleaseCoeff;
+            _detector += detectorCoeff * (power - _detector);
+            float env = MathF.Sqrt(_detector + 1e-12f);
 
             if (_gateOpen)
             {
-                // Use lower close threshold (threshold - hysteresis) to prevent chatter
                 if (env < _closeThresholdLinear)
                 {
-                    if (_holdSamplesLeft <= 0)
+                    if (_holdSamples <= 0)
+                    {
+                        _gateOpen = false;
+                    }
+                    else if (_holdSamplesLeft <= 0)
                     {
                         _holdSamplesLeft = _holdSamples;
                     }
@@ -94,23 +114,36 @@ public sealed class NoiseGatePlugin : IPlugin
             }
             else if (env >= _thresholdLinear)
             {
-                // Gate opens at the main threshold
                 _gateOpen = true;
                 _holdSamplesLeft = _holdSamples;
             }
 
-            float target = _gateOpen ? 1f : 0f;
-            float coeff = target > _gain ? _attackCoeff : _releaseCoeff;
-            _gain += coeff * (target - _gain);
+            float targetGain;
+            if (_gateOpen)
+            {
+                targetGain = 1f;
+            }
+            else
+            {
+                float envDb = DspUtils.LinearToDb(env);
+                float overDb = _thresholdDb - envDb;
+                float reductionDb = MathF.Min(MaxRangeDb, overDb * (1f - 1f / GateRatio));
+                targetGain = DspUtils.DbToLinear(-reductionDb);
+            }
+
+            float gainCoeff = targetGain > _gain ? _gainAttackCoeff : _gainReleaseCoeff;
+            _gain += gainCoeff * (targetGain - _gain);
             buffer[i] = sample * _gain;
 
-            // Track peak input level for metering
             float absVal = MathF.Abs(sample);
-            if (absVal > _inputLevel)
-                _inputLevel = absVal;
+            if (absVal > peak)
+            {
+                peak = absVal;
+            }
         }
 
         Interlocked.Exchange(ref _gateOpenBits, _gateOpen ? 1 : 0);
+        Interlocked.Exchange(ref _inputLevelBits, BitConverter.SingleToInt32Bits(peak));
     }
 
     /// <summary>
@@ -119,9 +152,7 @@ public sealed class NoiseGatePlugin : IPlugin
     /// </summary>
     public float GetAndResetInputLevel()
     {
-        float level = _inputLevel;
-        _inputLevel = 0f;
-        return level;
+        return BitConverter.Int32BitsToSingle(Interlocked.Exchange(ref _inputLevelBits, 0));
     }
 
     public void SetParameter(int index, float value)
@@ -208,11 +239,12 @@ public sealed class NoiseGatePlugin : IPlugin
         }
 
         _thresholdLinear = DspUtils.DbToLinear(_thresholdDb);
-        // Close threshold is lower by hysteresis amount to prevent chatter
         _closeThresholdLinear = DspUtils.DbToLinear(_thresholdDb - _hysteresisDb);
-        _attackCoeff = DspUtils.TimeToCoefficient(_attackMs, _sampleRate);
-        _releaseCoeff = DspUtils.TimeToCoefficient(_releaseMs, _sampleRate);
+        _detectorAttackCoeff = DspUtils.TimeToCoefficient(_attackMs, _sampleRate);
+        _detectorReleaseCoeff = DspUtils.TimeToCoefficient(_releaseMs, _sampleRate);
+        _gainAttackCoeff = _detectorAttackCoeff;
+        _gainReleaseCoeff = _detectorReleaseCoeff;
         _holdSamples = (int)(_holdMs * 0.001f * _sampleRate);
-        _envelope.Configure(_attackMs, _releaseMs, _sampleRate);
+        _sidechainFilter.Configure(SidechainHpfHz, _sampleRate);
     }
 }

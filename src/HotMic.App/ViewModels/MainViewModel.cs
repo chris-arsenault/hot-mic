@@ -883,7 +883,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 string paramName = plugin.Parameters[paramIndex].Name;
                 ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed),
+            () => RequestNoiseLearn(channelIndex, slotIndex))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
@@ -916,7 +917,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ChannelId = channelIndex,
             Type = ParameterType.PluginCommand,
             PluginIndex = slotIndex,
-            Command = PluginCommandType.LearnNoiseProfile
+            Command = PluginCommandType.ToggleNoiseLearn
         });
     }
 
@@ -942,10 +943,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var slotInfos = new List<PluginSlotInfo>(slots.Length);
         foreach (var plugin in slots)
         {
+            float latencyMs = 0f;
+            if (plugin is not null && _audioEngine.SampleRate > 0)
+            {
+                latencyMs = plugin.LatencySamples * 1000f / _audioEngine.SampleRate;
+            }
+
             slotInfos.Add(new PluginSlotInfo
             {
                 Name = plugin?.Name ?? string.Empty,
-                IsBypassed = plugin?.IsBypassed ?? false
+                IsBypassed = plugin?.IsBypassed ?? false,
+                LatencyMs = latencyMs
             });
         }
         if (channelIndex == 0)

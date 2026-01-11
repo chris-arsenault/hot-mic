@@ -68,6 +68,7 @@ public partial class GainWindow : Window
             InputLevel: _smoothedInputLevel,
             OutputLevel: _smoothedOutputLevel,
             IsPhaseInverted: _plugin.IsPhaseInverted,
+            LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
             IsKnobHovered: _isKnobHovered
         );

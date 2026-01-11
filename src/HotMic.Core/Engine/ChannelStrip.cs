@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Threading;
+using HotMic.Core.Dsp;
 using HotMic.Core.Metering;
 using HotMic.Core.Plugins;
 
@@ -10,16 +11,21 @@ public sealed class ChannelStrip
     private readonly PluginChain _pluginChain;
     private readonly MeterProcessor _inputMeter;
     private readonly MeterProcessor _outputMeter;
-    private float _inputGain = 1f;
-    private float _outputGain = 1f;
+    private readonly LinearSmoother _inputGainSmoother = new();
+    private readonly LinearSmoother _outputGainSmoother = new();
+    private readonly LinearSmoother _muteSmoother = new();
     private int _isMuted;
     private int _isSoloed;
+    private float _muteTarget = 1f;
 
     public ChannelStrip(int sampleRate, int blockSize)
     {
         _pluginChain = new PluginChain(5);
         _inputMeter = new MeterProcessor(sampleRate);
         _outputMeter = new MeterProcessor(sampleRate);
+        _inputGainSmoother.Configure(sampleRate, 5f, 1f);
+        _outputGainSmoother.Configure(sampleRate, 5f, 1f);
+        _muteSmoother.Configure(sampleRate, 5f, 1f);
     }
 
     public MeterProcessor InputMeter => _inputMeter;
@@ -30,12 +36,12 @@ public sealed class ChannelStrip
 
     public void SetInputGainDb(float gainDb)
     {
-        _inputGain = DbToLinear(gainDb);
+        _inputGainSmoother.SetTarget(DbToLinear(gainDb));
     }
 
     public void SetOutputGainDb(float gainDb)
     {
-        _outputGain = DbToLinear(gainDb);
+        _outputGainSmoother.SetTarget(DbToLinear(gainDb));
     }
 
     public void SetMuted(bool muted)
@@ -52,7 +58,15 @@ public sealed class ChannelStrip
 
     public void Process(Span<float> buffer, bool globalMute)
     {
-        if (globalMute || Volatile.Read(ref _isMuted) == 1)
+        bool localMute = Volatile.Read(ref _isMuted) == 1;
+        float targetMute = (globalMute || localMute) ? 0f : 1f;
+        if (MathF.Abs(targetMute - _muteTarget) > 1e-6f)
+        {
+            _muteTarget = targetMute;
+            _muteSmoother.SetTarget(_muteTarget);
+        }
+
+        if (_muteTarget <= 0f && !_muteSmoother.IsSmoothing)
         {
             buffer.Clear();
             _inputMeter.Process(buffer);
@@ -60,24 +74,45 @@ public sealed class ChannelStrip
             return;
         }
 
-        ApplyGain(buffer, _inputGain);
+        ApplyGain(buffer, ref _inputGainSmoother);
         _inputMeter.Process(buffer);
         _pluginChain.Process(buffer);
-        ApplyGain(buffer, _outputGain);
+        ApplyGain(buffer, ref _outputGainSmoother);
+        ApplyGain(buffer, ref _muteSmoother);
         _outputMeter.Process(buffer);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void ApplyGain(Span<float> buffer, float gain)
+    private static void ApplyGain(Span<float> buffer, ref LinearSmoother smoother)
     {
+        if (buffer.IsEmpty)
+        {
+            return;
+        }
+
+        if (!smoother.IsSmoothing)
+        {
+            float gain = smoother.Current;
+            if (MathF.Abs(gain - 1f) <= 1e-6f)
+            {
+                return;
+            }
+
+            for (int i = 0; i < buffer.Length; i++)
+            {
+                buffer[i] *= gain;
+            }
+            return;
+        }
+
         for (int i = 0; i < buffer.Length; i++)
         {
-            buffer[i] *= gain;
+            buffer[i] *= smoother.Next();
         }
     }
 
     private static float DbToLinear(float db)
     {
-        return MathF.Pow(10f, db / 20f);
+        return DspUtils.DbToLinear(db);
     }
 }

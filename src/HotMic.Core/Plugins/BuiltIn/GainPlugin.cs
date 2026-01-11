@@ -12,9 +12,11 @@ public sealed class GainPlugin : IPlugin
     private float _phaseInvert; // 0 = normal, 1 = inverted
     private float _gainLinear = 1f;
     private float _phaseMultiplier = 1f;
+    private int _sampleRate;
+    private readonly LinearSmoother _gainSmoother = new();
 
-    private float _inputLevel;
-    private float _outputLevel;
+    private int _inputLevelBits;
+    private int _outputLevelBits;
 
     public GainPlugin()
     {
@@ -31,10 +33,16 @@ public sealed class GainPlugin : IPlugin
 
     public bool IsBypassed { get; set; }
 
+    public int LatencySamples => 0;
+
     public IReadOnlyList<PluginParameter> Parameters { get; }
+
+    public int SampleRate => _sampleRate;
 
     public void Initialize(int sampleRate, int blockSize)
     {
+        _sampleRate = sampleRate;
+        _gainSmoother.Configure(sampleRate, 5f, _gainLinear * _phaseMultiplier);
         UpdateCoefficients();
     }
 
@@ -47,10 +55,17 @@ public sealed class GainPlugin : IPlugin
 
         float peakIn = 0f;
         float peakOut = 0f;
-        float gain = _gainLinear * _phaseMultiplier;
+        bool smoothing = _gainSmoother.IsSmoothing;
+        float gain = _gainSmoother.Current;
 
         for (int i = 0; i < buffer.Length; i++)
         {
+            if (smoothing)
+            {
+                gain = _gainSmoother.Next();
+                smoothing = _gainSmoother.IsSmoothing;
+            }
+
             float input = buffer[i];
             float absIn = MathF.Abs(input);
             if (absIn > peakIn) peakIn = absIn;
@@ -62,8 +77,8 @@ public sealed class GainPlugin : IPlugin
             if (absOut > peakOut) peakOut = absOut;
         }
 
-        _inputLevel = peakIn;
-        _outputLevel = peakOut;
+        Interlocked.Exchange(ref _inputLevelBits, BitConverter.SingleToInt32Bits(peakIn));
+        Interlocked.Exchange(ref _outputLevelBits, BitConverter.SingleToInt32Bits(peakOut));
     }
 
     public void SetParameter(int index, float value)
@@ -83,16 +98,12 @@ public sealed class GainPlugin : IPlugin
 
     public float GetAndResetInputLevel()
     {
-        float level = _inputLevel;
-        _inputLevel = 0f;
-        return level;
+        return BitConverter.Int32BitsToSingle(Interlocked.Exchange(ref _inputLevelBits, 0));
     }
 
     public float GetAndResetOutputLevel()
     {
-        float level = _outputLevel;
-        _outputLevel = 0f;
-        return level;
+        return BitConverter.Int32BitsToSingle(Interlocked.Exchange(ref _outputLevelBits, 0));
     }
 
     // Current parameter values for UI binding
@@ -130,5 +141,9 @@ public sealed class GainPlugin : IPlugin
     {
         _gainLinear = DspUtils.DbToLinear(_gainDb);
         _phaseMultiplier = _phaseInvert >= 0.5f ? -1f : 1f;
+        if (_sampleRate > 0)
+        {
+            _gainSmoother.SetTarget(_gainLinear * _phaseMultiplier);
+        }
     }
 }

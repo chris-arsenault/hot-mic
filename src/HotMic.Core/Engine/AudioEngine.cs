@@ -924,6 +924,10 @@ public sealed class AudioEngine : IDisposable
             {
                 noise.LearnNoiseProfile();
             }
+            else if (plugin is FFTNoiseRemovalPlugin noiseToggle && command == PluginCommandType.ToggleNoiseLearn)
+            {
+                noiseToggle.ToggleLearning();
+            }
         }
     }
 

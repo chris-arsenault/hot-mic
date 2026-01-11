@@ -68,6 +68,7 @@ public partial class CompressorWindow : Window
             MakeupDb: _plugin.MakeupDb,
             GainReductionDb: _plugin.GetGainReductionDb(),
             InputLevel: _smoothedInputLevel,
+            LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
             HoveredKnob: _hoveredKnob
         );

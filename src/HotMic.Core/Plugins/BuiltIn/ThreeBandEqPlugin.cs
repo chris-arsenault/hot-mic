@@ -1,4 +1,6 @@
+using System.Threading;
 using HotMic.Core.Dsp;
+using HotMic.Core.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
@@ -14,6 +16,8 @@ public sealed class ThreeBandEqPlugin : IPlugin
     public const int HighFreqIndex = 7;
     public const int HighQIndex = 8;
 
+    private const int AnalysisSize = 1024;
+
     private readonly BiquadFilter _low = new();
     private readonly BiquadFilter _mid = new();
     private readonly BiquadFilter _high = new();
@@ -28,20 +32,30 @@ public sealed class ThreeBandEqPlugin : IPlugin
     private float _highFreq = 8000f;
     private float _highQ = 0.7f;
     private int _sampleRate;
-    private float _inputLevel;
-    private float _outputLevel;
+    private int _inputLevelBits;
+    private int _outputLevelBits;
 
-    // Spectrum analysis - 32 bands with peak hold
+    // Spectrum analysis - 32 bands with peak hold (computed on UI thread).
     public const int SpectrumBins = 32;
     private readonly float[] _spectrumLevels = new float[SpectrumBins];
     private readonly float[] _spectrumPeaks = new float[SpectrumBins];
-    private readonly float[] _sampleBuffer = new float[512];
-    private int _sampleBufferIndex;
     private const float SpectrumDecay = 0.92f;
     private const float PeakDecay = 0.985f;
 
+    private readonly LockFreeRingBuffer _analysisBuffer = new(AnalysisSize * 4);
+    private readonly float[] _analysisSamples = new float[AnalysisSize];
+    private readonly float[] _fftReal = new float[AnalysisSize];
+    private readonly float[] _fftImag = new float[AnalysisSize];
+    private readonly float[] _window = new float[AnalysisSize];
+    private readonly FastFft _fft = new(AnalysisSize);
+
     public ThreeBandEqPlugin()
     {
+        for (int i = 0; i < AnalysisSize; i++)
+        {
+            _window[i] = 0.5f - 0.5f * MathF.Cos(2f * MathF.PI * i / (AnalysisSize - 1));
+        }
+
         Parameters =
         [
             new PluginParameter { Index = LowGainIndex, Name = "Low Gain", MinValue = -24f, MaxValue = 24f, DefaultValue = 0f, Unit = "dB" },
@@ -62,6 +76,8 @@ public sealed class ThreeBandEqPlugin : IPlugin
 
     public bool IsBypassed { get; set; }
 
+    public int LatencySamples => 0;
+
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
     // Property getters for UI binding
@@ -78,16 +94,12 @@ public sealed class ThreeBandEqPlugin : IPlugin
 
     public float GetAndResetInputLevel()
     {
-        float level = _inputLevel;
-        _inputLevel = 0f;
-        return level;
+        return BitConverter.Int32BitsToSingle(Interlocked.Exchange(ref _inputLevelBits, 0));
     }
 
     public float GetAndResetOutputLevel()
     {
-        float level = _outputLevel;
-        _outputLevel = 0f;
-        return level;
+        return BitConverter.Int32BitsToSingle(Interlocked.Exchange(ref _outputLevelBits, 0));
     }
 
     /// <summary>
@@ -95,6 +107,7 @@ public sealed class ThreeBandEqPlugin : IPlugin
     /// </summary>
     public void GetSpectrum(float[] levels, float[] peaks)
     {
+        UpdateSpectrum();
         if (levels.Length >= SpectrumBins && peaks.Length >= SpectrumBins)
         {
             Array.Copy(_spectrumLevels, levels, SpectrumBins);
@@ -110,19 +123,21 @@ public sealed class ThreeBandEqPlugin : IPlugin
 
     public void Process(Span<float> buffer)
     {
-        // Track input level
         float maxInput = 0f;
         for (int i = 0; i < buffer.Length; i++)
         {
             float abs = MathF.Abs(buffer[i]);
-            if (abs > maxInput) maxInput = abs;
+            if (abs > maxInput)
+            {
+                maxInput = abs;
+            }
         }
-        if (maxInput > _inputLevel) _inputLevel = maxInput;
+
+        Interlocked.Exchange(ref _inputLevelBits, BitConverter.SingleToInt32Bits(maxInput));
 
         if (IsBypassed)
         {
-            // Still update spectrum with input when bypassed
-            UpdateSampleBuffer(buffer);
+            _analysisBuffer.Write(buffer);
             return;
         }
 
@@ -136,68 +151,14 @@ public sealed class ThreeBandEqPlugin : IPlugin
             buffer[i] = sample;
 
             float abs = MathF.Abs(sample);
-            if (abs > maxOutput) maxOutput = abs;
-        }
-        if (maxOutput > _outputLevel) _outputLevel = maxOutput;
-
-        // Update spectrum with output
-        UpdateSampleBuffer(buffer);
-    }
-
-    private void UpdateSampleBuffer(Span<float> buffer)
-    {
-        // Copy samples to ring buffer
-        for (int i = 0; i < buffer.Length; i++)
-        {
-            _sampleBuffer[_sampleBufferIndex] = buffer[i];
-            _sampleBufferIndex = (_sampleBufferIndex + 1) % _sampleBuffer.Length;
-        }
-
-        // Compute spectrum using simple DFT for each bin
-        // Bins are logarithmically spaced from 20Hz to Nyquist
-        float minFreq = 20f;
-        float maxFreq = _sampleRate > 0 ? _sampleRate / 2f : 20000f;
-        int bufferLen = _sampleBuffer.Length;
-
-        for (int bin = 0; bin < SpectrumBins; bin++)
-        {
-            // Logarithmic frequency for this bin
-            float t = bin / (float)(SpectrumBins - 1);
-            float freq = minFreq * MathF.Pow(maxFreq / minFreq, t);
-
-            // Simple Goertzel-like magnitude calculation
-            float omega = 2f * MathF.PI * freq / _sampleRate;
-            float cosOmega = MathF.Cos(omega);
-            float sinOmega = MathF.Sin(omega);
-
-            float real = 0f;
-            float imag = 0f;
-            int readIdx = _sampleBufferIndex;
-
-            for (int i = 0; i < bufferLen; i++)
+            if (abs > maxOutput)
             {
-                float sample = _sampleBuffer[readIdx];
-                float phase = omega * i;
-                real += sample * MathF.Cos(phase);
-                imag += sample * MathF.Sin(phase);
-                readIdx = (readIdx + 1) % bufferLen;
-            }
-
-            float magnitude = MathF.Sqrt(real * real + imag * imag) / bufferLen;
-
-            // Apply decay to current level
-            _spectrumLevels[bin] = MathF.Max(_spectrumLevels[bin] * SpectrumDecay, magnitude);
-
-            // Update peak with slower decay
-            if (magnitude > _spectrumPeaks[bin])
-            {
-                _spectrumPeaks[bin] = magnitude;
-            }
-            else
-            {
-                _spectrumPeaks[bin] *= PeakDecay;
+                maxOutput = abs;
             }
         }
+
+        Interlocked.Exchange(ref _outputLevelBits, BitConverter.SingleToInt32Bits(maxOutput));
+        _analysisBuffer.Write(buffer);
     }
 
     public void SetParameter(int index, float value)
@@ -284,5 +245,65 @@ public sealed class ThreeBandEqPlugin : IPlugin
         _low.SetLowShelf(_sampleRate, _lowFreq, _lowGainDb, _lowQ);
         _mid.SetPeaking(_sampleRate, _midFreq, _midGainDb, _midQ);
         _high.SetHighShelf(_sampleRate, _highFreq, _highGainDb, _highQ);
+    }
+
+    private void UpdateSpectrum()
+    {
+        // Run analysis on UI thread using buffered samples to keep audio callback light.
+        int read = _analysisBuffer.Read(_analysisSamples);
+        if (read < _analysisSamples.Length)
+        {
+            Array.Clear(_analysisSamples, read, _analysisSamples.Length - read);
+        }
+
+        for (int i = 0; i < AnalysisSize; i++)
+        {
+            _fftReal[i] = _analysisSamples[i] * _window[i];
+            _fftImag[i] = 0f;
+        }
+
+        _fft.Forward(_fftReal, _fftImag);
+
+        int fftBins = AnalysisSize / 2 + 1;
+        float minFreq = 20f;
+        float maxFreq = _sampleRate > 0 ? _sampleRate / 2f : 20000f;
+        const float normalizationFactor = 2f / AnalysisSize;
+
+        for (int displayBin = 0; displayBin < SpectrumBins; displayBin++)
+        {
+            float t0 = displayBin / (float)SpectrumBins;
+            float t1 = (displayBin + 1) / (float)SpectrumBins;
+            float freq0 = minFreq * MathF.Pow(maxFreq / minFreq, t0);
+            float freq1 = minFreq * MathF.Pow(maxFreq / minFreq, t1);
+
+            int bin0 = (int)(freq0 * fftBins / maxFreq);
+            int bin1 = (int)(freq1 * fftBins / maxFreq);
+            bin0 = Math.Clamp(bin0, 0, fftBins - 1);
+            bin1 = Math.Clamp(bin1, bin0 + 1, fftBins);
+
+            float sumSq = 0f;
+            int count = 0;
+            for (int i = bin0; i < bin1 && i < fftBins; i++)
+            {
+                float real = _fftReal[i];
+                float imag = _fftImag[i];
+                float mag = MathF.Sqrt(real * real + imag * imag);
+                sumSq += mag * mag;
+                count++;
+            }
+
+            float magnitude = count > 0 ? MathF.Sqrt(sumSq / count) * normalizationFactor : 0f;
+
+            _spectrumLevels[displayBin] = MathF.Max(_spectrumLevels[displayBin] * SpectrumDecay, magnitude);
+
+            if (magnitude > _spectrumPeaks[displayBin])
+            {
+                _spectrumPeaks[displayBin] = magnitude;
+            }
+            else
+            {
+                _spectrumPeaks[displayBin] *= PeakDecay;
+            }
+        }
     }
 }

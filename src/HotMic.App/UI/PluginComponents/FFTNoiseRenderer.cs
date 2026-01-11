@@ -42,6 +42,7 @@ public sealed class FFTNoiseRenderer : IDisposable
     private readonly SKPaint _learningPaint;
     private readonly SKPaint _progressBarPaint;
     private readonly SKPaint _progressFillPaint;
+    private readonly SKPaint _latencyPaint;
 
     private readonly SKColor _inputColor = new(0x3D, 0xA5, 0xF4, 0x80);    // Blue, semi-transparent
     private readonly SKColor _outputColor = new(0x00, 0xD4, 0xAA, 0xA0);   // Teal, semi-transparent
@@ -210,6 +211,15 @@ public sealed class FFTNoiseRenderer : IDisposable
             Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
         };
 
+        _latencyPaint = new SKPaint
+        {
+            Color = _theme.TextMuted,
+            IsAntialias = true,
+            TextSize = 9f,
+            TextAlign = SKTextAlign.Right,
+            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
+        };
+
         _learnButtonPaint = new SKPaint
         {
             Color = _noiseColor,
@@ -287,6 +297,12 @@ public sealed class FFTNoiseRenderer : IDisposable
             Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
         };
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
+
+        if (state.LatencyMs >= 0f)
+        {
+            string latencyLabel = $"LAT {state.LatencyMs:0.0}ms";
+            canvas.DrawText(latencyLabel, _bypassButtonRect.Left - 6f, TitleBarHeight / 2f + 4, _latencyPaint);
+        }
 
         // Close button
         _closeButtonRect = new SKRect(size.Width - Padding - 24, (TitleBarHeight - 24) / 2,
@@ -559,11 +575,11 @@ public sealed class FFTNoiseRenderer : IDisposable
             TextAlign = SKTextAlign.Center,
             Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
         };
-        string learnLabel = state.IsLearning ? "LEARNING..." : (state.HasNoiseProfile ? "RE-LEARN" : "LEARN NOISE");
+        string learnLabel = state.IsLearning ? "STOP" : (state.HasNoiseProfile ? "RE-LEARN" : "LEARN");
         canvas.DrawText(learnLabel, _learnButtonRect.MidX, _learnButtonRect.MidY + 4, learnTextPaint);
 
         // Status text below button
-        string statusText = state.HasNoiseProfile ? "Profile captured" : "No profile yet";
+        string statusText = state.IsLearning ? "Learning..." : (state.HasNoiseProfile ? "Profile captured" : "No profile yet");
         canvas.DrawText(statusText, _learnButtonRect.MidX, _learnButtonRect.Bottom + 16, _labelPaint);
 
         // Reduction knob
@@ -712,6 +728,7 @@ public sealed class FFTNoiseRenderer : IDisposable
         _knobPointerPaint.Dispose();
         _labelPaint.Dispose();
         _valuePaint.Dispose();
+        _latencyPaint.Dispose();
         _learnButtonPaint.Dispose();
         _learningPaint.Dispose();
         _progressBarPaint.Dispose();
@@ -727,6 +744,7 @@ public record struct FFTNoiseState(
     bool HasNoiseProfile,
     bool IsBypassed,
     int SampleRate,
+    float LatencyMs,
     float[]? InputSpectrum = null,
     float[]? InputPeaks = null,
     float[]? OutputSpectrum = null,

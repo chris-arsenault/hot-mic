@@ -56,6 +56,8 @@ public sealed class Vst3PluginWrapper : IPlugin
 
     public bool IsBypassed { get; set; }
 
+    public int LatencySamples => 0;
+
     public IReadOnlyList<PluginParameter> Parameters => _parameters;
 
     public bool IsFaulted => Volatile.Read(ref _isFaulted) == 1;

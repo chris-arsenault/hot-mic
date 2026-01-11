@@ -1,5 +1,5 @@
-using MathNet.Numerics;
-using MathNet.Numerics.IntegralTransforms;
+using System.Threading;
+using HotMic.Core.Dsp;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
@@ -7,9 +7,9 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
 {
     public const int ReductionIndex = 0;
 
-    private const int FftSize = 2048;
-    private const int HopSize = FftSize / 4;  // 75% overlap for smoother reconstruction
-    private const int NoiseFramesToLearn = 50;  // More frames for better noise estimate
+    private const int FftSize = 1024;
+    private const int HopSize = FftSize / 4;
+    private const int NoiseFramesToLearn = 50;
 
     // For UI visualization - use 64 bins for display
     public const int DisplayBins = 64;
@@ -17,60 +17,53 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
     private readonly float[] _inputRing = new float[FftSize];
     private readonly float[] _outputRing = new float[FftSize];
     private readonly float[] _window = new float[FftSize];
-    private readonly float[] _synthesisWindow = new float[FftSize];  // Separate synthesis window
-    private readonly Complex32[] _fftBuffer = new Complex32[FftSize];
-    private readonly float[] _noiseProfile = new float[FftSize / 2 + 1];
-    private readonly float[] _prevGains = new float[FftSize / 2 + 1];  // For temporal smoothing
-    private readonly float[] _frameBuffer = new float[FftSize];
+    private readonly float[] _synthesisWindow = new float[FftSize];
+    private readonly float[] _fftReal = new float[FftSize];
+    private readonly float[] _fftImag = new float[FftSize];
+    private readonly float[] _noisePsd = new float[FftSize / 2 + 1];
+    private readonly float[] _prevSnr = new float[FftSize / 2 + 1];
+    private readonly float[] _prevGain = new float[FftSize / 2 + 1];
+    private readonly float[] _gainBuffer = new float[FftSize / 2 + 1];
+    private readonly FastFft _fft = new(FftSize);
 
-    // Spectrum data for UI visualization (downsampled to DisplayBins)
-    private readonly float[] _inputSpectrum = new float[DisplayBins];
-    private readonly float[] _outputSpectrum = new float[DisplayBins];
-    private readonly float[] _displayNoiseProfile = new float[DisplayBins];
-    private readonly float[] _inputSpectrumPeaks = new float[DisplayBins];
-    private readonly float[] _outputSpectrumPeaks = new float[DisplayBins];
+    // Spectrum data for UI visualization (double-buffered).
+    private readonly float[][] _inputSpectrumBuffers = { new float[DisplayBins], new float[DisplayBins] };
+    private readonly float[][] _outputSpectrumBuffers = { new float[DisplayBins], new float[DisplayBins] };
+    private readonly float[][] _noiseSpectrumBuffers = { new float[DisplayBins], new float[DisplayBins] };
+    private readonly float[][] _inputPeakBuffers = { new float[DisplayBins], new float[DisplayBins] };
+    private readonly float[][] _outputPeakBuffers = { new float[DisplayBins], new float[DisplayBins] };
+    private int _displayIndex;
+
     private const float SpectrumDecay = 0.85f;
     private const float PeakDecay = 0.98f;
 
     // Algorithm parameters
-    private const float GainSmoothingFreq = 0.3f;  // Smoothing across frequency bins
-    private const float GainSmoothingTime = 0.5f;  // Temporal smoothing between frames
-    private const float OverSubtraction = 2.0f;  // Oversubtract noise for cleaner result
+    private const float DecisionDirectedAlpha = 0.98f;
+    private const float FrequencySmoothing = 0.35f;
+    private const float TimeSmoothing = 0.4f;
+    private const float OverSubMax = 2.5f;
 
-    private float _windowSum;  // For proper overlap-add normalization
+    private float _windowSum;
     private int _inputIndex;
     private int _hopCounter;
     private bool _learning;
     private int _noiseFrames;
     private float _reduction = 0.5f;
+    private float _smoothedReduction = 0.5f;
     private int _sampleRate;
+    private int _hasProfileFlag;
 
     public FFTNoiseRemovalPlugin()
     {
-        // Hann window for analysis
         for (int i = 0; i < FftSize; i++)
         {
             _window[i] = 0.5f - 0.5f * MathF.Cos(2f * MathF.PI * i / (FftSize - 1));
-            _synthesisWindow[i] = _window[i];  // Same window for synthesis
+            _synthesisWindow[i] = _window[i];
         }
 
-        // Calculate normalization factor for overlap-add
-        // With 75% overlap (HopSize = FftSize/4), we need to account for 4 overlapping frames
-        // The sum of squared Hann windows at 75% overlap = 1.5 per sample position
-        _windowSum = 0f;
-        for (int hop = 0; hop < FftSize; hop += HopSize)
-        {
-            for (int i = 0; i < FftSize && (hop + i) < FftSize; i++)
-            {
-                if (hop == 0)
-                    _windowSum += _window[i] * _synthesisWindow[i];
-            }
-        }
-        // Approximate: for 75% overlap with Hann, sum is about 1.5
-        _windowSum = 1.5f;
-
-        // Initialize previous gains to 1.0 (no reduction)
-        Array.Fill(_prevGains, 1f);
+        _windowSum = CalculateWindowSum();
+        Array.Fill(_prevSnr, 0f);
+        Array.Fill(_prevGain, 1f);
 
         Parameters =
         [
@@ -84,6 +77,8 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
 
     public bool IsBypassed { get; set; }
 
+    public int LatencySamples => FftSize - HopSize;
+
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
     // Property getters for UI binding
@@ -91,7 +86,7 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
     public bool IsLearning => _learning;
     public int LearningProgress => _noiseFrames;
     public int LearningTotal => NoiseFramesToLearn;
-    public bool HasNoiseProfile => !_learning && _noiseFrames >= NoiseFramesToLearn;
+    public bool HasNoiseProfile => Volatile.Read(ref _hasProfileFlag) == 1;
     public int SampleRate => _sampleRate;
 
     /// <summary>
@@ -101,16 +96,12 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
                                  float[] outputSpectrum, float[] outputPeaks,
                                  float[] noiseProfile)
     {
-        if (inputSpectrum.Length >= DisplayBins)
-            Array.Copy(_inputSpectrum, inputSpectrum, DisplayBins);
-        if (inputPeaks.Length >= DisplayBins)
-            Array.Copy(_inputSpectrumPeaks, inputPeaks, DisplayBins);
-        if (outputSpectrum.Length >= DisplayBins)
-            Array.Copy(_outputSpectrum, outputSpectrum, DisplayBins);
-        if (outputPeaks.Length >= DisplayBins)
-            Array.Copy(_outputSpectrumPeaks, outputPeaks, DisplayBins);
-        if (noiseProfile.Length >= DisplayBins)
-            Array.Copy(_displayNoiseProfile, noiseProfile, DisplayBins);
+        int index = Volatile.Read(ref _displayIndex);
+        Array.Copy(_inputSpectrumBuffers[index], inputSpectrum, DisplayBins);
+        Array.Copy(_inputPeakBuffers[index], inputPeaks, DisplayBins);
+        Array.Copy(_outputSpectrumBuffers[index], outputSpectrum, DisplayBins);
+        Array.Copy(_outputPeakBuffers[index], outputPeaks, DisplayBins);
+        Array.Copy(_noiseSpectrumBuffers[index], noiseProfile, DisplayBins);
     }
 
     public void Initialize(int sampleRate, int blockSize)
@@ -120,10 +111,19 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
 
     public void LearnNoiseProfile()
     {
-        _learning = true;
-        _noiseFrames = 0;
-        Array.Clear(_noiseProfile);
-        Array.Fill(_prevGains, 1f);  // Reset gain smoothing
+        StartLearning();
+    }
+
+    public void ToggleLearning()
+    {
+        if (_learning)
+        {
+            FinalizeNoiseProfile();
+        }
+        else
+        {
+            StartLearning();
+        }
     }
 
     public void Process(Span<float> buffer)
@@ -182,136 +182,195 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
         {
             int index = (start + i) % FftSize;
             float sample = _inputRing[index] * _window[i];
-            _frameBuffer[i] = sample;
-            _fftBuffer[i] = new Complex32(sample, 0f);
+            _fftReal[i] = sample;
+            _fftImag[i] = 0f;
         }
 
-        Fourier.Forward(_fftBuffer, FourierOptions.Matlab);
-
-        // Capture input spectrum for visualization (before noise removal)
-        UpdateDisplaySpectrum(_inputSpectrum, _inputSpectrumPeaks, _fftBuffer);
+        _fft.Forward(_fftReal, _fftImag);
+        UpdateDisplaySpectrum(_inputSpectrumBuffers, _inputPeakBuffers, _fftReal, _fftImag);
 
         if (_learning)
         {
             AccumulateNoiseProfile();
         }
 
-        // Apply Wiener-style noise reduction with smoothing
-        int numBins = _noiseProfile.Length;
-        Span<float> gains = stackalloc float[numBins];
+        int bins = _noisePsd.Length;
+        _smoothedReduction = _smoothedReduction * 0.9f + _reduction * 0.1f;
+        bool applyReduction = _smoothedReduction > 1e-3f && Volatile.Read(ref _hasProfileFlag) == 1;
+        float noiseScale = 1f + OverSubMax * _smoothedReduction;
+        float minGain = DspUtils.DbToLinear(-60f * _smoothedReduction);
 
-        // Calculate per-bin gains using Wiener-style filtering
-        for (int i = 0; i < numBins; i++)
+        for (int i = 0; i < bins; i++)
         {
-            float real = _fftBuffer[i].Real;
-            float imag = _fftBuffer[i].Imaginary;
-            float magnitude = MathF.Sqrt(real * real + imag * imag);
-            float magnitudeSq = magnitude * magnitude;
-
-            // Noise power with oversubtraction for cleaner result
-            float noisePower = _noiseProfile[i] * _noiseProfile[i] * OverSubtraction * _reduction;
-
-            // Wiener gain: (signal^2 - noise^2) / signal^2
-            // This gives smooth attenuation rather than hard subtraction
-            float gain;
-            if (magnitudeSq > noisePower)
+            if (!applyReduction)
             {
-                gain = MathF.Sqrt((magnitudeSq - noisePower) / magnitudeSq);
-            }
-            else
-            {
-                gain = 0f;  // Below noise floor, fully attenuate
+                _gainBuffer[i] = 1f;
+                continue;
             }
 
-            gains[i] = gain;
+            float real = _fftReal[i];
+            float imag = _fftImag[i];
+            float mag2 = real * real + imag * imag;
+            float noise = _noisePsd[i] * noiseScale + 1e-12f;
+            float snrPost = mag2 / noise;
+
+            // Decision-directed SNR drives a Wiener-style gain with a gentle floor.
+            float snrPrior = DecisionDirectedAlpha * _prevSnr[i] +
+                             (1f - DecisionDirectedAlpha) * MathF.Max(snrPost - 1f, 0f);
+            _prevSnr[i] = snrPrior;
+
+            float gain = snrPrior / (1f + snrPrior);
+            _gainBuffer[i] = MathF.Max(gain, minGain);
         }
 
-        // Smooth gains across frequency (reduces musical noise)
+        // Smooth gains across frequency to reduce musical noise.
         for (int pass = 0; pass < 2; pass++)
         {
-            for (int i = 1; i < numBins - 1; i++)
+            for (int i = 1; i < bins - 1; i++)
             {
-                gains[i] = gains[i] * (1f - GainSmoothingFreq) +
-                           (gains[i - 1] + gains[i + 1]) * 0.5f * GainSmoothingFreq;
+                _gainBuffer[i] = _gainBuffer[i] * (1f - FrequencySmoothing) +
+                                 (_gainBuffer[i - 1] + _gainBuffer[i + 1]) * 0.5f * FrequencySmoothing;
             }
         }
 
-        // Apply gains with temporal smoothing
-        for (int i = 0; i < numBins; i++)
+        for (int i = 0; i < bins; i++)
         {
-            // Temporal smoothing - blend with previous frame's gain
-            float smoothedGain = _prevGains[i] * GainSmoothingTime + gains[i] * (1f - GainSmoothingTime);
-            _prevGains[i] = smoothedGain;
-
-            float real = _fftBuffer[i].Real;
-            float imag = _fftBuffer[i].Imaginary;
-            _fftBuffer[i] = new Complex32(real * smoothedGain, imag * smoothedGain);
+            float gain = _prevGain[i] * TimeSmoothing + _gainBuffer[i] * (1f - TimeSmoothing);
+            _prevGain[i] = gain;
+            _fftReal[i] *= gain;
+            _fftImag[i] *= gain;
         }
 
-        // Capture output spectrum for visualization (after noise removal)
-        UpdateDisplaySpectrum(_outputSpectrum, _outputSpectrumPeaks, _fftBuffer);
+        UpdateDisplaySpectrum(_outputSpectrumBuffers, _outputPeakBuffers, _fftReal, _fftImag);
 
-        // Mirror conjugate for negative frequencies
-        for (int i = 1; i < numBins - 1; i++)
+        for (int i = 1; i < bins - 1; i++)
         {
             int mirror = FftSize - i;
-            _fftBuffer[mirror] = new Complex32(_fftBuffer[i].Real, -_fftBuffer[i].Imaginary);
+            _fftReal[mirror] = _fftReal[i];
+            _fftImag[mirror] = -_fftImag[i];
         }
 
-        Fourier.Inverse(_fftBuffer, FourierOptions.Matlab);
+        _fft.Inverse(_fftReal, _fftImag);
 
-        // Overlap-add with normalization
         for (int i = 0; i < FftSize; i++)
         {
-            float sample = _fftBuffer[i].Real;
             int index = (start + i) % FftSize;
-            _outputRing[index] += sample * _synthesisWindow[i] / _windowSum;
+            _outputRing[index] += _fftReal[i] * _synthesisWindow[i] / _windowSum;
+        }
+
+        PublishDisplayBuffers();
+    }
+
+    private void StartLearning()
+    {
+        _learning = true;
+        _noiseFrames = 0;
+        Volatile.Write(ref _hasProfileFlag, 0);
+        Array.Clear(_noisePsd);
+        Array.Fill(_prevSnr, 0f);
+        Array.Fill(_prevGain, 1f);
+    }
+
+    private void AccumulateNoiseProfile()
+    {
+        for (int i = 0; i < _noisePsd.Length; i++)
+        {
+            float real = _fftReal[i];
+            float imag = _fftImag[i];
+            _noisePsd[i] += real * real + imag * imag;
+        }
+
+        _noiseFrames++;
+        if (_noiseFrames >= NoiseFramesToLearn)
+        {
+            FinalizeNoiseProfile();
         }
     }
 
-    private void UpdateDisplaySpectrum(float[] spectrum, float[] peaks, Complex32[] fftData)
+    private void FinalizeNoiseProfile()
     {
-        // Downsample FFT bins to display bins using logarithmic frequency mapping
+        if (_noiseFrames <= 0)
+        {
+            _learning = false;
+            return;
+        }
+
+        float inv = 1f / _noiseFrames;
+        for (int i = 0; i < _noisePsd.Length; i++)
+        {
+            _noisePsd[i] *= inv;
+        }
+
+        UpdateNoiseProfileDisplay();
+        _learning = false;
+        Volatile.Write(ref _hasProfileFlag, 1);
+    }
+
+    private float CalculateWindowSum()
+    {
+        var overlap = new float[FftSize];
+        for (int frame = 0; frame < FftSize; frame += HopSize)
+        {
+            for (int i = 0; i < FftSize; i++)
+            {
+                overlap[(frame + i) % FftSize] += _window[i] * _synthesisWindow[i];
+            }
+        }
+
+        float sum = 0f;
+        for (int i = 0; i < overlap.Length; i++)
+        {
+            sum += overlap[i];
+        }
+
+        return sum / overlap.Length;
+    }
+
+    private void PublishDisplayBuffers()
+    {
+        int current = Volatile.Read(ref _displayIndex);
+        int next = current == 0 ? 1 : 0;
+        Volatile.Write(ref _displayIndex, next);
+    }
+
+    private void UpdateDisplaySpectrum(float[][] spectrumBuffers, float[][] peakBuffers, float[] fftReal, float[] fftImag)
+    {
+        int current = Volatile.Read(ref _displayIndex);
+        int target = current == 0 ? 1 : 0;
+        float[] spectrum = spectrumBuffers[target];
+        float[] peaks = peakBuffers[target];
+
         int fftBins = FftSize / 2 + 1;
         float minFreq = 20f;
         float maxFreq = _sampleRate > 0 ? _sampleRate / 2f : 20000f;
-
-        // Normalization: divide by FftSize/2 so full-scale audio = magnitude 1.0 = 0dB
         const float normalizationFactor = 2f / FftSize;
 
         for (int displayBin = 0; displayBin < DisplayBins; displayBin++)
         {
-            // Calculate frequency range for this display bin (log scale)
             float t0 = displayBin / (float)DisplayBins;
             float t1 = (displayBin + 1) / (float)DisplayBins;
             float freq0 = minFreq * MathF.Pow(maxFreq / minFreq, t0);
             float freq1 = minFreq * MathF.Pow(maxFreq / minFreq, t1);
 
-            // Convert frequencies to FFT bin indices
             int bin0 = (int)(freq0 * fftBins / maxFreq);
             int bin1 = (int)(freq1 * fftBins / maxFreq);
             bin0 = Math.Clamp(bin0, 0, fftBins - 1);
             bin1 = Math.Clamp(bin1, bin0 + 1, fftBins);
 
-            // Use RMS of magnitudes in this frequency range (better than pure average)
             float sumSq = 0f;
             int count = 0;
             for (int i = bin0; i < bin1 && i < fftBins; i++)
             {
-                float real = fftData[i].Real;
-                float imag = fftData[i].Imaginary;
+                float real = fftReal[i];
+                float imag = fftImag[i];
                 float mag = MathF.Sqrt(real * real + imag * imag);
                 sumSq += mag * mag;
                 count++;
             }
 
-            // RMS magnitude, normalized
             float magnitude = count > 0 ? MathF.Sqrt(sumSq / count) * normalizationFactor : 0f;
-
-            // Apply decay
             spectrum[displayBin] = MathF.Max(spectrum[displayBin] * SpectrumDecay, magnitude);
 
-            // Update peaks
             if (magnitude > peaks[displayBin])
             {
                 peaks[displayBin] = magnitude;
@@ -323,39 +382,15 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
         }
     }
 
-    private void AccumulateNoiseProfile()
+    private void UpdateNoiseProfileDisplay()
     {
-        for (int i = 0; i < _noiseProfile.Length; i++)
-        {
-            float real = _fftBuffer[i].Real;
-            float imag = _fftBuffer[i].Imaginary;
-            float magnitude = MathF.Sqrt(real * real + imag * imag);
-            _noiseProfile[i] += magnitude;
-        }
+        int current = Volatile.Read(ref _displayIndex);
+        int target = current == 0 ? 1 : 0;
+        float[] profile = _noiseSpectrumBuffers[target];
 
-        _noiseFrames++;
-        if (_noiseFrames >= NoiseFramesToLearn)
-        {
-            for (int i = 0; i < _noiseProfile.Length; i++)
-            {
-                _noiseProfile[i] /= _noiseFrames;
-            }
-
-            // Update display noise profile
-            UpdateDisplayNoiseProfile();
-
-            _learning = false;
-        }
-    }
-
-    private void UpdateDisplayNoiseProfile()
-    {
-        // Downsample noise profile to display bins using logarithmic frequency mapping
         int fftBins = FftSize / 2 + 1;
         float minFreq = 20f;
         float maxFreq = _sampleRate > 0 ? _sampleRate / 2f : 20000f;
-
-        // Same normalization as UpdateDisplaySpectrum
         const float normalizationFactor = 2f / FftSize;
 
         for (int displayBin = 0; displayBin < DisplayBins; displayBin++)
@@ -370,18 +405,16 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
             bin0 = Math.Clamp(bin0, 0, fftBins - 1);
             bin1 = Math.Clamp(bin1, bin0 + 1, fftBins);
 
-            // Use RMS to match spectrum display calculation
             float sumSq = 0f;
             int count = 0;
-            for (int i = bin0; i < bin1 && i < _noiseProfile.Length; i++)
+            for (int i = bin0; i < bin1 && i < _noisePsd.Length; i++)
             {
-                float mag = _noiseProfile[i];
+                float mag = MathF.Sqrt(_noisePsd[i]);
                 sumSq += mag * mag;
                 count++;
             }
 
-            // RMS magnitude, normalized to match spectrum scale
-            _displayNoiseProfile[displayBin] = count > 0 ? MathF.Sqrt(sumSq / count) * normalizationFactor : 0f;
+            profile[displayBin] = count > 0 ? MathF.Sqrt(sumSq / count) * normalizationFactor : 0f;
         }
     }
 }

@@ -55,6 +55,7 @@ public sealed class EqRenderer : IDisposable
     private readonly SKPaint _knobPointerPaint;
     private readonly SKPaint _labelPaint;
     private readonly SKPaint _valuePaint;
+    private readonly SKPaint _latencyPaint;
     private readonly SKPaint _bandLabelPaint;
     private readonly SKPaint _meterBackgroundPaint;
 
@@ -249,6 +250,15 @@ public sealed class EqRenderer : IDisposable
             Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
         };
 
+        _latencyPaint = new SKPaint
+        {
+            Color = _theme.TextMuted,
+            IsAntialias = true,
+            TextSize = 9f,
+            TextAlign = SKTextAlign.Right,
+            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
+        };
+
         _bandLabelPaint = new SKPaint
         {
             IsAntialias = true,
@@ -313,6 +323,12 @@ public sealed class EqRenderer : IDisposable
             Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
         };
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
+
+        if (state.LatencyMs >= 0f)
+        {
+            string latencyLabel = $"LAT {state.LatencyMs:0.0}ms";
+            canvas.DrawText(latencyLabel, _bypassButtonRect.Left - 6f, TitleBarHeight / 2f + 4, _latencyPaint);
+        }
 
         // Close button
         _closeButtonRect = new SKRect(size.Width - Padding - 24, (TitleBarHeight - 24) / 2,
@@ -840,6 +856,7 @@ public sealed class EqRenderer : IDisposable
         _knobPointerPaint.Dispose();
         _labelPaint.Dispose();
         _valuePaint.Dispose();
+        _latencyPaint.Dispose();
         _bandLabelPaint.Dispose();
         _meterBackgroundPaint.Dispose();
     }
@@ -861,6 +878,7 @@ public record struct EqState(
     float InputLevel,
     float OutputLevel,
     int SampleRate,
+    float LatencyMs,
     bool IsBypassed,
     float[]? SpectrumLevels = null,
     float[]? SpectrumPeaks = null,
