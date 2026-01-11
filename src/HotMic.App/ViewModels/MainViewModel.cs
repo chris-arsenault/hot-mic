@@ -928,7 +928,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             new() { Id = "builtin:compressor", Name = "Compressor", IsVst3 = false },
             new() { Id = "builtin:noisegate", Name = "Noise Gate", IsVst3 = false },
             new() { Id = "builtin:eq3", Name = "3-Band EQ", IsVst3 = false },
-            new() { Id = "builtin:fft-noise", Name = "FFT Noise Removal", IsVst3 = false }
+            new() { Id = "builtin:fft-noise", Name = "FFT Noise Removal", IsVst3 = false },
+            new() { Id = "builtin:rnnoise", Name = "RNNoise (AI)", IsVst3 = false },
+            new() { Id = "builtin:deepfilternet", Name = "DeepFilterNet (AI)", IsVst3 = false }
         };
 
         var scanner = new Vst3Scanner();
@@ -1000,11 +1002,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }).ToList();
 
         Action? learnNoiseAction = plugin is FFTNoiseRemovalPlugin ? () => RequestNoiseLearn(channelIndex, slotIndex) : null;
+        Func<float>? vadProvider = plugin is RNNoisePlugin rnnoise ? () => rnnoise.VadProbability : null;
+        string statusMessage = plugin is IPluginStatusProvider statusProvider ? statusProvider.StatusMessage : string.Empty;
 
         float latencyMs = _audioEngine.SampleRate > 0
             ? plugin.LatencySamples * 1000f / _audioEngine.SampleRate
             : 0f;
-        var viewModel = new PluginParametersViewModel(plugin.Name, parameterViewModels, null, null, learnNoiseAction, latencyMs);
+        var viewModel = new PluginParametersViewModel(plugin.Name, parameterViewModels, null, null, learnNoiseAction, latencyMs, statusMessage, vadProvider);
         var window = new PluginParametersWindow(viewModel)
         {
             Owner = System.Windows.Application.Current?.MainWindow

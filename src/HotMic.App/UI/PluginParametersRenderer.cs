@@ -27,6 +27,7 @@ public sealed class PluginParametersRenderer
     private readonly SKPaint _sliderTrackPaint;
     private readonly SKPaint _sliderFillPaint;
     private readonly SKPaint _latencyPaint;
+    private readonly SKPaint _statusPaint;
 
     private readonly List<ParameterRect> _parameterRects = new();
     private SKRect _closeButtonRect;
@@ -46,6 +47,7 @@ public sealed class PluginParametersRenderer
         _sliderTrackPaint = CreateFillPaint(_theme.Surface);
         _sliderFillPaint = CreateFillPaint(_theme.Accent);
         _latencyPaint = CreateTextPaint(_theme.TextMuted, 10f, align: SKTextAlign.Right);
+        _statusPaint = CreateTextPaint(_theme.MeterWarn, 11f);
     }
 
     public float ListContentHeight { get; private set; }
@@ -82,13 +84,21 @@ public sealed class PluginParametersRenderer
         bool showGain = viewModel.GainReductionProvider is not null;
         bool showGate = viewModel.GateOpenProvider is not null;
         bool showLearn = viewModel.LearnNoiseAction is not null;
+        bool showVad = viewModel.VadProbabilityProvider is not null;
 
-        float headerHeight = showGain || showGate || showLearn ? 60f : 0f;
         float listTop = TitleBarHeight + Padding;
+        if (!string.IsNullOrWhiteSpace(viewModel.StatusMessage))
+        {
+            var statusRect = new SKRect(Padding, listTop, size.Width - Padding, listTop + 32f);
+            DrawStatusMessage(canvas, statusRect, viewModel.StatusMessage);
+            listTop = statusRect.Bottom + 12f;
+        }
+
+        float headerHeight = showGain || showGate || showLearn || showVad ? 60f : 0f;
         if (headerHeight > 0f)
         {
             var headerRect = new SKRect(Padding, listTop, size.Width - Padding, listTop + headerHeight);
-            DrawHeader(canvas, headerRect, viewModel, showGain, showGate, showLearn);
+            DrawHeader(canvas, headerRect, viewModel, showGain, showGate, showLearn, showVad);
             listTop = headerRect.Bottom + 12f;
         }
         float listBottom = size.Height - Padding - ButtonHeight - 12f;
@@ -177,7 +187,7 @@ public sealed class PluginParametersRenderer
         _parameterRects.Add(new ParameterRect(index, sliderRect));
     }
 
-    private void DrawHeader(SKCanvas canvas, SKRect rect, PluginParametersViewModel viewModel, bool showGain, bool showGate, bool showLearn)
+    private void DrawHeader(SKCanvas canvas, SKRect rect, PluginParametersViewModel viewModel, bool showGain, bool showGate, bool showLearn, bool showVad)
     {
         _learnButtonRect = SKRect.Empty;
         var round = new SKRoundRect(rect, 8f);
@@ -211,12 +221,35 @@ public sealed class PluginParametersRenderer
             x += 80f;
         }
 
+        if (showVad && viewModel.VadProbabilityProvider is not null)
+        {
+            canvas.DrawText("VAD", x, y + 12f, _textPaint);
+            float vad = Math.Clamp(viewModel.VadProbabilityProvider(), 0f, 1f);
+            var barRect = new SKRect(x, y + 22f, x + 140f, y + 28f);
+            canvas.DrawRect(barRect, _sliderTrackPaint);
+            var fillRect = new SKRect(barRect.Left, barRect.Top, barRect.Left + barRect.Width * vad, barRect.Bottom);
+            canvas.DrawRect(fillRect, _sliderFillPaint);
+            canvas.DrawRect(barRect, _borderPaint);
+            canvas.DrawText($"{vad * 100f:0}%", barRect.Right + 8f, y + 18f, CreateTextPaint(_theme.TextSecondary, 10f));
+            x += 190f;
+        }
+
         if (showLearn)
         {
             _learnButtonRect = new SKRect(rect.Right - 12f - ButtonWidth, rect.MidY - ButtonHeight / 2f,
                 rect.Right - 12f, rect.MidY + ButtonHeight / 2f);
             DrawButton(canvas, _learnButtonRect, "Learn", isActive: false);
         }
+    }
+
+    private void DrawStatusMessage(SKCanvas canvas, SKRect rect, string message)
+    {
+        var round = new SKRoundRect(rect, 8f);
+        canvas.DrawRoundRect(round, _panelPaint);
+        canvas.DrawRoundRect(round, _borderPaint);
+
+        string text = TrimTextToWidth(message, _statusPaint, rect.Width - 20f);
+        canvas.DrawText(text, rect.Left + 10f, rect.MidY + 4f, _statusPaint);
     }
 
     private void DrawButton(SKCanvas canvas, SKRect rect, string label, bool isActive)
@@ -250,6 +283,24 @@ public sealed class PluginParametersRenderer
         TextAlign = align,
         Typeface = SKTypeface.FromFamilyName("Segoe UI", style ?? SKFontStyle.Normal)
     };
+
+    private static string TrimTextToWidth(string text, SKPaint paint, float maxWidth)
+    {
+        if (string.IsNullOrEmpty(text) || paint.MeasureText(text) <= maxWidth)
+        {
+            return text;
+        }
+
+        const string suffix = "...";
+        float suffixWidth = paint.MeasureText(suffix);
+        int length = text.Length;
+        while (length > 0 && paint.MeasureText(text[..length]) + suffixWidth > maxWidth)
+        {
+            length--;
+        }
+
+        return length <= 0 ? suffix : text[..length] + suffix;
+    }
 
     private sealed record ParameterRect(int Index, SKRect SliderRect);
 }

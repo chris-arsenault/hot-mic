@@ -13,6 +13,8 @@ public static class PluginFactory
             "builtin:eq3" => new ThreeBandEqPlugin(),
             "builtin:fft-noise" => new FFTNoiseRemovalPlugin(),
             "builtin:gain" => new GainPlugin(),
+            "builtin:rnnoise" => new RNNoisePlugin(),
+            "builtin:deepfilternet" => new DeepFilterNetPlugin(),
             _ => null
         };
     }

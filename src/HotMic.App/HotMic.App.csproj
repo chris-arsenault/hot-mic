@@ -20,4 +20,13 @@
     <ProjectReference Include="..\HotMic.Common\HotMic.Common.csproj" />
     <ProjectReference Include="..\HotMic.Vst3\HotMic.Vst3.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets/Native/librnnoise.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Assets/Models/deepfilternet3/**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>
