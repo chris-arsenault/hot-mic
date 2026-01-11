@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
@@ -432,14 +433,34 @@ internal sealed class SileroVadInference : IDisposable
         var output = new List<int>();
         foreach (var dim in dims)
         {
-            int value = dim switch
+            int value;
+            if (dim is null)
             {
-                int i => i,
-                long l => (int)Math.Clamp(l, int.MinValue, int.MaxValue),
-                int? n => n ?? -1,
-                long? n => n.HasValue ? (int)Math.Clamp(n.Value, int.MinValue, int.MaxValue) : -1,
-                _ => -1
-            };
+                value = -1;
+            }
+            else if (dim is int i)
+            {
+                value = i;
+            }
+            else if (dim is long l)
+            {
+                value = (int)Math.Clamp(l, int.MinValue, int.MaxValue);
+            }
+            else if (dim is IConvertible convertible)
+            {
+                try
+                {
+                    value = Convert.ToInt32(convertible, CultureInfo.InvariantCulture);
+                }
+                catch (Exception)
+                {
+                    value = -1;
+                }
+            }
+            else
+            {
+                value = -1;
+            }
             output.Add(value);
         }
         return output.ToArray();
