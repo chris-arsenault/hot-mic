@@ -76,8 +76,8 @@ Status legend:
 | ID | Status | Notes |
 | --- | --- | --- |
 | FR-6.1 | Partial | VST.NET host wrapper added; not validated with VST3 binaries. |
-| FR-6.2 | Implemented | Scans common VST3 directories. |
-| FR-6.3 | Implemented | Scan results cached to JSON. |
+| FR-6.2 | Implemented | Scans common VST3 directories plus VST2 plugin paths. |
+| FR-6.3 | Implemented | Scan results cached to JSON; cache refreshed for VST2/VST3. |
 | FR-6.4 | Implemented | VST3 editor window hosts native plugin UI. |
 | FR-6.5 | Partial | Chunk/parameter state supported and persisted. |
 

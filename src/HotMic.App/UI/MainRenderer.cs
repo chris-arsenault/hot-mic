@@ -10,90 +10,90 @@ namespace HotMic.App.UI;
 
 public sealed class MainRenderer
 {
-    private const float CornerRadius = 12f;
-    private const float TitleBarHeight = 52f;
-    private const float Padding = 16f;
-    private const float PanelRadius = 10f;
-    private const float PanelPadding = 12f;
-    private const float ContentSpacing = 16f;
-    private const float DevicePanelHeight = 210f;
-    private const float KnobSize = 68f;
-    private const float KnobLabelHeight = 28f;
-    private const float MeterWidth = 36f;
-    private const float MeterHeight = 86f;
-    private const float SlotSpacing = 6f;
-    private const float MinSlotHeight = 22f;
-    private const float MaxSlotHeight = 40f;
-    private const float ToggleSize = 26f;
-    private const float TopButtonSize = 26f;
-    private const float DebugPanelRadius = 8f;
-    private const float DebugLineHeight = 14f;
+    // Layout constants
+    private const float CornerRadius = 10f;
+    private const float TitleBarHeight = 40f;
+    private const float Padding = 12f;
+    private const float ChannelStripHeight = 120f;
+    private const float ChannelSpacing = 8f;
+    private const float MasterWidth = 80f;
+
+    // Section dimensions
+    private const float InputSectionWidth = 100f;
+    private const float PluginSlotWidth = 110f;
+    private const float PluginSlotHeight = 28f;
+    private const float PluginSlotSpacing = 4f;
+    private const float OutputSectionWidth = 100f;
+    private const float MeterWidth = 24f;
+    private const float MeterHeight = 80f;
+    private const float StereoMeterWidth = 44f;
+    private const float KnobSize = 48f;
+    private const float ToggleSize = 22f;
+
+    // Meter segments
+    private const int MeterSegments = 24;
+    private const float SegmentGap = 1f;
 
     private readonly HotMicTheme _theme = HotMicTheme.Default;
+
+    // Pre-allocated paints
     private readonly SKPaint _backgroundPaint;
-    private readonly SKPaint _panelPaint;
-    private readonly SKPaint _panelBorderPaint;
-    private readonly SKPaint _surfacePaint;
-    private readonly SKPaint _surfaceBorderPaint;
+    private readonly SKPaint _titleBarPaint;
+    private readonly SKPaint _borderPaint;
+    private readonly SKPaint _borderLightPaint;
+    private readonly SKPaint _sectionPaint;
+    private readonly SKPaint _pluginSlotEmptyPaint;
+    private readonly SKPaint _pluginSlotFilledPaint;
+    private readonly SKPaint _pluginSlotBypassedPaint;
     private readonly SKPaint _accentPaint;
     private readonly SKPaint _textPaint;
-    private readonly SKPaint _secondaryTextPaint;
+    private readonly SKPaint _textSecondaryPaint;
+    private readonly SKPaint _textMutedPaint;
     private readonly SKPaint _titlePaint;
     private readonly SKPaint _smallTextPaint;
-    private readonly SKPaint _buttonTextPaint;
-    private readonly SKPaint _buttonFillPaint;
-    private readonly SKPaint _buttonActivePaint;
+    private readonly SKPaint _meterBackgroundPaint;
+    private readonly SKPaint _meterSegmentOffPaint;
+    private readonly SKPaint _peakPaint;
+    private readonly SKPaint _iconPaint;
+    private readonly SKPaint _mutePaint;
+    private readonly SKPaint _soloPaint;
+    private readonly SKPaint _buttonPaint;
     private readonly SKPaint _debugPanelPaint;
-    private readonly SKPaint _debugBorderPaint;
     private readonly SKPaint _debugTextPaint;
-    private readonly SKPaint _meterGreenPaint;
-    private readonly SKPaint _meterYellowPaint;
-    private readonly SKPaint _meterRedPaint;
-    private readonly SKPaint _meterPeakPaint;
-    private readonly SKPaint _tickPaint;
-    private readonly SKPaint _tickLabelPaint;
-    private readonly SKPaint _iconStrokePaint;
 
+    // Hit target storage
     private readonly Dictionary<MainButton, SKRect> _topButtonRects = new();
-    private readonly Dictionary<DevicePickerTarget, SKRect> _devicePickerRects = new();
-    private readonly List<DeviceItemRect> _deviceItemRects = new();
     private readonly List<KnobRect> _knobRects = new();
     private readonly List<PluginSlotRect> _pluginSlots = new();
     private readonly List<ToggleRect> _toggleRects = new();
-    private SKRect _applyDevicesRect;
     private SKRect _titleBarRect;
-    private SKRect _deviceListRect;
 
     public MainRenderer()
     {
         _backgroundPaint = CreateFillPaint(_theme.BackgroundPrimary);
-        _panelPaint = CreateFillPaint(_theme.BackgroundSecondary);
-        _panelBorderPaint = CreateStrokePaint(_theme.Border, 1f);
-        _surfacePaint = CreateFillPaint(_theme.BackgroundTertiary);
-        _surfaceBorderPaint = CreateStrokePaint(_theme.Border, 1f);
+        _titleBarPaint = CreateFillPaint(_theme.BackgroundSecondary);
+        _borderPaint = CreateStrokePaint(_theme.Border, 1f);
+        _borderLightPaint = CreateStrokePaint(_theme.BorderLight, 1f);
+        _sectionPaint = CreateFillPaint(_theme.BackgroundTertiary);
+        _pluginSlotEmptyPaint = CreateFillPaint(_theme.PluginSlotEmpty);
+        _pluginSlotFilledPaint = CreateFillPaint(_theme.PluginSlotFilled);
+        _pluginSlotBypassedPaint = CreateFillPaint(_theme.PluginSlotBypassed);
         _accentPaint = CreateFillPaint(_theme.Accent);
-        _textPaint = CreateTextPaint(_theme.TextPrimary, 14f);
-        _secondaryTextPaint = CreateTextPaint(_theme.TextSecondary, 12f);
-        _titlePaint = CreateTextPaint(_theme.TextPrimary, 18f, SKFontStyle.Bold);
-        _smallTextPaint = CreateTextPaint(_theme.TextSecondary, 10f);
-        _buttonTextPaint = CreateCenteredTextPaint(_theme.TextPrimary, 12f, SKFontStyle.Bold);
-        _buttonFillPaint = CreateFillPaint(_theme.Surface);
-        _buttonActivePaint = CreateFillPaint(_theme.Accent);
-        _debugPanelPaint = CreateFillPaint(new SKColor(0x16, 0x16, 0x16, 0xDD));
-        _debugBorderPaint = CreateStrokePaint(_theme.Border, 1f);
-        _debugTextPaint = CreateTextPaint(_theme.TextSecondary, 11f);
-        _meterGreenPaint = CreateFillPaint(_theme.MeterGreen);
-        _meterYellowPaint = CreateFillPaint(_theme.MeterYellow);
-        _meterRedPaint = CreateFillPaint(_theme.MeterRed);
-        _meterPeakPaint = CreateStrokePaint(_theme.TextPrimary, 2f);
-        _tickPaint = CreateStrokePaint(_theme.Border, 1f);
-        _tickLabelPaint = CreateTextPaint(_theme.TextSecondary, 9f);
-        _iconStrokePaint = CreateStrokePaint(_theme.TextPrimary, 2f);
+        _textPaint = CreateTextPaint(_theme.TextPrimary, 12f);
+        _textSecondaryPaint = CreateTextPaint(_theme.TextSecondary, 11f);
+        _textMutedPaint = CreateTextPaint(_theme.TextMuted, 10f);
+        _titlePaint = CreateTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _smallTextPaint = CreateTextPaint(_theme.TextSecondary, 9f);
+        _meterBackgroundPaint = CreateFillPaint(_theme.MeterBackground);
+        _meterSegmentOffPaint = CreateFillPaint(_theme.MeterSegmentOff);
+        _peakPaint = CreateStrokePaint(_theme.TextPrimary, 1.5f);
+        _iconPaint = CreateStrokePaint(_theme.TextSecondary, 1.5f);
+        _mutePaint = CreateFillPaint(_theme.Mute);
+        _soloPaint = CreateFillPaint(_theme.Solo);
+        _buttonPaint = CreateFillPaint(_theme.Surface);
+        _debugPanelPaint = CreateFillPaint(new SKColor(0x12, 0x12, 0x14, 0xE0));
+        _debugTextPaint = CreateTextPaint(_theme.TextSecondary, 10f);
     }
-
-    public float DeviceListContentHeight { get; private set; }
-
-    public float DeviceListViewportHeight { get; private set; }
 
     public void Render(SKCanvas canvas, SKSize size, MainViewModel viewModel, MainUiState uiState, float dpiScale)
     {
@@ -121,127 +121,36 @@ public sealed class MainRenderer
         canvas.Restore();
     }
 
-    public MainButton? HitTestTopButton(float x, float y)
-    {
-        foreach (var (button, rect) in _topButtonRects)
-        {
-            if (rect.Contains(x, y))
-            {
-                return button;
-            }
-        }
-
-        return null;
-    }
-
-    public DevicePickerTarget HitTestDevicePicker(float x, float y)
-    {
-        foreach (var (target, rect) in _devicePickerRects)
-        {
-            if (rect.Contains(x, y))
-            {
-                return target;
-            }
-        }
-
-        return DevicePickerTarget.None;
-    }
-
-    public DeviceItemHit? HitTestDeviceItem(float x, float y)
-    {
-        foreach (var item in _deviceItemRects)
-        {
-            if (item.Rect.Contains(x, y))
-            {
-                return new DeviceItemHit(item.Target, item.Index);
-            }
-        }
-
-        return null;
-    }
-
-    public KnobHit? HitTestKnob(float x, float y)
-    {
-        foreach (var knob in _knobRects)
-        {
-            if (knob.Rect.Contains(x, y))
-            {
-                return new KnobHit(knob.ChannelIndex, knob.KnobType);
-            }
-        }
-
-        return null;
-    }
-
-    public PluginSlotHit? HitTestPluginSlot(float x, float y, out PluginSlotRegion region)
-    {
-        foreach (var slot in _pluginSlots)
-        {
-            if (!slot.Rect.Contains(x, y))
-            {
-                continue;
-            }
-
-            if (slot.BypassRect.Contains(x, y))
-            {
-                region = PluginSlotRegion.Bypass;
-                return new PluginSlotHit(slot.ChannelIndex, slot.SlotIndex);
-            }
-
-            if (slot.RemoveRect.Contains(x, y))
-            {
-                region = PluginSlotRegion.Remove;
-                return new PluginSlotHit(slot.ChannelIndex, slot.SlotIndex);
-            }
-
-            region = PluginSlotRegion.Action;
-            return new PluginSlotHit(slot.ChannelIndex, slot.SlotIndex);
-        }
-
-        region = PluginSlotRegion.None;
-        return null;
-    }
-
-    public ToggleHit? HitTestToggle(float x, float y)
-    {
-        foreach (var toggle in _toggleRects)
-        {
-            if (toggle.Rect.Contains(x, y))
-            {
-                return new ToggleHit(toggle.ChannelIndex, toggle.ToggleType);
-            }
-        }
-
-        return null;
-    }
-
-    public bool HitTestApplyDevices(float x, float y) => _applyDevicesRect.Contains(x, y);
-
-    public bool HitTestTitleBar(float x, float y) => _titleBarRect.Contains(x, y);
-
-    public bool HitTestDeviceList(float x, float y) => !_deviceListRect.IsEmpty && _deviceListRect.Contains(x, y);
-
     private void DrawBackground(SKCanvas canvas, SKSize size)
     {
         var rect = new SKRoundRect(new SKRect(0, 0, size.Width, size.Height), CornerRadius);
         canvas.DrawRoundRect(rect, _backgroundPaint);
-        canvas.DrawRoundRect(rect, _panelBorderPaint);
+        canvas.DrawRoundRect(rect, _borderPaint);
     }
 
     private void DrawTitleBar(SKCanvas canvas, SKSize size, MainViewModel viewModel)
     {
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
-        canvas.DrawRect(_titleBarRect, _panelPaint);
-        canvas.DrawLine(0, TitleBarHeight, size.Width, TitleBarHeight, _panelBorderPaint);
 
-        float titleX = Padding;
-        float titleY = TitleBarHeight / 2f + _titlePaint.TextSize / 2.5f;
-        canvas.DrawText("HotMic", titleX, titleY, _titlePaint);
+        // Draw title bar background clipped to top corners
+        using var clip = new SKPath();
+        clip.AddRoundRect(new SKRoundRect(new SKRect(0, 0, size.Width, TitleBarHeight + CornerRadius), CornerRadius));
+        clip.AddRect(new SKRect(0, TitleBarHeight, size.Width, TitleBarHeight + CornerRadius));
+        canvas.Save();
+        canvas.ClipPath(clip);
+        canvas.DrawRect(_titleBarRect, _titleBarPaint);
+        canvas.Restore();
 
+        canvas.DrawLine(0, TitleBarHeight, size.Width, TitleBarHeight, _borderPaint);
+
+        // Logo/title
+        canvas.DrawText("HotMic", Padding, TitleBarHeight / 2f + 5f, _titlePaint);
+
+        // Status message
         if (!string.IsNullOrWhiteSpace(viewModel.StatusMessage))
         {
-            var statusPaint = CreateTextPaint(_theme.Accent, 12f);
-            canvas.DrawText(viewModel.StatusMessage, titleX + 88f, titleY - 2f, statusPaint);
+            var statusPaint = CreateTextPaint(_theme.Accent, 11f);
+            canvas.DrawText(viewModel.StatusMessage, 80f, TitleBarHeight / 2f + 4f, statusPaint);
         }
 
         DrawTopButtons(canvas, size, viewModel);
@@ -252,682 +161,490 @@ public sealed class MainRenderer
         _topButtonRects.Clear();
         float right = size.Width - Padding;
         float centerY = TitleBarHeight / 2f;
-        float buttonSpacing = 8f;
+        float buttonSize = 24f;
+        float spacing = 6f;
 
-        SKRect closeRect = new(right - TopButtonSize, centerY - TopButtonSize / 2f, right, centerY + TopButtonSize / 2f);
-        DrawIconButton(canvas, closeRect, string.Empty, MainButton.Close, isActive: false, IconType.Close);
-        right -= TopButtonSize + buttonSpacing;
+        // Close
+        var closeRect = new SKRect(right - buttonSize, centerY - buttonSize / 2f, right, centerY + buttonSize / 2f);
+        DrawIconButton(canvas, closeRect, MainButton.Close, false, IconType.Close);
+        right -= buttonSize + spacing;
 
-        SKRect minimizeRect = new(right - TopButtonSize, centerY - TopButtonSize / 2f, right, centerY + TopButtonSize / 2f);
-        DrawIconButton(canvas, minimizeRect, string.Empty, MainButton.Minimize, isActive: false, IconType.Minimize);
-        right -= TopButtonSize + buttonSpacing;
+        // Minimize
+        var minRect = new SKRect(right - buttonSize, centerY - buttonSize / 2f, right, centerY + buttonSize / 2f);
+        DrawIconButton(canvas, minRect, MainButton.Minimize, false, IconType.Minimize);
+        right -= buttonSize + spacing;
 
-        SKRect pinRect = new(right - TopButtonSize, centerY - TopButtonSize / 2f, right, centerY + TopButtonSize / 2f);
-        DrawIconButton(canvas, pinRect, string.Empty, MainButton.Pin, isActive: viewModel.AlwaysOnTop, IconType.Pin);
-        right -= TopButtonSize + buttonSpacing;
+        // Pin
+        var pinRect = new SKRect(right - buttonSize, centerY - buttonSize / 2f, right, centerY + buttonSize / 2f);
+        DrawIconButton(canvas, pinRect, MainButton.Pin, viewModel.AlwaysOnTop, IconType.Pin);
+        right -= buttonSize + spacing;
 
-        SKRect settingsRect = new(right - TopButtonSize, centerY - TopButtonSize / 2f, right, centerY + TopButtonSize / 2f);
-        DrawIconButton(canvas, settingsRect, string.Empty, MainButton.Settings, isActive: false, IconType.Settings);
-        right -= TopButtonSize + buttonSpacing;
+        // Settings
+        var settingsRect = new SKRect(right - buttonSize, centerY - buttonSize / 2f, right, centerY + buttonSize / 2f);
+        DrawIconButton(canvas, settingsRect, MainButton.Settings, false, IconType.Settings);
+        right -= buttonSize + spacing + 8f;
 
-        string viewLabel = viewModel.IsMinimalView ? "Full" : "Minimal";
-        float toggleWidth = 80f;
-        SKRect viewRect = new(right - toggleWidth, centerY - TopButtonSize / 2f, right, centerY + TopButtonSize / 2f);
-        DrawTextButton(canvas, viewRect, viewLabel, viewModel.IsMinimalView, MainButton.ToggleView);
+        // View toggle
+        string viewLabel = viewModel.IsMinimalView ? "Expand" : "Compact";
+        float toggleWidth = 60f;
+        var toggleRect = new SKRect(right - toggleWidth, centerY - buttonSize / 2f, right, centerY + buttonSize / 2f);
+        DrawTextButton(canvas, toggleRect, viewLabel, MainButton.ToggleView);
     }
 
     private void DrawFull(SKCanvas canvas, SKSize size, MainViewModel viewModel, MainUiState uiState)
     {
         float contentTop = TitleBarHeight + Padding;
-        float contentBottom = size.Height - Padding;
         float contentLeft = Padding;
         float contentRight = size.Width - Padding;
 
-        var devicePanelRect = new SKRect(contentLeft, contentTop, contentRight, contentTop + DevicePanelHeight);
-        DrawDevicePanel(canvas, devicePanelRect, viewModel, uiState);
+        // Calculate widths
+        float masterSectionWidth = MasterWidth + Padding;
+        float channelAreaWidth = contentRight - contentLeft - masterSectionWidth - Padding;
 
-        float channelTop = devicePanelRect.Bottom + ContentSpacing;
-        float channelHeight = contentBottom - channelTop;
-        float channelWidth = (contentRight - contentLeft - ContentSpacing) / 2f;
+        // Draw channel strips
+        float channelY = contentTop;
+        DrawChannelStrip(canvas, contentLeft, channelY, channelAreaWidth, ChannelStripHeight, viewModel.Channel1, 0, uiState);
+        channelY += ChannelStripHeight + ChannelSpacing;
+        DrawChannelStrip(canvas, contentLeft, channelY, channelAreaWidth, ChannelStripHeight, viewModel.Channel2, 1, uiState);
 
-        var channel1Rect = new SKRect(contentLeft, channelTop, contentLeft + channelWidth, channelTop + channelHeight);
-        var channel2Rect = new SKRect(contentLeft + channelWidth + ContentSpacing, channelTop, contentRight, channelTop + channelHeight);
+        // Draw master section
+        float masterX = contentRight - masterSectionWidth;
+        float masterHeight = ChannelStripHeight * 2 + ChannelSpacing;
+        DrawMasterSection(canvas, masterX, contentTop, masterSectionWidth, masterHeight, viewModel);
+    }
 
-        DrawChannelStrip(canvas, channel1Rect, viewModel.Channel1, 0);
-        DrawChannelStrip(canvas, channel2Rect, viewModel.Channel2, 1);
+    private void DrawChannelStrip(SKCanvas canvas, float x, float y, float width, float height, ChannelStripViewModel channel, int channelIndex, MainUiState uiState)
+    {
+        // Channel strip background
+        var stripRect = new SKRect(x, y, x + width, y + height);
+        var stripRound = new SKRoundRect(stripRect, 8f);
+        canvas.DrawRoundRect(stripRound, _sectionPaint);
+        canvas.DrawRoundRect(stripRound, _borderPaint);
 
-        DrawDeviceListOverlay(canvas, viewModel, uiState);
+        float sectionX = x + 8f;
+        float sectionY = y + 8f;
+        float sectionHeight = height - 16f;
+
+        // Input section
+        DrawInputSection(canvas, sectionX, sectionY, InputSectionWidth, sectionHeight, channel, channelIndex);
+        sectionX += InputSectionWidth + 8f;
+
+        // Plugin chain section
+        float pluginAreaWidth = width - InputSectionWidth - OutputSectionWidth - 40f;
+        DrawPluginChain(canvas, sectionX, sectionY, pluginAreaWidth, sectionHeight, channel, channelIndex, uiState);
+        sectionX += pluginAreaWidth + 8f;
+
+        // Output section
+        DrawOutputSection(canvas, sectionX, sectionY, OutputSectionWidth, sectionHeight, channel, channelIndex);
+    }
+
+    private void DrawInputSection(SKCanvas canvas, float x, float y, float width, float height, ChannelStripViewModel channel, int channelIndex)
+    {
+        // Section background
+        var rect = new SKRect(x, y, x + width, y + height);
+        var roundRect = new SKRoundRect(rect, 6f);
+        canvas.DrawRoundRect(roundRect, CreateFillPaint(_theme.ChannelInput));
+        canvas.DrawRoundRect(roundRect, _borderPaint);
+
+        // Channel name
+        float nameY = y + 14f;
+        canvas.DrawText(channel.Name, x + 8f, nameY, _textPaint);
+
+        // Input knob
+        float knobX = x + 8f;
+        float knobY = y + 22f;
+        DrawMiniKnob(canvas, knobX, knobY, channel.InputGainDb, "IN");
+        _knobRects.Add(new KnobRect(channelIndex, KnobType.InputGain, new SKRect(knobX, knobY, knobX + KnobSize, knobY + KnobSize)));
+
+        // Input meter
+        float meterX = x + width - MeterWidth - 8f;
+        float meterY = y + 20f;
+        DrawVerticalMeter(canvas, meterX, meterY, MeterWidth, MeterHeight - 10f, channel.InputPeakLevel, channel.InputRmsLevel);
+
+        // Mute/Solo buttons
+        float toggleY = y + height - ToggleSize - 6f;
+        var muteRect = new SKRect(x + 8f, toggleY, x + 8f + ToggleSize, toggleY + ToggleSize);
+        DrawToggleButton(canvas, muteRect, "M", channel.IsMuted, _mutePaint);
+        _toggleRects.Add(new ToggleRect(channelIndex, ToggleType.Mute, muteRect));
+
+        var soloRect = new SKRect(x + 8f + ToggleSize + 4f, toggleY, x + 8f + ToggleSize * 2 + 4f, toggleY + ToggleSize);
+        DrawToggleButton(canvas, soloRect, "S", channel.IsSoloed, _soloPaint);
+        _toggleRects.Add(new ToggleRect(channelIndex, ToggleType.Solo, soloRect));
+    }
+
+    private void DrawPluginChain(SKCanvas canvas, float x, float y, float width, float height, ChannelStripViewModel channel, int channelIndex, MainUiState uiState)
+    {
+        // Section background
+        var rect = new SKRect(x, y, x + width, y + height);
+        var roundRect = new SKRoundRect(rect, 6f);
+        canvas.DrawRoundRect(roundRect, CreateFillPaint(_theme.ChannelPlugins));
+        canvas.DrawRoundRect(roundRect, _borderPaint);
+
+        // Label
+        canvas.DrawText("PLUGINS", x + 8f, y + 12f, _smallTextPaint);
+
+        // Plugin slots in horizontal layout
+        float slotX = x + 8f;
+        float slotY = y + 20f;
+
+        for (int i = 0; i < channel.PluginSlots.Count && i < 5; i++)
+        {
+            var slot = channel.PluginSlots[i];
+            DrawPluginSlot(canvas, slotX, slotY, PluginSlotWidth, height - 28f, slot, channelIndex, i, uiState);
+            slotX += PluginSlotWidth + PluginSlotSpacing;
+        }
+    }
+
+    private void DrawPluginSlot(SKCanvas canvas, float x, float y, float width, float height, PluginViewModel slot, int channelIndex, int slotIndex, MainUiState uiState)
+    {
+        var rect = new SKRect(x, y, x + width, y + height);
+        var roundRect = new SKRoundRect(rect, 4f);
+
+        // Background based on state
+        SKPaint bgPaint = slot.IsEmpty ? _pluginSlotEmptyPaint :
+                          slot.IsBypassed ? _pluginSlotBypassedPaint : _pluginSlotFilledPaint;
+        canvas.DrawRoundRect(roundRect, bgPaint);
+        canvas.DrawRoundRect(roundRect, _borderPaint);
+
+        // Slot number
+        canvas.DrawText($"{slotIndex + 1}", x + 6f, y + 14f, _textMutedPaint);
+
+        if (slot.IsEmpty)
+        {
+            // Plus icon for empty slot
+            float centerX = x + width / 2f;
+            float centerY = y + height / 2f;
+            canvas.DrawLine(centerX - 8f, centerY, centerX + 8f, centerY, _iconPaint);
+            canvas.DrawLine(centerX, centerY - 8f, centerX, centerY + 8f, _iconPaint);
+        }
+        else
+        {
+            // Plugin name (vertical)
+            canvas.Save();
+            canvas.RotateDegrees(-90f, x + 18f, y + height - 8f);
+            var textPaint = slot.IsBypassed ? _textMutedPaint : _textSecondaryPaint;
+            DrawEllipsizedText(canvas, slot.DisplayName, x + 18f, y + height - 8f, height - 24f, textPaint);
+            canvas.Restore();
+
+            // Bypass indicator
+            if (slot.IsBypassed)
+            {
+                float bypassX = x + width - 18f;
+                float bypassY = y + 6f;
+                var bypassRect = new SKRect(bypassX, bypassY, bypassX + 12f, bypassY + 12f);
+                canvas.DrawRoundRect(new SKRoundRect(bypassRect, 2f), CreateFillPaint(_theme.Bypass));
+                canvas.DrawText("B", bypassX + 3f, bypassY + 10f, CreateTextPaint(SKColors.White, 8f));
+            }
+
+            // Remove button
+            float removeX = x + width - 16f;
+            float removeY = y + height - 16f;
+            canvas.DrawLine(removeX, removeY, removeX + 8f, removeY + 8f, _iconPaint);
+            canvas.DrawLine(removeX + 8f, removeY, removeX, removeY + 8f, _iconPaint);
+        }
+
+        var bypassHitRect = new SKRect(x + width - 20f, y + 4f, x + width - 4f, y + 20f);
+        var removeHitRect = new SKRect(x + width - 20f, y + height - 20f, x + width - 4f, y + height - 4f);
+        _pluginSlots.Add(new PluginSlotRect(channelIndex, slotIndex, rect, bypassHitRect, removeHitRect));
+    }
+
+    private void DrawOutputSection(SKCanvas canvas, float x, float y, float width, float height, ChannelStripViewModel channel, int channelIndex)
+    {
+        // Section background
+        var rect = new SKRect(x, y, x + width, y + height);
+        var roundRect = new SKRoundRect(rect, 6f);
+        canvas.DrawRoundRect(roundRect, CreateFillPaint(_theme.ChannelOutput));
+        canvas.DrawRoundRect(roundRect, _borderPaint);
+
+        // Label
+        canvas.DrawText("OUT", x + 8f, y + 12f, _smallTextPaint);
+
+        // Output knob
+        float knobX = x + 8f;
+        float knobY = y + 18f;
+        DrawMiniKnob(canvas, knobX, knobY, channel.OutputGainDb, "dB");
+        _knobRects.Add(new KnobRect(channelIndex, KnobType.OutputGain, new SKRect(knobX, knobY, knobX + KnobSize, knobY + KnobSize)));
+
+        // Output meter
+        float meterX = x + width - MeterWidth - 8f;
+        float meterY = y + 16f;
+        DrawVerticalMeter(canvas, meterX, meterY, MeterWidth, MeterHeight - 6f, channel.OutputPeakLevel, channel.OutputRmsLevel);
+
+        // dB value
+        float dbY = y + height - 10f;
+        string dbText = $"{ToDb(channel.OutputPeakLevel):0.0}";
+        canvas.DrawText(dbText, x + 8f, dbY, _smallTextPaint);
+    }
+
+    private void DrawMasterSection(SKCanvas canvas, float x, float y, float width, float height, MainViewModel viewModel)
+    {
+        // Section background
+        var rect = new SKRect(x, y, x + width, y + height);
+        var roundRect = new SKRoundRect(rect, 8f);
+        canvas.DrawRoundRect(roundRect, CreateFillPaint(_theme.MasterSection));
+        canvas.DrawRoundRect(roundRect, _borderPaint);
+
+        // Label
+        canvas.DrawText("MASTER", x + (width - 50f) / 2f, y + 16f, _textSecondaryPaint);
+
+        // Stereo meters
+        float meterY = y + 28f;
+        float meterHeight = height - 60f;
+        float leftMeterX = x + (width - StereoMeterWidth) / 2f;
+        float rightMeterX = leftMeterX + MeterWidth + 4f;
+
+        // L/R labels
+        canvas.DrawText("L", leftMeterX + 8f, meterY - 4f, _smallTextPaint);
+        canvas.DrawText("R", rightMeterX + 8f, meterY - 4f, _smallTextPaint);
+
+        // Get combined levels from both channels
+        float leftPeak = MathF.Max(viewModel.Channel1.OutputPeakLevel, viewModel.Channel2.OutputPeakLevel * 0.3f);
+        float rightPeak = MathF.Max(viewModel.Channel2.OutputPeakLevel, viewModel.Channel1.OutputPeakLevel * 0.3f);
+        float leftRms = MathF.Max(viewModel.Channel1.OutputRmsLevel, viewModel.Channel2.OutputRmsLevel * 0.3f);
+        float rightRms = MathF.Max(viewModel.Channel2.OutputRmsLevel, viewModel.Channel1.OutputRmsLevel * 0.3f);
+
+        DrawVerticalMeter(canvas, leftMeterX, meterY, MeterWidth, meterHeight, leftPeak, leftRms);
+        DrawVerticalMeter(canvas, rightMeterX, meterY, MeterWidth, meterHeight, rightPeak, rightRms);
+
+        // Peak dB values
+        float dbY = y + height - 12f;
+        string leftDb = $"{ToDb(leftPeak):0.0}";
+        string rightDb = $"{ToDb(rightPeak):0.0}";
+        canvas.DrawText(leftDb, leftMeterX, dbY, _smallTextPaint);
+        canvas.DrawText(rightDb, rightMeterX, dbY, _smallTextPaint);
+    }
+
+    private void DrawVerticalMeter(SKCanvas canvas, float x, float y, float width, float height, float peakLevel, float rmsLevel)
+    {
+        // Background
+        var rect = new SKRect(x, y, x + width, y + height);
+        canvas.DrawRect(rect, _meterBackgroundPaint);
+
+        // Draw segments
+        float segmentHeight = (height - (MeterSegments - 1) * SegmentGap) / MeterSegments;
+        float rms = Math.Clamp(rmsLevel, 0f, 1f);
+        float peak = Math.Clamp(peakLevel, 0f, 1f);
+
+        for (int i = 0; i < MeterSegments; i++)
+        {
+            float segY = y + height - (i + 1) * (segmentHeight + SegmentGap);
+            float threshold = (i + 0.5f) / MeterSegments;
+            bool lit = rms >= threshold;
+
+            var segRect = new SKRect(x + 2f, segY, x + width - 2f, segY + segmentHeight);
+
+            if (lit)
+            {
+                // Color gradient based on position
+                SKColor color = GetMeterSegmentColor(threshold);
+                canvas.DrawRect(segRect, CreateFillPaint(color));
+            }
+            else
+            {
+                canvas.DrawRect(segRect, _meterSegmentOffPaint);
+            }
+        }
+
+        // Peak line
+        float peakY = y + height - height * peak;
+        if (peak > 0.01f)
+        {
+            var peakColor = peak >= 0.95f ? _theme.MeterClip : _theme.TextPrimary;
+            canvas.DrawLine(x, peakY, x + width, peakY, CreateStrokePaint(peakColor, 2f));
+        }
+    }
+
+    private SKColor GetMeterSegmentColor(float level)
+    {
+        if (level >= 0.95f) return _theme.MeterClip;
+        if (level >= 0.85f) return _theme.MeterWarn;
+        if (level >= 0.65f) return _theme.MeterHigh;
+        if (level >= 0.35f) return _theme.MeterMid;
+        return _theme.MeterLow;
+    }
+
+    private void DrawMiniKnob(SKCanvas canvas, float x, float y, float value, string label)
+    {
+        float size = KnobSize;
+        var center = new SKPoint(x + size / 2f, y + size / 2f - 4f);
+        float radius = size / 2f - 4f;
+
+        // Knob background
+        canvas.DrawCircle(center, radius, CreateFillPaint(_theme.Surface));
+        canvas.DrawCircle(center, radius, _borderPaint);
+
+        // Value arc
+        float normalized = (value + 60f) / 72f; // -60 to +12 range
+        normalized = Math.Clamp(normalized, 0f, 1f);
+        float startAngle = 135f;
+        float sweepAngle = 270f * normalized;
+
+        using var arc = new SKPath();
+        arc.AddArc(new SKRect(center.X - radius, center.Y - radius, center.X + radius, center.Y + radius), startAngle, sweepAngle);
+        canvas.DrawPath(arc, CreateStrokePaint(_theme.Accent, 3f));
+
+        // Value indicator line
+        float angle = (startAngle + sweepAngle) * MathF.PI / 180f;
+        float innerR = radius * 0.5f;
+        float outerR = radius * 0.85f;
+        canvas.DrawLine(
+            center.X + MathF.Cos(angle) * innerR, center.Y + MathF.Sin(angle) * innerR,
+            center.X + MathF.Cos(angle) * outerR, center.Y + MathF.Sin(angle) * outerR,
+            CreateStrokePaint(_theme.TextPrimary, 2f));
+
+        // Value text
+        string valueText = value.ToString("0.0", CultureInfo.InvariantCulture);
+        canvas.DrawText(valueText, x + 2f, y + size - 2f, _smallTextPaint);
+    }
+
+    private void DrawToggleButton(SKCanvas canvas, SKRect rect, string label, bool isActive, SKPaint activePaint)
+    {
+        var roundRect = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(roundRect, isActive ? activePaint : _buttonPaint);
+        canvas.DrawRoundRect(roundRect, _borderPaint);
+
+        var textPaint = isActive
+            ? CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 10f, SKFontStyle.Bold)
+            : CreateCenteredTextPaint(_theme.TextSecondary, 10f);
+        canvas.DrawText(label, rect.MidX, rect.MidY + 3f, textPaint);
     }
 
     private void DrawMinimal(SKCanvas canvas, SKSize size, MainViewModel viewModel)
     {
-        float panelWidth = size.Width - Padding * 2;
-        float panelHeight = size.Height - TitleBarHeight - Padding * 2;
-        var panelRect = new SKRect(Padding, TitleBarHeight + Padding, Padding + panelWidth, TitleBarHeight + Padding + panelHeight);
+        float y = TitleBarHeight + Padding;
+        float width = size.Width - Padding * 2f;
+        float rowHeight = 48f;
 
-        var panelRound = new SKRoundRect(panelRect, PanelRadius);
-        canvas.DrawRoundRect(panelRound, _panelPaint);
-        canvas.DrawRoundRect(panelRound, _panelBorderPaint);
+        DrawMinimalChannelRow(canvas, Padding, y, width, rowHeight, viewModel.Channel1);
+        y += rowHeight + 6f;
+        DrawMinimalChannelRow(canvas, Padding, y, width, rowHeight, viewModel.Channel2);
+    }
 
-        float rowHeight = 32f;
-        float rowSpacing = 10f;
-        float startY = panelRect.Top + PanelPadding;
+    private void DrawMinimalChannelRow(SKCanvas canvas, float x, float y, float width, float height, ChannelStripViewModel channel)
+    {
+        // Background
+        var rect = new SKRect(x, y, x + width, y + height);
+        var roundRect = new SKRoundRect(rect, 6f);
+        canvas.DrawRoundRect(roundRect, _sectionPaint);
+        canvas.DrawRoundRect(roundRect, _borderPaint);
 
-        DrawMinimalRow(canvas, panelRect, startY, viewModel.Channel1);
-        DrawMinimalRow(canvas, panelRect, startY + rowHeight + rowSpacing, viewModel.Channel2);
+        // Channel name
+        canvas.DrawText(channel.Name, x + 12f, y + height / 2f + 4f, _textPaint);
+
+        // Horizontal meter
+        float meterX = x + 100f;
+        float meterWidth = width - 180f;
+        float meterHeight = 16f;
+        float meterY = y + (height - meterHeight) / 2f;
+        DrawHorizontalMeter(canvas, meterX, meterY, meterWidth, meterHeight, channel.OutputPeakLevel, channel.OutputRmsLevel);
+
+        // dB value
+        string dbText = $"{ToDb(channel.OutputPeakLevel):0.0} dB";
+        canvas.DrawText(dbText, x + width - 60f, y + height / 2f + 4f, _textSecondaryPaint);
+    }
+
+    private void DrawHorizontalMeter(SKCanvas canvas, float x, float y, float width, float height, float peakLevel, float rmsLevel)
+    {
+        canvas.DrawRect(new SKRect(x, y, x + width, y + height), _meterBackgroundPaint);
+
+        float rms = Math.Clamp(rmsLevel, 0f, 1f);
+        float peak = Math.Clamp(peakLevel, 0f, 1f);
+
+        // RMS bar with gradient
+        if (rms > 0.01f)
+        {
+            float rmsWidth = width * rms;
+            using var gradient = SKShader.CreateLinearGradient(
+                new SKPoint(x, y),
+                new SKPoint(x + width, y),
+                new[] { _theme.MeterLow, _theme.MeterMid, _theme.MeterHigh, _theme.MeterWarn, _theme.MeterClip },
+                new[] { 0f, 0.35f, 0.65f, 0.85f, 1f },
+                SKShaderTileMode.Clamp);
+
+            using var gradientPaint = new SKPaint { Shader = gradient, IsAntialias = true };
+            canvas.DrawRect(new SKRect(x + 2f, y + 2f, x + 2f + rmsWidth - 4f, y + height - 2f), gradientPaint);
+        }
+
+        // Peak line
+        float peakX = x + width * peak;
+        if (peak > 0.01f)
+        {
+            var peakColor = peak >= 0.95f ? _theme.MeterClip : _theme.TextPrimary;
+            canvas.DrawLine(peakX, y, peakX, y + height, CreateStrokePaint(peakColor, 2f));
+        }
+    }
+
+    private void DrawIconButton(SKCanvas canvas, SKRect rect, MainButton button, bool isActive, IconType icon)
+    {
+        var roundRect = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(roundRect, isActive ? _accentPaint : _buttonPaint);
+
+        float cx = rect.MidX;
+        float cy = rect.MidY;
+        float s = 5f;
+
+        switch (icon)
+        {
+            case IconType.Close:
+                canvas.DrawLine(cx - s, cy - s, cx + s, cy + s, _iconPaint);
+                canvas.DrawLine(cx + s, cy - s, cx - s, cy + s, _iconPaint);
+                break;
+            case IconType.Minimize:
+                canvas.DrawLine(cx - s, cy + 3f, cx + s, cy + 3f, _iconPaint);
+                break;
+            case IconType.Pin:
+                canvas.DrawCircle(cx, cy - 1f, 3f, _iconPaint);
+                canvas.DrawLine(cx, cy + 2f, cx, cy + 5f, _iconPaint);
+                break;
+            case IconType.Settings:
+                canvas.DrawCircle(cx, cy, 3f, _iconPaint);
+                for (int i = 0; i < 6; i++)
+                {
+                    float angle = i * 60f * MathF.PI / 180f;
+                    canvas.DrawLine(cx + MathF.Cos(angle) * 4f, cy + MathF.Sin(angle) * 4f,
+                                   cx + MathF.Cos(angle) * 6f, cy + MathF.Sin(angle) * 6f, _iconPaint);
+                }
+                break;
+        }
+
+        _topButtonRects[button] = rect;
+    }
+
+    private void DrawTextButton(SKCanvas canvas, SKRect rect, string text, MainButton button)
+    {
+        var roundRect = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(roundRect, _buttonPaint);
+        canvas.DrawRoundRect(roundRect, _borderPaint);
+        canvas.DrawText(text, rect.MidX, rect.MidY + 4f, CreateCenteredTextPaint(_theme.TextSecondary, 10f));
+        _topButtonRects[button] = rect;
     }
 
     private void DrawDebugOverlay(SKCanvas canvas, SKSize size, MainViewModel viewModel)
     {
         var lines = viewModel.DebugLines;
-        if (lines.Count == 0)
-        {
-            return;
-        }
+        if (lines.Count == 0) return;
 
         float padding = 8f;
+        float lineHeight = 12f;
         float maxWidth = 0f;
         foreach (var line in lines)
-        {
-            float width = _debugTextPaint.MeasureText(line);
-            if (width > maxWidth)
-            {
-                maxWidth = width;
-            }
-        }
+            maxWidth = MathF.Max(maxWidth, _debugTextPaint.MeasureText(line));
 
-        float panelWidth = MathF.Min(size.Width - Padding * 2f, MathF.Max(220f, maxWidth + padding * 2f));
-        float panelHeight = lines.Count * DebugLineHeight + padding * 2f;
+        float panelWidth = MathF.Min(size.Width - Padding * 2f, maxWidth + padding * 2f);
+        float panelHeight = lines.Count * lineHeight + padding * 2f;
         float x = Padding;
         float y = size.Height - Padding - panelHeight;
-        float minY = TitleBarHeight + Padding;
-        if (y < minY)
-        {
-            y = minY;
-        }
 
-        var rect = new SKRect(x, y, x + panelWidth, y + panelHeight);
-        var roundRect = new SKRoundRect(rect, DebugPanelRadius);
-        canvas.DrawRoundRect(roundRect, _debugPanelPaint);
-        canvas.DrawRoundRect(roundRect, _debugBorderPaint);
+        var rect = new SKRoundRect(new SKRect(x, y, x + panelWidth, y + panelHeight), 6f);
+        canvas.DrawRoundRect(rect, _debugPanelPaint);
+        canvas.DrawRoundRect(rect, _borderPaint);
 
-        float textY = y + padding + DebugLineHeight - 3f;
-        float textX = x + padding;
+        float textY = y + padding + lineHeight - 2f;
         foreach (var line in lines)
         {
-            canvas.DrawText(line, textX, textY, _debugTextPaint);
-            textY += DebugLineHeight;
+            canvas.DrawText(line, x + padding, textY, _debugTextPaint);
+            textY += lineHeight;
         }
-    }
-
-    private void DrawMinimalRow(SKCanvas canvas, SKRect panelRect, float y, ChannelStripViewModel channel)
-    {
-        float nameWidth = 60f;
-        float valueWidth = 52f;
-        float meterLeft = panelRect.Left + PanelPadding + nameWidth;
-        float meterRight = panelRect.Right - PanelPadding - valueWidth;
-        float meterHeight = 16f;
-        float meterTop = y + 6f;
-
-        canvas.DrawText(channel.Name, panelRect.Left + PanelPadding, y + 16f, _textPaint);
-
-        var meterRect = new SKRect(meterLeft, meterTop, meterRight, meterTop + meterHeight);
-        DrawHorizontalMeter(canvas, meterRect, channel.OutputPeakLevel, channel.OutputRmsLevel);
-
-        canvas.DrawText(channel.PeakDbLabel, meterRight + 8f, y + 16f, _secondaryTextPaint);
-    }
-
-    private void DrawDevicePanel(SKCanvas canvas, SKRect rect, MainViewModel viewModel, MainUiState uiState)
-    {
-        var roundRect = new SKRoundRect(rect, PanelRadius);
-        canvas.DrawRoundRect(roundRect, _panelPaint);
-        canvas.DrawRoundRect(roundRect, _panelBorderPaint);
-
-        _devicePickerRects.Clear();
-        _deviceItemRects.Clear();
-        _deviceListRect = SKRect.Empty;
-        DeviceListContentHeight = 0f;
-        DeviceListViewportHeight = 0f;
-
-        float labelHeight = 14f;
-        float fieldHeight = 30f;
-        float columnSpacing = 12f;
-        float rowSpacing = 14f;
-        float applyWidth = 80f;
-        float rowHeight = labelHeight + 6f + fieldHeight;
-        float row1Top = rect.Top + PanelPadding;
-        float row2Top = row1Top + rowHeight + rowSpacing;
-        float row3Top = row2Top + rowHeight + rowSpacing;
-
-        float x = rect.Left + PanelPadding;
-        float fieldsWidth = rect.Width - PanelPadding * 2 - applyWidth - columnSpacing;
-        float fieldWidth = (fieldsWidth - columnSpacing * 3) / 4f;
-
-        float labelY = row1Top + labelHeight;
-        float fieldTop = row1Top + labelHeight + 6f;
-
-        DrawPickerField(canvas, "Input 1", labelY, viewModel.SelectedInputDevice1?.Name ?? "Select...", new SKRect(x, fieldTop, x + fieldWidth, fieldTop + fieldHeight), DevicePickerTarget.Input1);
-        x += fieldWidth + columnSpacing;
-        DrawPickerField(canvas, "Input 2", labelY, viewModel.SelectedInputDevice2?.Name ?? "Select...", new SKRect(x, fieldTop, x + fieldWidth, fieldTop + fieldHeight), DevicePickerTarget.Input2);
-        x += fieldWidth + columnSpacing;
-        DrawPickerField(canvas, "Output", labelY, viewModel.SelectedOutputDevice?.Name ?? "Select...", new SKRect(x, fieldTop, x + fieldWidth, fieldTop + fieldHeight), DevicePickerTarget.Output);
-        x += fieldWidth + columnSpacing;
-        DrawPickerField(canvas, "Monitor", labelY, viewModel.SelectedMonitorDevice?.Name ?? "Select...", new SKRect(x, fieldTop, x + fieldWidth, fieldTop + fieldHeight), DevicePickerTarget.Monitor);
-
-        var applyRect = new SKRect(rect.Right - PanelPadding - applyWidth, fieldTop, rect.Right - PanelPadding, fieldTop + fieldHeight);
-        _applyDevicesRect = applyRect;
-        DrawPanelButton(canvas, applyRect, "Apply", isActive: false);
-
-        float row2LabelY = row2Top + labelHeight;
-        float row2FieldTop = row2Top + labelHeight + 6f;
-        float row2FieldWidth = (rect.Width - PanelPadding * 2 - columnSpacing) / 2f;
-        x = rect.Left + PanelPadding;
-
-        DrawPickerField(canvas, "Sample Rate", row2LabelY, FormatSampleRate(viewModel.SelectedSampleRate),
-            new SKRect(x, row2FieldTop, x + row2FieldWidth, row2FieldTop + fieldHeight), DevicePickerTarget.SampleRate);
-        x += row2FieldWidth + columnSpacing;
-        DrawPickerField(canvas, "Buffer", row2LabelY, $"{viewModel.SelectedBufferSize} samples",
-            new SKRect(x, row2FieldTop, x + row2FieldWidth, row2FieldTop + fieldHeight), DevicePickerTarget.BufferSize);
-
-        float row3LabelY = row3Top + labelHeight;
-        float row3FieldTop = row3Top + labelHeight + 6f;
-        float row3FieldWidth = (rect.Width - PanelPadding * 2 - columnSpacing * 2) / 3f;
-        x = rect.Left + PanelPadding;
-
-        DrawPickerField(canvas, "Input 1 Chan", row3LabelY, FormatInputChannel(viewModel.SelectedInput1Channel),
-            new SKRect(x, row3FieldTop, x + row3FieldWidth, row3FieldTop + fieldHeight), DevicePickerTarget.Input1Channel);
-        x += row3FieldWidth + columnSpacing;
-        DrawPickerField(canvas, "Input 2 Chan", row3LabelY, FormatInputChannel(viewModel.SelectedInput2Channel),
-            new SKRect(x, row3FieldTop, x + row3FieldWidth, row3FieldTop + fieldHeight), DevicePickerTarget.Input2Channel);
-        x += row3FieldWidth + columnSpacing;
-        DrawPickerField(canvas, "Output Route", row3LabelY, FormatOutputRouting(viewModel.SelectedOutputRouting),
-            new SKRect(x, row3FieldTop, x + row3FieldWidth, row3FieldTop + fieldHeight), DevicePickerTarget.OutputRouting);
-
-    }
-
-    private void DrawDeviceListOverlay(SKCanvas canvas, MainViewModel viewModel, MainUiState uiState)
-    {
-        if (uiState.ActiveDevicePicker == DevicePickerTarget.None)
-        {
-            return;
-        }
-
-        if (_devicePickerRects.TryGetValue(uiState.ActiveDevicePicker, out var fieldRect))
-        {
-            DrawDeviceList(canvas, fieldRect, viewModel, uiState);
-        }
-    }
-
-    private void DrawPickerField(SKCanvas canvas, string label, float labelY, string displayText, SKRect rect, DevicePickerTarget target)
-    {
-        _devicePickerRects[target] = rect;
-
-        canvas.DrawText(label, rect.Left, labelY, _secondaryTextPaint);
-        canvas.DrawRoundRect(new SKRoundRect(rect, 6f), _surfacePaint);
-        canvas.DrawRoundRect(new SKRoundRect(rect, 6f), _surfaceBorderPaint);
-
-        DrawEllipsizedText(canvas, displayText, rect.Left + 8f, rect.MidY + 4f, rect.Width - 16f, _textPaint);
-
-        DrawChevron(canvas, new SKPoint(rect.Right - 14f, rect.MidY), 6f);
-    }
-
-    private void DrawDeviceList(SKCanvas canvas, SKRect anchor, MainViewModel viewModel, MainUiState uiState)
-    {
-        var items = GetPickerItems(viewModel, uiState.ActiveDevicePicker, out int selectedIndex);
-
-        float itemHeight = 26f;
-        float maxHeight = 200f;
-        float listWidth = MathF.Max(anchor.Width, 240f);
-        float listLeft = anchor.Left;
-        float listTop = anchor.Bottom + 6f;
-        float contentHeight = items.Count * itemHeight;
-        float listHeight = MathF.Min(maxHeight, MathF.Max(itemHeight, contentHeight));
-
-        var listRect = new SKRect(listLeft, listTop, listLeft + listWidth, listTop + listHeight);
-        _deviceListRect = listRect;
-        DeviceListContentHeight = contentHeight;
-        DeviceListViewportHeight = listHeight;
-
-        var roundRect = new SKRoundRect(listRect, 8f);
-        canvas.DrawRoundRect(roundRect, _panelPaint);
-        canvas.DrawRoundRect(roundRect, _panelBorderPaint);
-
-        canvas.Save();
-        canvas.ClipRect(listRect);
-
-        float scroll = MathF.Max(0f, uiState.DevicePickerScroll);
-        float y = listTop - scroll;
-        _deviceItemRects.Clear();
-
-        for (int i = 0; i < items.Count; i++)
-        {
-            var itemRect = new SKRect(listLeft, y, listLeft + listWidth, y + itemHeight);
-            if (itemRect.Bottom >= listTop && itemRect.Top <= listRect.Bottom)
-            {
-                bool isSelected = i == selectedIndex;
-                if (isSelected)
-                {
-                    canvas.DrawRect(itemRect, _surfacePaint);
-                }
-
-                DrawEllipsizedText(canvas, items[i], itemRect.Left + 8f, itemRect.MidY + 4f, itemRect.Width - 16f, _textPaint);
-                _deviceItemRects.Add(new DeviceItemRect(uiState.ActiveDevicePicker, i, itemRect));
-            }
-
-            y += itemHeight;
-        }
-
-        canvas.Restore();
-    }
-
-    private static IReadOnlyList<string> GetPickerItems(MainViewModel viewModel, DevicePickerTarget target, out int selectedIndex)
-    {
-        selectedIndex = -1;
-        switch (target)
-        {
-            case DevicePickerTarget.Input1:
-                return BuildDeviceList(viewModel.InputDevices, viewModel.SelectedInputDevice1, out selectedIndex);
-            case DevicePickerTarget.Input2:
-                return BuildDeviceList(viewModel.InputDevices, viewModel.SelectedInputDevice2, out selectedIndex);
-            case DevicePickerTarget.Output:
-                return BuildDeviceList(viewModel.OutputDevices, viewModel.SelectedOutputDevice, out selectedIndex);
-            case DevicePickerTarget.Monitor:
-                return BuildDeviceList(viewModel.OutputDevices, viewModel.SelectedMonitorDevice, out selectedIndex);
-            case DevicePickerTarget.SampleRate:
-                return BuildOptionList(viewModel.SampleRateOptions, viewModel.SelectedSampleRate, FormatSampleRate, out selectedIndex);
-            case DevicePickerTarget.BufferSize:
-                return BuildOptionList(viewModel.BufferSizeOptions, viewModel.SelectedBufferSize, size => $"{size} samples", out selectedIndex);
-            case DevicePickerTarget.Input1Channel:
-                return BuildEnumList(viewModel.InputChannelOptions, viewModel.SelectedInput1Channel, FormatInputChannel, out selectedIndex);
-            case DevicePickerTarget.Input2Channel:
-                return BuildEnumList(viewModel.InputChannelOptions, viewModel.SelectedInput2Channel, FormatInputChannel, out selectedIndex);
-            case DevicePickerTarget.OutputRouting:
-                return BuildEnumList(viewModel.OutputRoutingOptions, viewModel.SelectedOutputRouting, FormatOutputRouting, out selectedIndex);
-            default:
-                return Array.Empty<string>();
-        }
-    }
-
-    private static IReadOnlyList<string> BuildDeviceList(IReadOnlyList<AudioDevice> devices, AudioDevice? selected, out int selectedIndex)
-    {
-        selectedIndex = -1;
-        var list = new List<string>(devices.Count);
-        for (int i = 0; i < devices.Count; i++)
-        {
-            var device = devices[i];
-            list.Add(device.Name);
-            if (selected is not null && device.Id == selected.Id)
-            {
-                selectedIndex = i;
-            }
-        }
-
-        return list;
-    }
-
-    private static IReadOnlyList<string> BuildOptionList(IReadOnlyList<int> options, int selected, Func<int, string> formatter, out int selectedIndex)
-    {
-        selectedIndex = -1;
-        var list = new List<string>(options.Count);
-        for (int i = 0; i < options.Count; i++)
-        {
-            int value = options[i];
-            list.Add(formatter(value));
-            if (value == selected)
-            {
-                selectedIndex = i;
-            }
-        }
-
-        return list;
-    }
-
-    private static IReadOnlyList<string> BuildEnumList<T>(IReadOnlyList<T> options, T selected, Func<T, string> formatter, out int selectedIndex)
-        where T : struct
-    {
-        selectedIndex = -1;
-        var list = new List<string>(options.Count);
-        for (int i = 0; i < options.Count; i++)
-        {
-            var value = options[i];
-            list.Add(formatter(value));
-            if (EqualityComparer<T>.Default.Equals(value, selected))
-            {
-                selectedIndex = i;
-            }
-        }
-
-        return list;
-    }
-
-    private static string FormatSampleRate(int value)
-    {
-        if (value >= 1000)
-        {
-            return $"{value / 1000f:0.#} kHz";
-        }
-
-        return $"{value} Hz";
-    }
-
-    private static string FormatInputChannel(InputChannelMode mode) => mode switch
-    {
-        InputChannelMode.Left => "Left",
-        InputChannelMode.Right => "Right",
-        _ => "Sum (L+R)"
-    };
-
-    private static string FormatOutputRouting(OutputRoutingMode mode) => mode switch
-    {
-        OutputRoutingMode.Sum => "Sum (L+R)",
-        _ => "Split (1=L, 2=R)"
-    };
-
-    private void DrawChannelStrip(SKCanvas canvas, SKRect rect, ChannelStripViewModel channel, int channelIndex)
-    {
-        var card = new SKRoundRect(rect, PanelRadius);
-        canvas.DrawRoundRect(card, _panelPaint);
-        canvas.DrawRoundRect(card, _panelBorderPaint);
-
-        float x = rect.Left + PanelPadding;
-        float y = rect.Top + PanelPadding;
-        float innerRight = rect.Right - PanelPadding;
-
-        canvas.DrawText(channel.Name, x, y + _titlePaint.TextSize, _titlePaint);
-        y += _titlePaint.TextSize + 8f;
-
-        float rowHeight = MathF.Max(KnobSize + KnobLabelHeight, MeterHeight);
-        var inputKnobRect = new SKRect(x, y, x + KnobSize, y + rowHeight);
-        DrawKnob(canvas, inputKnobRect, channel.InputGainDb, -60f, 12f, "INPUT");
-        _knobRects.Add(new KnobRect(channelIndex, KnobType.InputGain, inputKnobRect));
-
-        var inputMeterRect = new SKRect(innerRight - MeterWidth, y, innerRight, y + MeterHeight);
-        DrawVerticalMeter(canvas, inputMeterRect, channel.InputPeakLevel, channel.InputRmsLevel, showTicks: true);
-
-        y += rowHeight + 10f;
-
-        float outputRowHeight = rowHeight;
-        float muteRowHeight = 32f;
-        float outputRowBottom = rect.Bottom - PanelPadding - muteRowHeight - 6f;
-        float pluginAreaBottom = outputRowBottom - 10f;
-        float pluginAreaHeight = MathF.Max(0f, pluginAreaBottom - y);
-        float slotHeight = (pluginAreaHeight - SlotSpacing * 4) / 5f;
-        slotHeight = Math.Clamp(slotHeight, MinSlotHeight, MaxSlotHeight);
-        float slotTotalHeight = slotHeight * 5 + SlotSpacing * 4;
-        float slotStartY = y + MathF.Max(0f, (pluginAreaHeight - slotTotalHeight) / 2f);
-
-        for (int i = 0; i < channel.PluginSlots.Count; i++)
-        {
-            if (i >= 5)
-            {
-                break;
-            }
-
-            var slotRect = new SKRect(x, slotStartY, innerRight, slotStartY + slotHeight);
-            DrawPluginSlot(canvas, slotRect, channel.PluginSlots[i], channelIndex, i);
-            slotStartY += slotHeight + SlotSpacing;
-        }
-
-        y = outputRowBottom - outputRowHeight;
-        var outputKnobRect = new SKRect(x, y, x + KnobSize, y + rowHeight);
-        DrawKnob(canvas, outputKnobRect, channel.OutputGainDb, -60f, 12f, "OUTPUT");
-        _knobRects.Add(new KnobRect(channelIndex, KnobType.OutputGain, outputKnobRect));
-
-        var outputMeterRect = new SKRect(innerRight - MeterWidth, y, innerRight, y + MeterHeight);
-        DrawVerticalMeter(canvas, outputMeterRect, channel.OutputPeakLevel, channel.OutputRmsLevel, showTicks: true);
-
-        DrawToggleButtons(canvas, rect, channel, channelIndex);
-    }
-
-    private void DrawToggleButtons(SKCanvas canvas, SKRect rect, ChannelStripViewModel channel, int channelIndex)
-    {
-        float centerX = rect.MidX;
-        float y = rect.Bottom - PanelPadding - ToggleSize;
-        float spacing = 10f;
-
-        var muteRect = new SKRect(centerX - ToggleSize - spacing / 2f, y, centerX - spacing / 2f, y + ToggleSize);
-        DrawToggle(canvas, muteRect, "M", channel.IsMuted);
-        _toggleRects.Add(new ToggleRect(channelIndex, ToggleType.Mute, muteRect));
-
-        var soloRect = new SKRect(centerX + spacing / 2f, y, centerX + spacing / 2f + ToggleSize, y + ToggleSize);
-        DrawToggle(canvas, soloRect, "S", channel.IsSoloed);
-        _toggleRects.Add(new ToggleRect(channelIndex, ToggleType.Solo, soloRect));
-    }
-
-    private void DrawToggle(SKCanvas canvas, SKRect rect, string label, bool isActive)
-    {
-        var round = new SKRoundRect(rect, 6f);
-        canvas.DrawRoundRect(round, isActive ? _buttonActivePaint : _buttonFillPaint);
-        canvas.DrawRoundRect(round, _surfaceBorderPaint);
-        var paint = isActive ? CreateCenteredTextPaint(SKColors.Black, 12f, SKFontStyle.Bold) : _buttonTextPaint;
-        canvas.DrawText(label, rect.MidX, rect.MidY + 4f, paint);
-    }
-
-    private void DrawKnob(SKCanvas canvas, SKRect rect, float value, float min, float max, string label)
-    {
-        float knobCenterY = rect.Top + KnobSize / 2f;
-        var center = new SKPoint(rect.Left + KnobSize / 2f, knobCenterY);
-        float radius = KnobSize / 2f;
-
-        canvas.DrawCircle(center, radius, _surfacePaint);
-        canvas.DrawCircle(center, radius, _surfaceBorderPaint);
-
-        float normalized = (value - min) / MathF.Max(0.0001f, max - min);
-        normalized = Math.Clamp(normalized, 0f, 1f);
-        float startAngle = 225f;
-        float sweepAngle = 270f * normalized;
-        using var arc = new SKPath();
-        arc.AddArc(new SKRect(center.X - radius, center.Y - radius, center.X + radius, center.Y + radius), startAngle, sweepAngle);
-        var ringPaint = new SKPaint
-        {
-            Color = _theme.Accent,
-            IsAntialias = true,
-            StrokeWidth = 4f,
-            Style = SKPaintStyle.Stroke
-        };
-        canvas.DrawPath(arc, ringPaint);
-
-        float angle = (startAngle + sweepAngle) * (MathF.PI / 180f);
-        var indicator = new SKPoint(center.X + MathF.Cos(angle) * radius * 0.8f,
-            center.Y + MathF.Sin(angle) * radius * 0.8f);
-        canvas.DrawLine(center, indicator, _meterPeakPaint);
-
-        float labelY = rect.Top + KnobSize + 12f;
-        canvas.DrawText(label, rect.Left, labelY, _smallTextPaint);
-        string valueText = value.ToString("0.0", CultureInfo.InvariantCulture);
-        canvas.DrawText(valueText, rect.Left + 2f, labelY + 12f, _smallTextPaint);
-    }
-
-    private void DrawVerticalMeter(SKCanvas canvas, SKRect rect, float peakLevel, float rmsLevel, bool showTicks)
-    {
-        canvas.DrawRect(rect, _surfacePaint);
-        canvas.DrawRect(rect, _surfaceBorderPaint);
-
-        float rms = Math.Clamp(rmsLevel, 0f, 1f);
-        float peak = Math.Clamp(peakLevel, 0f, 1f);
-        float rmsHeight = rect.Height * rms;
-        var rmsRect = new SKRect(rect.Left + 2f, rect.Bottom - rmsHeight, rect.Right - 2f, rect.Bottom);
-        canvas.DrawRect(rmsRect, GetMeterPaint(rms));
-
-        float peakY = rect.Bottom - rect.Height * peak;
-        var peakPaint = peak >= 1f ? _meterRedPaint : _meterPeakPaint;
-        canvas.DrawLine(rect.Left, peakY, rect.Right, peakY, peakPaint);
-
-        if (showTicks)
-        {
-            DrawMeterTicks(canvas, rect);
-        }
-    }
-
-    private void DrawHorizontalMeter(SKCanvas canvas, SKRect rect, float peakLevel, float rmsLevel)
-    {
-        canvas.DrawRect(rect, _surfacePaint);
-        canvas.DrawRect(rect, _surfaceBorderPaint);
-
-        float rms = Math.Clamp(rmsLevel, 0f, 1f);
-        float peak = Math.Clamp(peakLevel, 0f, 1f);
-        float rmsWidth = rect.Width * rms;
-        var rmsRect = new SKRect(rect.Left, rect.Top, rect.Left + rmsWidth, rect.Bottom);
-        canvas.DrawRect(rmsRect, GetMeterPaint(rms));
-
-        float peakX = rect.Left + rect.Width * peak;
-        var peakPaint = peak >= 1f ? _meterRedPaint : _meterPeakPaint;
-        canvas.DrawLine(peakX, rect.Top, peakX, rect.Bottom, peakPaint);
-    }
-
-    private void DrawMeterTicks(SKCanvas canvas, SKRect rect)
-    {
-        float[] dbMarks = { 0f, -6f, -12f, -24f, -48f };
-        foreach (float db in dbMarks)
-        {
-            float level = MathF.Pow(10f, db / 20f);
-            float y = rect.Bottom - rect.Height * level;
-            canvas.DrawLine(rect.Left - 6f, y, rect.Left, y, _tickPaint);
-            canvas.DrawText($"{db:0}", rect.Left - 24f, y + 3f, _tickLabelPaint);
-        }
-    }
-
-    private SKPaint GetMeterPaint(float level)
-    {
-        if (level > 0.95f)
-        {
-            return _meterRedPaint;
-        }
-
-        if (level > 0.7f)
-        {
-            return _meterYellowPaint;
-        }
-
-        return _meterGreenPaint;
-    }
-
-    private void DrawPluginSlot(SKCanvas canvas, SKRect rect, PluginViewModel slot, int channelIndex, int slotIndex)
-    {
-        var round = new SKRoundRect(rect, 6f);
-        canvas.DrawRoundRect(round, _surfacePaint);
-        canvas.DrawRoundRect(round, _surfaceBorderPaint);
-
-        float padding = 8f;
-        float right = rect.Right - padding;
-        float iconSize = 16f;
-
-        var removeRect = new SKRect(right - iconSize, rect.MidY - iconSize / 2f, right, rect.MidY + iconSize / 2f);
-        right -= iconSize + 8f;
-        var bypassRect = new SKRect(right - iconSize, rect.MidY - iconSize / 2f, right, rect.MidY + iconSize / 2f);
-
-        if (!slot.IsEmpty)
-        {
-            DrawBypassIcon(canvas, bypassRect, slot.IsBypassed);
-            DrawRemoveIcon(canvas, removeRect);
-        }
-
-        string title = slot.IsEmpty ? "+ Add Plugin" : $"[{slotIndex + 1}] {slot.DisplayName}";
-        var textPaint = slot.IsBypassed ? _secondaryTextPaint : _textPaint;
-        DrawEllipsizedText(canvas, title, rect.Left + padding, rect.MidY + 4f, rect.Width - padding * 2 - 40f, textPaint);
-
-        _pluginSlots.Add(new PluginSlotRect(channelIndex, slotIndex, rect, bypassRect, removeRect));
-    }
-
-    private void DrawTextButton(SKCanvas canvas, SKRect rect, string label, bool isActive, MainButton button, SKPaint? overridePaint = null)
-    {
-        var round = new SKRoundRect(rect, 6f);
-        canvas.DrawRoundRect(round, isActive ? _buttonActivePaint : overridePaint ?? _buttonFillPaint);
-        canvas.DrawRoundRect(round, _surfaceBorderPaint);
-        canvas.DrawText(label, rect.MidX, rect.MidY + 4f, _buttonTextPaint);
-        _topButtonRects[button] = rect;
-    }
-
-    private void DrawPanelButton(SKCanvas canvas, SKRect rect, string label, bool isActive)
-    {
-        var round = new SKRoundRect(rect, 6f);
-        canvas.DrawRoundRect(round, isActive ? _buttonActivePaint : _buttonFillPaint);
-        canvas.DrawRoundRect(round, _surfaceBorderPaint);
-        canvas.DrawText(label, rect.MidX, rect.MidY + 4f, _buttonTextPaint);
-    }
-
-    private void DrawIconButton(SKCanvas canvas, SKRect rect, string label, MainButton button, bool isActive, IconType icon)
-    {
-        var round = new SKRoundRect(rect, 6f);
-        canvas.DrawRoundRect(round, isActive ? _buttonActivePaint : _buttonFillPaint);
-        canvas.DrawRoundRect(round, _surfaceBorderPaint);
-
-        switch (icon)
-        {
-            case IconType.Close:
-                DrawCloseIcon(canvas, rect);
-                break;
-            case IconType.Minimize:
-                DrawMinimizeIcon(canvas, rect);
-                break;
-            case IconType.Pin:
-                DrawPinIcon(canvas, rect);
-                break;
-            case IconType.Settings:
-                DrawSettingsIcon(canvas, rect);
-                break;
-        }
-
-        if (!string.IsNullOrWhiteSpace(label))
-        {
-            canvas.DrawText(label, rect.MidX, rect.MidY + 4f, _buttonTextPaint);
-        }
-
-        _topButtonRects[button] = rect;
-    }
-
-    private void DrawCloseIcon(SKCanvas canvas, SKRect rect)
-    {
-        canvas.DrawLine(rect.Left + 7f, rect.Top + 7f, rect.Right - 7f, rect.Bottom - 7f, _iconStrokePaint);
-        canvas.DrawLine(rect.Right - 7f, rect.Top + 7f, rect.Left + 7f, rect.Bottom - 7f, _iconStrokePaint);
-    }
-
-    private void DrawMinimizeIcon(SKCanvas canvas, SKRect rect)
-    {
-        canvas.DrawLine(rect.Left + 6f, rect.Bottom - 8f, rect.Right - 6f, rect.Bottom - 8f, _iconStrokePaint);
-    }
-
-    private void DrawPinIcon(SKCanvas canvas, SKRect rect)
-    {
-        var center = new SKPoint(rect.MidX, rect.MidY - 2f);
-        canvas.DrawCircle(center, 4f, _iconStrokePaint);
-        canvas.DrawLine(center.X, center.Y + 4f, center.X, rect.Bottom - 6f, _iconStrokePaint);
-        canvas.DrawLine(center.X - 3f, rect.Bottom - 6f, center.X + 3f, rect.Bottom - 6f, _iconStrokePaint);
-    }
-
-    private void DrawSettingsIcon(SKCanvas canvas, SKRect rect)
-    {
-        var center = new SKPoint(rect.MidX, rect.MidY);
-        canvas.DrawCircle(center, 4f, _iconStrokePaint);
-        for (int i = 0; i < 6; i++)
-        {
-            float angle = i * 60f * (MathF.PI / 180f);
-            float x1 = center.X + MathF.Cos(angle) * 6f;
-            float y1 = center.Y + MathF.Sin(angle) * 6f;
-            float x2 = center.X + MathF.Cos(angle) * 8f;
-            float y2 = center.Y + MathF.Sin(angle) * 8f;
-            canvas.DrawLine(x1, y1, x2, y2, _iconStrokePaint);
-        }
-    }
-
-    private void DrawBypassIcon(SKCanvas canvas, SKRect rect, bool isBypassed)
-    {
-        var round = new SKRoundRect(rect, 4f);
-        canvas.DrawRoundRect(round, isBypassed ? _buttonActivePaint : _buttonFillPaint);
-        canvas.DrawRoundRect(round, _surfaceBorderPaint);
-        canvas.DrawText("B", rect.MidX, rect.MidY + 4f, _smallTextPaint);
-    }
-
-    private void DrawRemoveIcon(SKCanvas canvas, SKRect rect)
-    {
-        canvas.DrawLine(rect.Left + 3f, rect.Top + 3f, rect.Right - 3f, rect.Bottom - 3f, _iconStrokePaint);
-        canvas.DrawLine(rect.Right - 3f, rect.Top + 3f, rect.Left + 3f, rect.Bottom - 3f, _iconStrokePaint);
-    }
-
-    private void DrawChevron(SKCanvas canvas, SKPoint center, float size)
-    {
-        canvas.DrawLine(center.X - size, center.Y - size / 2f, center.X, center.Y + size / 2f, _iconStrokePaint);
-        canvas.DrawLine(center.X, center.Y + size / 2f, center.X + size, center.Y - size / 2f, _iconStrokePaint);
     }
 
     private void DrawEllipsizedText(SKCanvas canvas, string text, float x, float y, float maxWidth, SKPaint paint)
@@ -937,93 +654,85 @@ public sealed class MainRenderer
             canvas.DrawText(text, x, y, paint);
             return;
         }
-
         const string ellipsis = "...";
-        float available = Math.Max(0f, maxWidth - paint.MeasureText(ellipsis));
-        int length = text.Length;
-        while (length > 0 && paint.MeasureText(text.AsSpan(0, length).ToString()) > available)
-        {
-            length--;
-        }
-
-        string trimmed = length > 0 ? $"{text[..length]}{ellipsis}" : ellipsis;
-        canvas.DrawText(trimmed, x, y, paint);
+        float available = MathF.Max(0f, maxWidth - paint.MeasureText(ellipsis));
+        int len = text.Length;
+        while (len > 0 && paint.MeasureText(text.AsSpan(0, len).ToString()) > available)
+            len--;
+        canvas.DrawText(len > 0 ? $"{text[..len]}{ellipsis}" : ellipsis, x, y, paint);
     }
+
+    private static float ToDb(float linear) => linear <= 0f ? -60f : 20f * MathF.Log10(linear + 1e-6f);
 
     private void ClearHitTargets()
     {
         _topButtonRects.Clear();
-        _devicePickerRects.Clear();
-        _deviceItemRects.Clear();
         _knobRects.Clear();
         _pluginSlots.Clear();
         _toggleRects.Clear();
-        _applyDevicesRect = SKRect.Empty;
-        _deviceListRect = SKRect.Empty;
     }
 
-    private static SKPaint CreateFillPaint(SKColor color) => new()
+    // Hit testing
+    public MainButton? HitTestTopButton(float x, float y)
     {
-        Color = color,
-        IsAntialias = true,
-        Style = SKPaintStyle.Fill
-    };
+        foreach (var (button, rect) in _topButtonRects)
+            if (rect.Contains(x, y)) return button;
+        return null;
+    }
 
-    private static SKPaint CreateStrokePaint(SKColor color, float strokeWidth) => new()
+    public KnobHit? HitTestKnob(float x, float y)
     {
-        Color = color,
-        IsAntialias = true,
-        Style = SKPaintStyle.Stroke,
-        StrokeWidth = strokeWidth
-    };
+        foreach (var knob in _knobRects)
+            if (knob.Rect.Contains(x, y)) return new KnobHit(knob.ChannelIndex, knob.KnobType);
+        return null;
+    }
 
+    public PluginSlotHit? HitTestPluginSlot(float x, float y, out PluginSlotRegion region)
+    {
+        foreach (var slot in _pluginSlots)
+        {
+            if (!slot.Rect.Contains(x, y)) continue;
+            if (slot.BypassRect.Contains(x, y)) { region = PluginSlotRegion.Bypass; return new PluginSlotHit(slot.ChannelIndex, slot.SlotIndex); }
+            if (slot.RemoveRect.Contains(x, y)) { region = PluginSlotRegion.Remove; return new PluginSlotHit(slot.ChannelIndex, slot.SlotIndex); }
+            region = PluginSlotRegion.Action;
+            return new PluginSlotHit(slot.ChannelIndex, slot.SlotIndex);
+        }
+        region = PluginSlotRegion.None;
+        return null;
+    }
+
+    public ToggleHit? HitTestToggle(float x, float y)
+    {
+        foreach (var toggle in _toggleRects)
+            if (toggle.Rect.Contains(x, y)) return new ToggleHit(toggle.ChannelIndex, toggle.ToggleType);
+        return null;
+    }
+
+    public bool HitTestTitleBar(float x, float y) => _titleBarRect.Contains(x, y);
+
+    // Paint factories
+    private static SKPaint CreateFillPaint(SKColor color) => new() { Color = color, IsAntialias = true, Style = SKPaintStyle.Fill };
+    private static SKPaint CreateStrokePaint(SKColor color, float width) => new() { Color = color, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = width };
     private static SKPaint CreateTextPaint(SKColor color, float size, SKFontStyle? style = null) => new()
     {
-        Color = color,
-        IsAntialias = true,
-        TextSize = size,
-        TextAlign = SKTextAlign.Left,
+        Color = color, IsAntialias = true, TextSize = size, TextAlign = SKTextAlign.Left,
         Typeface = SKTypeface.FromFamilyName("Segoe UI", style ?? SKFontStyle.Normal)
     };
-
     private static SKPaint CreateCenteredTextPaint(SKColor color, float size, SKFontStyle? style = null) => new()
     {
-        Color = color,
-        IsAntialias = true,
-        TextSize = size,
-        TextAlign = SKTextAlign.Center,
+        Color = color, IsAntialias = true, TextSize = size, TextAlign = SKTextAlign.Center,
         Typeface = SKTypeface.FromFamilyName("Segoe UI", style ?? SKFontStyle.Normal)
     };
 
-    private sealed record DeviceItemRect(DevicePickerTarget Target, int Index, SKRect Rect);
-
+    // Internal records
     private sealed record KnobRect(int ChannelIndex, KnobType KnobType, SKRect Rect);
-
     private sealed record PluginSlotRect(int ChannelIndex, int SlotIndex, SKRect Rect, SKRect BypassRect, SKRect RemoveRect);
-
     private sealed record ToggleRect(int ChannelIndex, ToggleType ToggleType, SKRect Rect);
-
-    private enum IconType
-    {
-        Close,
-        Minimize,
-        Pin,
-        Settings
-    }
+    private enum IconType { Close, Minimize, Pin, Settings }
 }
 
 public readonly record struct DeviceItemHit(DevicePickerTarget Target, int Index);
-
 public readonly record struct KnobHit(int ChannelIndex, KnobType KnobType);
-
 public readonly record struct PluginSlotHit(int ChannelIndex, int SlotIndex);
-
-public enum PluginSlotRegion
-{
-    None,
-    Action,
-    Bypass,
-    Remove
-}
-
+public enum PluginSlotRegion { None, Action, Bypass, Remove }
 public readonly record struct ToggleHit(int ChannelIndex, ToggleType ToggleType);

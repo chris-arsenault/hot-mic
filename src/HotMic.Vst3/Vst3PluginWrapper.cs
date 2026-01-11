@@ -48,7 +48,9 @@ public sealed class Vst3PluginWrapper : IPlugin
         _info = info;
     }
 
-    public string Id => $"vst3:{_info.Path}";
+    public string Id => _info.Format == VstPluginFormat.Vst2
+        ? $"vst2:{_info.Path}"
+        : $"vst3:{_info.Path}";
 
     public string Name => _info.Name;
 

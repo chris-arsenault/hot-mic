@@ -48,7 +48,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         ToggleViewCommand = new RelayCommand(ToggleView);
         ToggleAlwaysOnTopCommand = new RelayCommand(() => AlwaysOnTop = !AlwaysOnTop);
-        OpenSettingsCommand = new RelayCommand(() => { });
+        OpenSettingsCommand = new RelayCommand(OpenSettings);
         ApplyDeviceSelectionCommand = new RelayCommand(ApplyDeviceSelection);
 
         ApplyConfigToViewModels();
@@ -123,10 +123,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private double windowY;
 
     [ObservableProperty]
-    private double windowWidth = 1020;
+    private double windowWidth = 900;
 
     [ObservableProperty]
-    private double windowHeight = 720;
+    private double windowHeight = 320;
 
     public string ViewToggleLabel => IsMinimalView ? "Full" : "Minimal";
 
@@ -143,13 +143,50 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsMinimalView = !IsMinimalView;
         if (IsMinimalView)
         {
-            WindowWidth = 420;
-            WindowHeight = 180;
+            WindowWidth = 400;
+            WindowHeight = 160;
         }
         else
         {
-            WindowWidth = 1020;
-            WindowHeight = 720;
+            WindowWidth = 900;
+            WindowHeight = 320;
+        }
+    }
+
+    private void OpenSettings()
+    {
+        var settingsViewModel = new SettingsViewModel(
+            InputDevices,
+            OutputDevices,
+            SelectedInputDevice1,
+            SelectedInputDevice2,
+            SelectedOutputDevice,
+            SelectedMonitorDevice,
+            SelectedSampleRate,
+            SelectedBufferSize,
+            SelectedInput1Channel,
+            SelectedInput2Channel,
+            SelectedOutputRouting);
+
+        var window = new SettingsWindow(settingsViewModel)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+
+        if (window.ShowDialog() == true)
+        {
+            // Apply settings from dialog
+            SelectedInputDevice1 = settingsViewModel.SelectedInputDevice1;
+            SelectedInputDevice2 = settingsViewModel.SelectedInputDevice2;
+            SelectedOutputDevice = settingsViewModel.SelectedOutputDevice;
+            SelectedMonitorDevice = settingsViewModel.SelectedMonitorDevice;
+            SelectedSampleRate = settingsViewModel.SelectedSampleRate;
+            SelectedBufferSize = settingsViewModel.SelectedBufferSize;
+            SelectedInput1Channel = settingsViewModel.SelectedInput1Channel;
+            SelectedInput2Channel = settingsViewModel.SelectedInput2Channel;
+            SelectedOutputRouting = settingsViewModel.SelectedOutputRouting;
+
+            ApplyDeviceSelection();
         }
     }
 
@@ -292,10 +329,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 var pluginConfig = config.Plugins[i];
                 IPlugin? plugin = null;
-                if (pluginConfig.Type.StartsWith("vst3:", StringComparison.OrdinalIgnoreCase))
+                if (TryParseVstPluginType(pluginConfig.Type, out var format, out var path))
                 {
-                    var path = pluginConfig.Type.Substring("vst3:".Length);
-                    plugin = new Vst3PluginWrapper(new Vst3PluginInfo { Name = Path.GetFileNameWithoutExtension(path), Path = path });
+                    plugin = new Vst3PluginWrapper(new Vst3PluginInfo
+                    {
+                        Name = Path.GetFileNameWithoutExtension(path),
+                        Path = path,
+                        Format = format
+                    });
                 }
                 else
                 {
@@ -478,7 +519,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             IPlugin? newPlugin = choice.IsVst3
-                ? new Vst3PluginWrapper(new Vst3PluginInfo { Name = choice.Name, Path = choice.Path })
+                ? new Vst3PluginWrapper(new Vst3PluginInfo { Name = choice.Name, Path = choice.Path, Format = choice.Format })
                 : PluginFactory.Create(choice.Id);
 
             if (newPlugin is null)
@@ -565,9 +606,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         };
 
         var scanner = new Vst3Scanner();
-        foreach (var vst in scanner.Scan())
+        foreach (var vst in scanner.Scan(_config.Vst2SearchPaths, _config.Vst3SearchPaths))
         {
-            choices.Add(new PluginChoice { Id = $"vst3:{vst.Path}", Name = vst.Name, Path = vst.Path, IsVst3 = true });
+            string prefix = vst.Format == VstPluginFormat.Vst2 ? "vst2:" : "vst3:";
+            string label = vst.Format == VstPluginFormat.Vst2 ? "VST2" : "VST3";
+            choices.Add(new PluginChoice
+            {
+                Id = $"{prefix}{vst.Path}",
+                Name = $"{vst.Name} ({label})",
+                Path = vst.Path,
+                IsVst3 = true,
+                Format = vst.Format
+            });
         }
 
         var viewModel = new PluginBrowserViewModel(choices);
@@ -802,5 +852,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         return pluginConfig.Parameters.TryGetValue(parameterName, out var value) ? value : fallback;
+    }
+
+    private static bool TryParseVstPluginType(string type, out VstPluginFormat format, out string path)
+    {
+        if (type.StartsWith("vst3:", StringComparison.OrdinalIgnoreCase))
+        {
+            format = VstPluginFormat.Vst3;
+            path = type["vst3:".Length..];
+            return !string.IsNullOrWhiteSpace(path);
+        }
+
+        if (type.StartsWith("vst2:", StringComparison.OrdinalIgnoreCase))
+        {
+            format = VstPluginFormat.Vst2;
+            path = type["vst2:".Length..];
+            return !string.IsNullOrWhiteSpace(path);
+        }
+
+        format = VstPluginFormat.Vst3;
+        path = string.Empty;
+        return false;
     }
 }

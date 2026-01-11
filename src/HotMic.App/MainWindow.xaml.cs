@@ -80,37 +80,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_renderer.HitTestApplyDevices(x, y))
-        {
-            viewModel.ApplyDeviceSelectionCommand.Execute(null);
-            e.Handled = true;
-            return;
-        }
-
-        var deviceItemHit = _renderer.HitTestDeviceItem(x, y);
-        if (deviceItemHit.HasValue)
-        {
-            ApplyDeviceSelection(viewModel, deviceItemHit.Value);
-            _uiState.ActiveDevicePicker = DevicePickerTarget.None;
-            e.Handled = true;
-            return;
-        }
-
-        var devicePicker = _renderer.HitTestDevicePicker(x, y);
-        if (devicePicker != DevicePickerTarget.None)
-        {
-            ToggleDevicePicker(devicePicker);
-            e.Handled = true;
-            return;
-        }
-
-        if (_uiState.ActiveDevicePicker != DevicePickerTarget.None && !_renderer.HitTestDeviceList(x, y))
-        {
-            _uiState.ActiveDevicePicker = DevicePickerTarget.None;
-            e.Handled = true;
-            return;
-        }
-
         var knobHit = _renderer.HitTestKnob(x, y);
         if (knobHit.HasValue)
         {
@@ -205,20 +174,7 @@ public partial class MainWindow : Window
 
     private void SkiaCanvas_MouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (DataContext is not MainViewModel viewModel || viewModel.IsMinimalView)
-        {
-            return;
-        }
-
-        if (_uiState.ActiveDevicePicker == DevicePickerTarget.None)
-        {
-            return;
-        }
-
-        float maxScroll = MathF.Max(0f, _renderer.DeviceListContentHeight - _renderer.DeviceListViewportHeight);
-        float next = _uiState.DevicePickerScroll - e.Delta / 4f;
-        _uiState.DevicePickerScroll = Math.Clamp(next, 0f, maxScroll);
-        e.Handled = true;
+        // No longer used for device picker - reserved for future scroll functionality
     }
 
     private void HandleTopButton(MainButton button, MainViewModel viewModel)
@@ -288,80 +244,6 @@ public partial class MainWindow : Window
         }
 
         channel.PluginSlots[slotIndex].ActionCommand.Execute(null);
-    }
-
-    private void ToggleDevicePicker(DevicePickerTarget target)
-    {
-        if (_uiState.ActiveDevicePicker == target)
-        {
-            _uiState.ActiveDevicePicker = DevicePickerTarget.None;
-        }
-        else
-        {
-            _uiState.ActiveDevicePicker = target;
-            _uiState.DevicePickerScroll = 0f;
-        }
-    }
-
-    private static void ApplyDeviceSelection(MainViewModel viewModel, DeviceItemHit hit)
-    {
-        switch (hit.Target)
-        {
-            case DevicePickerTarget.Input1:
-                if ((uint)hit.Index < (uint)viewModel.InputDevices.Count)
-                {
-                    viewModel.SelectedInputDevice1 = viewModel.InputDevices[hit.Index];
-                }
-                break;
-            case DevicePickerTarget.Input2:
-                if ((uint)hit.Index < (uint)viewModel.InputDevices.Count)
-                {
-                    viewModel.SelectedInputDevice2 = viewModel.InputDevices[hit.Index];
-                }
-                break;
-            case DevicePickerTarget.Output:
-                if ((uint)hit.Index < (uint)viewModel.OutputDevices.Count)
-                {
-                    viewModel.SelectedOutputDevice = viewModel.OutputDevices[hit.Index];
-                }
-                break;
-            case DevicePickerTarget.Monitor:
-                if ((uint)hit.Index < (uint)viewModel.OutputDevices.Count)
-                {
-                    viewModel.SelectedMonitorDevice = viewModel.OutputDevices[hit.Index];
-                }
-                break;
-            case DevicePickerTarget.SampleRate:
-                if ((uint)hit.Index < (uint)viewModel.SampleRateOptions.Count)
-                {
-                    viewModel.SelectedSampleRate = viewModel.SampleRateOptions[hit.Index];
-                }
-                break;
-            case DevicePickerTarget.BufferSize:
-                if ((uint)hit.Index < (uint)viewModel.BufferSizeOptions.Count)
-                {
-                    viewModel.SelectedBufferSize = viewModel.BufferSizeOptions[hit.Index];
-                }
-                break;
-            case DevicePickerTarget.Input1Channel:
-                if ((uint)hit.Index < (uint)viewModel.InputChannelOptions.Count)
-                {
-                    viewModel.SelectedInput1Channel = viewModel.InputChannelOptions[hit.Index];
-                }
-                break;
-            case DevicePickerTarget.Input2Channel:
-                if ((uint)hit.Index < (uint)viewModel.InputChannelOptions.Count)
-                {
-                    viewModel.SelectedInput2Channel = viewModel.InputChannelOptions[hit.Index];
-                }
-                break;
-            case DevicePickerTarget.OutputRouting:
-                if ((uint)hit.Index < (uint)viewModel.OutputRoutingOptions.Count)
-                {
-                    viewModel.SelectedOutputRouting = viewModel.OutputRoutingOptions[hit.Index];
-                }
-                break;
-        }
     }
 
     private void StartKnobDrag(MainViewModel viewModel, KnobHit hit, float startY)

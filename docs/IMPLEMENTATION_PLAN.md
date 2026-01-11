@@ -3,7 +3,7 @@
 ## Goals
 - Implement the HotMic audio routing pipeline (2x WASAPI inputs -> plugin chains -> VB-Cable output).
 - Provide WPF + SkiaSharp UI with full edit and minimal view modes.
-- Support built-in DSP plugins and VST3 discovery/hosting.
+- Support built-in DSP plugins and VST2/VST3 discovery/hosting.
 - Persist configuration across sessions via JSON.
 
 ## Phases (aligned to REQUIREMENTS.md + AGENTS.md)
@@ -27,9 +27,9 @@
    - Minimal view with compact meters and channel labels.
    - Always-on-top toggle and view switching.
 
-5. VST3 Support
-   - Scan VST3 directories and cache results.
-   - Host VST3 plugins through wrapper implementing IPlugin.
+5. VST Support
+   - Scan VST2/VST3 directories and cache results.
+   - Host VST plugins through wrapper implementing IPlugin.
 
 6. Persistence & Polish
    - Persist devices, plugins, parameters, and UI state to JSON.
@@ -39,7 +39,7 @@
 - FR-1/FR-2: Audio engine + DeviceManager
 - FR-3/FR-7: ChannelStrip + MeterProcessor + UI meters
 - FR-4/FR-5: PluginChain + built-in plugins + plugin UI
-- FR-6: VST3 scanning/hosting
+- FR-6: VST scanning/hosting
 - FR-8/FR-9: WPF views and SkiaSharp controls
 - FR-10: ConfigManager + AppConfig persistence
 
@@ -49,5 +49,5 @@
 - Channel Strip & Metering
 - Plugin Chain & Built-in DSP
 - UI & View Modes
-- VST3 Support
+- VST Support
 - Configuration & Persistence
