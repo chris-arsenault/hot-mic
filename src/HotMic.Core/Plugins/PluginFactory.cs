@@ -15,6 +15,7 @@ public static class PluginFactory
             "builtin:gain" => new GainPlugin(),
             "builtin:rnnoise" => new RNNoisePlugin(),
             "builtin:deepfilternet" => new DeepFilterNetPlugin(),
+            "builtin:voice-gate" => new SileroVoiceGatePlugin(),
             _ => null
         };
     }

@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.InteropServices;
 
 namespace HotMic.Core.Plugins.BuiltIn;
@@ -17,4 +18,14 @@ internal static class RNNoiseInterop
 
     [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
     public static extern int rnnoise_get_size();
+
+    public static void TryLoadFromBaseDirectory()
+    {
+        string baseDir = AppContext.BaseDirectory;
+        string assetsPath = Path.Combine(baseDir, "Assets", "Native", "librnnoise.dll");
+        if (File.Exists(assetsPath))
+        {
+            NativeLibrary.TryLoad(assetsPath, out _);
+        }
+    }
 }

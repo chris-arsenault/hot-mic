@@ -102,7 +102,11 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
         try
         {
-            string modelDir = Path.Combine(AppContext.BaseDirectory, "Models", "deepfilternet3");
+            string modelDir = ResolveModelDirectory();
+            if (string.IsNullOrEmpty(modelDir))
+            {
+                throw new DirectoryNotFoundException("DeepFilterNet model directory not found.");
+            }
             _processor = new DeepFilterNetProcessor(modelDir);
             _hopSize = _processor.HopSize;
             _latencySamples = _processor.LatencySamples;
@@ -329,5 +333,23 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 _outputBuffer.Write(_hopOutput);
             }
         }
+    }
+
+    private static string ResolveModelDirectory()
+    {
+        string baseDir = AppContext.BaseDirectory;
+        string primary = Path.Combine(baseDir, "Models", "deepfilternet3");
+        if (File.Exists(Path.Combine(primary, "config.ini")))
+        {
+            return primary;
+        }
+
+        string assets = Path.Combine(baseDir, "Assets", "Models", "deepfilternet3");
+        if (File.Exists(Path.Combine(assets, "config.ini")))
+        {
+            return assets;
+        }
+
+        return string.Empty;
     }
 }

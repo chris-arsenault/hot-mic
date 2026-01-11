@@ -104,6 +104,12 @@ internal sealed class DeepFilterNetProcessor : IDisposable
             energy += sample * sample;
         }
 
+        if (maxAbs <= 0f)
+        {
+            output.Clear();
+            return;
+        }
+
         float rms = energy / input.Length;
         if (rms < 1e-7f)
         {

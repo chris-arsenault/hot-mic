@@ -204,8 +204,39 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void ToggleView()
     {
         IsMinimalView = !IsMinimalView;
-        WindowWidth = IsMinimalView ? MinimalViewWidth : FullViewWidth;
-        WindowHeight = IsMinimalView ? MinimalViewHeight : FullViewHeight;
+        UpdateDynamicWindowWidth();
+    }
+
+    private void UpdateDynamicWindowWidth()
+    {
+        if (IsMinimalView)
+        {
+            WindowWidth = MinimalViewWidth;
+            WindowHeight = MinimalViewHeight;
+            return;
+        }
+
+        // Calculate width based on the longest plugin chain (including +1 add placeholder)
+        int channel1PluginCount = 0;
+        int channel2PluginCount = 0;
+
+        if (_audioEngine.Channels.Count > 0)
+        {
+            channel1PluginCount = _audioEngine.Channels[0].PluginChain.Count;
+        }
+        if (_audioEngine.Channels.Count > 1)
+        {
+            channel2PluginCount = _audioEngine.Channels[1].PluginChain.Count;
+        }
+
+        // +1 for the add placeholder slot
+        int maxPlugins = Math.Max(channel1PluginCount, channel2PluginCount) + 1;
+
+        double pluginAreaWidth = maxPlugins * PluginSlotWidthWithSpacing;
+        double calculatedWidth = FullViewBaseWidth + pluginAreaWidth;
+
+        WindowWidth = Math.Clamp(calculatedWidth, MinFullViewWidth, MaxFullViewWidth);
+        WindowHeight = FullViewHeight;
     }
 
     partial void OnInput1IsStereoChanged(bool value)
@@ -450,23 +481,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
         for (int channelIndex = 0; channelIndex < _audioEngine.Channels.Count; channelIndex++)
         {
             var strip = _audioEngine.Channels[channelIndex];
-            var newSlots = new IPlugin?[strip.PluginChain.MaxPlugins];
-            var snapshot = channelIndex < snapshots.Length ? snapshots[channelIndex] : Array.Empty<IPlugin?>();
+            var snapshot = channelIndex < snapshots.Length ? snapshots[channelIndex] : [];
+            var pluginList = new List<IPlugin>();
 
-            for (int i = 0; i < newSlots.Length; i++)
+            foreach (var plugin in snapshot)
             {
-                if (i >= snapshot.Length || snapshot[i] is null)
+                if (plugin is null)
                 {
-                    newSlots[i] = null;
                     continue;
                 }
 
-                var plugin = snapshot[i]!;
                 ReinitializePluginForQuality(plugin, profile);
-                newSlots[i] = plugin;
+                pluginList.Add(plugin);
             }
 
-            strip.PluginChain.ReplaceAll(newSlots);
+            strip.PluginChain.ReplaceAll(pluginList.ToArray());
         }
     }
 
@@ -519,7 +548,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     // Window size constants (must match MainRenderer layout calculations)
-    private const double FullViewWidth = 920;
+    private const double FullViewBaseWidth = 280; // Input + Output + Master + padding, no plugins
+    private const double PluginSlotWidthWithSpacing = 54; // Narrow slot width + spacing (52 + 2)
+    private const double MaxFullViewWidth = 1200;
+    private const double MinFullViewWidth = 400;
     private const double FullViewHeight = 290;
     private const double MinimalViewWidth = 400;
     private const double MinimalViewHeight = 140;
@@ -532,9 +564,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         WindowX = _config.Ui.WindowPosition.X;
         WindowY = _config.Ui.WindowPosition.Y;
 
-        // Force correct window size based on view mode (ignore saved values)
-        WindowWidth = IsMinimalView ? MinimalViewWidth : FullViewWidth;
-        WindowHeight = IsMinimalView ? MinimalViewHeight : FullViewHeight;
+        // Force correct window size based on view mode
+        UpdateDynamicWindowWidth();
 
         var channel1Config = _config.Channels.ElementAtOrDefault(0);
         var channel2Config = _config.Channels.ElementAtOrDefault(1);
@@ -559,7 +590,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (channel1Config is not null)
         {
-            EnsurePluginList(channel1Config);
             Channel1.UpdateName(channel1Config.Name);
             Channel1.InputGainDb = channel1Config.InputGainDb;
             Channel1.OutputGainDb = channel1Config.OutputGainDb;
@@ -569,7 +599,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (channel2Config is not null)
         {
-            EnsurePluginList(channel2Config);
             Channel2.UpdateName(channel2Config.Name);
             Channel2.InputGainDb = channel2Config.InputGainDb;
             Channel2.OutputGainDb = channel2Config.OutputGainDb;
@@ -595,15 +624,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var strip = _audioEngine.Channels[channelIndex];
-        var slots = new IPlugin?[strip.PluginChain.MaxPlugins];
-        var slotInfos = new List<PluginSlotInfo>();
+        var pluginList = new List<IPlugin>();
         var profile = GetQualityProfile();
 
         if (config is not null)
         {
-            for (int i = 0; i < config.Plugins.Count && i < slots.Length; i++)
+            for (int i = 0; i < config.Plugins.Count; i++)
             {
                 var pluginConfig = config.Plugins[i];
+                if (string.IsNullOrWhiteSpace(pluginConfig.Type))
+                {
+                    continue;
+                }
+
                 IPlugin? plugin = null;
                 if (TryParseVstPluginType(pluginConfig.Type, out var format, out var path))
                 {
@@ -644,28 +677,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     plugin.SetState(pluginConfig.State);
                 }
 
-                slots[i] = plugin;
+                pluginList.Add(plugin);
             }
         }
 
-        strip.PluginChain.ReplaceAll(slots);
-        for (int i = 0; i < slots.Length; i++)
-        {
-            float latencyMs = 0f;
-            if (slots[i] is not null && _audioEngine.SampleRate > 0)
-            {
-                latencyMs = slots[i]!.LatencySamples * 1000f / _audioEngine.SampleRate;
-            }
-
-            slotInfos.Add(new PluginSlotInfo
-            {
-                Name = slots[i]?.Name ?? string.Empty,
-                IsBypassed = slots[i]?.IsBypassed ?? false,
-                LatencyMs = latencyMs
-            });
-        }
-
-        viewModel.UpdatePlugins(slotInfos);
+        strip.PluginChain.ReplaceAll(pluginList.ToArray());
+        RefreshPluginViewModels(channelIndex);
     }
 
     private void UpdateMeters()
@@ -824,12 +841,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var strip = _audioEngine.Channels[channelIndex];
         var slots = strip.PluginChain.GetSnapshot();
-        if ((uint)slotIndex >= (uint)slots.Length)
-        {
-            return;
-        }
 
-        var plugin = slots[slotIndex];
+        // If clicking on the "+1" add placeholder (slotIndex == slots.Length)
+        bool isAddPlaceholder = slotIndex == slots.Length;
+        var plugin = isAddPlaceholder ? null : (slotIndex < slots.Length ? slots[slotIndex] : null);
+
         if (plugin is null)
         {
             var choice = ShowPluginBrowser();
@@ -853,11 +869,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             newPlugin.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
-            var newSlots = slots.ToArray();
-            newSlots[slotIndex] = newPlugin;
-            strip.PluginChain.ReplaceAll(newSlots);
-            UpdatePluginConfig(channelIndex, slotIndex, newPlugin);
+
+            if (isAddPlaceholder)
+            {
+                // Add new slot at the end
+                strip.PluginChain.AddSlot(newPlugin);
+                UpdatePluginConfig(channelIndex, slots.Length, newPlugin);
+            }
+            else
+            {
+                // Replace existing slot
+                strip.PluginChain.SetSlot(slotIndex, newPlugin);
+                UpdatePluginConfig(channelIndex, slotIndex, newPlugin);
+            }
             RefreshPluginViewModels(channelIndex);
+            UpdateDynamicWindowWidth();
         }
         else
         {
@@ -890,11 +916,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var newSlots = slots.ToArray();
-        newSlots[slotIndex] = null;
-        strip.PluginChain.ReplaceAll(newSlots);
-        ClearPluginConfig(channelIndex, slotIndex);
+        strip.PluginChain.RemoveSlot(slotIndex);
+        RemovePluginConfig(channelIndex, slotIndex);
         RefreshPluginViewModels(channelIndex);
+        UpdateDynamicWindowWidth();
     }
 
     private void ReorderPlugins(int channelIndex, int fromIndex, int toIndex)
@@ -930,7 +955,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             new() { Id = "builtin:eq3", Name = "3-Band EQ", IsVst3 = false },
             new() { Id = "builtin:fft-noise", Name = "FFT Noise Removal", IsVst3 = false },
             new() { Id = "builtin:rnnoise", Name = "RNNoise (AI)", IsVst3 = false },
-            new() { Id = "builtin:deepfilternet", Name = "DeepFilterNet (AI)", IsVst3 = false }
+            new() { Id = "builtin:deepfilternet", Name = "DeepFilterNet (AI)", IsVst3 = false },
+            new() { Id = "builtin:voice-gate", Name = "Voice Gate (AI)", IsVst3 = false }
         };
 
         var scanner = new Vst3Scanner();
@@ -1002,7 +1028,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }).ToList();
 
         Action? learnNoiseAction = plugin is FFTNoiseRemovalPlugin ? () => RequestNoiseLearn(channelIndex, slotIndex) : null;
-        Func<float>? vadProvider = plugin is RNNoisePlugin rnnoise ? () => rnnoise.VadProbability : null;
+        Func<float>? vadProvider = plugin switch
+        {
+            RNNoisePlugin rnnoise => () => rnnoise.VadProbability,
+            SileroVoiceGatePlugin silero => () => silero.VadProbability,
+            _ => null
+        };
         string statusMessage = plugin is IPluginStatusProvider statusProvider ? statusProvider.StatusMessage : string.Empty;
 
         float latencyMs = _audioEngine.SampleRate > 0
@@ -1195,9 +1226,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return _config.Channels[channelIndex];
     }
 
-    private void EnsurePluginList(ChannelConfig config)
+    private void EnsurePluginListCapacity(ChannelConfig config, int requiredCapacity)
     {
-        while (config.Plugins.Count < 5)
+        while (config.Plugins.Count < requiredCapacity)
         {
             config.Plugins.Add(new PluginConfig());
         }
@@ -1206,7 +1237,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void UpdatePluginConfig(int channelIndex, int slotIndex, IPlugin plugin)
     {
         var config = GetOrCreateChannelConfig(channelIndex);
-        EnsurePluginList(config);
+        EnsurePluginListCapacity(config, slotIndex + 1);
 
         var pluginConfig = new PluginConfig
         {
@@ -1220,18 +1251,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _configManager.Save(_config);
     }
 
-    private void ClearPluginConfig(int channelIndex, int slotIndex)
+    private void RemovePluginConfig(int channelIndex, int slotIndex)
     {
         var config = GetOrCreateChannelConfig(channelIndex);
-        EnsurePluginList(config);
-        config.Plugins[slotIndex] = new PluginConfig();
+        if (slotIndex >= 0 && slotIndex < config.Plugins.Count)
+        {
+            config.Plugins.RemoveAt(slotIndex);
+        }
         _configManager.Save(_config);
     }
 
     private void SwapPluginConfig(int channelIndex, int fromIndex, int toIndex)
     {
         var config = GetOrCreateChannelConfig(channelIndex);
-        EnsurePluginList(config);
+        int maxIndex = Math.Max(fromIndex, toIndex);
+        EnsurePluginListCapacity(config, maxIndex + 1);
         (config.Plugins[fromIndex], config.Plugins[toIndex]) = (config.Plugins[toIndex], config.Plugins[fromIndex]);
         _configManager.Save(_config);
     }
@@ -1239,7 +1273,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void UpdatePluginParameterConfig(int channelIndex, int slotIndex, string parameterName, float value)
     {
         var config = GetOrCreateChannelConfig(channelIndex);
-        EnsurePluginList(config);
+        if (slotIndex < 0 || slotIndex >= config.Plugins.Count)
+        {
+            return;
+        }
         if (string.IsNullOrWhiteSpace(config.Plugins[slotIndex].Type))
         {
             return;
@@ -1270,7 +1307,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var config = GetOrCreateChannelConfig(channelIndex);
-        EnsurePluginList(config);
+        if (slotIndex >= config.Plugins.Count)
+        {
+            return;
+        }
         config.Plugins[slotIndex].State = plugin.GetState();
         _configManager.Save(_config);
     }
@@ -1278,7 +1318,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void UpdatePluginBypassConfig(int channelIndex, int slotIndex, bool bypass)
     {
         var config = GetOrCreateChannelConfig(channelIndex);
-        EnsurePluginList(config);
+        if (slotIndex < 0 || slotIndex >= config.Plugins.Count)
+        {
+            return;
+        }
         if (string.IsNullOrWhiteSpace(config.Plugins[slotIndex].Type))
         {
             return;

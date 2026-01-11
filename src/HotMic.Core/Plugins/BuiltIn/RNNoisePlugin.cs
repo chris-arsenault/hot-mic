@@ -86,6 +86,7 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
 
         try
         {
+            RNNoiseInterop.TryLoadFromBaseDirectory();
             _state = RNNoiseInterop.rnnoise_create(IntPtr.Zero);
             if (_state == IntPtr.Zero)
             {
@@ -223,6 +224,7 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
     private void ProcessFrame()
     {
         int start = _ringIndex;
+        float maxAbs = 0f;
         for (int i = 0; i < FrameSize; i++)
         {
             int index = start + i;
@@ -230,7 +232,19 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
             {
                 index -= FrameSize;
             }
-            _frameIn[i] = _inputRing[index];
+            float sample = _inputRing[index];
+            _frameIn[i] = sample;
+            float abs = MathF.Abs(sample);
+            if (abs > maxAbs)
+            {
+                maxAbs = abs;
+            }
+        }
+
+        if (maxAbs <= 0f)
+        {
+            Interlocked.Exchange(ref _vadBits, 0);
+            return;
         }
 
         float vad = RNNoiseInterop.rnnoise_process_frame(_state, _frameOut, _frameIn);
