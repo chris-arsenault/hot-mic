@@ -435,10 +435,10 @@ internal sealed class SileroVadInference : IDisposable
             return new[] { 1, 1, frameSize };
         }
 
-        int d0 = dims[0] > 0 ? dims[0] : 1;
-        int d1 = dims[1] > 0 ? dims[1] : 1;
-        int d2 = dims[2] > 0 ? dims[2] : frameSize;
-        return new[] { d0, d1, d2 };
+        int d0Value = dims[0] > 0 ? dims[0] : 1;
+        int d1Value = dims[1] > 0 ? dims[1] : 1;
+        int d2Value = dims[2] > 0 ? dims[2] : frameSize;
+        return new[] { d0Value, d1Value, d2Value };
     }
 
     private static int[] NormalizeStateShape(int[] dims)
@@ -455,10 +455,10 @@ internal sealed class SileroVadInference : IDisposable
             return new[] { 2, 1, 64 };
         }
 
-        int d0 = dims[0] > 0 ? dims[0] : 2;
-        int d1 = dims[1] > 0 ? dims[1] : 1;
-        int d2 = dims[2] > 0 ? dims[2] : 64;
-        return new[] { d0, d1, d2 };
+        int d0Value = dims[0] > 0 ? dims[0] : 2;
+        int d1Value = dims[1] > 0 ? dims[1] : 1;
+        int d2Value = dims[2] > 0 ? dims[2] : 64;
+        return new[] { d0Value, d1Value, d2Value };
     }
 
     private static int[] NormalizeSampleRateShape(int[] dims)
