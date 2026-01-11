@@ -82,12 +82,6 @@ public sealed class ConfigManager
 
     private static ChannelConfig CreateDefaultChannel(int id, string name)
     {
-        var channel = new ChannelConfig { Id = id, Name = name };
-        for (int i = 0; i < 5; i++)
-        {
-            channel.Plugins.Add(new PluginConfig());
-        }
-
-        return channel;
+        return new ChannelConfig { Id = id, Name = name };
     }
 }

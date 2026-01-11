@@ -11,16 +11,16 @@ public sealed class ChannelStrip
     private readonly PluginChain _pluginChain;
     private readonly MeterProcessor _inputMeter;
     private readonly MeterProcessor _outputMeter;
-    private readonly LinearSmoother _inputGainSmoother = new();
-    private readonly LinearSmoother _outputGainSmoother = new();
-    private readonly LinearSmoother _muteSmoother = new();
+    private LinearSmoother _inputGainSmoother = new();
+    private LinearSmoother _outputGainSmoother = new();
+    private LinearSmoother _muteSmoother = new();
     private int _isMuted;
     private int _isSoloed;
     private float _muteTarget = 1f;
 
     public ChannelStrip(int sampleRate, int blockSize)
     {
-        _pluginChain = new PluginChain(5);
+        _pluginChain = new PluginChain();
         _inputMeter = new MeterProcessor(sampleRate);
         _outputMeter = new MeterProcessor(sampleRate);
         _inputGainSmoother.Configure(sampleRate, 5f, 1f);

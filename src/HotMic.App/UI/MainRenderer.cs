@@ -19,7 +19,7 @@ public sealed class MainRenderer
 
     // Section dimensions
     private const float InputSectionWidth = 70f;
-    private const float PluginSlotWidth = 72f;
+    private const float PluginSlotWidth = 52f; // Narrower for N+1 model (one knob width + buffer)
     private const float PluginSlotSpacing = 2f;
     private const float OutputSectionWidth = 70f;
     private const float MeterWidth = 16f;
@@ -331,7 +331,7 @@ public sealed class MainRenderer
         float slotY = y + 4f;
         float slotHeight = height - 8f;
 
-        for (int i = 0; i < channel.PluginSlots.Count && i < 5; i++)
+        for (int i = 0; i < channel.PluginSlots.Count; i++)
         {
             var slot = channel.PluginSlots[i];
             DrawPluginSlot(canvas, slotX, slotY, PluginSlotWidth - MiniMeterWidth - 2f, slotHeight, slot, channelIndex, i, uiState);

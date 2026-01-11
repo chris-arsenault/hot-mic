@@ -63,6 +63,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _audioEngine = new AudioEngine(_config.AudioSettings);
         }
         LoadPluginsFromConfig();
+        UpdateDynamicWindowWidth(); // Recalculate after plugins are loaded
         _isInitializing = false; // Now safe to allow side effects from property changes
         StartEngine();
 
@@ -134,7 +135,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private double windowY;
 
     [ObservableProperty]
-    private double windowWidth = 920;
+    private double windowWidth = 400; // Will be recalculated by UpdateDynamicWindowWidth
 
     [ObservableProperty]
     private double windowHeight = 290;
@@ -548,7 +549,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     // Window size constants (must match MainRenderer layout calculations)
-    private const double FullViewBaseWidth = 280; // Input + Output + Master + padding, no plugins
+    // Layout calculation: pluginArea = windowWidth - 294 (from MainRenderer layout)
+    // Each slot needs 54px, so: windowWidth = 300 + N * 54 gives comfortable fit
+    private const double FullViewBaseWidth = 300;
     private const double PluginSlotWidthWithSpacing = 54; // Narrow slot width + spacing (52 + 2)
     private const double MaxFullViewWidth = 1200;
     private const double MinFullViewWidth = 400;

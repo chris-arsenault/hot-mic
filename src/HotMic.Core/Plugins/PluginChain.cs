@@ -6,36 +6,61 @@ public sealed class PluginChain
 {
     private IPlugin?[] _slots;
 
-    public PluginChain(int maxPlugins)
+    public PluginChain(int initialCapacity = 0)
     {
-        if (maxPlugins <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(maxPlugins));
-        }
-
-        _slots = new IPlugin?[maxPlugins];
+        _slots = initialCapacity > 0 ? new IPlugin?[initialCapacity] : [];
     }
 
-    public int MaxPlugins => _slots.Length;
+    public int Count => Volatile.Read(ref _slots).Length;
+
+    public int ActiveCount
+    {
+        get
+        {
+            var slots = Volatile.Read(ref _slots);
+            int count = 0;
+            for (int i = 0; i < slots.Length; i++)
+            {
+                if (slots[i] is not null)
+                {
+                    count++;
+                }
+            }
+            return count;
+        }
+    }
 
     public IPlugin?[] GetSnapshot()
     {
         return Volatile.Read(ref _slots);
     }
 
-    public bool TryAdd(IPlugin plugin)
+    public void AddSlot(IPlugin? plugin = null)
     {
-        var slots = Volatile.Read(ref _slots);
-        for (int i = 0; i < slots.Length; i++)
+        var oldSlots = Volatile.Read(ref _slots);
+        var newSlots = new IPlugin?[oldSlots.Length + 1];
+        Array.Copy(oldSlots, newSlots, oldSlots.Length);
+        newSlots[^1] = plugin;
+        Interlocked.Exchange(ref _slots, newSlots);
+    }
+
+    public void RemoveSlot(int index)
+    {
+        var oldSlots = Volatile.Read(ref _slots);
+        if ((uint)index >= (uint)oldSlots.Length || oldSlots.Length == 0)
         {
-            if (slots[i] is null)
-            {
-                slots[i] = plugin;
-                return true;
-            }
+            throw new ArgumentOutOfRangeException(nameof(index));
         }
 
-        return false;
+        var newSlots = new IPlugin?[oldSlots.Length - 1];
+        for (int i = 0, j = 0; i < oldSlots.Length; i++)
+        {
+            if (i != index)
+            {
+                newSlots[j++] = oldSlots[i];
+            }
+        }
+        Interlocked.Exchange(ref _slots, newSlots);
     }
 
     public void SetSlot(int index, IPlugin? plugin)
@@ -47,6 +72,19 @@ public sealed class PluginChain
         }
 
         slots[index] = plugin;
+    }
+
+    public void EnsureCapacity(int count)
+    {
+        var slots = Volatile.Read(ref _slots);
+        if (slots.Length >= count)
+        {
+            return;
+        }
+
+        var newSlots = new IPlugin?[count];
+        Array.Copy(slots, newSlots, slots.Length);
+        Interlocked.Exchange(ref _slots, newSlots);
     }
 
     public void Swap(int indexA, int indexB)
@@ -62,11 +100,6 @@ public sealed class PluginChain
 
     public void ReplaceAll(IPlugin?[] newSlots)
     {
-        if (newSlots.Length != _slots.Length)
-        {
-            throw new ArgumentException("Slot array length mismatch", nameof(newSlots));
-        }
-
         Interlocked.Exchange(ref _slots, newSlots);
     }
 

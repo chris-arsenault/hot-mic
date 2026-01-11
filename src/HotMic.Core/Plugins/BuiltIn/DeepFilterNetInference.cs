@@ -86,10 +86,6 @@ internal sealed class DeepFilterNetInference : IDisposable
         };
 
         var results = _encSession.Run(inputs);
-        foreach (var input in inputs)
-        {
-            input.Dispose();
-        }
 
         return new EncoderOutput(results,
             GetTensor(results, _encOutputEmb),
@@ -113,10 +109,6 @@ internal sealed class DeepFilterNetInference : IDisposable
         };
 
         using var results = _erbSession.Run(inputs);
-        foreach (var input in inputs)
-        {
-            input.Dispose();
-        }
 
         var mask = GetTensor(results, _erbOutputMask);
         CopyTensorTo(gainsOut, mask);
@@ -131,10 +123,6 @@ internal sealed class DeepFilterNetInference : IDisposable
         };
 
         using var results = _dfSession.Run(inputs);
-        foreach (var input in inputs)
-        {
-            input.Dispose();
-        }
 
         var coefs = GetTensor(results, _dfOutputCoefs);
         CopyTensorTo(coefsOut, coefs);
@@ -181,17 +169,36 @@ internal sealed class DeepFilterNetInference : IDisposable
     private static float GetScalar(IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results, string name)
     {
         var tensor = GetTensor(results, name);
-        return tensor.Buffer.Span[0];
+        if (tensor is DenseTensor<float> denseTensor)
+        {
+            return denseTensor.Buffer.Span[0];
+        }
+        return tensor.GetValue(0);
     }
 
     private static void CopyTensorTo(float[] destination, Tensor<float> tensor)
     {
-        var span = tensor.Buffer.Span;
-        int count = Math.Min(destination.Length, span.Length);
-        span[..count].CopyTo(destination);
-        if (count < destination.Length)
+        if (tensor is DenseTensor<float> denseTensor)
         {
-            Array.Clear(destination, count, destination.Length - count);
+            var span = denseTensor.Buffer.Span;
+            int count = Math.Min(destination.Length, span.Length);
+            span[..count].CopyTo(destination);
+            if (count < destination.Length)
+            {
+                Array.Clear(destination, count, destination.Length - count);
+            }
+        }
+        else
+        {
+            int count = Math.Min(destination.Length, (int)tensor.Length);
+            for (int i = 0; i < count; i++)
+            {
+                destination[i] = tensor.GetValue(i);
+            }
+            if (count < destination.Length)
+            {
+                Array.Clear(destination, count, destination.Length - count);
+            }
         }
     }
 

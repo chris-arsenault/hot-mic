@@ -14,7 +14,7 @@ internal sealed class SileroVadInference : IDisposable
     private readonly InferenceSession _session;
     private readonly string _inputName;
     private readonly string? _sampleRateName;
-    private readonly TensorElementType? _sampleRateType;
+    private readonly Type? _sampleRateType;
     private readonly int[]? _sampleRateShape;
     private readonly string? _stateHName;
     private readonly string? _stateCName;
@@ -85,9 +85,9 @@ internal sealed class SileroVadInference : IDisposable
             NamedOnnxValue.CreateFromTensor(_inputName, _inputTensor)
         };
 
-        if (_sampleRateName is not null && _sampleRateType.HasValue)
+        if (_sampleRateName is not null && _sampleRateType is not null)
         {
-            inputs.Add(CreateSampleRateInput(_sampleRateName, _sampleRateType.Value, _sampleRateShape));
+            inputs.Add(CreateSampleRateInput(_sampleRateName, _sampleRateType, _sampleRateShape));
         }
 
         if (_stateHTensor is not null && _stateCTensor is not null && _stateHName is not null && _stateCName is not null)
@@ -97,10 +97,6 @@ internal sealed class SileroVadInference : IDisposable
         }
 
         using var results = _session.Run(inputs);
-        foreach (var input in inputs)
-        {
-            input.Dispose();
-        }
 
         float prob = ReadScalar(results, _outputName);
         if (_outputHName is not null && _stateH is not null)
@@ -120,12 +116,12 @@ internal sealed class SileroVadInference : IDisposable
         _session.Dispose();
     }
 
-    private (string inputName, string? sampleRateName, TensorElementType? sampleRateType, int[]? sampleRateShape,
+    private (string inputName, string? sampleRateName, Type? sampleRateType, int[]? sampleRateShape,
         string? stateHName, string? stateCName, int[] inputShape, int[]? stateShape, int frameSize) ResolveInputs()
     {
         string? inputName = null;
         string? sampleRateName = null;
-        TensorElementType? sampleRateType = null;
+        Type? sampleRateType = null;
         int[]? sampleRateShape = null;
         string? stateHName = null;
         string? stateCName = null;
@@ -298,10 +294,10 @@ internal sealed class SileroVadInference : IDisposable
         return (outputName, outputHName, outputCName);
     }
 
-    private static NamedOnnxValue CreateSampleRateInput(string name, TensorElementType type, int[]? shape)
+    private static NamedOnnxValue CreateSampleRateInput(string name, Type type, int[]? shape)
     {
         int[] dims = shape is null || shape.Length == 0 ? Array.Empty<int>() : shape;
-        return type == TensorElementType.Int64
+        return type == typeof(long)
             ? NamedOnnxValue.CreateFromTensor(name, new DenseTensor<long>(new[] { 16000L }, dims))
             : NamedOnnxValue.CreateFromTensor(name, new DenseTensor<float>(new[] { 16000f }, dims));
     }
@@ -312,7 +308,12 @@ internal sealed class SileroVadInference : IDisposable
         {
             if (item.Name == name)
             {
-                return item.AsTensor<float>().Buffer.Span[0];
+                var tensor = item.AsTensor<float>();
+                if (tensor is DenseTensor<float> denseTensor)
+                {
+                    return denseTensor.Buffer.Span[0];
+                }
+                return tensor.GetValue(0);
             }
         }
 
@@ -328,12 +329,28 @@ internal sealed class SileroVadInference : IDisposable
                 continue;
             }
 
-            var span = item.AsTensor<float>().Buffer.Span;
-            int count = Math.Min(destination.Length, span.Length);
-            span[..count].CopyTo(destination);
-            if (count < destination.Length)
+            var tensor = item.AsTensor<float>();
+            if (tensor is DenseTensor<float> denseTensor)
             {
-                Array.Clear(destination, count, destination.Length - count);
+                var span = denseTensor.Buffer.Span;
+                int count = Math.Min(destination.Length, span.Length);
+                span[..count].CopyTo(destination);
+                if (count < destination.Length)
+                {
+                    Array.Clear(destination, count, destination.Length - count);
+                }
+            }
+            else
+            {
+                int count = Math.Min(destination.Length, (int)tensor.Length);
+                for (int i = 0; i < count; i++)
+                {
+                    destination[i] = tensor.GetValue(i);
+                }
+                if (count < destination.Length)
+                {
+                    Array.Clear(destination, count, destination.Length - count);
+                }
             }
             return;
         }
@@ -341,7 +358,7 @@ internal sealed class SileroVadInference : IDisposable
 
     private static bool IsSampleRateInput(NodeMetadata meta, int[] dims)
     {
-        return meta.ElementType == TensorElementType.Int64 && (dims.Length == 0 || dims.Length == 1);
+        return meta.ElementType == typeof(long) && (dims.Length == 0 || dims.Length == 1);
     }
 
     private static bool IsAudioInput(int[] dims)

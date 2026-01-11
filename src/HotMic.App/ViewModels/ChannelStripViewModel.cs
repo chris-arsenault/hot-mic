@@ -23,12 +23,9 @@ public partial class ChannelStripViewModel : ObservableObject
         _pluginReorderSink = pluginReorderSink;
         _pluginBypassConfigSink = pluginBypassConfigSink;
         PluginSlots = new ObservableCollection<PluginViewModel>();
-        for (int i = 0; i < 5; i++)
-        {
-            int slotIndex = i + 1;
-            int slot = i;
-            PluginSlots.Add(PluginViewModel.CreateEmpty(ChannelId, slotIndex, () => _pluginActionSink?.Invoke(slot), () => _pluginRemoveSink?.Invoke(slot), _parameterSink, (index, value) => _pluginBypassConfigSink?.Invoke(index, value)));
-        }
+
+        // Start with just one add placeholder
+        PluginSlots.Add(PluginViewModel.CreateEmpty(ChannelId, 1, () => _pluginActionSink?.Invoke(0), () => _pluginRemoveSink?.Invoke(0), _parameterSink, (index, value) => _pluginBypassConfigSink?.Invoke(index, value)));
 
         ToggleMuteCommand = new RelayCommand(() => IsMuted = !IsMuted);
         ToggleSoloCommand = new RelayCommand(() => IsSoloed = !IsSoloed);
@@ -134,9 +131,11 @@ public partial class ChannelStripViewModel : ObservableObject
     public void UpdatePlugins(IReadOnlyList<PluginSlotInfo> slots)
     {
         PluginSlots.Clear();
-        for (int i = 0; i < 5; i++)
+
+        // Add actual plugins
+        for (int i = 0; i < slots.Count; i++)
         {
-            if (i < slots.Count && !string.IsNullOrWhiteSpace(slots[i].Name))
+            if (!string.IsNullOrWhiteSpace(slots[i].Name))
             {
                 int slotIndex = i + 1;
                 int slot = i;
@@ -144,13 +143,11 @@ public partial class ChannelStripViewModel : ObservableObject
                 viewModel.IsBypassed = slots[i].IsBypassed;
                 PluginSlots.Add(viewModel);
             }
-            else
-            {
-                int slotIndex = i + 1;
-                int slot = i;
-                PluginSlots.Add(PluginViewModel.CreateEmpty(ChannelId, slotIndex, () => _pluginActionSink?.Invoke(slot), () => _pluginRemoveSink?.Invoke(slot), _parameterSink, (index, value) => _pluginBypassConfigSink?.Invoke(index, value)));
-            }
         }
+
+        // Add the "+1" add placeholder at the end
+        int addSlotIndex = slots.Count;
+        PluginSlots.Add(PluginViewModel.CreateEmpty(ChannelId, addSlotIndex + 1, () => _pluginActionSink?.Invoke(addSlotIndex), () => { }, _parameterSink, (index, value) => { }));
     }
 
     public void MovePlugin(int fromIndex, int toIndex)
