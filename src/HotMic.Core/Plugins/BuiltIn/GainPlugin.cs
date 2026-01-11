@@ -1,9 +1,11 @@
 using System.Threading;
+using HotMic.Common.Configuration;
 using HotMic.Core.Dsp;
+using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class GainPlugin : IPlugin
+public sealed class GainPlugin : IPlugin, IQualityConfigurablePlugin
 {
     public const int GainIndex = 0;
     public const int PhaseInvertIndex = 1;
@@ -12,6 +14,7 @@ public sealed class GainPlugin : IPlugin
     private float _phaseInvert; // 0 = normal, 1 = inverted
     private float _gainLinear = 1f;
     private float _phaseMultiplier = 1f;
+    private float _smoothingMs = 5f;
     private int _sampleRate;
     private readonly LinearSmoother _gainSmoother = new();
 
@@ -42,7 +45,7 @@ public sealed class GainPlugin : IPlugin
     public void Initialize(int sampleRate, int blockSize)
     {
         _sampleRate = sampleRate;
-        _gainSmoother.Configure(sampleRate, 5f, _gainLinear * _phaseMultiplier);
+        _gainSmoother.Configure(sampleRate, _smoothingMs, _gainLinear * _phaseMultiplier);
         UpdateCoefficients();
     }
 
@@ -135,6 +138,11 @@ public sealed class GainPlugin : IPlugin
 
     public void Dispose()
     {
+    }
+
+    public void ApplyQuality(AudioQualityProfile profile)
+    {
+        _smoothingMs = MathF.Max(1f, profile.GainSmoothingMs);
     }
 
     private void UpdateCoefficients()

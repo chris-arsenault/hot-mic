@@ -88,6 +88,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_renderer.HitTestQualityToggle(x, y))
+        {
+            viewModel.QualityMode = viewModel.QualityMode == HotMic.Common.Configuration.AudioQualityMode.LatencyPriority
+                ? HotMic.Common.Configuration.AudioQualityMode.QualityPriority
+                : HotMic.Common.Configuration.AudioQualityMode.LatencyPriority;
+            e.Handled = true;
+            return;
+        }
+
         // Stats area click toggles debug overlay
         if (_renderer.HitTestStatsArea(x, y))
         {

@@ -1,10 +1,12 @@
 using System.Threading;
+using HotMic.Common.Configuration;
 using HotMic.Core.Dsp;
+using HotMic.Core.Plugins;
 using HotMic.Core.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class ThreeBandEqPlugin : IPlugin
+public sealed class ThreeBandEqPlugin : IPlugin, IQualityConfigurablePlugin
 {
     public const int LowGainIndex = 0;
     public const int LowFreqIndex = 1;
@@ -16,9 +18,9 @@ public sealed class ThreeBandEqPlugin : IPlugin
     public const int HighFreqIndex = 7;
     public const int HighQIndex = 8;
 
-    private const int AnalysisSize = 1024;
-    private const float ParameterSmoothingMs = 15f;
-    private const int CoefficientUpdateStride = 16; // Throttle coefficient updates to avoid per-sample trig work.
+    private const int DefaultAnalysisSize = 1024;
+    private const float DefaultSmoothingMs = 15f;
+    private const int DefaultCoefficientUpdateStride = 16; // Throttle coefficient updates to avoid per-sample trig work.
 
     private readonly BiquadFilter _low = new();
     private readonly BiquadFilter _mid = new();
@@ -38,6 +40,9 @@ public sealed class ThreeBandEqPlugin : IPlugin
     private int _outputLevelBits;
     private int _coeffUpdateCounter;
     private bool _filtersDirty;
+    private int _analysisSize = DefaultAnalysisSize;
+    private float _parameterSmoothingMs = DefaultSmoothingMs;
+    private int _coefficientUpdateStride = DefaultCoefficientUpdateStride;
 
     private readonly LinearSmoother _lowGainSmoother = new();
     private readonly LinearSmoother _lowFreqSmoother = new();
@@ -56,19 +61,17 @@ public sealed class ThreeBandEqPlugin : IPlugin
     private const float SpectrumDecay = 0.92f;
     private const float PeakDecay = 0.985f;
 
-    private readonly LockFreeRingBuffer _analysisBuffer = new(AnalysisSize * 4);
-    private readonly float[] _analysisSamples = new float[AnalysisSize];
-    private readonly float[] _fftReal = new float[AnalysisSize];
-    private readonly float[] _fftImag = new float[AnalysisSize];
-    private readonly float[] _window = new float[AnalysisSize];
-    private readonly FastFft _fft = new(AnalysisSize);
+    private LockFreeRingBuffer _analysisBuffer;
+    private float[] _analysisSamples = Array.Empty<float>();
+    private float[] _fftReal = Array.Empty<float>();
+    private float[] _fftImag = Array.Empty<float>();
+    private float[] _window = Array.Empty<float>();
+    private FastFft? _fft;
 
     public ThreeBandEqPlugin()
     {
-        for (int i = 0; i < AnalysisSize; i++)
-        {
-            _window[i] = 0.5f - 0.5f * MathF.Cos(2f * MathF.PI * i / (AnalysisSize - 1));
-        }
+        _analysisBuffer = new LockFreeRingBuffer(DefaultAnalysisSize * 4);
+        ConfigureAnalysis(_analysisSize);
 
         Parameters =
         [
@@ -132,6 +135,7 @@ public sealed class ThreeBandEqPlugin : IPlugin
     public void Initialize(int sampleRate, int blockSize)
     {
         _sampleRate = sampleRate;
+        ConfigureAnalysis(_analysisSize);
         ConfigureSmoothers();
     }
 
@@ -171,7 +175,7 @@ public sealed class ThreeBandEqPlugin : IPlugin
                 if (updateCounter <= 0)
                 {
                     UpdateFiltersFromSmoothers();
-                    updateCounter = CoefficientUpdateStride;
+                    updateCounter = _coefficientUpdateStride;
                 }
                 updateCounter--;
             }
@@ -291,6 +295,15 @@ public sealed class ThreeBandEqPlugin : IPlugin
     {
     }
 
+    public void ApplyQuality(AudioQualityProfile profile)
+    {
+        _analysisSize = Math.Max(256, NextPowerOfTwo(profile.EqAnalysisSize));
+        _parameterSmoothingMs = MathF.Max(1f, profile.EqSmoothingMs);
+        _coefficientUpdateStride = Math.Max(1, profile.EqCoefficientUpdateStride);
+        ConfigureAnalysis(_analysisSize);
+        ConfigureSmoothers();
+    }
+
     private void UpdateFiltersFromSmoothers()
     {
         if (_sampleRate <= 0)
@@ -310,19 +323,53 @@ public sealed class ThreeBandEqPlugin : IPlugin
             return;
         }
 
-        _lowGainSmoother.Configure(_sampleRate, ParameterSmoothingMs, _lowGainDb);
-        _lowFreqSmoother.Configure(_sampleRate, ParameterSmoothingMs, _lowFreq);
-        _lowQSmoother.Configure(_sampleRate, ParameterSmoothingMs, _lowQ);
-        _midGainSmoother.Configure(_sampleRate, ParameterSmoothingMs, _midGainDb);
-        _midFreqSmoother.Configure(_sampleRate, ParameterSmoothingMs, _midFreq);
-        _midQSmoother.Configure(_sampleRate, ParameterSmoothingMs, _midQ);
-        _highGainSmoother.Configure(_sampleRate, ParameterSmoothingMs, _highGainDb);
-        _highFreqSmoother.Configure(_sampleRate, ParameterSmoothingMs, _highFreq);
-        _highQSmoother.Configure(_sampleRate, ParameterSmoothingMs, _highQ);
+        _lowGainSmoother.Configure(_sampleRate, _parameterSmoothingMs, _lowGainDb);
+        _lowFreqSmoother.Configure(_sampleRate, _parameterSmoothingMs, _lowFreq);
+        _lowQSmoother.Configure(_sampleRate, _parameterSmoothingMs, _lowQ);
+        _midGainSmoother.Configure(_sampleRate, _parameterSmoothingMs, _midGainDb);
+        _midFreqSmoother.Configure(_sampleRate, _parameterSmoothingMs, _midFreq);
+        _midQSmoother.Configure(_sampleRate, _parameterSmoothingMs, _midQ);
+        _highGainSmoother.Configure(_sampleRate, _parameterSmoothingMs, _highGainDb);
+        _highFreqSmoother.Configure(_sampleRate, _parameterSmoothingMs, _highFreq);
+        _highQSmoother.Configure(_sampleRate, _parameterSmoothingMs, _highQ);
 
         UpdateFiltersFromSmoothers();
         _filtersDirty = false;
         _coeffUpdateCounter = 0;
+    }
+
+    private void ConfigureAnalysis(int analysisSize)
+    {
+        int size = Math.Max(256, NextPowerOfTwo(analysisSize));
+        if (_analysisSamples.Length == size)
+        {
+            _analysisBuffer.Clear();
+            return;
+        }
+
+        _analysisBuffer = new LockFreeRingBuffer(size * 4);
+        _analysisSamples = new float[size];
+        _fftReal = new float[size];
+        _fftImag = new float[size];
+        _window = new float[size];
+        for (int i = 0; i < size; i++)
+        {
+            _window[i] = 0.5f - 0.5f * MathF.Cos(2f * MathF.PI * i / (size - 1));
+        }
+
+        _fft = new FastFft(size);
+        _analysisSize = size;
+    }
+
+    private static int NextPowerOfTwo(int value)
+    {
+        int power = 1;
+        while (power < value)
+        {
+            power <<= 1;
+        }
+
+        return power;
     }
 
     private void MarkFiltersDirty()
@@ -360,13 +407,19 @@ public sealed class ThreeBandEqPlugin : IPlugin
     private void UpdateSpectrum()
     {
         // Run analysis on UI thread using buffered samples to keep audio callback light.
+        int analysisSize = _analysisSamples.Length;
+        if (analysisSize == 0 || _fft is null)
+        {
+            return;
+        }
+
         int read = _analysisBuffer.Read(_analysisSamples);
         if (read < _analysisSamples.Length)
         {
             Array.Clear(_analysisSamples, read, _analysisSamples.Length - read);
         }
 
-        for (int i = 0; i < AnalysisSize; i++)
+        for (int i = 0; i < analysisSize; i++)
         {
             _fftReal[i] = _analysisSamples[i] * _window[i];
             _fftImag[i] = 0f;
@@ -374,10 +427,10 @@ public sealed class ThreeBandEqPlugin : IPlugin
 
         _fft.Forward(_fftReal, _fftImag);
 
-        int fftBins = AnalysisSize / 2 + 1;
+        int fftBins = analysisSize / 2 + 1;
         float minFreq = 20f;
         float maxFreq = _sampleRate > 0 ? _sampleRate / 2f : 20000f;
-        const float normalizationFactor = 2f / AnalysisSize;
+        float normalizationFactor = 2f / analysisSize;
 
         for (int displayBin = 0; displayBin < SpectrumBins; displayBin++)
         {

@@ -20,7 +20,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly ConfigManager _configManager = new();
     private readonly DeviceManager _deviceManager = new();
-    private readonly AudioEngine _audioEngine;
+    private AudioEngine _audioEngine;
     private readonly DispatcherTimer _meterTimer;
     private AppConfig _config;
     private long _lastMeterUpdateTicks;
@@ -37,8 +37,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _config = _configManager.LoadOrDefault();
         _audioEngine = new AudioEngine(_config.AudioSettings);
 
-        Channel1 = new ChannelStripViewModel(0, "Channel 1", _audioEngine.EnqueueParameterChange, slot => HandlePluginAction(0, slot), slot => RemovePlugin(0, slot), (from, to) => ReorderPlugins(0, from, to), (index, value) => UpdatePluginBypassConfig(0, index, value));
-        Channel2 = new ChannelStripViewModel(1, "Channel 2", _audioEngine.EnqueueParameterChange, slot => HandlePluginAction(1, slot), slot => RemovePlugin(1, slot), (from, to) => ReorderPlugins(1, from, to), (index, value) => UpdatePluginBypassConfig(1, index, value));
+        Channel1 = new ChannelStripViewModel(0, "Channel 1", EnqueueParameterChange, slot => HandlePluginAction(0, slot), slot => RemovePlugin(0, slot), (from, to) => ReorderPlugins(0, from, to), (index, value) => UpdatePluginBypassConfig(0, index, value));
+        Channel2 = new ChannelStripViewModel(1, "Channel 2", EnqueueParameterChange, slot => HandlePluginAction(1, slot), slot => RemovePlugin(1, slot), (from, to) => ReorderPlugins(1, from, to), (index, value) => UpdatePluginBypassConfig(1, index, value));
         Channel1.PropertyChanged += (_, e) => UpdateChannelConfig(0, Channel1, e.PropertyName);
         Channel2.PropertyChanged += (_, e) => UpdateChannelConfig(1, Channel2, e.PropertyName);
 
@@ -57,6 +57,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ApplyDeviceSelectionCommand = new RelayCommand(ApplyDeviceSelection);
 
         ApplyConfigToViewModels();
+        if (_audioEngine.SampleRate != _config.AudioSettings.SampleRate || _audioEngine.BlockSize != _config.AudioSettings.BufferSize)
+        {
+            _audioEngine.Dispose();
+            _audioEngine = new AudioEngine(_config.AudioSettings);
+        }
         LoadPluginsFromConfig();
         _isInitializing = false; // Now safe to allow side effects from property changes
         StartEngine();
@@ -150,6 +155,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     // Meter scale mode (false = default, true = vox +20dB)
     [ObservableProperty]
     private bool meterScaleVox;
+
+    [ObservableProperty]
+    private AudioQualityMode qualityMode;
 
     // Hotbar stats
     [ObservableProperty]
@@ -292,6 +300,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _configManager.Save(_config);
     }
 
+    partial void OnQualityModeChanged(AudioQualityMode value)
+    {
+        if (_isInitializing) return;
+        ApplyQualityMode(value);
+    }
+
+    private void EnqueueParameterChange(ParameterChange change)
+    {
+        _audioEngine.EnqueueParameterChange(change);
+    }
+
+    private AudioQualityProfile GetQualityProfile()
+    {
+        return AudioQualityProfiles.ForMode(QualityMode, SelectedSampleRate);
+    }
+
+    private void ApplyQualityMode(AudioQualityMode mode)
+    {
+        var profile = AudioQualityProfiles.ForMode(mode, SelectedSampleRate);
+        SelectedBufferSize = profile.BufferSize;
+        _config.AudioSettings.QualityMode = mode;
+        _config.AudioSettings.BufferSize = SelectedBufferSize;
+        _configManager.Save(_config);
+        RestartAudioEngineForQuality(profile);
+    }
+
     private void StartEngine()
     {
         if (!_audioEngine.IsVbCableInstalled())
@@ -320,12 +354,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var profile = GetQualityProfile();
+        if (SelectedBufferSize != profile.BufferSize)
+        {
+            SelectedBufferSize = profile.BufferSize;
+        }
+
         _config.AudioSettings.InputDevice1Id = SelectedInputDevice1?.Id ?? string.Empty;
         _config.AudioSettings.InputDevice2Id = SelectedInputDevice2?.Id ?? string.Empty;
         _config.AudioSettings.OutputDeviceId = SelectedOutputDevice?.Id ?? string.Empty;
         _config.AudioSettings.MonitorOutputDeviceId = SelectedMonitorDevice?.Id ?? string.Empty;
         _config.AudioSettings.SampleRate = SelectedSampleRate;
         _config.AudioSettings.BufferSize = SelectedBufferSize;
+        _config.AudioSettings.QualityMode = QualityMode;
         _config.AudioSettings.Input1Channel = SelectedInput1Channel;
         _config.AudioSettings.Input2Channel = SelectedInput2Channel;
         _config.AudioSettings.OutputRouting = SelectedOutputRouting;
@@ -349,6 +390,134 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void RestartAudioEngineForQuality(AudioQualityProfile profile)
+    {
+        var snapshots = CapturePluginSnapshots();
+        _audioEngine.Stop();
+        _audioEngine.Dispose();
+        _audioEngine = new AudioEngine(_config.AudioSettings);
+
+        if (SelectedOutputDevice is null)
+        {
+            StatusMessage = "Select an output device.";
+            return;
+        }
+
+        if (!DeviceManager.IsVbCableDeviceName(SelectedOutputDevice.Name))
+        {
+            StatusMessage = "Output must be set to VB-Cable.";
+            return;
+        }
+
+        _audioEngine.ConfigureDevices(
+            SelectedInputDevice1?.Id ?? string.Empty,
+            SelectedInputDevice2?.Id ?? string.Empty,
+            SelectedOutputDevice?.Id ?? string.Empty,
+            SelectedMonitorDevice?.Id ?? string.Empty);
+        _audioEngine.ConfigureRouting(SelectedInput1Channel, SelectedInput2Channel, SelectedOutputRouting);
+        ApplyChannelStateToEngine();
+
+        RestorePluginsFromSnapshots(snapshots, profile);
+
+        try
+        {
+            _audioEngine.Start();
+            StatusMessage = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Audio start failed: {ex.Message}";
+        }
+
+        RefreshPluginViewModels(0);
+        RefreshPluginViewModels(1);
+    }
+
+    private IPlugin?[][] CapturePluginSnapshots()
+    {
+        var snapshots = new IPlugin?[_audioEngine.Channels.Count][];
+        for (int i = 0; i < _audioEngine.Channels.Count; i++)
+        {
+            var slots = _audioEngine.Channels[i].PluginChain.GetSnapshot();
+            snapshots[i] = slots.ToArray();
+        }
+
+        return snapshots;
+    }
+
+    private void RestorePluginsFromSnapshots(IPlugin?[][] snapshots, AudioQualityProfile profile)
+    {
+        for (int channelIndex = 0; channelIndex < _audioEngine.Channels.Count; channelIndex++)
+        {
+            var strip = _audioEngine.Channels[channelIndex];
+            var newSlots = new IPlugin?[strip.PluginChain.MaxPlugins];
+            var snapshot = channelIndex < snapshots.Length ? snapshots[channelIndex] : Array.Empty<IPlugin?>();
+
+            for (int i = 0; i < newSlots.Length; i++)
+            {
+                if (i >= snapshot.Length || snapshot[i] is null)
+                {
+                    newSlots[i] = null;
+                    continue;
+                }
+
+                var plugin = snapshot[i]!;
+                ReinitializePluginForQuality(plugin, profile);
+                newSlots[i] = plugin;
+            }
+
+            strip.PluginChain.ReplaceAll(newSlots);
+        }
+    }
+
+    private void ReinitializePluginForQuality(IPlugin plugin, AudioQualityProfile profile)
+    {
+        bool bypassed = plugin.IsBypassed;
+        if (plugin is IQualityConfigurablePlugin qualityPlugin)
+        {
+            qualityPlugin.ApplyQuality(profile);
+        }
+
+        if (plugin is Vst3PluginWrapper vst3)
+        {
+            var state = vst3.GetState();
+            vst3.Dispose();
+            vst3.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
+            if (state.Length > 0)
+            {
+                vst3.SetState(state);
+            }
+        }
+        else
+        {
+            plugin.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
+        }
+
+        plugin.IsBypassed = bypassed;
+    }
+
+    private void ApplyChannelStateToEngine()
+    {
+        if (_audioEngine.Channels.Count < 2)
+        {
+            return;
+        }
+
+        var channel1 = _audioEngine.Channels[0];
+        channel1.SetInputGainDb(Channel1.InputGainDb);
+        channel1.SetOutputGainDb(Channel1.OutputGainDb);
+        channel1.SetMuted(Channel1.IsMuted);
+        channel1.SetSoloed(Channel1.IsSoloed);
+
+        var channel2 = _audioEngine.Channels[1];
+        channel2.SetInputGainDb(Channel2.InputGainDb);
+        channel2.SetOutputGainDb(Channel2.OutputGainDb);
+        channel2.SetMuted(Channel2.IsMuted);
+        channel2.SetSoloed(Channel2.IsSoloed);
+
+        _audioEngine.SetMasterMute(MasterMuted);
+    }
+
     // Window size constants (must match MainRenderer layout calculations)
     private const double FullViewWidth = 920;
     private const double FullViewHeight = 290;
@@ -370,12 +539,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var channel1Config = _config.Channels.ElementAtOrDefault(0);
         var channel2Config = _config.Channels.ElementAtOrDefault(1);
 
+        QualityMode = _config.AudioSettings.QualityMode;
         SelectedSampleRate = SampleRateOptions.Contains(_config.AudioSettings.SampleRate)
             ? _config.AudioSettings.SampleRate
             : SampleRateOptions[0];
-        SelectedBufferSize = BufferSizeOptions.Contains(_config.AudioSettings.BufferSize)
-            ? _config.AudioSettings.BufferSize
+        var profile = AudioQualityProfiles.ForMode(QualityMode, SelectedSampleRate);
+        SelectedBufferSize = BufferSizeOptions.Contains(profile.BufferSize)
+            ? profile.BufferSize
             : BufferSizeOptions[1];
+        _config.AudioSettings.BufferSize = SelectedBufferSize;
         SelectedInput1Channel = _config.AudioSettings.Input1Channel;
         SelectedInput2Channel = _config.AudioSettings.Input2Channel;
         SelectedOutputRouting = _config.AudioSettings.OutputRouting;
@@ -425,6 +597,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var strip = _audioEngine.Channels[channelIndex];
         var slots = new IPlugin?[strip.PluginChain.MaxPlugins];
         var slotInfos = new List<PluginSlotInfo>();
+        var profile = GetQualityProfile();
 
         if (config is not null)
         {
@@ -448,6 +621,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (plugin is null)
                 {
                     continue;
+                }
+
+                if (plugin is IQualityConfigurablePlugin qualityPlugin)
+                {
+                    qualityPlugin.ApplyQuality(profile);
                 }
 
                 plugin.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
@@ -667,6 +845,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             if (newPlugin is null)
             {
                 return;
+            }
+
+            if (newPlugin is IQualityConfigurablePlugin qualityPlugin)
+            {
+                qualityPlugin.ApplyQuality(GetQualityProfile());
             }
 
             newPlugin.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);

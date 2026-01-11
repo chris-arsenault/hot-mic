@@ -64,6 +64,7 @@ public sealed class MainRenderer
     private readonly List<ToggleRect> _toggleRects = new();
     private SKRect _titleBarRect;
     private SKRect _meterScaleToggleRect;
+    private SKRect _qualityToggleRect;
     private SKRect _statsAreaRect;
 
     public MainRenderer()
@@ -203,6 +204,19 @@ public sealed class MainRenderer
         var scalePaint = voxActive ? CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 9f, SKFontStyle.Bold)
                                    : CreateCenteredTextPaint(_theme.TextSecondary, 9f);
         canvas.DrawText(scaleLabel, _meterScaleToggleRect.MidX, _meterScaleToggleRect.MidY + 3f, scalePaint);
+
+        // Quality mode toggle
+        float qualityX = _meterScaleToggleRect.Right + 6f;
+        _qualityToggleRect = new SKRect(qualityX, toggleY, qualityX + 56f, toggleY + 16f);
+        bool qualityActive = viewModel.QualityMode == HotMic.Common.Configuration.AudioQualityMode.QualityPriority;
+        var qualityBg = qualityActive ? _accentPaint : _buttonPaint;
+        canvas.DrawRoundRect(new SKRoundRect(_qualityToggleRect, 3f), qualityBg);
+        canvas.DrawRoundRect(new SKRoundRect(_qualityToggleRect, 3f), _borderPaint);
+
+        string qualityLabel = qualityActive ? "QUAL" : "LAT";
+        var qualityPaint = qualityActive ? CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 9f, SKFontStyle.Bold)
+                                         : CreateCenteredTextPaint(_theme.TextSecondary, 9f);
+        canvas.DrawText(qualityLabel, _qualityToggleRect.MidX, _qualityToggleRect.MidY + 3f, qualityPaint);
 
         // Stats on right side (clickable to toggle debug overlay)
         float statsRightX = size.Width - Padding;
@@ -939,6 +953,8 @@ public sealed class MainRenderer
     }
 
     public bool HitTestMeterScaleToggle(float x, float y) => _meterScaleToggleRect.Contains(x, y);
+
+    public bool HitTestQualityToggle(float x, float y) => _qualityToggleRect.Contains(x, y);
 
     public bool HitTestStatsArea(float x, float y) => _statsAreaRect.Contains(x, y);
 

@@ -1,9 +1,11 @@
 using System.Threading;
+using HotMic.Common.Configuration;
 using HotMic.Core.Dsp;
+using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class NoiseGatePlugin : IPlugin
+public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
 {
     public const int ThresholdIndex = 0;
     public const int HysteresisIndex = 1;
@@ -33,9 +35,9 @@ public sealed class NoiseGatePlugin : IPlugin
 
     private float _detector;
     private readonly OnePoleHighPass _sidechainFilter = new();
-    private const float SidechainHpfHz = 80f;
-    private const float GateRatio = 3f;
-    private const float MaxRangeDb = 24f;
+    private float _sidechainHpfHz = 80f;
+    private float _gateRatio = 3f;
+    private float _maxRangeDb = 24f;
 
     public NoiseGatePlugin()
     {
@@ -64,6 +66,12 @@ public sealed class NoiseGatePlugin : IPlugin
     public void Initialize(int sampleRate, int blockSize)
     {
         _sampleRate = sampleRate;
+        _detector = 0f;
+        _gain = 1f;
+        _gateOpen = false;
+        _holdSamplesLeft = 0;
+        Interlocked.Exchange(ref _gateOpenBits, 0);
+        Interlocked.Exchange(ref _inputLevelBits, 0);
         UpdateCoefficients();
     }
 
@@ -127,7 +135,7 @@ public sealed class NoiseGatePlugin : IPlugin
             {
                 float envDb = DspUtils.LinearToDb(env);
                 float overDb = _thresholdDb - envDb;
-                float reductionDb = MathF.Min(MaxRangeDb, overDb * (1f - 1f / GateRatio));
+                float reductionDb = MathF.Min(_maxRangeDb, overDb * (1f - 1f / _gateRatio));
                 targetGain = DspUtils.DbToLinear(-reductionDb);
             }
 
@@ -231,6 +239,17 @@ public sealed class NoiseGatePlugin : IPlugin
     {
     }
 
+    public void ApplyQuality(AudioQualityProfile profile)
+    {
+        _sidechainHpfHz = MathF.Max(20f, profile.GateSidechainHpfHz);
+        _gateRatio = MathF.Max(1f, profile.GateRatio);
+        _maxRangeDb = MathF.Max(0f, profile.GateMaxRangeDb);
+        if (_sampleRate > 0)
+        {
+            UpdateCoefficients();
+        }
+    }
+
     private void UpdateCoefficients()
     {
         if (_sampleRate <= 0)
@@ -245,6 +264,6 @@ public sealed class NoiseGatePlugin : IPlugin
         _gainAttackCoeff = _detectorAttackCoeff;
         _gainReleaseCoeff = _detectorReleaseCoeff;
         _holdSamples = (int)(_holdMs * 0.001f * _sampleRate);
-        _sidechainFilter.Configure(SidechainHpfHz, _sampleRate);
+        _sidechainFilter.Configure(_sidechainHpfHz, _sampleRate);
     }
 }

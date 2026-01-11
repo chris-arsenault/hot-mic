@@ -1,9 +1,11 @@
 using System.Threading;
+using HotMic.Common.Configuration;
 using HotMic.Core.Dsp;
+using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class CompressorPlugin : IPlugin
+public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
 {
     public const int ThresholdIndex = 0;
     public const int RatioIndex = 1;
@@ -11,10 +13,10 @@ public sealed class CompressorPlugin : IPlugin
     public const int ReleaseIndex = 3;
     public const int MakeupIndex = 4;
 
-    private const float KneeDb = 6f;
-    private const float RmsBlend = 0.7f;
-    private const float ReleaseShape = 0.15f;
-    private const float SidechainHpfHz = 80f;
+    private float _kneeDb = 6f;
+    private float _rmsBlend = 0.7f;
+    private float _releaseShape = 0.15f;
+    private float _sidechainHpfHz = 80f;
 
     private float _thresholdDb = -20f;
     private float _ratio = 4f;
@@ -65,6 +67,9 @@ public sealed class CompressorPlugin : IPlugin
     public void Initialize(int sampleRate, int blockSize)
     {
         _sampleRate = sampleRate;
+        _rmsPower = 0f;
+        _envelope = 0f;
+        _gainReductionDb = 0f;
         UpdateCoefficients();
     }
 
@@ -96,7 +101,7 @@ public sealed class CompressorPlugin : IPlugin
             _rmsPower += detectorCoeff * (power - _rmsPower);
             float rms = MathF.Sqrt(_rmsPower + 1e-12f);
 
-            float detector = absSidechain * (1f - RmsBlend) + rms * RmsBlend;
+            float detector = absSidechain * (1f - _rmsBlend) + rms * _rmsBlend;
             float envCoeff = detector > _envelope ? _attackCoeff : _releaseCoeff;
             _envelope += envCoeff * (detector - _envelope);
 
@@ -104,22 +109,22 @@ public sealed class CompressorPlugin : IPlugin
             float delta = envDb - _thresholdDb;
 
             float desiredReductionDb;
-            if (delta <= -KneeDb * 0.5f)
+            if (delta <= -_kneeDb * 0.5f)
             {
                 desiredReductionDb = 0f;
             }
-            else if (delta >= KneeDb * 0.5f)
+            else if (delta >= _kneeDb * 0.5f)
             {
                 desiredReductionDb = delta * (1f - 1f / _ratio);
             }
             else
             {
-                float x = delta + KneeDb * 0.5f;
-                desiredReductionDb = (1f - 1f / _ratio) * x * x / (2f * KneeDb);
+                float x = delta + _kneeDb * 0.5f;
+                desiredReductionDb = (1f - 1f / _ratio) * x * x / (2f * _kneeDb);
             }
 
             // Program-dependent release: heavier gain reduction releases more slowly.
-            float shapedRelease = _releaseCoeff / (1f + ReleaseShape * _gainReductionDb);
+            float shapedRelease = _releaseCoeff / (1f + _releaseShape * _gainReductionDb);
             float gainCoeff = desiredReductionDb > _gainReductionDb ? _attackCoeff : shapedRelease;
             _gainReductionDb += gainCoeff * (desiredReductionDb - _gainReductionDb);
 
@@ -210,6 +215,18 @@ public sealed class CompressorPlugin : IPlugin
     {
     }
 
+    public void ApplyQuality(AudioQualityProfile profile)
+    {
+        _kneeDb = MathF.Max(0.1f, profile.CompressorKneeDb);
+        _rmsBlend = Math.Clamp(profile.CompressorRmsBlend, 0f, 1f);
+        _releaseShape = MathF.Max(0f, profile.CompressorReleaseShape);
+        _sidechainHpfHz = MathF.Max(20f, profile.CompressorSidechainHpfHz);
+        if (_sampleRate > 0)
+        {
+            UpdateCoefficients();
+        }
+    }
+
     private void UpdateCoefficients()
     {
         if (_sampleRate <= 0)
@@ -222,6 +239,6 @@ public sealed class CompressorPlugin : IPlugin
         _releaseCoeff = DspUtils.TimeToCoefficient(_releaseMs, _sampleRate);
         _detectorAttackCoeff = _attackCoeff;
         _detectorReleaseCoeff = _releaseCoeff;
-        _sidechainFilter.Configure(SidechainHpfHz, _sampleRate);
+        _sidechainFilter.Configure(_sidechainHpfHz, _sampleRate);
     }
 }

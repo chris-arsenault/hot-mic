@@ -62,6 +62,7 @@ public sealed class ConfigManager
             {
                 SampleRate = 48000,
                 BufferSize = 256,
+                QualityMode = AudioQualityMode.LatencyPriority,
                 Input1Channel = InputChannelMode.Sum,
                 Input2Channel = InputChannelMode.Sum,
                 OutputRouting = OutputRoutingMode.Split
