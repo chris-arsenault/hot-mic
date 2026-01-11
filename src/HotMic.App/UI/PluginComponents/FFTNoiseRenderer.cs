@@ -310,14 +310,75 @@ public sealed class FFTNoiseRenderer : IDisposable
         canvas.Restore();
     }
 
-    private void DrawSpectrum(SKCanvas canvas, SKRect rect, FFTNoiseState state)
+    private void DrawSpectrum(SKCanvas canvas, SKRect outerRect, FFTNoiseState state)
     {
-        // Background
-        var roundRect = new SKRoundRect(rect, 6f);
+        // Layout with margins for axis labels
+        const float leftMargin = 32f;   // Space for dB labels
+        const float bottomMargin = 18f; // Space for frequency labels
+        const float topMargin = 4f;
+
+        var graphRect = new SKRect(
+            outerRect.Left + leftMargin,
+            outerRect.Top + topMargin,
+            outerRect.Right - 4f,
+            outerRect.Bottom - bottomMargin);
+
+        // Background for entire area
+        var roundRect = new SKRoundRect(outerRect, 6f);
         canvas.DrawRoundRect(roundRect, _spectrumBackgroundPaint);
 
+        // dB scale: -90 to +12
+        const float minDb = -90f;
+        const float maxDb = 12f;
+        float dbRange = maxDb - minDb;
+
+        // Frequency scale
+        const float minFreq = 20f;
+        float maxFreq = state.SampleRate > 0 ? state.SampleRate / 2f : 24000f;
+
+        // Axis label paint
+        using var axisLabelPaint = new SKPaint
+        {
+            Color = _theme.TextMuted,
+            IsAntialias = true,
+            TextSize = 8f,
+            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
+        };
+
+        // Draw dB grid lines and labels
+        int[] dbMarkers = { 0, -12, -24, -36, -48, -60, -72, -84 };
+        foreach (int db in dbMarkers)
+        {
+            float y = graphRect.Bottom - ((db - minDb) / dbRange) * graphRect.Height;
+            if (y >= graphRect.Top && y <= graphRect.Bottom)
+            {
+                canvas.DrawLine(graphRect.Left, y, graphRect.Right, y, _gridPaint);
+                // Label on left
+                axisLabelPaint.TextAlign = SKTextAlign.Right;
+                canvas.DrawText($"{db}", graphRect.Left - 3, y + 3, axisLabelPaint);
+            }
+        }
+
+        // Draw frequency grid lines and labels
+        float[] freqMarkers = { 50f, 100f, 200f, 500f, 1000f, 2000f, 5000f, 10000f, 20000f };
+        axisLabelPaint.TextAlign = SKTextAlign.Center;
+        foreach (float freq in freqMarkers)
+        {
+            if (freq > maxFreq) continue;
+            float t = MathF.Log(freq / minFreq) / MathF.Log(maxFreq / minFreq);
+            float x = graphRect.Left + t * graphRect.Width;
+            if (x >= graphRect.Left && x <= graphRect.Right)
+            {
+                canvas.DrawLine(x, graphRect.Top, x, graphRect.Bottom, _gridPaint);
+                // Label at bottom - format nicely
+                string label = freq >= 1000 ? $"{freq / 1000:0}k" : $"{freq:0}";
+                canvas.DrawText(label, x, outerRect.Bottom - 4, axisLabelPaint);
+            }
+        }
+
+        // Clip to graph area for spectrum drawing
         canvas.Save();
-        canvas.ClipRoundRect(roundRect);
+        canvas.ClipRect(graphRect);
 
         int numBins = state.InputSpectrum?.Length ?? 0;
         if (numBins == 0)
@@ -327,45 +388,30 @@ public sealed class FFTNoiseRenderer : IDisposable
             return;
         }
 
-        float barWidth = rect.Width / numBins;
-        float minDb = -60f;
-        float maxDb = 0f;
+        float barWidth = graphRect.Width / numBins;
 
-        // Grid lines
-        for (int db = -48; db <= 0; db += 12)
+        // Helper to convert magnitude to Y position
+        float MagToY(float magnitude)
         {
-            float y = rect.Bottom - ((db - minDb) / (maxDb - minDb)) * rect.Height;
-            canvas.DrawLine(rect.Left, y, rect.Right, y, _gridPaint);
-        }
-
-        // Frequency grid lines
-        float minFreq = 20f;
-        float maxFreq = state.SampleRate > 0 ? state.SampleRate / 2f : 20000f;
-        float[] freqMarkers = { 100f, 1000f, 10000f };
-        foreach (float freq in freqMarkers)
-        {
-            float t = MathF.Log(freq / minFreq) / MathF.Log(maxFreq / minFreq);
-            float x = rect.Left + t * rect.Width;
-            canvas.DrawLine(x, rect.Top, x, rect.Bottom, _gridPaint);
+            float db = 20f * MathF.Log10(magnitude + 1e-10f);
+            db = Math.Clamp(db, minDb, maxDb);
+            return graphRect.Bottom - ((db - minDb) / dbRange) * graphRect.Height;
         }
 
         // Draw noise profile first (as filled area at bottom)
         if (state.HasNoiseProfile && state.NoiseProfile != null)
         {
             using var profilePath = new SKPath();
-            profilePath.MoveTo(rect.Left, rect.Bottom);
+            profilePath.MoveTo(graphRect.Left, graphRect.Bottom);
 
             for (int i = 0; i < numBins; i++)
             {
-                float x = rect.Left + i * barWidth + barWidth / 2;
-                float magnitude = state.NoiseProfile[i];
-                float db = 20f * MathF.Log10(magnitude + 1e-10f);
-                db = Math.Clamp(db, minDb, maxDb);
-                float y = rect.Bottom - ((db - minDb) / (maxDb - minDb)) * rect.Height;
+                float x = graphRect.Left + i * barWidth + barWidth / 2;
+                float y = MagToY(state.NoiseProfile[i]);
                 profilePath.LineTo(x, y);
             }
 
-            profilePath.LineTo(rect.Right, rect.Bottom);
+            profilePath.LineTo(graphRect.Right, graphRect.Bottom);
             profilePath.Close();
             canvas.DrawPath(profilePath, _noiseProfileFillPaint);
 
@@ -374,11 +420,8 @@ public sealed class FFTNoiseRenderer : IDisposable
             bool first = true;
             for (int i = 0; i < numBins; i++)
             {
-                float x = rect.Left + i * barWidth + barWidth / 2;
-                float magnitude = state.NoiseProfile[i];
-                float db = 20f * MathF.Log10(magnitude + 1e-10f);
-                db = Math.Clamp(db, minDb, maxDb);
-                float y = rect.Bottom - ((db - minDb) / (maxDb - minDb)) * rect.Height;
+                float x = graphRect.Left + i * barWidth + barWidth / 2;
+                float y = MagToY(state.NoiseProfile[i]);
 
                 if (first)
                 {
@@ -398,15 +441,13 @@ public sealed class FFTNoiseRenderer : IDisposable
         {
             for (int i = 0; i < numBins; i++)
             {
-                float x = rect.Left + i * barWidth;
-                float magnitude = state.InputSpectrum[i];
-                float db = 20f * MathF.Log10(magnitude + 1e-10f);
-                db = Math.Clamp(db, minDb, maxDb);
-                float barHeight = ((db - minDb) / (maxDb - minDb)) * rect.Height;
+                float x = graphRect.Left + i * barWidth;
+                float y = MagToY(state.InputSpectrum[i]);
+                float barHeight = graphRect.Bottom - y;
 
                 if (barHeight > 1)
                 {
-                    var barRect = new SKRect(x + 1, rect.Bottom - barHeight, x + barWidth / 2 - 0.5f, rect.Bottom);
+                    var barRect = new SKRect(x + 1, y, x + barWidth / 2 - 0.5f, graphRect.Bottom);
                     canvas.DrawRect(barRect, _inputBarPaint);
                 }
             }
@@ -417,15 +458,13 @@ public sealed class FFTNoiseRenderer : IDisposable
         {
             for (int i = 0; i < numBins; i++)
             {
-                float x = rect.Left + i * barWidth + barWidth / 2;
-                float magnitude = state.OutputSpectrum[i];
-                float db = 20f * MathF.Log10(magnitude + 1e-10f);
-                db = Math.Clamp(db, minDb, maxDb);
-                float barHeight = ((db - minDb) / (maxDb - minDb)) * rect.Height;
+                float x = graphRect.Left + i * barWidth + barWidth / 2;
+                float y = MagToY(state.OutputSpectrum[i]);
+                float barHeight = graphRect.Bottom - y;
 
                 if (barHeight > 1)
                 {
-                    var barRect = new SKRect(x + 0.5f, rect.Bottom - barHeight, x + barWidth / 2 - 1, rect.Bottom);
+                    var barRect = new SKRect(x + 0.5f, y, x + barWidth / 2 - 1, graphRect.Bottom);
                     canvas.DrawRect(barRect, _outputBarPaint);
                 }
             }
@@ -440,13 +479,13 @@ public sealed class FFTNoiseRenderer : IDisposable
                 IsAntialias = true,
                 Style = SKPaintStyle.Fill
             };
-            canvas.DrawRoundRect(roundRect, learningOverlay);
+            canvas.DrawRect(graphRect, learningOverlay);
 
             // Progress bar
-            float progressWidth = rect.Width * 0.6f;
+            float progressWidth = graphRect.Width * 0.6f;
             float progressHeight = 8f;
-            float progressX = rect.MidX - progressWidth / 2;
-            float progressY = rect.MidY - progressHeight / 2;
+            float progressX = graphRect.MidX - progressWidth / 2;
+            float progressY = graphRect.MidY - progressHeight / 2;
             var progressBg = new SKRect(progressX, progressY, progressX + progressWidth, progressY + progressHeight);
             canvas.DrawRoundRect(new SKRoundRect(progressBg, 4f), _progressBarPaint);
 
@@ -464,16 +503,16 @@ public sealed class FFTNoiseRenderer : IDisposable
                 Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
             };
             canvas.DrawText($"Learning noise profile... {state.LearningProgress}/{state.LearningTotal}",
-                rect.MidX, progressY - 12, learningText);
+                graphRect.MidX, progressY - 12, learningText);
         }
 
         canvas.Restore();
 
-        // Border
-        canvas.DrawRoundRect(roundRect, _borderPaint);
+        // Border around graph area
+        canvas.DrawRect(graphRect, _borderPaint);
 
-        // Legend
-        float legendY = rect.Bottom + 14;
+        // Legend (below everything)
+        float legendY = outerRect.Bottom + 14;
         using var legendPaint = new SKPaint
         {
             Color = _theme.TextMuted,
@@ -484,26 +523,18 @@ public sealed class FFTNoiseRenderer : IDisposable
 
         // Input legend
         using var inputSwatch = new SKPaint { Color = _inputColor, Style = SKPaintStyle.Fill };
-        canvas.DrawRect(rect.Left, legendY - 6, 12, 8, inputSwatch);
-        canvas.DrawText("Input", rect.Left + 16, legendY, legendPaint);
+        canvas.DrawRect(outerRect.Left, legendY - 6, 12, 8, inputSwatch);
+        canvas.DrawText("Input", outerRect.Left + 16, legendY, legendPaint);
 
         // Output legend
         using var outputSwatch = new SKPaint { Color = _outputColor, Style = SKPaintStyle.Fill };
-        canvas.DrawRect(rect.Left + 60, legendY - 6, 12, 8, outputSwatch);
-        canvas.DrawText("Output", rect.Left + 76, legendY, legendPaint);
+        canvas.DrawRect(outerRect.Left + 60, legendY - 6, 12, 8, outputSwatch);
+        canvas.DrawText("Output", outerRect.Left + 76, legendY, legendPaint);
 
         // Noise profile legend
         using var noiseSwatch = new SKPaint { Color = _noiseColor, Style = SKPaintStyle.Fill };
-        canvas.DrawRect(rect.Left + 130, legendY - 6, 12, 8, noiseSwatch);
-        canvas.DrawText("Noise Profile", rect.Left + 146, legendY, legendPaint);
-
-        // Frequency labels
-        canvas.DrawText("100", rect.Left + rect.Width * MathF.Log(100f / minFreq) / MathF.Log(maxFreq / minFreq),
-            legendY, legendPaint);
-        canvas.DrawText("1k", rect.Left + rect.Width * MathF.Log(1000f / minFreq) / MathF.Log(maxFreq / minFreq),
-            legendY, legendPaint);
-        canvas.DrawText("10k", rect.Left + rect.Width * MathF.Log(10000f / minFreq) / MathF.Log(maxFreq / minFreq),
-            legendY, legendPaint);
+        canvas.DrawRect(outerRect.Left + 130, legendY - 6, 12, 8, noiseSwatch);
+        canvas.DrawText("Noise Profile", outerRect.Left + 146, legendY, legendPaint);
     }
 
     private void DrawControls(SKCanvas canvas, float x, float y, float width, float height, FFTNoiseState state)

@@ -34,7 +34,6 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
     private const float PeakDecay = 0.98f;
 
     // Algorithm parameters
-    private const float SpectralFloor = 0.01f;  // -40dB floor to prevent complete zeroing
     private const float GainSmoothingFreq = 0.3f;  // Smoothing across frequency bins
     private const float GainSmoothingTime = 0.5f;  // Temporal smoothing between frames
     private const float OverSubtraction = 2.0f;  // Oversubtract noise for cleaner result
@@ -235,21 +234,22 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
             // Wiener gain: (signal^2 - noise^2) / signal^2
             // This gives smooth attenuation rather than hard subtraction
             float gain;
-            if (magnitudeSq > noisePower && magnitude > _sensitivityLinear)
+            if (magnitude > _sensitivityLinear)
             {
-                gain = MathF.Sqrt(MathF.Max(0f, magnitudeSq - noisePower) / magnitudeSq);
-            }
-            else if (magnitude > _sensitivityLinear)
-            {
-                gain = SpectralFloor;  // Don't zero out completely
+                if (magnitudeSq > noisePower)
+                {
+                    gain = MathF.Sqrt((magnitudeSq - noisePower) / magnitudeSq);
+                }
+                else
+                {
+                    gain = 0f;  // Below noise floor, fully attenuate
+                }
             }
             else
             {
                 gain = 1f;  // Below sensitivity, don't modify
             }
 
-            // Apply spectral floor
-            gain = MathF.Max(gain, SpectralFloor);
             gains[i] = gain;
         }
 
