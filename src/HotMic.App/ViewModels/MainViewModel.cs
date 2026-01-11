@@ -26,6 +26,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private long _lastMeterUpdateTicks;
     private long _nextDebugUpdateTicks;
     private static readonly long DebugUpdateIntervalTicks = Math.Max(1, Stopwatch.Frequency / 4);
+    private bool _isInitializing = true; // Skip side effects during initial config load
 
     // 30-second rolling window for drop tracking
     private readonly Queue<(long ticks, long input1, long input2, long underflow1, long underflow2)> _dropHistory = new();
@@ -57,6 +58,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         ApplyConfigToViewModels();
         LoadPluginsFromConfig();
+        _isInitializing = false; // Now safe to allow side effects from property changes
         StartEngine();
 
         _meterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
@@ -201,6 +203,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnInput1IsStereoChanged(bool value)
     {
         SelectedInput1Channel = value ? InputChannelMode.Left : InputChannelMode.Sum;
+        if (_isInitializing) return;
         _audioEngine.ConfigureRouting(SelectedInput1Channel, SelectedInput2Channel, SelectedOutputRouting);
         _config.AudioSettings.Input1Channel = SelectedInput1Channel;
         _configManager.Save(_config);
@@ -209,6 +212,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnInput2IsStereoChanged(bool value)
     {
         SelectedInput2Channel = value ? InputChannelMode.Right : InputChannelMode.Sum;
+        if (_isInitializing) return;
         _audioEngine.ConfigureRouting(SelectedInput1Channel, SelectedInput2Channel, SelectedOutputRouting);
         _config.AudioSettings.Input2Channel = SelectedInput2Channel;
         _configManager.Save(_config);
@@ -217,6 +221,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnMasterIsStereoChanged(bool value)
     {
         SelectedOutputRouting = value ? OutputRoutingMode.Split : OutputRoutingMode.Sum;
+        if (_isInitializing) return;
         _audioEngine.ConfigureRouting(SelectedInput1Channel, SelectedInput2Channel, SelectedOutputRouting);
         _config.AudioSettings.OutputRouting = SelectedOutputRouting;
         _configManager.Save(_config);
@@ -224,6 +229,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnMasterMutedChanged(bool value)
     {
+        if (_isInitializing) return;
         _audioEngine.SetMasterMute(value);
     }
 
@@ -267,18 +273,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnIsMinimalViewChanged(bool value)
     {
         OnPropertyChanged(nameof(ViewToggleLabel));
+        if (_isInitializing) return;
         _config.Ui.ViewMode = value ? "minimal" : "full";
         _configManager.Save(_config);
     }
 
     partial void OnAlwaysOnTopChanged(bool value)
     {
+        if (_isInitializing) return;
         _config.Ui.AlwaysOnTop = value;
         _configManager.Save(_config);
     }
 
     partial void OnMeterScaleVoxChanged(bool value)
     {
+        if (_isInitializing) return;
         _config.Ui.MeterScaleVox = value;
         _configManager.Save(_config);
     }
