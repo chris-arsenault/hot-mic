@@ -216,9 +216,11 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
 
         Fourier.Inverse(_fftBuffer, FourierOptions.Matlab);
 
+        // Note: Fourier.Inverse with FourierOptions.Matlab already divides by N,
+        // so we don't divide by FftSize here
         for (int i = 0; i < FftSize; i++)
         {
-            float sample = _fftBuffer[i].Real / FftSize;
+            float sample = _fftBuffer[i].Real;
             int index = (start + i) % FftSize;
             _outputRing[index] += sample * _window[i];
         }
@@ -230,6 +232,10 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
         int fftBins = FftSize / 2 + 1;
         float minFreq = 20f;
         float maxFreq = _sampleRate > 0 ? _sampleRate / 2f : 20000f;
+
+        // Normalization factor: divide by FftSize/2 so that full-scale audio = magnitude 1.0 = 0dB
+        // This makes the spectrum display show actual signal levels in dB relative to full-scale
+        const float normalizationFactor = 2f / FftSize;
 
         for (int displayBin = 0; displayBin < DisplayBins; displayBin++)
         {
@@ -256,7 +262,8 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
                 count++;
             }
 
-            float magnitude = count > 0 ? sum / count : 0f;
+            // Normalize so full-scale audio = 1.0 (0dB)
+            float magnitude = count > 0 ? (sum / count) * normalizationFactor : 0f;
 
             // Apply decay
             spectrum[displayBin] = MathF.Max(spectrum[displayBin] * SpectrumDecay, magnitude);
@@ -305,6 +312,9 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
         float minFreq = 20f;
         float maxFreq = _sampleRate > 0 ? _sampleRate / 2f : 20000f;
 
+        // Same normalization as UpdateDisplaySpectrum so noise profile is at correct dB level
+        const float normalizationFactor = 2f / FftSize;
+
         for (int displayBin = 0; displayBin < DisplayBins; displayBin++)
         {
             float t0 = displayBin / (float)DisplayBins;
@@ -325,7 +335,8 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin
                 count++;
             }
 
-            _displayNoiseProfile[displayBin] = count > 0 ? sum / count : 0f;
+            // Normalize to match spectrum display scale
+            _displayNoiseProfile[displayBin] = count > 0 ? (sum / count) * normalizationFactor : 0f;
         }
     }
 
