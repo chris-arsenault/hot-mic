@@ -355,17 +355,24 @@ public sealed class MainRenderer
             canvas.Save();
             canvas.RotateDegrees(-90f, x + 14f, y + height - 4f);
             var textPaint = slot.IsBypassed ? _tinyTextPaint : _smallTextPaint;
-            DrawEllipsizedText(canvas, slot.DisplayName, x + 14f, y + height - 4f, height - 16f, textPaint);
+            DrawEllipsizedText(canvas, slot.DisplayName, x + 14f, y + height - 4f, height - 24f, textPaint);
             canvas.Restore();
 
-            if (slot.IsBypassed)
-            {
-                float bypassX = x + width - 12f;
-                float bypassY = y + 2f;
-                var bypassRect = new SKRect(bypassX, bypassY, bypassX + 10f, bypassY + 10f);
-                canvas.DrawRoundRect(new SKRoundRect(bypassRect, 2f), CreateFillPaint(_theme.Bypass));
-            }
+            // Bypass button - always visible, different color when bypassed
+            float bypassX = x + width - 13f;
+            float bypassY = y + 2f;
+            var bypassRect = new SKRect(bypassX, bypassY, bypassX + 11f, bypassY + 11f);
+            var bypassColor = slot.IsBypassed ? _theme.Bypass : _theme.Surface;
+            canvas.DrawRoundRect(new SKRoundRect(bypassRect, 2f), CreateFillPaint(bypassColor));
+            canvas.DrawRoundRect(new SKRoundRect(bypassRect, 2f), _borderPaint);
 
+            // Draw "B" label
+            var bypassTextPaint = slot.IsBypassed
+                ? CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 8f, SKFontStyle.Bold)
+                : CreateCenteredTextPaint(_theme.TextMuted, 8f);
+            canvas.DrawText("B", bypassRect.MidX, bypassRect.MidY + 3f, bypassTextPaint);
+
+            // Remove button
             float removeX = x + width - 10f;
             float removeY = y + height - 10f;
             canvas.DrawLine(removeX, removeY, removeX + 6f, removeY + 6f, _iconPaint);
