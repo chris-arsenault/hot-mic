@@ -678,10 +678,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     // Window size constants (must match MainRenderer layout calculations)
-    // Layout calculation: pluginArea = windowWidth - 294 (from MainRenderer layout)
-    // Each slot needs 54px, so: windowWidth = 300 + N * 54 gives comfortable fit
+    // MainRenderer: PluginSlotWidth=68, MiniMeterWidth=6, PluginSlotSpacing=2
+    // Filled slot = (68-6-2) + 6 + 2 = 68px, Empty slot = 36 + 6 + 2 = 44px
     private const double FullViewBaseWidth = 300;
-    private const double PluginSlotWidthWithSpacing = 54; // Narrow slot width + spacing (52 + 2)
+    private const double PluginSlotWidthWithSpacing = 70; // Filled slot width + meter + spacing (60 + 6 + 2 + padding)
     private const double MaxFullViewWidth = 1200;
     private const double MinFullViewWidth = 400;
     private const double FullViewHeight = 290;

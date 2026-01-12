@@ -120,6 +120,8 @@ public sealed class MidiManager : IDisposable
             _isLearning = true;
             _learnTargetPath = targetPath;
             _learnCallback = onLearned;
+            // Clear last CC values so any movement triggers learn
+            _lastCcValues.Clear();
         }
     }
 
