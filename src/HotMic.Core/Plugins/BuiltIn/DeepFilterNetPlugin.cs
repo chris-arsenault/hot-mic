@@ -35,6 +35,8 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private float _postFilterEnabled = 1f;
     private bool _forcedBypass;
     private bool _wasBypassed = true;
+    private bool _roundTripPrimed;
+    private int _roundTripMinOutput;
     private string _statusMessage = string.Empty;
     private int _gainReductionDbBits;
     private float _smoothedGrDb;
@@ -143,6 +145,10 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         if (DeepFilterNetProcessor.RoundTripOnly)
         {
             _statusMessage = "DeepFilterNet STFT round-trip mode.";
+            int hop = Math.Max(1, _hopSize);
+            int minOutput = ((blockSize / hop) + 2) * hop;
+            _roundTripMinOutput = Math.Min(_outputBuffer!.Capacity, Math.Max(hop * 2, minOutput));
+            _roundTripPrimed = false;
         }
         _mixSmoother.Configure(sampleRate, MixSmoothingMs, _reductionPct / 100f);
         if (!DeepFilterNetProcessor.RoundTripOnly)
@@ -180,6 +186,20 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
                 _processor.ProcessHop(_hopBuffer, _hopOutput, postFilterEnabled: false, attenLimitDb: _attenLimitDb);
                 _outputBuffer.Write(_hopOutput);
+            }
+
+            if (!_roundTripPrimed)
+            {
+                if (_outputBuffer.AvailableRead >= _roundTripMinOutput)
+                {
+                    _roundTripPrimed = true;
+                }
+                else
+                {
+                    buffer.Clear();
+                    Interlocked.Exchange(ref _gainReductionDbBits, 0);
+                    return;
+                }
             }
 
             int roundTripRead = _outputBuffer.Read(_processedScratch.AsSpan(0, buffer.Length));
@@ -346,6 +366,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         Array.Clear(_processedScratch, 0, _processedScratch.Length);
         Array.Clear(_dryRing, 0, _dryRing.Length);
         _dryIndex = 0;
+        _roundTripPrimed = false;
         _processor?.Reset();
         _smoothedGrDb = 0f;
         Interlocked.Exchange(ref _gainReductionDbBits, 0);
