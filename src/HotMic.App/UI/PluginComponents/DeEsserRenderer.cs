@@ -17,6 +17,7 @@ public sealed class DeEsserRenderer : IDisposable
 
     private readonly PluginComponentTheme _theme;
     private readonly RotaryKnob _knob;
+    private readonly PluginPresetBar _presetBar;
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -54,6 +55,7 @@ public sealed class DeEsserRenderer : IDisposable
     {
         _theme = theme ?? PluginComponentTheme.Default;
         _knob = new RotaryKnob(_theme);
+        _presetBar = new PluginPresetBar(_theme);
 
         _backgroundPaint = new SKPaint
         {
@@ -254,6 +256,11 @@ public sealed class DeEsserRenderer : IDisposable
 
         // Title
         canvas.DrawText("De-Esser", Padding, TitleBarHeight / 2f + 5, _titlePaint);
+
+        // Preset bar
+        float presetBarX = Padding + 75;
+        float presetBarY = (TitleBarHeight - PluginPresetBar.TotalHeight) / 2f;
+        _presetBar.Render(canvas, presetBarX, presetBarY, state.PresetName);
 
         // Active indicator
         bool isActive = state.GainReductionDb < -0.5f;
@@ -528,6 +535,12 @@ public sealed class DeEsserRenderer : IDisposable
         if (_bypassButtonRect.Contains(x, y))
             return new DeEsserHitTest(DeEsserHitArea.BypassButton, DeEsserKnob.None);
 
+        var presetHit = _presetBar.HitTest(x, y);
+        if (presetHit == PresetBarHitArea.Dropdown)
+            return new DeEsserHitTest(DeEsserHitArea.PresetDropdown, DeEsserKnob.None);
+        if (presetHit == PresetBarHitArea.SaveButton)
+            return new DeEsserHitTest(DeEsserHitArea.PresetSave, DeEsserKnob.None);
+
         for (int i = 0; i < _knobCenters.Length; i++)
         {
             float dx = x - _knobCenters[i].X;
@@ -545,6 +558,8 @@ public sealed class DeEsserRenderer : IDisposable
         return new DeEsserHitTest(DeEsserHitArea.None, DeEsserKnob.None);
     }
 
+    public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
+
     public static SKSize GetPreferredSize() => new(480, 340);
 
     public void Dispose()
@@ -552,6 +567,7 @@ public sealed class DeEsserRenderer : IDisposable
         _inputMeter.Dispose();
         _sibilanceMeter.Dispose();
         _knob.Dispose();
+        _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -589,7 +605,8 @@ public record struct DeEsserState(
     float LatencyMs,
     bool IsBypassed,
     DeEsserKnob HoveredKnob = DeEsserKnob.None,
-    float[]? Spectrum = null);
+    float[]? Spectrum = null,
+    string PresetName = "Custom");
 
 public enum DeEsserHitArea
 {
@@ -597,7 +614,9 @@ public enum DeEsserHitArea
     TitleBar,
     CloseButton,
     BypassButton,
-    Knob
+    Knob,
+    PresetDropdown,
+    PresetSave
 }
 
 public enum DeEsserKnob

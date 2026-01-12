@@ -33,6 +33,7 @@ public sealed class EqRenderer : IDisposable
     private const float MeterWidth = 18f;
 
     private readonly PluginComponentTheme _theme;
+    private readonly PluginPresetBar _presetBar;
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -90,6 +91,7 @@ public sealed class EqRenderer : IDisposable
     public EqRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
+        _presetBar = new PluginPresetBar(_theme);
 
         _inputMeter = new LevelMeter();
         _outputMeter = new LevelMeter();
@@ -314,6 +316,11 @@ public sealed class EqRenderer : IDisposable
         // Title
         canvas.DrawText("5-Band EQ", Padding, TitleBarHeight / 2f + 5, _titlePaint);
 
+        // Preset bar (after title, before bypass)
+        float presetBarX = 100f;
+        float presetBarY = (TitleBarHeight - PluginPresetBar.TotalHeight) / 2f;
+        _presetBar.Render(canvas, presetBarX, presetBarY, state.PresetName ?? "Custom");
+
         // Bypass button
         float bypassWidth = 60f;
         _bypassButtonRect = new SKRect(
@@ -435,9 +442,12 @@ public sealed class EqRenderer : IDisposable
         canvas.Save();
         canvas.ClipRoundRect(roundRect);
 
-        float zeroY = rect.MidY;
-        float dbRange = 24f;
-        float dbPixelsPerDb = (rect.Height / 2f) / dbRange;
+        // Asymmetric dB range: +24 at top, -48 at bottom (72 dB total)
+        const float dbMax = 24f;
+        const float dbMin = -48f;
+        float dbRange = dbMax - dbMin; // 72 dB total
+        float dbPixelsPerDb = rect.Height / dbRange;
+        float zeroY = rect.Top + dbMax * dbPixelsPerDb; // 0 dB line position
 
         // Draw spectrum bars first (behind everything)
         if (state.SpectrumLevels != null && state.SpectrumPeaks != null)
@@ -448,10 +458,14 @@ public sealed class EqRenderer : IDisposable
         // Grid lines (dB)
         float db12Y = zeroY - 12 * dbPixelsPerDb;
         float dbMinus12Y = zeroY + 12 * dbPixelsPerDb;
+        float dbMinus24Y = zeroY + 24 * dbPixelsPerDb;
+        float dbMinus36Y = zeroY + 36 * dbPixelsPerDb;
         canvas.DrawLine(rect.Left, db12Y, rect.Right, db12Y, _gridPaint);
         canvas.DrawLine(rect.Left, dbMinus12Y, rect.Right, dbMinus12Y, _gridPaint);
+        canvas.DrawLine(rect.Left, dbMinus24Y, rect.Right, dbMinus24Y, _gridPaint);
+        canvas.DrawLine(rect.Left, dbMinus36Y, rect.Right, dbMinus36Y, _gridPaint);
 
-        // 0 dB center line
+        // 0 dB line
         canvas.DrawLine(rect.Left, zeroY, rect.Right, zeroY, _zeroLinePaint);
 
         // Frequency grid lines (logarithmic: 100, 1k, 10k)
@@ -494,12 +508,20 @@ public sealed class EqRenderer : IDisposable
         canvas.DrawText("+12", rect.Left - 16, db12Y + 3, freqLabelPaint);
         canvas.DrawText("0", rect.Left - 10, zeroY + 3, freqLabelPaint);
         canvas.DrawText("-12", rect.Left - 16, dbMinus12Y + 3, freqLabelPaint);
+        canvas.DrawText("-24", rect.Left - 16, dbMinus24Y + 3, freqLabelPaint);
+        canvas.DrawText("-36", rect.Left - 16, dbMinus36Y + 3, freqLabelPaint);
     }
 
     private void DrawSpectrum(SKCanvas canvas, SKRect rect, float[] levels, float[] peaks, int sampleRate)
     {
         int numBins = levels.Length;
         if (numBins == 0) return;
+
+        // Standard spectrum analyzer scale (independent of EQ curve scale):
+        // 0 dBFS at top, -60 dB floor at bottom, full display height
+        const float spectrumFloor = -60f;
+        const float spectrumCeiling = 0f;
+        float spectrumRange = spectrumCeiling - spectrumFloor; // 60 dB
 
         float minFreq = 20f;
         float maxFreq = sampleRate > 0 ? sampleRate / 2f : 20000f;
@@ -516,26 +538,28 @@ public sealed class EqRenderer : IDisposable
             float x2 = i < numBins - 1 ? FreqToX(nextFreq, rect, sampleRate) : rect.Right;
             float barWidth = Math.Max(2f, x2 - x1 - 1f);
 
-            // Convert level to dB and then to Y position
+            // Convert level to dB, clamp to spectrum range
             float levelDb = 20f * MathF.Log10(levels[i] + 1e-10f);
-            levelDb = Math.Clamp(levelDb, -60f, 0f);
-            // Map -60 to 0 dB to bottom to top of spectrum area
-            float normalizedLevel = (levelDb + 60f) / 60f;
-            float barHeight = normalizedLevel * rect.Height;
+            levelDb = Math.Clamp(levelDb, spectrumFloor, spectrumCeiling);
+
+            // Normalize: 0 dB -> 1.0, -60 dB -> 0.0
+            float normalized = (levelDb - spectrumFloor) / spectrumRange;
+            float barHeight = normalized * rect.Height;
 
             if (barHeight > 1f)
             {
+                // Draw from bottom upward
                 var barRect = new SKRect(x1, rect.Bottom - barHeight, x1 + barWidth, rect.Bottom);
                 canvas.DrawRect(barRect, _spectrumBarPaint);
             }
 
             // Draw peak line
             float peakDb = 20f * MathF.Log10(peaks[i] + 1e-10f);
-            peakDb = Math.Clamp(peakDb, -60f, 0f);
-            float normalizedPeak = (peakDb + 60f) / 60f;
-            float peakY = rect.Bottom - normalizedPeak * rect.Height;
+            peakDb = Math.Clamp(peakDb, spectrumFloor, spectrumCeiling);
+            float peakNormalized = (peakDb - spectrumFloor) / spectrumRange;
+            float peakY = rect.Bottom - peakNormalized * rect.Height;
 
-            if (normalizedPeak > 0.01f)
+            if (peakNormalized > 0.02f)
             {
                 canvas.DrawLine(x1, peakY, x1 + barWidth, peakY, _spectrumPeakPaint);
             }
@@ -815,6 +839,13 @@ public sealed class EqRenderer : IDisposable
         if (_bypassButtonRect.Contains(x, y))
             return new EqHitTest(EqHitArea.BypassButton, -1);
 
+        // Check preset bar hits
+        var presetHit = _presetBar.HitTest(x, y);
+        if (presetHit == PresetBarHitArea.Dropdown)
+            return new EqHitTest(EqHitArea.PresetDropdown, -1);
+        if (presetHit == PresetBarHitArea.SaveButton)
+            return new EqHitTest(EqHitArea.PresetSave, -1);
+
         // Check knobs
         if (IsInKnob(x, y, _hpfFreqKnob)) return new EqHitTest(EqHitArea.Knob, 0);
         if (IsInKnob(x, y, _lowShelfGainKnob)) return new EqHitTest(EqHitArea.Knob, 1);
@@ -841,8 +872,11 @@ public sealed class EqRenderer : IDisposable
 
     public static SKSize GetPreferredSize() => new(WindowWidth, WindowHeight);
 
+    public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
+
     public void Dispose()
     {
+        _presetBar.Dispose();
         _inputMeter.Dispose();
         _outputMeter.Dispose();
         _backgroundPaint.Dispose();
@@ -894,7 +928,8 @@ public record struct EqState(
     bool IsBypassed,
     float[]? SpectrumLevels = null,
     float[]? SpectrumPeaks = null,
-    int HoveredKnob = -1);
+    int HoveredKnob = -1,
+    string? PresetName = null);
 
 public enum EqHitArea
 {
@@ -902,7 +937,9 @@ public enum EqHitArea
     TitleBar,
     CloseButton,
     BypassButton,
-    Knob
+    Knob,
+    PresetDropdown,
+    PresetSave
 }
 
 public record struct EqHitTest(EqHitArea Area, int KnobIndex);

@@ -68,6 +68,8 @@ public sealed class MainRenderer
     private SKRect _meterScaleToggleRect;
     private SKRect _qualityToggleRect;
     private SKRect _statsAreaRect;
+    private SKRect _preset1DropdownRect;
+    private SKRect _preset2DropdownRect;
 
     public MainRenderer()
     {
@@ -220,6 +222,15 @@ public sealed class MainRenderer
                                          : CreateCenteredTextPaint(_theme.TextSecondary, 9f);
         canvas.DrawText(qualityLabel, _qualityToggleRect.MidX, _qualityToggleRect.MidY + 3f, qualityPaint);
 
+        // Preset dropdowns (center area)
+        float presetX = _qualityToggleRect.Right + 12f;
+        DrawPresetSelector(canvas, presetX, toggleY, "C1", viewModel.Channel1PresetName, MainButton.SavePreset1, out _preset1DropdownRect, out var save1Rect);
+        _topButtonRects[MainButton.SavePreset1] = save1Rect;
+
+        float preset2X = _preset1DropdownRect.Right + 16f;
+        DrawPresetSelector(canvas, preset2X, toggleY, "C2", viewModel.Channel2PresetName, MainButton.SavePreset2, out _preset2DropdownRect, out var save2Rect);
+        _topButtonRects[MainButton.SavePreset2] = save2Rect;
+
         // Stats on right side (clickable to toggle debug overlay)
         float statsRightX = size.Width - Padding;
         float statsY = y + HotbarHeight / 2f + 3f;
@@ -242,6 +253,47 @@ public sealed class MainRenderer
 
         // Store stats area for hit testing
         _statsAreaRect = new SKRect(statsX - cpuWidth - 4f, y, statsRightX + 4f, y + HotbarHeight);
+    }
+
+    private void DrawPresetSelector(SKCanvas canvas, float x, float y, string label, string presetName, MainButton saveButton, out SKRect dropdownRect, out SKRect saveRect)
+    {
+        // Label
+        canvas.DrawText(label, x, y + 11f, _smallTextPaint);
+        float labelWidth = _smallTextPaint.MeasureText(label);
+
+        // Dropdown
+        float dropdownX = x + labelWidth + 4f;
+        float dropdownWidth = 80f;
+        dropdownRect = new SKRect(dropdownX, y, dropdownX + dropdownWidth, y + 16f);
+
+        canvas.DrawRoundRect(new SKRoundRect(dropdownRect, 3f), _buttonPaint);
+        canvas.DrawRoundRect(new SKRoundRect(dropdownRect, 3f), _borderPaint);
+
+        // Truncate preset name if needed
+        string displayName = presetName.Length > 10 ? presetName[..10] + ".." : presetName;
+        canvas.DrawText(displayName, dropdownX + 4f, y + 11f, _smallTextPaint);
+
+        // Dropdown arrow
+        float arrowX = dropdownX + dropdownWidth - 10f;
+        float arrowY = y + 6f;
+        using var arrowPath = new SKPath();
+        arrowPath.MoveTo(arrowX - 3f, arrowY);
+        arrowPath.LineTo(arrowX + 3f, arrowY);
+        arrowPath.LineTo(arrowX, arrowY + 4f);
+        arrowPath.Close();
+        canvas.DrawPath(arrowPath, CreateFillPaint(_theme.TextMuted));
+
+        // Save button
+        float saveX = dropdownRect.Right + 4f;
+        saveRect = new SKRect(saveX, y, saveX + 18f, y + 16f);
+        canvas.DrawRoundRect(new SKRoundRect(saveRect, 3f), _buttonPaint);
+        canvas.DrawRoundRect(new SKRoundRect(saveRect, 3f), _borderPaint);
+
+        // Save icon (floppy disk outline)
+        float iconCx = saveRect.MidX;
+        float iconCy = saveRect.MidY;
+        canvas.DrawRect(new SKRect(iconCx - 4f, iconCy - 4f, iconCx + 4f, iconCy + 4f), CreateStrokePaint(_theme.TextSecondary, 1f));
+        canvas.DrawRect(new SKRect(iconCx - 2f, iconCy - 4f, iconCx + 2f, iconCy - 1f), CreateFillPaint(_theme.TextSecondary));
     }
 
     private void DrawFull(SKCanvas canvas, SKSize size, MainViewModel viewModel, MainUiState uiState)
@@ -1028,6 +1080,15 @@ public sealed class MainRenderer
     public bool HitTestStatsArea(float x, float y) => _statsAreaRect.Contains(x, y);
 
     public bool HitTestTitleBar(float x, float y) => _titleBarRect.Contains(x, y);
+
+    public int HitTestPresetDropdown(float x, float y)
+    {
+        if (_preset1DropdownRect.Contains(x, y)) return 0;
+        if (_preset2DropdownRect.Contains(x, y)) return 1;
+        return -1;
+    }
+
+    public SKRect GetPresetDropdownRect(int channelIndex) => channelIndex == 0 ? _preset1DropdownRect : _preset2DropdownRect;
 
     // Paint factories
     private static SKPaint CreateFillPaint(SKColor color) => new() { Color = color, IsAntialias = true, Style = SKPaintStyle.Fill };

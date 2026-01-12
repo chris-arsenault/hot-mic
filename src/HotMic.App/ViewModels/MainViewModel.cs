@@ -294,6 +294,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private AudioEngineDiagnosticsSnapshot diagnostics;
 
+    [ObservableProperty]
+    private string channel1PresetName = PluginPresetManager.CustomPresetName;
+
+    [ObservableProperty]
+    private string channel2PresetName = PluginPresetManager.CustomPresetName;
+
     public string ViewToggleLabel => IsMinimalView ? "Full" : "Minimal";
 
     public IRelayCommand ToggleViewCommand { get; }
@@ -377,10 +383,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OpenSettings()
     {
-        string channel1Preset = GetChannelPresetName(0);
-        string channel2Preset = GetChannelPresetName(1);
-        var presetOptions = _presetManager.GetChainPresetNames();
-
         var settingsViewModel = new SettingsViewModel(
             InputDevices,
             OutputDevices,
@@ -396,10 +398,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _config.EnableVstPlugins,
             _config.Midi.Enabled,
             MidiDevices,
-            _config.Midi.DeviceName,
-            presetOptions,
-            channel1Preset,
-            channel2Preset);
+            _config.Midi.DeviceName);
 
         var window = new SettingsWindow(settingsViewModel)
         {
@@ -437,23 +436,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             ApplyDeviceSelection();
-
-            string nextPreset1 = string.IsNullOrWhiteSpace(settingsViewModel.SelectedChannel1Preset)
-                ? PluginPresetManager.CustomPresetName
-                : settingsViewModel.SelectedChannel1Preset;
-            string nextPreset2 = string.IsNullOrWhiteSpace(settingsViewModel.SelectedChannel2Preset)
-                ? PluginPresetManager.CustomPresetName
-                : settingsViewModel.SelectedChannel2Preset;
-
-            if (!string.Equals(nextPreset1, channel1Preset, StringComparison.OrdinalIgnoreCase))
-            {
-                ApplyChannelPreset(0, nextPreset1);
-            }
-
-            if (!string.Equals(nextPreset2, channel2Preset, StringComparison.OrdinalIgnoreCase))
-            {
-                ApplyChannelPreset(1, nextPreset2);
-            }
         }
     }
 
@@ -755,6 +737,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Channel2.IsMuted = channel2Config.IsMuted;
             Channel2.IsSoloed = channel2Config.IsSoloed;
         }
+
+        // Initialize preset names
+        Channel1PresetName = GetChannelPresetName(0);
+        Channel2PresetName = GetChannelPresetName(1);
     }
 
     private void LoadPluginsFromConfig()
@@ -1991,6 +1977,112 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _config.Midi.DeviceName = deviceName;
         _midiManager?.ApplyConfig(_config.Midi);
         _configManager.Save(_config);
+    }
+
+    public IReadOnlyList<string> GetPresetOptions() => _presetManager.GetChainPresetNames();
+
+    public void SelectChannelPreset(int channelIndex, string presetName)
+    {
+        ApplyChannelPreset(channelIndex, presetName);
+        UpdatePresetNameProperty(channelIndex);
+    }
+
+    public void SaveCurrentAsPreset(int channelIndex, string presetName)
+    {
+        if (string.IsNullOrWhiteSpace(presetName))
+        {
+            return;
+        }
+
+        // Cannot overwrite built-in presets
+        if (_presetManager.IsBuiltInPreset(presetName))
+        {
+            return;
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        var plugins = new List<(string pluginId, Dictionary<string, float> parameters)>();
+
+        foreach (var pluginConfig in config.Plugins)
+        {
+            if (string.IsNullOrWhiteSpace(pluginConfig.Type))
+            {
+                continue;
+            }
+
+            var parameters = new Dictionary<string, float>(pluginConfig.Parameters, StringComparer.OrdinalIgnoreCase);
+            plugins.Add((pluginConfig.Type, parameters));
+        }
+
+        if (_presetManager.SaveChainPreset(presetName, plugins))
+        {
+            config.PresetName = presetName;
+            _configManager.Save(_config);
+            UpdatePresetNameProperty(channelIndex);
+        }
+    }
+
+    public bool CanOverwritePreset(string presetName)
+    {
+        if (string.IsNullOrWhiteSpace(presetName))
+        {
+            return false;
+        }
+
+        // Cannot overwrite built-in presets or "Custom"
+        if (_presetManager.IsBuiltInPreset(presetName))
+        {
+            return false;
+        }
+
+        if (string.Equals(presetName, PluginPresetManager.CustomPresetName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    public bool DeleteUserPreset(string presetName)
+    {
+        if (_presetManager.DeleteChainPreset(presetName))
+        {
+            // Reset any channels using this preset to Custom
+            var channel1Name = GetChannelPresetName(0);
+            var channel2Name = GetChannelPresetName(1);
+
+            if (string.Equals(channel1Name, presetName, StringComparison.OrdinalIgnoreCase))
+            {
+                var config = GetOrCreateChannelConfig(0);
+                config.PresetName = PluginPresetManager.CustomPresetName;
+                Channel1PresetName = PluginPresetManager.CustomPresetName;
+            }
+
+            if (string.Equals(channel2Name, presetName, StringComparison.OrdinalIgnoreCase))
+            {
+                var config = GetOrCreateChannelConfig(1);
+                config.PresetName = PluginPresetManager.CustomPresetName;
+                Channel2PresetName = PluginPresetManager.CustomPresetName;
+            }
+
+            _configManager.Save(_config);
+            return true;
+        }
+
+        return false;
+    }
+
+    private void UpdatePresetNameProperty(int channelIndex)
+    {
+        var presetName = GetChannelPresetName(channelIndex);
+        if (channelIndex == 0)
+        {
+            Channel1PresetName = presetName;
+        }
+        else
+        {
+            Channel2PresetName = presetName;
+        }
     }
 
     private float GetPluginParameterValue(int channelIndex, int slotIndex, string parameterName, float fallback)

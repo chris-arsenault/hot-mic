@@ -18,6 +18,7 @@ public sealed class FFTNoiseRenderer : IDisposable
     private const float WindowHeight = 400f;
 
     private readonly PluginComponentTheme _theme;
+    private readonly PluginPresetBar _presetBar;
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -59,6 +60,7 @@ public sealed class FFTNoiseRenderer : IDisposable
     public FFTNoiseRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
+        _presetBar = new PluginPresetBar(_theme);
 
         _backgroundPaint = new SKPaint
         {
@@ -276,6 +278,11 @@ public sealed class FFTNoiseRenderer : IDisposable
 
         // Title
         canvas.DrawText("FFT Noise Removal", Padding, TitleBarHeight / 2f + 5, _titlePaint);
+
+        // Preset bar
+        float presetBarX = Padding + 135;
+        float presetBarY = (TitleBarHeight - PluginPresetBar.TotalHeight) / 2f;
+        _presetBar.Render(canvas, presetBarX, presetBarY, state.PresetName);
 
         // Bypass button
         float bypassWidth = 60f;
@@ -686,6 +693,12 @@ public sealed class FFTNoiseRenderer : IDisposable
         if (_bypassButtonRect.Contains(x, y))
             return new FFTNoiseHitTest(FFTNoiseHitArea.BypassButton, -1);
 
+        var presetHit = _presetBar.HitTest(x, y);
+        if (presetHit == PresetBarHitArea.Dropdown)
+            return new FFTNoiseHitTest(FFTNoiseHitArea.PresetDropdown, -1);
+        if (presetHit == PresetBarHitArea.SaveButton)
+            return new FFTNoiseHitTest(FFTNoiseHitArea.PresetSave, -1);
+
         if (_learnButtonRect.Contains(x, y))
             return new FFTNoiseHitTest(FFTNoiseHitArea.LearnButton, -1);
 
@@ -705,10 +718,13 @@ public sealed class FFTNoiseRenderer : IDisposable
         return dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.3f;
     }
 
+    public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
+
     public static SKSize GetPreferredSize() => new(WindowWidth, WindowHeight);
 
     public void Dispose()
     {
+        _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -750,7 +766,8 @@ public record struct FFTNoiseState(
     float[]? OutputSpectrum = null,
     float[]? OutputPeaks = null,
     float[]? NoiseProfile = null,
-    int HoveredKnob = -1);
+    int HoveredKnob = -1,
+    string PresetName = "Custom");
 
 public enum FFTNoiseHitArea
 {
@@ -759,7 +776,9 @@ public enum FFTNoiseHitArea
     CloseButton,
     BypassButton,
     LearnButton,
-    Knob
+    Knob,
+    PresetDropdown,
+    PresetSave
 }
 
 public record struct FFTNoiseHitTest(FFTNoiseHitArea Area, int KnobIndex);

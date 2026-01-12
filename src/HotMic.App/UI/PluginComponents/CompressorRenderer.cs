@@ -20,6 +20,7 @@ public sealed class CompressorRenderer : IDisposable
 
     private readonly PluginComponentTheme _theme;
     private readonly RotaryKnob _knob;
+    private readonly PluginPresetBar _presetBar;
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -55,6 +56,7 @@ public sealed class CompressorRenderer : IDisposable
     {
         _theme = theme ?? PluginComponentTheme.Default;
         _knob = new RotaryKnob(_theme);
+        _presetBar = new PluginPresetBar(_theme);
 
         _backgroundPaint = new SKPaint
         {
@@ -231,6 +233,11 @@ public sealed class CompressorRenderer : IDisposable
 
         // Title
         canvas.DrawText("Compressor", Padding, TitleBarHeight / 2f + 5, _titlePaint);
+
+        // Preset bar (after title, before bypass)
+        float presetBarX = 100f;
+        float presetBarY = (TitleBarHeight - PluginPresetBar.TotalHeight) / 2f;
+        _presetBar.Render(canvas, presetBarX, presetBarY, state.PresetName);
 
         // Bypass button
         float bypassWidth = 60f;
@@ -579,6 +586,13 @@ public sealed class CompressorRenderer : IDisposable
         if (_bypassButtonRect.Contains(x, y))
             return new CompressorHitTest(CompressorHitArea.BypassButton, -1);
 
+        // Check preset bar hits
+        var presetHit = _presetBar.HitTest(x, y);
+        if (presetHit == PresetBarHitArea.Dropdown)
+            return new CompressorHitTest(CompressorHitArea.PresetDropdown, -1);
+        if (presetHit == PresetBarHitArea.SaveButton)
+            return new CompressorHitTest(CompressorHitArea.PresetSave, -1);
+
         if (_detectorToggleRect.Contains(x, y))
             return new CompressorHitTest(CompressorHitArea.DetectorToggle, -1);
 
@@ -601,12 +615,15 @@ public sealed class CompressorRenderer : IDisposable
         return new CompressorHitTest(CompressorHitArea.None, -1);
     }
 
+    public SkiaSharp.SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
+
     public static SKSize GetPreferredSize() => new(420, 320);
 
     public void Dispose()
     {
         _grMeter.Dispose();
         _knob.Dispose();
+        _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -644,6 +661,7 @@ public record struct CompressorState(
     bool SidechainHpfEnabled,
     float LatencyMs,
     bool IsBypassed,
+    string PresetName = "Custom",
     int HoveredKnob = -1);
 
 public enum CompressorHitArea
@@ -654,7 +672,9 @@ public enum CompressorHitArea
     BypassButton,
     Knob,
     DetectorToggle,
-    SidechainToggle
+    SidechainToggle,
+    PresetDropdown,
+    PresetSave
 }
 
 public record struct CompressorHitTest(CompressorHitArea Area, int KnobIndex);

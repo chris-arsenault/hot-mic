@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
+using HotMic.Core.Presets;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
 
@@ -17,6 +19,7 @@ public partial class FFTNoiseWindow : Window
     private readonly Action<bool> _bypassCallback;
     private readonly Action _learnToggleCallback;
     private readonly DispatcherTimer _renderTimer;
+    private readonly PluginPresetHelper _presetHelper;
 
     private int _activeKnob = -1;
     private float _dragStartY;
@@ -43,6 +46,12 @@ public partial class FFTNoiseWindow : Window
         _parameterCallback = parameterCallback;
         _bypassCallback = bypassCallback;
         _learnToggleCallback = learnToggleCallback;
+
+        _presetHelper = new PluginPresetHelper(
+            plugin.Id,
+            PluginPresetManager.Default,
+            ApplyPreset,
+            GetCurrentParameters);
 
         var preferredSize = FFTNoiseRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -86,7 +95,8 @@ public partial class FFTNoiseWindow : Window
             OutputSpectrum: _outputSpectrum,
             OutputPeaks: _outputPeaks,
             NoiseProfile: _noiseProfile,
-            HoveredKnob: _hoveredKnob
+            HoveredKnob: _hoveredKnob,
+            PresetName: _presetHelper.CurrentPresetName
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
@@ -130,6 +140,16 @@ public partial class FFTNoiseWindow : Window
                 _dragStartY = y;
                 _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
                 SkiaCanvas.CaptureMouse();
+                e.Handled = true;
+                break;
+
+            case FFTNoiseHitArea.PresetDropdown:
+                _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
+                e.Handled = true;
+                break;
+
+            case FFTNoiseHitArea.PresetSave:
+                _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
         }
@@ -183,6 +203,7 @@ public partial class FFTNoiseWindow : Window
         var (paramIndex, min, max) = KnobParams[knobIndex];
         float value = min + normalizedValue * (max - min);
         _parameterCallback(paramIndex, value);
+        _presetHelper.MarkAsCustom();
     }
 
     private float GetPluginParamValue(int paramIndex)
@@ -191,6 +212,31 @@ public partial class FFTNoiseWindow : Window
         {
             FFTNoiseRemovalPlugin.ReductionIndex => _plugin.Reduction,
             _ => 0f
+        };
+    }
+
+    private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)
+    {
+        foreach (var (name, value) in parameters)
+        {
+            int paramIndex = name switch
+            {
+                "Reduction" => FFTNoiseRemovalPlugin.ReductionIndex,
+                _ => -1
+            };
+
+            if (paramIndex >= 0)
+            {
+                _parameterCallback(paramIndex, value);
+            }
+        }
+    }
+
+    private Dictionary<string, float> GetCurrentParameters()
+    {
+        return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Reduction"] = _plugin.Reduction
         };
     }
 

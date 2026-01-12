@@ -17,6 +17,7 @@ public sealed class LimiterRenderer : IDisposable
 
     private readonly PluginComponentTheme _theme;
     private readonly RotaryKnob _knob;
+    private readonly PluginPresetBar _presetBar;
     private readonly LevelMeter _inputMeter;
     private readonly LevelMeter _outputMeter;
 
@@ -47,6 +48,7 @@ public sealed class LimiterRenderer : IDisposable
     {
         _theme = theme ?? PluginComponentTheme.Default;
         _knob = new RotaryKnob(_theme);
+        _presetBar = new PluginPresetBar(_theme);
         _inputMeter = new LevelMeter();
         _outputMeter = new LevelMeter();
 
@@ -201,6 +203,11 @@ public sealed class LimiterRenderer : IDisposable
 
         // Title
         canvas.DrawText("Limiter", Padding, TitleBarHeight / 2f + 5, _titlePaint);
+
+        // Preset bar
+        float presetBarX = Padding + 60;
+        float presetBarY = (TitleBarHeight - PluginPresetBar.TotalHeight) / 2f;
+        _presetBar.Render(canvas, presetBarX, presetBarY, state.PresetName);
 
         // Bypass button
         float bypassWidth = 60f;
@@ -362,6 +369,12 @@ public sealed class LimiterRenderer : IDisposable
         if (_bypassButtonRect.Contains(x, y))
             return new LimiterHitTest(LimiterHitArea.BypassButton, LimiterKnob.None);
 
+        var presetHit = _presetBar.HitTest(x, y);
+        if (presetHit == PresetBarHitArea.Dropdown)
+            return new LimiterHitTest(LimiterHitArea.PresetDropdown, LimiterKnob.None);
+        if (presetHit == PresetBarHitArea.SaveButton)
+            return new LimiterHitTest(LimiterHitArea.PresetSave, LimiterKnob.None);
+
         float dx = x - _ceilingKnobCenter.X;
         float dy = y - _ceilingKnobCenter.Y;
         if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
@@ -378,6 +391,8 @@ public sealed class LimiterRenderer : IDisposable
         return new LimiterHitTest(LimiterHitArea.None, LimiterKnob.None);
     }
 
+    public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
+
     public static SKSize GetPreferredSize() => new(320, 280);
 
     public void Dispose()
@@ -385,6 +400,7 @@ public sealed class LimiterRenderer : IDisposable
         _inputMeter.Dispose();
         _outputMeter.Dispose();
         _knob.Dispose();
+        _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -412,7 +428,8 @@ public record struct LimiterState(
     float GainReductionDb,
     float LatencyMs,
     bool IsBypassed,
-    LimiterKnob HoveredKnob = LimiterKnob.None);
+    LimiterKnob HoveredKnob = LimiterKnob.None,
+    string PresetName = "Custom");
 
 public enum LimiterHitArea
 {
@@ -420,7 +437,9 @@ public enum LimiterHitArea
     TitleBar,
     CloseButton,
     BypassButton,
-    Knob
+    Knob,
+    PresetDropdown,
+    PresetSave
 }
 
 public enum LimiterKnob

@@ -108,6 +108,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Preset dropdown clicks
+        int presetChannel = _renderer.HitTestPresetDropdown(x, y);
+        if (presetChannel >= 0)
+        {
+            ShowPresetDropdownMenu(viewModel, presetChannel);
+            e.Handled = true;
+            return;
+        }
+
         // Check plugin knobs first (they're on top of plugin slots)
         var pluginKnobHit = _renderer.HitTestPluginKnob(x, y);
         if (pluginKnobHit.HasValue)
@@ -355,6 +364,12 @@ public partial class MainWindow : Window
             case MainButton.Close:
                 Close();
                 break;
+            case MainButton.SavePreset1:
+                ShowSavePresetMenu(viewModel, 0);
+                break;
+            case MainButton.SavePreset2:
+                ShowSavePresetMenu(viewModel, 1);
+                break;
         }
     }
 
@@ -531,6 +546,95 @@ public partial class MainWindow : Window
         if (DataContext is MainViewModel viewModel)
         {
             viewModel.Dispose();
+        }
+    }
+
+    private void ShowPresetDropdownMenu(MainViewModel viewModel, int channelIndex)
+    {
+        var menu = new ContextMenu();
+        var presetOptions = viewModel.GetPresetOptions();
+        string currentPreset = channelIndex == 0 ? viewModel.Channel1PresetName : viewModel.Channel2PresetName;
+
+        foreach (var presetName in presetOptions)
+        {
+            var item = new MenuItem
+            {
+                Header = presetName,
+                IsCheckable = true,
+                IsChecked = string.Equals(presetName, currentPreset, StringComparison.OrdinalIgnoreCase)
+            };
+
+            string capturedName = presetName;
+            item.Click += (_, _) =>
+            {
+                viewModel.SelectChannelPreset(channelIndex, capturedName);
+            };
+
+            menu.Items.Add(item);
+        }
+
+        // Position menu below the dropdown
+        var rect = _renderer.GetPresetDropdownRect(channelIndex);
+        menu.PlacementTarget = SkiaCanvas;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Relative;
+        menu.HorizontalOffset = rect.Left;
+        menu.VerticalOffset = rect.Bottom;
+        menu.IsOpen = true;
+    }
+
+    private void ShowSavePresetMenu(MainViewModel viewModel, int channelIndex)
+    {
+        var menu = new ContextMenu();
+        string currentPreset = channelIndex == 0 ? viewModel.Channel1PresetName : viewModel.Channel2PresetName;
+
+        // Save as new option
+        var saveNewItem = new MenuItem { Header = "Save as New..." };
+        saveNewItem.Click += (_, _) =>
+        {
+            ShowSavePresetDialog(viewModel, channelIndex, null);
+        };
+        menu.Items.Add(saveNewItem);
+
+        // Overwrite current (only if current is a user preset that can be overwritten)
+        if (viewModel.CanOverwritePreset(currentPreset))
+        {
+            var overwriteItem = new MenuItem { Header = $"Overwrite \"{currentPreset}\"" };
+            overwriteItem.Click += (_, _) =>
+            {
+                viewModel.SaveCurrentAsPreset(channelIndex, currentPreset);
+            };
+            menu.Items.Add(overwriteItem);
+        }
+
+        menu.PlacementTarget = SkiaCanvas;
+        menu.IsOpen = true;
+    }
+
+    private void ShowSavePresetDialog(MainViewModel viewModel, int channelIndex, string? suggestedName)
+    {
+        var dialog = new Views.InputDialog("Save Preset", "Enter preset name:", suggestedName ?? "My Preset")
+        {
+            Owner = this
+        };
+
+        if (dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(dialog.InputValue))
+        {
+            string presetName = dialog.InputValue.Trim();
+
+            // Check if this would overwrite a built-in preset
+            if (!viewModel.CanOverwritePreset(presetName) &&
+                !string.Equals(presetName, HotMic.Core.Presets.PluginPresetManager.CustomPresetName, StringComparison.OrdinalIgnoreCase))
+            {
+                // Check if it's a built-in preset name
+                var options = viewModel.GetPresetOptions();
+                if (options.Contains(presetName))
+                {
+                    System.Windows.MessageBox.Show($"Cannot overwrite built-in preset \"{presetName}\".", "Save Preset", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+            }
+
+            viewModel.SaveCurrentAsPreset(channelIndex, presetName);
         }
     }
 }

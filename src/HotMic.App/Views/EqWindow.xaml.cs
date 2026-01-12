@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
+using HotMic.Core.Presets;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
 
@@ -16,6 +18,7 @@ public partial class EqWindow : Window
     private readonly Action<int, float> _parameterCallback;
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
+    private readonly PluginPresetHelper _presetHelper;
 
     private int _activeKnob = -1;
     private float _dragStartY;
@@ -48,6 +51,12 @@ public partial class EqWindow : Window
         _plugin = plugin;
         _parameterCallback = parameterCallback;
         _bypassCallback = bypassCallback;
+
+        _presetHelper = new PluginPresetHelper(
+            plugin.Id,
+            PluginPresetManager.Default,
+            ApplyPreset,
+            GetCurrentParameters);
 
         var preferredSize = EqRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -101,7 +110,8 @@ public partial class EqWindow : Window
             IsBypassed: _plugin.IsBypassed,
             SpectrumLevels: _spectrumLevels,
             SpectrumPeaks: _spectrumPeaks,
-            HoveredKnob: _hoveredKnob
+            HoveredKnob: _hoveredKnob,
+            PresetName: _presetHelper.CurrentPresetName
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
@@ -140,6 +150,16 @@ public partial class EqWindow : Window
                 _dragStartY = y;
                 _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
                 SkiaCanvas.CaptureMouse();
+                e.Handled = true;
+                break;
+
+            case EqHitArea.PresetDropdown:
+                _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
+                e.Handled = true;
+                break;
+
+            case EqHitArea.PresetSave:
+                _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
         }
@@ -208,6 +228,7 @@ public partial class EqWindow : Window
         }
 
         _parameterCallback(paramIndex, value);
+        _presetHelper.MarkAsCustom();
     }
 
     private float GetPluginParamValue(int paramIndex)
@@ -226,6 +247,51 @@ public partial class EqWindow : Window
             FiveBandEqPlugin.HighShelfGainIndex => _plugin.HighShelfGainDb,
             FiveBandEqPlugin.HighShelfFreqIndex => _plugin.HighShelfFreq,
             _ => 0f
+        };
+    }
+
+    private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)
+    {
+        foreach (var (name, value) in parameters)
+        {
+            int paramIndex = name switch
+            {
+                "HpfFreq" => FiveBandEqPlugin.HpfFreqIndex,
+                "LowShelfGain" => FiveBandEqPlugin.LowShelfGainIndex,
+                "LowShelfFreq" => FiveBandEqPlugin.LowShelfFreqIndex,
+                "Mid1Gain" => FiveBandEqPlugin.Mid1GainIndex,
+                "Mid1Freq" => FiveBandEqPlugin.Mid1FreqIndex,
+                "Mid1Q" => FiveBandEqPlugin.Mid1QIndex,
+                "Mid2Gain" => FiveBandEqPlugin.Mid2GainIndex,
+                "Mid2Freq" => FiveBandEqPlugin.Mid2FreqIndex,
+                "Mid2Q" => FiveBandEqPlugin.Mid2QIndex,
+                "HighShelfGain" => FiveBandEqPlugin.HighShelfGainIndex,
+                "HighShelfFreq" => FiveBandEqPlugin.HighShelfFreqIndex,
+                _ => -1
+            };
+
+            if (paramIndex >= 0)
+            {
+                _parameterCallback(paramIndex, value);
+            }
+        }
+    }
+
+    private Dictionary<string, float> GetCurrentParameters()
+    {
+        return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["HpfFreq"] = _plugin.HpfFreq,
+            ["LowShelfGain"] = _plugin.LowShelfGainDb,
+            ["LowShelfFreq"] = _plugin.LowShelfFreq,
+            ["Mid1Gain"] = _plugin.Mid1GainDb,
+            ["Mid1Freq"] = _plugin.Mid1Freq,
+            ["Mid1Q"] = _plugin.Mid1Q,
+            ["Mid2Gain"] = _plugin.Mid2GainDb,
+            ["Mid2Freq"] = _plugin.Mid2Freq,
+            ["Mid2Q"] = _plugin.Mid2Q,
+            ["HighShelfGain"] = _plugin.HighShelfGainDb,
+            ["HighShelfFreq"] = _plugin.HighShelfFreq
         };
     }
 

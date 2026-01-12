@@ -15,6 +15,7 @@ public sealed class GainRenderer : IDisposable
     private const float CornerRadius = 10f;
 
     private readonly PluginComponentTheme _theme;
+    private readonly PluginPresetBar _presetBar;
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -51,6 +52,7 @@ public sealed class GainRenderer : IDisposable
     public GainRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
+        _presetBar = new PluginPresetBar(_theme);
 
         _backgroundPaint = new SKPaint
         {
@@ -253,6 +255,11 @@ public sealed class GainRenderer : IDisposable
 
         // Title
         canvas.DrawText("Gain", Padding, TitleBarHeight / 2f + 5, _titlePaint);
+
+        // Preset bar
+        float presetBarX = 60f;
+        float presetBarY = (TitleBarHeight - PluginPresetBar.TotalHeight) / 2f;
+        _presetBar.Render(canvas, presetBarX, presetBarY, state.PresetName);
 
         // Bypass button
         float bypassWidth = 60f;
@@ -526,6 +533,12 @@ public sealed class GainRenderer : IDisposable
         if (_bypassButtonRect.Contains(x, y))
             return new GainHitTest(GainHitArea.BypassButton);
 
+        var presetHit = _presetBar.HitTest(x, y);
+        if (presetHit == PresetBarHitArea.Dropdown)
+            return new GainHitTest(GainHitArea.PresetDropdown);
+        if (presetHit == PresetBarHitArea.SaveButton)
+            return new GainHitTest(GainHitArea.PresetSave);
+
         if (_phaseButtonRect.Contains(x, y))
             return new GainHitTest(GainHitArea.PhaseButton);
 
@@ -542,12 +555,15 @@ public sealed class GainRenderer : IDisposable
         return new GainHitTest(GainHitArea.None);
     }
 
+    public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
+
     public static SKSize GetPreferredSize() => new(280, 320);
 
     public void Dispose()
     {
         _inputMeter.Dispose();
         _outputMeter.Dispose();
+        _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -582,6 +598,7 @@ public record struct GainState(
     bool IsPhaseInverted,
     float LatencyMs,
     bool IsBypassed,
+    string PresetName = "Custom",
     bool IsKnobHovered = false);
 
 public enum GainHitArea
@@ -591,7 +608,9 @@ public enum GainHitArea
     CloseButton,
     BypassButton,
     PhaseButton,
-    Knob
+    Knob,
+    PresetDropdown,
+    PresetSave
 }
 
 public record struct GainHitTest(GainHitArea Area);

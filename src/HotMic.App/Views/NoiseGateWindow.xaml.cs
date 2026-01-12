@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
+using HotMic.Core.Presets;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
 
@@ -17,6 +19,7 @@ public partial class NoiseGateWindow : Window
     private readonly Action<int, float> _parameterCallback;
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
+    private readonly PluginPresetHelper _presetHelper;
 
     private int _activeKnob = -1;
     private float _dragStartY;
@@ -29,6 +32,12 @@ public partial class NoiseGateWindow : Window
         _plugin = plugin;
         _parameterCallback = parameterCallback;
         _bypassCallback = bypassCallback;
+
+        _presetHelper = new PluginPresetHelper(
+            plugin.Id,
+            PluginPresetManager.Default,
+            ApplyPreset,
+            GetCurrentParameters);
 
         var preferredSize = NoiseGateRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -69,7 +78,8 @@ public partial class NoiseGateWindow : Window
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsGateOpen: _plugin.IsGateOpen(),
             IsBypassed: _plugin.IsBypassed,
-            HoveredKnob: _hoveredKnob
+            HoveredKnob: _hoveredKnob,
+            PresetName: _presetHelper.CurrentPresetName
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
@@ -108,6 +118,16 @@ public partial class NoiseGateWindow : Window
                 _dragStartY = y;
                 _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
                 SkiaCanvas.CaptureMouse();
+                e.Handled = true;
+                break;
+
+            case NoiseGateHitArea.PresetDropdown:
+                _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
+                e.Handled = true;
+                break;
+
+            case NoiseGateHitArea.PresetSave:
+                _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
         }
@@ -180,7 +200,41 @@ public partial class NoiseGateWindow : Window
         if (paramIndex >= 0)
         {
             _parameterCallback(paramIndex, value);
+            _presetHelper.MarkAsCustom();
         }
+    }
+
+    private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)
+    {
+        foreach (var (name, value) in parameters)
+        {
+            int paramIndex = name switch
+            {
+                "Threshold" => NoiseGatePlugin.ThresholdIndex,
+                "Hysteresis" => NoiseGatePlugin.HysteresisIndex,
+                "Attack" => NoiseGatePlugin.AttackIndex,
+                "Hold" => NoiseGatePlugin.HoldIndex,
+                "Release" => NoiseGatePlugin.ReleaseIndex,
+                _ => -1
+            };
+
+            if (paramIndex >= 0)
+            {
+                _parameterCallback(paramIndex, value);
+            }
+        }
+    }
+
+    private Dictionary<string, float> GetCurrentParameters()
+    {
+        return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Threshold"] = _plugin.ThresholdDb,
+            ["Hysteresis"] = _plugin.HysteresisDb,
+            ["Attack"] = _plugin.AttackMs,
+            ["Hold"] = _plugin.HoldMs,
+            ["Release"] = _plugin.ReleaseMs
+        };
     }
 
     private float GetDpiScale()

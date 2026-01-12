@@ -21,6 +21,7 @@ public sealed class RNNoiseRenderer : IDisposable
     private readonly GainReductionMeter _grMeter;
     private readonly AiProcessingIndicator _processingIndicator;
     private readonly RotaryKnob _knob;
+    private readonly PluginPresetBar _presetBar;
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -46,6 +47,7 @@ public sealed class RNNoiseRenderer : IDisposable
         _grMeter = new GainReductionMeter(_theme);
         _processingIndicator = new AiProcessingIndicator(_theme);
         _knob = new RotaryKnob(_theme);
+        _presetBar = new PluginPresetBar(_theme);
 
         _backgroundPaint = new SKPaint
         {
@@ -155,8 +157,14 @@ public sealed class RNNoiseRenderer : IDisposable
         // Title
         canvas.DrawText("RNNoise", Padding, TitleBarHeight / 2f + 5, _titlePaint);
 
-        // AI badge
-        var badgeRect = new SKRect(Padding + 70, (TitleBarHeight - 16) / 2, Padding + 90, (TitleBarHeight + 16) / 2);
+        // Preset bar (after title, before AI badge)
+        float presetBarX = Padding + 70;
+        float presetBarY = (TitleBarHeight - PluginPresetBar.TotalHeight) / 2f;
+        _presetBar.Render(canvas, presetBarX, presetBarY, state.PresetName);
+
+        // AI badge (positioned after preset bar)
+        float badgeX = presetBarX + PluginPresetBar.TotalWidth + 8f;
+        var badgeRect = new SKRect(badgeX, (TitleBarHeight - 16) / 2, badgeX + 20, (TitleBarHeight + 16) / 2);
         using var badgePaint = new SKPaint { Color = new SKColor(0x40, 0xA0, 0xFF), IsAntialias = true };
         canvas.DrawRoundRect(new SKRoundRect(badgeRect, 3f), badgePaint);
         using var badgeTextPaint = new SKPaint
@@ -297,6 +305,13 @@ public sealed class RNNoiseRenderer : IDisposable
         if (_bypassButtonRect.Contains(x, y))
             return new RNNoiseHitTest(RNNoiseHitArea.BypassButton, -1);
 
+        // Check preset bar hits
+        var presetHit = _presetBar.HitTest(x, y);
+        if (presetHit == PresetBarHitArea.Dropdown)
+            return new RNNoiseHitTest(RNNoiseHitArea.PresetDropdown, -1);
+        if (presetHit == PresetBarHitArea.SaveButton)
+            return new RNNoiseHitTest(RNNoiseHitArea.PresetSave, -1);
+
         for (int i = 0; i < KnobCount; i++)
         {
             float dx = x - _knobCenters[i].X;
@@ -313,6 +328,8 @@ public sealed class RNNoiseRenderer : IDisposable
         return new RNNoiseHitTest(RNNoiseHitArea.None, -1);
     }
 
+    public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
+
     public static SKSize GetPreferredSize() => new(380, 400);
 
     public void Dispose()
@@ -321,6 +338,7 @@ public sealed class RNNoiseRenderer : IDisposable
         _grMeter.Dispose();
         _processingIndicator.Dispose();
         _knob.Dispose();
+        _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -342,6 +360,7 @@ public record struct RNNoiseState(
     float LatencyMs,
     bool IsBypassed,
     string StatusMessage = "",
+    string PresetName = "Custom",
     int HoveredKnob = -1);
 
 public enum RNNoiseHitArea
@@ -350,7 +369,9 @@ public enum RNNoiseHitArea
     TitleBar,
     CloseButton,
     BypassButton,
-    Knob
+    Knob,
+    PresetDropdown,
+    PresetSave
 }
 
 public record struct RNNoiseHitTest(RNNoiseHitArea Area, int KnobIndex);

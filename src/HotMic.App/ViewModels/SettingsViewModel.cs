@@ -25,15 +25,11 @@ public partial class SettingsViewModel : ObservableObject
         bool enableVstPlugins = true,
         bool enableMidi = false,
         IReadOnlyList<string>? midiDevices = null,
-        string? selectedMidiDevice = null,
-        IReadOnlyList<string>? channelPresetOptions = null,
-        string? selectedChannel1Preset = null,
-        string? selectedChannel2Preset = null)
+        string? selectedMidiDevice = null)
     {
         InputDevices = new ObservableCollection<AudioDevice>(inputDevices);
         OutputDevices = new ObservableCollection<AudioDevice>(outputDevices);
         MidiDevices = new ObservableCollection<string>(midiDevices ?? []);
-        ChannelPresetOptions = new ObservableCollection<string>(channelPresetOptions ?? []);
 
         _selectedInputDevice1 = selectedInput1;
         _selectedInputDevice2 = selectedInput2;
@@ -47,14 +43,11 @@ public partial class SettingsViewModel : ObservableObject
         _enableVstPlugins = enableVstPlugins;
         _enableMidi = enableMidi;
         _selectedMidiDevice = selectedMidiDevice;
-        _selectedChannel1Preset = selectedChannel1Preset ?? string.Empty;
-        _selectedChannel2Preset = selectedChannel2Preset ?? string.Empty;
     }
 
     public ObservableCollection<AudioDevice> InputDevices { get; }
     public ObservableCollection<AudioDevice> OutputDevices { get; }
     public ObservableCollection<string> MidiDevices { get; }
-    public ObservableCollection<string> ChannelPresetOptions { get; }
 
     public IReadOnlyList<int> SampleRateOptions { get; } = [44100, 48000];
     public IReadOnlyList<int> BufferSizeOptions { get; } = [128, 256, 512, 1024];
@@ -96,12 +89,6 @@ public partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     private string? _selectedMidiDevice;
-
-    [ObservableProperty]
-    private string _selectedChannel1Preset = string.Empty;
-
-    [ObservableProperty]
-    private string _selectedChannel2Preset = string.Empty;
 
     [RelayCommand]
     private void Apply()

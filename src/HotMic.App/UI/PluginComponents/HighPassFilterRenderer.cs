@@ -17,6 +17,7 @@ public sealed class HighPassFilterRenderer : IDisposable
 
     private readonly PluginComponentTheme _theme;
     private readonly RotaryKnob _knob;
+    private readonly PluginPresetBar _presetBar;
     private readonly LevelMeter _inputMeter;
     private readonly LevelMeter _outputMeter;
 
@@ -52,6 +53,7 @@ public sealed class HighPassFilterRenderer : IDisposable
     {
         _theme = theme ?? PluginComponentTheme.Default;
         _knob = new RotaryKnob(_theme);
+        _presetBar = new PluginPresetBar(_theme);
         _inputMeter = new LevelMeter();
         _outputMeter = new LevelMeter();
 
@@ -237,6 +239,11 @@ public sealed class HighPassFilterRenderer : IDisposable
 
         // Title
         canvas.DrawText("High-Pass Filter", Padding, TitleBarHeight / 2f + 5, _titlePaint);
+
+        // Preset bar
+        float presetBarX = Padding + 115;
+        float presetBarY = (TitleBarHeight - PluginPresetBar.TotalHeight) / 2f;
+        _presetBar.Render(canvas, presetBarX, presetBarY, state.PresetName);
 
         // Bypass button
         float bypassWidth = 60f;
@@ -467,6 +474,12 @@ public sealed class HighPassFilterRenderer : IDisposable
         if (_bypassButtonRect.Contains(x, y))
             return new HpfHitTest(HpfHitArea.BypassButton, HpfElement.None);
 
+        var presetHit = _presetBar.HitTest(x, y);
+        if (presetHit == PresetBarHitArea.Dropdown)
+            return new HpfHitTest(HpfHitArea.PresetDropdown, HpfElement.None);
+        if (presetHit == PresetBarHitArea.SaveButton)
+            return new HpfHitTest(HpfHitArea.PresetSave, HpfElement.None);
+
         if (_slope12ButtonRect.Contains(x, y))
             return new HpfHitTest(HpfHitArea.SlopeButton, HpfElement.Slope12);
 
@@ -484,6 +497,8 @@ public sealed class HighPassFilterRenderer : IDisposable
         return new HpfHitTest(HpfHitArea.None, HpfElement.None);
     }
 
+    public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
+
     public static SKSize GetPreferredSize() => new(340, 300);
 
     public void Dispose()
@@ -491,6 +506,7 @@ public sealed class HighPassFilterRenderer : IDisposable
         _inputMeter.Dispose();
         _outputMeter.Dispose();
         _knob.Dispose();
+        _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -522,7 +538,8 @@ public record struct HighPassFilterState(
     float LatencyMs,
     bool IsBypassed,
     HpfElement HoveredElement = HpfElement.None,
-    float[]? Spectrum = null);
+    float[]? Spectrum = null,
+    string PresetName = "Custom");
 
 public enum HpfHitArea
 {
@@ -531,7 +548,9 @@ public enum HpfHitArea
     CloseButton,
     BypassButton,
     Knob,
-    SlopeButton
+    SlopeButton,
+    PresetDropdown,
+    PresetSave
 }
 
 public enum HpfElement

@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
+using HotMic.Core.Presets;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
 
@@ -17,6 +18,7 @@ public partial class CompressorWindow : Window
     private readonly Action<int, float> _parameterCallback;
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
+    private readonly PluginPresetHelper _presetHelper;
 
     private int _activeKnob = -1;
     private float _dragStartY;
@@ -30,6 +32,12 @@ public partial class CompressorWindow : Window
         _plugin = plugin;
         _parameterCallback = parameterCallback;
         _bypassCallback = bypassCallback;
+
+        _presetHelper = new PluginPresetHelper(
+            plugin.Id,
+            PluginPresetManager.Default,
+            ApplyPreset,
+            GetCurrentParameters);
 
         var preferredSize = CompressorRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -73,6 +81,7 @@ public partial class CompressorWindow : Window
             SidechainHpfEnabled: _plugin.IsSidechainHpfEnabled,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
+            PresetName: _presetHelper.CurrentPresetName,
             HoveredKnob: _hoveredKnob
         );
 
@@ -122,6 +131,16 @@ public partial class CompressorWindow : Window
                 _dragStartY = y;
                 _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
                 SkiaCanvas.CaptureMouse();
+                e.Handled = true;
+                break;
+
+            case CompressorHitArea.PresetDropdown:
+                _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
+                e.Handled = true;
+                break;
+
+            case CompressorHitArea.PresetSave:
+                _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
         }
@@ -197,7 +216,47 @@ public partial class CompressorWindow : Window
         if (paramIndex >= 0)
         {
             _parameterCallback(paramIndex, value);
+            _presetHelper.MarkAsCustom();
         }
+    }
+
+    private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)
+    {
+        foreach (var (name, value) in parameters)
+        {
+            int paramIndex = name switch
+            {
+                "Threshold" => CompressorPlugin.ThresholdIndex,
+                "Ratio" => CompressorPlugin.RatioIndex,
+                "Attack" => CompressorPlugin.AttackIndex,
+                "Release" => CompressorPlugin.ReleaseIndex,
+                "Knee" => CompressorPlugin.KneeIndex,
+                "Makeup" => CompressorPlugin.MakeupIndex,
+                "Detector" => CompressorPlugin.DetectorIndex,
+                "Sidechain HPF" => CompressorPlugin.SidechainIndex,
+                _ => -1
+            };
+
+            if (paramIndex >= 0)
+            {
+                _parameterCallback(paramIndex, value);
+            }
+        }
+    }
+
+    private Dictionary<string, float> GetCurrentParameters()
+    {
+        return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Threshold"] = _plugin.ThresholdDb,
+            ["Ratio"] = _plugin.Ratio,
+            ["Attack"] = _plugin.AttackMs,
+            ["Release"] = _plugin.ReleaseMs,
+            ["Knee"] = _plugin.KneeDb,
+            ["Makeup"] = _plugin.MakeupDb,
+            ["Detector"] = (float)_plugin.DetectorMode,
+            ["Sidechain HPF"] = _plugin.IsSidechainHpfEnabled ? 1f : 0f
+        };
     }
 
     private float GetDpiScale()
@@ -215,10 +274,12 @@ public partial class CompressorWindow : Window
             _ => CompressorDetectorMode.Peak
         };
         _parameterCallback(CompressorPlugin.DetectorIndex, (float)next);
+        _presetHelper.MarkAsCustom();
     }
 
     private void ToggleSidechain()
     {
         _parameterCallback(CompressorPlugin.SidechainIndex, _plugin.IsSidechainHpfEnabled ? 0f : 1f);
+        _presetHelper.MarkAsCustom();
     }
 }

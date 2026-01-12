@@ -23,6 +23,7 @@ public sealed class VoiceGateRenderer : IDisposable
     private readonly AiProcessingIndicator _processingIndicator;
     private readonly RotaryKnob _knob;
     private readonly GateIndicator _gateIndicator;
+    private readonly PluginPresetBar _presetBar;
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -51,6 +52,7 @@ public sealed class VoiceGateRenderer : IDisposable
         _processingIndicator = new AiProcessingIndicator(_theme);
         _knob = new RotaryKnob(_theme);
         _gateIndicator = new GateIndicator(_theme);
+        _presetBar = new PluginPresetBar(_theme);
 
         _backgroundPaint = new SKPaint
         {
@@ -174,6 +176,11 @@ public sealed class VoiceGateRenderer : IDisposable
         };
         canvas.DrawText("AI", badgeRect.MidX, badgeRect.MidY + 3, badgeTextPaint);
 
+        // Preset bar
+        float presetBarX = Padding + 115;
+        float presetBarY = (TitleBarHeight - PluginPresetBar.TotalHeight) / 2f;
+        _presetBar.Render(canvas, presetBarX, presetBarY, state.PresetName);
+
         // Bypass button
         float bypassWidth = 60f;
         _bypassButtonRect = new SKRect(
@@ -292,6 +299,12 @@ public sealed class VoiceGateRenderer : IDisposable
         if (_bypassButtonRect.Contains(x, y))
             return new VoiceGateHitTest(VoiceGateHitArea.BypassButton, -1);
 
+        var presetHit = _presetBar.HitTest(x, y);
+        if (presetHit == PresetBarHitArea.Dropdown)
+            return new VoiceGateHitTest(VoiceGateHitArea.PresetDropdown, -1);
+        if (presetHit == PresetBarHitArea.SaveButton)
+            return new VoiceGateHitTest(VoiceGateHitArea.PresetSave, -1);
+
         for (int i = 0; i < KnobCount; i++)
         {
             float dx = x - _knobCenters[i].X;
@@ -308,6 +321,8 @@ public sealed class VoiceGateRenderer : IDisposable
         return new VoiceGateHitTest(VoiceGateHitArea.None, -1);
     }
 
+    public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
+
     public static SKSize GetPreferredSize() => new(450, 380);
 
     public void Dispose()
@@ -317,6 +332,7 @@ public sealed class VoiceGateRenderer : IDisposable
         _processingIndicator.Dispose();
         _knob.Dispose();
         _gateIndicator.Dispose();
+        _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -339,7 +355,8 @@ public record struct VoiceGateState(
     bool IsGateOpen,
     bool IsBypassed,
     string StatusMessage = "",
-    int HoveredKnob = -1);
+    int HoveredKnob = -1,
+    string PresetName = "Custom");
 
 public enum VoiceGateHitArea
 {
@@ -347,7 +364,9 @@ public enum VoiceGateHitArea
     TitleBar,
     CloseButton,
     BypassButton,
-    Knob
+    Knob,
+    PresetDropdown,
+    PresetSave
 }
 
 public record struct VoiceGateHitTest(VoiceGateHitArea Area, int KnobIndex);

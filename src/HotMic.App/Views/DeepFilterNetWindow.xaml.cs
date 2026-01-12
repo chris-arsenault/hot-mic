@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
+using HotMic.Core.Presets;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
 
@@ -17,6 +19,7 @@ public partial class DeepFilterNetWindow : Window
     private readonly Action<int, float> _parameterCallback;
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
+    private readonly PluginPresetHelper _presetHelper;
 
     private int _activeKnob = -1;
     private float _dragStartY;
@@ -29,6 +32,12 @@ public partial class DeepFilterNetWindow : Window
         _plugin = plugin;
         _parameterCallback = parameterCallback;
         _bypassCallback = bypassCallback;
+
+        _presetHelper = new PluginPresetHelper(
+            plugin.Id,
+            PluginPresetManager.Default,
+            ApplyPreset,
+            GetCurrentParameters);
 
         var preferredSize = DeepFilterNetRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -66,7 +75,8 @@ public partial class DeepFilterNetWindow : Window
             LatencyMs: latencyMs,
             IsBypassed: _plugin.IsBypassed,
             StatusMessage: _plugin.StatusMessage,
-            HoveredKnob: _hoveredKnob
+            HoveredKnob: _hoveredKnob,
+            PresetName: _presetHelper.CurrentPresetName
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
@@ -103,6 +113,7 @@ public partial class DeepFilterNetWindow : Window
             case DeepFilterNetHitArea.PostFilterToggle:
                 float currentValue = GetParameterValue(DeepFilterNetPlugin.PostFilterIndex);
                 _parameterCallback(DeepFilterNetPlugin.PostFilterIndex, currentValue >= 0.5f ? 0f : 1f);
+                _presetHelper.MarkAsCustom();
                 e.Handled = true;
                 break;
 
@@ -111,6 +122,16 @@ public partial class DeepFilterNetWindow : Window
                 _dragStartY = y;
                 _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
                 SkiaCanvas.CaptureMouse();
+                e.Handled = true;
+                break;
+
+            case DeepFilterNetHitArea.PresetDropdown:
+                _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
+                e.Handled = true;
+                break;
+
+            case DeepFilterNetHitArea.PresetSave:
+                _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
         }
@@ -184,7 +205,37 @@ public partial class DeepFilterNetWindow : Window
         if (paramIndex >= 0)
         {
             _parameterCallback(paramIndex, value);
+            _presetHelper.MarkAsCustom();
         }
+    }
+
+    private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)
+    {
+        foreach (var (name, value) in parameters)
+        {
+            int paramIndex = name switch
+            {
+                "Reduction" => DeepFilterNetPlugin.ReductionIndex,
+                "Attenuation" => DeepFilterNetPlugin.AttenuationIndex,
+                "PostFilter" => DeepFilterNetPlugin.PostFilterIndex,
+                _ => -1
+            };
+
+            if (paramIndex >= 0)
+            {
+                _parameterCallback(paramIndex, value);
+            }
+        }
+    }
+
+    private Dictionary<string, float> GetCurrentParameters()
+    {
+        return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Reduction"] = GetParameterValue(DeepFilterNetPlugin.ReductionIndex),
+            ["Attenuation"] = GetParameterValue(DeepFilterNetPlugin.AttenuationIndex),
+            ["PostFilter"] = GetParameterValue(DeepFilterNetPlugin.PostFilterIndex) >= 0.5f ? 1f : 0f
+        };
     }
 
     private float GetDpiScale()

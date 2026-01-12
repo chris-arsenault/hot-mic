@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
+using HotMic.Core.Presets;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
 
@@ -17,6 +19,7 @@ public partial class HighPassFilterWindow : Window
     private readonly Action<int, float> _parameterCallback;
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
+    private readonly PluginPresetHelper _presetHelper;
 
     private bool _isKnobActive;
     private float _dragStartY;
@@ -32,6 +35,12 @@ public partial class HighPassFilterWindow : Window
         _plugin = plugin;
         _parameterCallback = parameterCallback;
         _bypassCallback = bypassCallback;
+
+        _presetHelper = new PluginPresetHelper(
+            plugin.Id,
+            PluginPresetManager.Default,
+            ApplyPreset,
+            GetCurrentParameters);
 
         var preferredSize = HighPassFilterRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -74,7 +83,8 @@ public partial class HighPassFilterWindow : Window
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
             HoveredElement: _hoveredElement,
-            Spectrum: _spectrum
+            Spectrum: _spectrum,
+            PresetName: _presetHelper.CurrentPresetName
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
@@ -111,6 +121,7 @@ public partial class HighPassFilterWindow : Window
             case HpfHitArea.SlopeButton:
                 float newSlope = hit.Element == HpfElement.Slope18 ? 18f : 12f;
                 _parameterCallback(HighPassFilterPlugin.SlopeIndex, newSlope);
+                _presetHelper.MarkAsCustom();
                 e.Handled = true;
                 break;
 
@@ -119,6 +130,16 @@ public partial class HighPassFilterWindow : Window
                 _dragStartY = y;
                 _dragStartValue = GetKnobNormalizedValue();
                 SkiaCanvas.CaptureMouse();
+                e.Handled = true;
+                break;
+
+            case HpfHitArea.PresetDropdown:
+                _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
+                e.Handled = true;
+                break;
+
+            case HpfHitArea.PresetSave:
+                _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
         }
@@ -166,6 +187,34 @@ public partial class HighPassFilterWindow : Window
         float logMax = MathF.Log10(200f);
         float cutoffHz = MathF.Pow(10, logMin + normalizedValue * (logMax - logMin));
         _parameterCallback(HighPassFilterPlugin.CutoffIndex, cutoffHz);
+        _presetHelper.MarkAsCustom();
+    }
+
+    private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)
+    {
+        foreach (var (name, value) in parameters)
+        {
+            int paramIndex = name switch
+            {
+                "Cutoff" => HighPassFilterPlugin.CutoffIndex,
+                "Slope" => HighPassFilterPlugin.SlopeIndex,
+                _ => -1
+            };
+
+            if (paramIndex >= 0)
+            {
+                _parameterCallback(paramIndex, value);
+            }
+        }
+    }
+
+    private Dictionary<string, float> GetCurrentParameters()
+    {
+        return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Cutoff"] = _plugin.CutoffHz,
+            ["Slope"] = _plugin.SlopeDbOct
+        };
     }
 
     private float GetDpiScale()

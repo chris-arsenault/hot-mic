@@ -6,7 +6,9 @@ public enum MainButton
     Settings,
     Pin,
     Minimize,
-    Close
+    Close,
+    SavePreset1,
+    SavePreset2
 }
 
 public enum DevicePickerTarget
@@ -20,7 +22,9 @@ public enum DevicePickerTarget
     BufferSize,
     Input1Channel,
     Input2Channel,
-    OutputRouting
+    OutputRouting,
+    Preset1,
+    Preset2
 }
 
 public enum KnobType
