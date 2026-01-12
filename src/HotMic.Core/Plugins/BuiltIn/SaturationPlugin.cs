@@ -12,19 +12,25 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
     private const float SmoothingMs = 8f;
     private const float AttackMs = 2f;
     private const float ReleaseMs = 60f;
-    private const float PreEmphasisMaxDb = 2.5f;
-    private const float PreEmphasisHz = 6000f;
-    private const float HfSplitHz = 3500f;
     private const float FilterQ = 0.707f;
     private const float WarmthPivotPct = 50f;
     private const float WarmthOverdriveMax = 2f;
-    private const float MaxDriveK = 0.6f;
-    private const float MaxBias = 0.04f;
-    private const float MinShaperA = 0.18f;
-    private const float MaxShaperA = 0.25f;
-    private const float MinShaperB = 0.015f;
-    private const float MaxShaperB = 0.03f;
-    private const float OutputTrimMax = 0.95f;
+
+    // Pre/post tilt (tape-like emphasis)
+    private const float PreTiltDb = 2f;
+    private const float PreTiltHz = 6000f;
+
+    // HF self-compression (prevents sibilant edge)
+    private const float HfSplitHz = 3800f;
+    private const float HfCompC = 0.7f;
+
+    // Asymmetric tanh warmth core coefficients
+    // k = base curvature, asymmetry = split between positive/negative halves
+    // kPos = k * (1 + asym), kNeg = k * (1 - asym) for different saturation on +/-
+    private const float K0 = 1.0f;    // Base curvature
+    private const float K1 = 1.0f;    // Envelope-scaled curvature addition
+    private const float A0 = 0.15f;   // Base asymmetry (0 = symmetric, higher = more even harmonics)
+    private const float A1 = 0.20f;   // Envelope-scaled asymmetry addition
 
     private float _warmthPct = 50f;
     private float _blendPct = 100f;
@@ -38,6 +44,11 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
     private int _inputLevelBits;
     private int _outputLevelBits;
 
+    // Diagnostic capture for visualization
+    private readonly SaturationDiagnostics _diagnostics = new();
+    private int _diagnosticDecimator;
+    private const int DiagnosticDecimation = 8; // Capture every Nth sample to reduce overhead
+
     private LinearSmoother _warmthSmoother = new();
     private LinearSmoother _blendSmoother = new();
 
@@ -50,6 +61,16 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
     private HalfbandResampler[] _downsamplers = [];
     private float[][] _stageBuffers = [];
     private float[] _dryBuffer = Array.Empty<float>();
+
+    // Reference path for null-difference analysis
+    // Must have identical filter chain (OS + linear filters) but NO saturation nonlinearity
+    private HalfbandResampler[] _refUpsamplers = [];
+    private HalfbandResampler[] _refDownsamplers = [];
+    private float[][] _refStageBuffers = [];
+    private float[] _dryFilteredBuffer = Array.Empty<float>();
+    private readonly BiquadFilter _refPreEmphasis = new();
+    private readonly BiquadFilter _refPostEmphasis = new();
+    private readonly BiquadFilter _refHfLowpass = new();
 
     public SaturationPlugin()
     {
@@ -73,6 +94,7 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
     public float WarmthPct => _warmthPct;
     public float BlendPct => _blendPct;
     public int SampleRate => _sampleRate;
+    public SaturationDiagnostics Diagnostics => _diagnostics;
 
     public void Initialize(int sampleRate, int blockSize)
     {
@@ -119,39 +141,55 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
                 warmthSmooth = _warmthSmoother.IsSmoothing;
             }
 
-            float bias = MaxBias * warmth;
-            float driveK = MaxDriveK * warmth;
-            float shaperA = (MinShaperA + (MaxShaperA - MinShaperA) * warmth) * warmth;
-            float shaperB = (MinShaperB + (MaxShaperB - MinShaperB) * warmth) * warmth;
-            float hfCompression = warmth;
-            float outputTrim = 1f - (1f - OutputTrimMax) * warmth;
-
+            // 1) Pre-tilt (push presence into the nonlinearity)
             float x1 = _preEmphasis.Process(oversampled[i]);
+
+            // 2) Envelope follower (for dynamic behavior)
             float env = _envelope.Process(x1);
-            float drive = 1f + driveK * env;
-            float x2 = (x1 + bias) * drive;
-            float biasSignal = bias * drive;
 
-            // Polynomial shaper (spec: y = x - a*x^3 + b*x^5) for even-harmonic warmth.
-            float x2Sq = x2 * x2;
-            float x2Cube = x2Sq * x2;
-            float x2Pow5 = x2Cube * x2Sq;
-            float shaped = x2 - shaperA * x2Cube + shaperB * x2Pow5;
+            // 3) Asymmetric tanh warmth core with split curvature
+            // Different k for positive vs negative creates even harmonics at all signal levels
+            float k = (K0 + K1 * env) * warmth;
+            float asym = (A0 + A1 * env) * warmth;
 
-            // Remove DC offset introduced by the bias so silence stays silent.
-            float biasSq = biasSignal * biasSignal;
-            float biasCube = biasSq * biasSignal;
-            float biasPow5 = biasCube * biasSq;
-            float biasOutput = biasSignal - shaperA * biasCube + shaperB * biasPow5;
-            shaped -= biasOutput;
+            // Split curvature: positive saturates harder, negative saturates softer
+            // This asymmetry persists regardless of signal amplitude
+            float kPos = k * (1f + asym);
+            float kNeg = k * (1f - asym);
 
+            float shaped;
+            if (x1 >= 0f)
+            {
+                shaped = MathF.Tanh(kPos * x1);
+            }
+            else
+            {
+                shaped = MathF.Tanh(kNeg * x1);
+            }
+
+            // Gain normalization: derivative at x=0 is k (average of kPos and kNeg at origin)
+            // Since tanh'(0) = 1, derivative is just the k coefficient
+            if (k > 0.001f)
+            {
+                shaped /= k;
+            }
+
+            // 4) HF self-compression (prevents sibilant edge)
             float low = _hfLowpass.Process(shaped);
             float high = shaped - low;
-            float hfGain = 1f / (1f + hfCompression * env);
+            float hfGain = 1f / (1f + HfCompC * warmth * env);
             float y = low + high * hfGain;
 
-            y = _postEmphasis.Process(y);
-            oversampled[i] = y * outputTrim;
+            // 5) De-tilt (inverse of pre-tilt)
+            float finalOutput = _postEmphasis.Process(y);
+            oversampled[i] = finalOutput;
+
+            // Capture diagnostic samples (decimated to reduce overhead)
+            if (++_diagnosticDecimator >= DiagnosticDecimation)
+            {
+                _diagnosticDecimator = 0;
+                _diagnostics.RecordTransferSample(x1, finalOutput, env);
+            }
         }
 
         ReadOnlySpan<float> downInput = oversampled;
@@ -165,6 +203,47 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
             _downsamplers[stage].ProcessDownsample(downInput, downOutput);
             downInput = downOutput;
             downLength = outputLength;
+        }
+
+        // Reference path: run dry through IDENTICAL filter chain (OS + linear filters) but NO saturation.
+        // This ensures delta = 0 at warmth=0, and delta shows ONLY what the nonlinearity added.
+        ReadOnlySpan<float> refInput = drySpan;
+        int refLength = buffer.Length;
+        for (int stage = 0; stage < _refUpsamplers.Length; stage++)
+        {
+            int refOutputLength = refLength * 2;
+            var refBuffer = _refStageBuffers[stage].AsSpan(0, refOutputLength);
+            _refUpsamplers[stage].ProcessUpsample(refInput, refBuffer);
+            refInput = refBuffer;
+            refLength = refOutputLength;
+        }
+
+        // Process reference through same linear filters (pre-emphasis, HF split, post-emphasis)
+        // but skip the nonlinear saturation (no bias, no drive, no shaper)
+        Span<float> refOversampled = _refStageBuffers[^1].AsSpan(0, refLength);
+        for (int i = 0; i < refOversampled.Length; i++)
+        {
+            float x1 = _refPreEmphasis.Process(refOversampled[i]);
+            // Skip envelope, drive, bias, shaper - just pass through linearly
+            float low = _refHfLowpass.Process(x1);
+            float high = x1 - low;
+            float y = low + high; // No HF compression (hfGain = 1)
+            y = _refPostEmphasis.Process(y);
+            refOversampled[i] = y;
+        }
+
+        ReadOnlySpan<float> refDownInput = refOversampled;
+        int refDownLength = refLength;
+        var dryFilteredSpan = _dryFilteredBuffer.AsSpan(0, buffer.Length);
+        for (int stage = _refDownsamplers.Length - 1; stage >= 0; stage--)
+        {
+            int outputLength = refDownLength / 2;
+            Span<float> refDownOutput = stage == 0
+                ? dryFilteredSpan
+                : _refStageBuffers[stage - 1].AsSpan(0, outputLength);
+            _refDownsamplers[stage].ProcessDownsample(refDownInput, refDownOutput);
+            refDownInput = refDownOutput;
+            refDownLength = outputLength;
         }
 
         float blend = _blendSmoother.Current;
@@ -183,6 +262,13 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
             float output = dry + (wet - dry) * blend;
             buffer[i] = output;
             outputPeak = MathF.Max(outputPeak, MathF.Abs(output));
+
+            // Null-difference: delta = wet - reference (reference has same linear filters, no saturation)
+            // At warmth=0, delta should be ~0. At warmth>0, delta shows ONLY what saturation added.
+            float dryFiltered = dryFilteredSpan[i];
+            float delta = wet - dryFiltered;
+            _diagnostics.RecordScopeSample(delta);
+            _diagnostics.RecordFftSample(delta);
         }
 
         // Update metering (thread-safe)
@@ -288,16 +374,27 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
         _downsamplers = new HalfbandResampler[stages];
         _stageBuffers = new float[stages][];
 
+        // Reference path (for null-difference analysis)
+        _refUpsamplers = new HalfbandResampler[stages];
+        _refDownsamplers = new HalfbandResampler[stages];
+        _refStageBuffers = new float[stages][];
+
         int length = _blockSize * 2;
         for (int i = 0; i < stages; i++)
         {
             _upsamplers[i] = new HalfbandResampler();
             _downsamplers[i] = new HalfbandResampler();
             _stageBuffers[i] = new float[length];
+
+            _refUpsamplers[i] = new HalfbandResampler();
+            _refDownsamplers[i] = new HalfbandResampler();
+            _refStageBuffers[i] = new float[length];
+
             length *= 2;
         }
 
         _dryBuffer = new float[_blockSize];
+        _dryFilteredBuffer = new float[_blockSize];
         _oversampledSampleRate = _sampleRate * _oversampleFactor;
 
         _warmthSmoother.Configure(_oversampledSampleRate, SmoothingMs, MapWarmthNormalized(_warmthPct));
@@ -308,6 +405,9 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
         _preEmphasis.Reset();
         _postEmphasis.Reset();
         _hfLowpass.Reset();
+        _refPreEmphasis.Reset();
+        _refPostEmphasis.Reset();
+        _refHfLowpass.Reset();
         UpdateToneFilters(MapWarmthNormalized(_warmthPct));
         UpdateLatency();
     }
@@ -319,10 +419,16 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
             return;
         }
 
-        float emphasisDb = PreEmphasisMaxDb * Math.Clamp(warmth, 0f, 1f);
-        _preEmphasis.SetHighShelf(_oversampledSampleRate, PreEmphasisHz, emphasisDb, FilterQ);
-        _postEmphasis.SetHighShelf(_oversampledSampleRate, PreEmphasisHz, -emphasisDb, FilterQ);
+        // Pre/de-tilt: fixed +/-2dB @ 6kHz (tape-like emphasis)
+        // The tilt is always applied; warmth controls the nonlinearity, not the tilt
+        _preEmphasis.SetHighShelf(_oversampledSampleRate, PreTiltHz, PreTiltDb, FilterQ);
+        _postEmphasis.SetHighShelf(_oversampledSampleRate, PreTiltHz, -PreTiltDb, FilterQ);
         _hfLowpass.SetLowPass(_oversampledSampleRate, HfSplitHz, FilterQ);
+
+        // Reference path filters (identical coefficients for proper null-difference)
+        _refPreEmphasis.SetHighShelf(_oversampledSampleRate, PreTiltHz, PreTiltDb, FilterQ);
+        _refPostEmphasis.SetHighShelf(_oversampledSampleRate, PreTiltHz, -PreTiltDb, FilterQ);
+        _refHfLowpass.SetLowPass(_oversampledSampleRate, HfSplitHz, FilterQ);
     }
 
     private static float MapWarmthNormalized(float warmthPct)

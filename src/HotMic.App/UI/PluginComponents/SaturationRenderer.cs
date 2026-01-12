@@ -3,16 +3,18 @@ using SkiaSharp;
 namespace HotMic.App.UI.PluginComponents;
 
 /// <summary>
-/// Renders a saturation plugin UI with transfer curve visualization and input/output meters.
+/// Renders a saturation plugin UI with transfer curve visualization, input/output meters,
+/// and diagnostic visualizations (dynamic transfer curve, null-difference scope, harmonic analyzer).
 /// </summary>
 public sealed class SaturationRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 16f;
-    private const float KnobRadius = 40f;
+    private const float KnobRadius = 36f;
     private const float MeterWidth = 20f;
-    private const float MeterHeight = 120f;
-    private const float CurveSize = 100f;
+    private const float MeterHeight = 100f;
+    private const float CurveSize = 120f;
+    private const float DiagnosticHeight = 100f;
     private const float CornerRadius = 10f;
     private const float WarmthPivotPct = 50f;
     private const float WarmthOverdriveMax = 2f;
@@ -22,6 +24,9 @@ public sealed class SaturationRenderer : IDisposable
     private readonly PluginPresetBar _presetBar;
     private readonly LevelMeter _inputMeter;
     private readonly LevelMeter _outputMeter;
+    private readonly DynamicTransferCurveDisplay _transferCurve;
+    private readonly NullDifferenceScope _nullScope;
+    private readonly HarmonicAnalyzer _harmonicAnalyzer;
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -38,6 +43,7 @@ public sealed class SaturationRenderer : IDisposable
     private readonly SKPaint _gridPaint;
     private readonly SKPaint _labelPaint;
     private readonly SKPaint _latencyPaint;
+    private readonly SKPaint _sectionLabelPaint;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
@@ -52,6 +58,9 @@ public sealed class SaturationRenderer : IDisposable
         _presetBar = new PluginPresetBar(_theme);
         _inputMeter = new LevelMeter();
         _outputMeter = new LevelMeter();
+        _transferCurve = new DynamicTransferCurveDisplay(_theme);
+        _nullScope = new NullDifferenceScope(_theme);
+        _harmonicAnalyzer = new HarmonicAnalyzer(_theme);
 
         _backgroundPaint = new SKPaint
         {
@@ -169,6 +178,15 @@ public sealed class SaturationRenderer : IDisposable
             TextAlign = SKTextAlign.Right,
             Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
         };
+
+        _sectionLabelPaint = new SKPaint
+        {
+            Color = _theme.TextMuted,
+            IsAntialias = true,
+            TextSize = 9f,
+            TextAlign = SKTextAlign.Left,
+            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
+        };
     }
 
     public void Render(SKCanvas canvas, SKSize size, float dpiScale, SaturationState state)
@@ -238,28 +256,25 @@ public sealed class SaturationRenderer : IDisposable
 
         float contentTop = TitleBarHeight + Padding;
 
+        // === ROW 1: Meters + Knobs + Dynamic Transfer Curve ===
+        float row1Height = MeterHeight + 20;
+
         // Input meter
-        float meterY = contentTop + 20;
+        float meterY = contentTop;
         var inputMeterRect = new SKRect(Padding, meterY, Padding + MeterWidth, meterY + MeterHeight);
         _inputMeter.Update(state.InputLevel);
         _inputMeter.Render(canvas, inputMeterRect, MeterOrientation.Vertical);
         canvas.DrawText("IN", inputMeterRect.MidX, inputMeterRect.Bottom + 12, _labelPaint);
 
         // Output meter
-        var outputMeterRect = new SKRect(inputMeterRect.Right + 8, meterY, inputMeterRect.Right + 8 + MeterWidth, meterY + MeterHeight);
+        var outputMeterRect = new SKRect(inputMeterRect.Right + 6, meterY, inputMeterRect.Right + 6 + MeterWidth, meterY + MeterHeight);
         _outputMeter.Update(state.OutputLevel);
         _outputMeter.Render(canvas, outputMeterRect, MeterOrientation.Vertical);
         canvas.DrawText("OUT", outputMeterRect.MidX, outputMeterRect.Bottom + 12, _labelPaint);
 
-        // Transfer curve display
-        float curveX = outputMeterRect.Right + 20;
-        float curveY = contentTop + 10;
-        var curveRect = new SKRect(curveX, curveY, curveX + CurveSize, curveY + CurveSize);
-        DrawTransferCurve(canvas, curveRect, state.WarmthPct);
-
-        // Knobs
-        float knobAreaX = curveRect.Right + 20;
-        float knobY = meterY + 30;
+        // Knobs (stacked vertically)
+        float knobAreaX = outputMeterRect.Right + 16;
+        float knobY = meterY + 20;
 
         // Warmth knob
         _warmthKnobCenter = new SKPoint(knobAreaX + KnobRadius, knobY);
@@ -267,9 +282,46 @@ public sealed class SaturationRenderer : IDisposable
         _knob.Render(canvas, _warmthKnobCenter, KnobRadius, warmthNorm, "WARMTH", $"{state.WarmthPct:0}", "%", state.HoveredKnob == SaturationKnob.Warmth);
 
         // Blend knob
-        _blendKnobCenter = new SKPoint(knobAreaX + KnobRadius, knobY + 90);
+        _blendKnobCenter = new SKPoint(knobAreaX + KnobRadius, knobY + 70);
         float blendNorm = state.BlendPct / 100f;
         _knob.Render(canvas, _blendKnobCenter, KnobRadius, blendNorm, "BLEND", $"{state.BlendPct:0}", "%", state.HoveredKnob == SaturationKnob.Blend);
+
+        // Dynamic Transfer curve (larger, shows real samples)
+        float curveX = knobAreaX + KnobRadius * 2 + 24;
+        float curveY = contentTop;
+        var curveRect = new SKRect(curveX, curveY, curveX + CurveSize, curveY + CurveSize);
+
+        if (state.GetTransferCurveSamples != null)
+        {
+            _transferCurve.Render(canvas, curveRect, state.WarmthPct, state.GetTransferCurveSamples);
+        }
+        else
+        {
+            DrawTransferCurve(canvas, curveRect, state.WarmthPct);
+        }
+
+        // === ROW 2: Diagnostic Visualizations ===
+        float row2Top = contentTop + row1Height + 8;
+        float diagWidth = (size.Width - Padding * 3) / 2;
+
+        // Section label
+        canvas.DrawText("DIAGNOSTICS", Padding, row2Top - 2, _sectionLabelPaint);
+
+        // Null-Difference Scope
+        var scopeRect = new SKRect(Padding, row2Top + 8, Padding + diagWidth, row2Top + 8 + DiagnosticHeight);
+        if (state.GetScopeSamples != null)
+        {
+            _nullScope.Render(canvas, scopeRect, state.GetScopeSamples);
+        }
+
+        // Harmonic Analyzer
+        var harmonicRect = new SKRect(scopeRect.Right + Padding, row2Top + 8, size.Width - Padding, row2Top + 8 + DiagnosticHeight);
+        if (state.GetFftSamples != null && state.SampleRate > 0)
+        {
+            _harmonicAnalyzer.SampleRate = state.SampleRate;
+            _harmonicAnalyzer.Analyze(state.GetFftSamples);
+            _harmonicAnalyzer.Render(canvas, harmonicRect);
+        }
 
         // Outer border
         canvas.DrawRoundRect(roundRect, _borderPaint);
@@ -291,25 +343,43 @@ public sealed class SaturationRenderer : IDisposable
         canvas.DrawLine(rect.Left + 4, rect.Bottom - 4, rect.Right - 4, rect.Top + 4, _curveLinearPaint);
 
         float warmth = MapWarmthPreview(warmthPct);
-        float env = 0.6f; // nominal level for previewing the dynamic curve
-        float bias = 0.04f * warmth;
-        float driveK = 0.6f * warmth;
-        float shaperA = (0.18f + (0.25f - 0.18f) * warmth) * warmth;
-        float shaperB = (0.015f + (0.03f - 0.015f) * warmth) * warmth;
-        float drive = 1f + driveK * env;
+        float env = 0.6f; // Nominal envelope for preview
 
-        // Draw polynomial transfer curve
+        // Asymmetric tanh coefficients (must match SaturationPlugin)
+        const float K0 = 1.0f, K1 = 1.0f;
+        const float A0 = 0.15f, A1 = 0.20f;
+
+        float k = (K0 + K1 * env) * warmth;
+        float asym = (A0 + A1 * env) * warmth;
+        float kPos = k * (1f + asym);
+        float kNeg = k * (1f - asym);
+
+        // Draw asymmetric tanh transfer curve
         using var curvePath = new SKPath();
         bool first = true;
 
         for (float i = 0; i <= 1f; i += 0.02f)
         {
             float input = i * 2f - 1f; // -1 to 1
-            float shapedInput = (input + bias) * drive;
-            float x2 = shapedInput * shapedInput;
-            float x3 = x2 * shapedInput;
-            float x5 = x3 * x2;
-            float output = shapedInput - shaperA * x3 + shaperB * x5;
+
+            // Split curvature: different k for positive vs negative
+            float shaped;
+            if (input >= 0f)
+            {
+                shaped = MathF.Tanh(kPos * input);
+            }
+            else
+            {
+                shaped = MathF.Tanh(kNeg * input);
+            }
+
+            // Gain normalization
+            if (k > 0.001f)
+            {
+                shaped /= k;
+            }
+
+            float output = shaped;
 
             float xPos = rect.Left + 4 + (rect.Width - 8) * i;
             float yPos = rect.Bottom - 4 - (rect.Height - 8) * ((output + 1f) / 2f);
@@ -378,7 +448,7 @@ public sealed class SaturationRenderer : IDisposable
 
     public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
 
-    public static SKSize GetPreferredSize() => new(340, 260);
+    public static SKSize GetPreferredSize() => new(420, 380);
 
     public void Dispose()
     {
@@ -386,6 +456,9 @@ public sealed class SaturationRenderer : IDisposable
         _outputMeter.Dispose();
         _knob.Dispose();
         _presetBar.Dispose();
+        _transferCurve.Dispose();
+        _nullScope.Dispose();
+        _harmonicAnalyzer.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -401,6 +474,7 @@ public sealed class SaturationRenderer : IDisposable
         _gridPaint.Dispose();
         _labelPaint.Dispose();
         _latencyPaint.Dispose();
+        _sectionLabelPaint.Dispose();
     }
 }
 
@@ -412,7 +486,11 @@ public record struct SaturationState(
     float LatencyMs,
     bool IsBypassed,
     SaturationKnob HoveredKnob = SaturationKnob.None,
-    string PresetName = "Custom");
+    string PresetName = "Custom",
+    int SampleRate = 0,
+    Func<float[], float[], float[], int>? GetTransferCurveSamples = null,
+    Func<float[], int>? GetScopeSamples = null,
+    Func<float[], int>? GetFftSamples = null);
 
 public enum SaturationHitArea
 {
