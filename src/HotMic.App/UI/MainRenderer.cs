@@ -338,7 +338,7 @@ public sealed class MainRenderer
 
             // Mini meter after plugin
             float miniMeterX = slotX + PluginSlotWidth - MiniMeterWidth - 2f;
-            float meterLevel = slot.IsEmpty ? 0f : (channel.OutputRmsLevel * (0.7f + i * 0.06f)); // Simulated per-plugin level
+            float meterLevel = slot.IsEmpty ? 0f : slot.OutputRmsLevel;
             DrawMiniMeter(canvas, miniMeterX, slotY + 2f, MiniMeterWidth, slotHeight - 4f, meterLevel, voxScale);
 
             slotX += PluginSlotWidth + PluginSlotSpacing;

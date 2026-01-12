@@ -810,6 +810,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Channel2.OutputPeakLevel = channel2.OutputMeter.GetPeakLevel();
         Channel2.OutputRmsLevel = channel2.OutputMeter.GetRmsLevel();
 
+        UpdatePluginMeters(Channel1, channel1);
+        UpdatePluginMeters(Channel2, channel2);
+
         // Update hotbar stats and diagnostics
         Diagnostics = _audioEngine.GetDiagnosticsSnapshot();
         int sampleRate = Math.Max(1, _audioEngine.SampleRate);
@@ -844,6 +847,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         UpdateDebugInfo(nowTicks);
         _lastMeterUpdateTicks = nowTicks;
+    }
+
+    private static void UpdatePluginMeters(ChannelStripViewModel viewModel, ChannelStrip channel)
+    {
+        var meters = channel.PluginChain.GetMeterSnapshot();
+        int pluginSlots = Math.Max(0, viewModel.PluginSlots.Count - 1);
+        int count = Math.Min(pluginSlots, meters.Length);
+
+        for (int i = 0; i < count; i++)
+        {
+            var slot = viewModel.PluginSlots[i];
+            slot.OutputPeakLevel = meters[i].GetPeakLevel();
+            slot.OutputRmsLevel = meters[i].GetRmsLevel();
+        }
+
+        for (int i = count; i < pluginSlots; i++)
+        {
+            var slot = viewModel.PluginSlots[i];
+            slot.OutputPeakLevel = 0f;
+            slot.OutputRmsLevel = 0f;
+        }
     }
 
     private void UpdateDebugInfo(long nowTicks)
@@ -1034,17 +1058,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var strip = _audioEngine.Channels[channelIndex];
         var slots = strip.PluginChain.GetSnapshot();
-        if ((uint)fromIndex >= (uint)slots.Length || (uint)toIndex >= (uint)slots.Length)
+        if (slots.Length == 0 || (uint)fromIndex >= (uint)slots.Length)
         {
             return;
         }
 
-        var newSlots = slots.ToArray();
+        if (toIndex < 0)
+        {
+            toIndex = 0;
+        }
+        else if (toIndex >= slots.Length)
+        {
+            toIndex = slots.Length - 1;
+        }
+
+        if (fromIndex == toIndex)
+        {
+            return;
+        }
+
+        var newSlots = new List<IPlugin?>(slots);
         var item = newSlots[fromIndex];
-        newSlots[fromIndex] = newSlots[toIndex];
-        newSlots[toIndex] = item;
-        strip.PluginChain.ReplaceAll(newSlots);
-        SwapPluginConfig(channelIndex, fromIndex, toIndex);
+        newSlots.RemoveAt(fromIndex);
+        newSlots.Insert(toIndex, item);
+
+        strip.PluginChain.ReplaceAll(newSlots.ToArray());
+        MovePluginConfig(channelIndex, fromIndex, toIndex);
         RefreshPluginViewModels(channelIndex);
     }
 
@@ -1467,12 +1506,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _configManager.Save(_config);
     }
 
-    private void SwapPluginConfig(int channelIndex, int fromIndex, int toIndex)
+    private void MovePluginConfig(int channelIndex, int fromIndex, int toIndex)
     {
         var config = GetOrCreateChannelConfig(channelIndex);
-        int maxIndex = Math.Max(fromIndex, toIndex);
-        EnsurePluginListCapacity(config, maxIndex + 1);
-        (config.Plugins[fromIndex], config.Plugins[toIndex]) = (config.Plugins[toIndex], config.Plugins[fromIndex]);
+        if ((uint)fromIndex >= (uint)config.Plugins.Count)
+        {
+            return;
+        }
+
+        if (toIndex < 0)
+        {
+            toIndex = 0;
+        }
+        else if (toIndex >= config.Plugins.Count)
+        {
+            toIndex = config.Plugins.Count - 1;
+        }
+
+        if (fromIndex == toIndex)
+        {
+            return;
+        }
+
+        var item = config.Plugins[fromIndex];
+        config.Plugins.RemoveAt(fromIndex);
+        config.Plugins.Insert(toIndex, item);
         _configManager.Save(_config);
     }
 

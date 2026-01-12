@@ -22,10 +22,12 @@ internal sealed class SileroVadInference : IDisposable
     private readonly string? _outputHName;
     private readonly string? _outputCName;
     private readonly int _frameSize;
+    private readonly int _contextSize;
     private readonly int[] _inputShape;
     private readonly int[]? _stateShape;
 
     private readonly float[] _inputBuffer;
+    private readonly float[] _context;
     private readonly float[]? _stateH;
     private readonly float[]? _stateC;
     private readonly DenseTensor<float> _inputTensor;
@@ -44,8 +46,11 @@ internal sealed class SileroVadInference : IDisposable
         (_inputName, _sampleRateName, _sampleRateType, _sampleRateShape, _stateHName, _stateCName, _inputShape, _stateShape, _frameSize) = ResolveInputs();
         (_outputName, _outputHName, _outputCName) = ResolveOutputs();
 
-        _inputBuffer = new float[_frameSize];
-        _inputTensor = new DenseTensor<float>(_inputBuffer, _inputShape);
+        _contextSize = ResolveContextSize(_frameSize);
+        _context = new float[_contextSize];
+        int totalSamples = _frameSize + _contextSize;
+        _inputBuffer = new float[totalSamples];
+        _inputTensor = new DenseTensor<float>(_inputBuffer, ApplyContextToInputShape(_inputShape, totalSamples));
 
         if (_stateShape is not null && _stateHName is not null)
         {
@@ -77,16 +82,28 @@ internal sealed class SileroVadInference : IDisposable
         {
             Array.Clear(_stateC, 0, _stateC.Length);
         }
+        if (_context.Length > 0)
+        {
+            Array.Clear(_context, 0, _context.Length);
+        }
     }
 
-    public float Process(ReadOnlySpan<float> frame16k)
+    public float Process(ReadOnlySpan<float> frame16k, out float raw)
     {
         if (frame16k.Length != _frameSize)
         {
             throw new ArgumentException("Silero VAD frame size mismatch.");
         }
 
-        frame16k.CopyTo(_inputBuffer);
+        if (_contextSize > 0)
+        {
+            _context.CopyTo(_inputBuffer.AsSpan(0, _contextSize));
+        }
+        frame16k.CopyTo(_inputBuffer.AsSpan(_contextSize));
+        if (_contextSize > 0)
+        {
+            frame16k.Slice(_frameSize - _contextSize).CopyTo(_context);
+        }
 
         var inputs = new List<NamedOnnxValue>(4)
         {
@@ -109,7 +126,8 @@ internal sealed class SileroVadInference : IDisposable
 
         using var results = _session.Run(inputs);
 
-        float prob = ReadScalar(results, _outputName);
+        raw = ReadScalar(results, _outputName);
+        float prob = ToProbability(raw);
         if (_outputHName is not null && _stateH is not null)
         {
             CopyTensor(results, _outputHName, _stateH);
@@ -174,6 +192,13 @@ internal sealed class SileroVadInference : IDisposable
             {
                 stateCName = name;
                 stateShape = dims;
+                continue;
+            }
+
+            if (string.Equals(name, "state", StringComparison.OrdinalIgnoreCase))
+            {
+                stateHName ??= name;
+                stateShape ??= dims;
                 continue;
             }
 
@@ -262,6 +287,13 @@ internal sealed class SileroVadInference : IDisposable
                 string.Equals(name, "prob", StringComparison.OrdinalIgnoreCase))
             {
                 outputName = name;
+                continue;
+            }
+
+            if (string.Equals(name, "stateN", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, "state", StringComparison.OrdinalIgnoreCase))
+            {
+                outputHName ??= name;
                 continue;
             }
 
@@ -369,6 +401,55 @@ internal sealed class SileroVadInference : IDisposable
             }
             return;
         }
+    }
+
+    private static float ToProbability(float raw)
+    {
+        if (raw >= 0f && raw <= 1f)
+        {
+            return raw;
+        }
+
+        // Convert logits to probability in a numerically stable way.
+        if (raw >= 0f)
+        {
+            float z = MathF.Exp(-raw);
+            return 1f / (1f + z);
+        }
+
+        float ez = MathF.Exp(raw);
+        return ez / (1f + ez);
+    }
+
+    private static int ResolveContextSize(int frameSize)
+    {
+        if (frameSize <= 0)
+        {
+            return 0;
+        }
+
+        // Silero VAD uses 64-sample context for 512-sample frames (and 32 for 256).
+        return Math.Max(1, frameSize / 8);
+    }
+
+    private static int[] ApplyContextToInputShape(int[] shape, int totalSamples)
+    {
+        if (shape.Length == 2)
+        {
+            return new[] { shape[0] > 0 ? shape[0] : 1, totalSamples };
+        }
+
+        if (shape.Length == 3)
+        {
+            return new[]
+            {
+                shape[0] > 0 ? shape[0] : 1,
+                shape[1] > 0 ? shape[1] : 1,
+                totalSamples
+            };
+        }
+
+        return new[] { 1, totalSamples };
     }
 
     private static bool IsSampleRateInput(NodeMetadata meta, int[] dims)

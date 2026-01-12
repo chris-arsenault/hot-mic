@@ -37,6 +37,12 @@ public partial class PluginViewModel : ObservableObject
     [ObservableProperty]
     private float latencyMs;
 
+    [ObservableProperty]
+    private float outputPeakLevel;
+
+    [ObservableProperty]
+    private float outputRmsLevel;
+
     public string ActionLabel => IsEmpty ? "Add Plugin" : "Edit Parameters";
 
     public IRelayCommand ActionCommand { get; }

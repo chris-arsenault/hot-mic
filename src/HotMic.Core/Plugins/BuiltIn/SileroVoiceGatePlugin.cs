@@ -46,6 +46,8 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider
     private int _silenceFrames;
 
     private int _vadBits;
+    private int _inputLevelBits;
+    private int _outputLevelBits;
     private bool _forcedBypass;
     private bool _wasBypassed = true;
     private string _statusMessage = string.Empty;
@@ -74,6 +76,16 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider
     public string StatusMessage => _statusMessage;
 
     public float VadProbability => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _vadBits, 0, 0));
+
+    public float GetAndResetInputLevel()
+    {
+        return BitConverter.Int32BitsToSingle(Interlocked.Exchange(ref _inputLevelBits, 0));
+    }
+
+    public float GetAndResetOutputLevel()
+    {
+        return BitConverter.Int32BitsToSingle(Interlocked.Exchange(ref _outputLevelBits, 0));
+    }
 
     public void Initialize(int sampleRate, int blockSize)
     {
@@ -141,9 +153,18 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider
         bool detected = vad >= _threshold;
         int holdLeft = detected ? _holdSamples : _holdSamplesLeft;
         float gate = _gate;
+        float peakIn = 0f;
+        float peakOut = 0f;
 
         for (int i = 0; i < buffer.Length; i++)
         {
+            float input = buffer[i];
+            float absIn = MathF.Abs(input);
+            if (absIn > peakIn)
+            {
+                peakIn = absIn;
+            }
+
             if (!detected && holdLeft > 0)
             {
                 holdLeft--;
@@ -152,11 +173,21 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider
             float target = (detected || holdLeft > 0) ? 1f : 0f;
             float coeff = target > gate ? _attackCoeff : _releaseCoeff;
             gate += coeff * (target - gate);
-            buffer[i] *= gate;
+            float output = input * gate;
+            buffer[i] = output;
+
+            float absOut = MathF.Abs(output);
+            if (absOut > peakOut)
+            {
+                peakOut = absOut;
+            }
         }
 
         _gate = gate;
         _holdSamplesLeft = holdLeft;
+
+        Interlocked.Exchange(ref _inputLevelBits, BitConverter.SingleToInt32Bits(peakIn));
+        Interlocked.Exchange(ref _outputLevelBits, BitConverter.SingleToInt32Bits(peakOut));
     }
 
     public void SetParameter(int index, float value)
@@ -239,6 +270,8 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider
         _decimatorFilter.Reset();
         _inference?.ResetState();
         Interlocked.Exchange(ref _vadBits, 0);
+        Interlocked.Exchange(ref _inputLevelBits, 0);
+        Interlocked.Exchange(ref _outputLevelBits, 0);
     }
 
     private void UpdateCoefficients()
@@ -358,7 +391,7 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider
                     Array.Clear(_frame16, outIndex, _frame16.Length - outIndex);
                 }
 
-                float prob = _inference.Process(_frame16);
+                float prob = _inference.Process(_frame16, out _);
                 Interlocked.Exchange(ref _vadBits, BitConverter.SingleToInt32Bits(prob));
             }
         }

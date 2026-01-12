@@ -1,14 +1,19 @@
 using System.Threading;
+using HotMic.Core.Metering;
 
 namespace HotMic.Core.Plugins;
 
 public sealed class PluginChain
 {
     private IPlugin?[] _slots;
+    private MeterProcessor[] _meters;
+    private readonly int _sampleRate;
 
-    public PluginChain(int initialCapacity = 0)
+    public PluginChain(int sampleRate, int initialCapacity = 0)
     {
+        _sampleRate = sampleRate;
         _slots = initialCapacity > 0 ? new IPlugin?[initialCapacity] : [];
+        _meters = initialCapacity > 0 ? CreateMeters(initialCapacity) : [];
     }
 
     public int Count => Volatile.Read(ref _slots).Length;
@@ -35,12 +40,19 @@ public sealed class PluginChain
         return Volatile.Read(ref _slots);
     }
 
+    public MeterProcessor[] GetMeterSnapshot()
+    {
+        return Volatile.Read(ref _meters);
+    }
+
     public void AddSlot(IPlugin? plugin = null)
     {
         var oldSlots = Volatile.Read(ref _slots);
         var newSlots = new IPlugin?[oldSlots.Length + 1];
         Array.Copy(oldSlots, newSlots, oldSlots.Length);
         newSlots[^1] = plugin;
+        var newMeters = CopyAndResizeMeters(newSlots.Length);
+        Interlocked.Exchange(ref _meters, newMeters);
         Interlocked.Exchange(ref _slots, newSlots);
     }
 
@@ -53,6 +65,8 @@ public sealed class PluginChain
         }
 
         var newSlots = new IPlugin?[oldSlots.Length - 1];
+        var oldMeters = Volatile.Read(ref _meters);
+        var newMeters = CreateMeters(newSlots.Length);
         for (int i = 0, j = 0; i < oldSlots.Length; i++)
         {
             if (i != index)
@@ -60,6 +74,14 @@ public sealed class PluginChain
                 newSlots[j++] = oldSlots[i];
             }
         }
+        for (int i = 0, j = 0; i < oldMeters.Length; i++)
+        {
+            if (i != index && j < newMeters.Length)
+            {
+                newMeters[j++] = oldMeters[i];
+            }
+        }
+        Interlocked.Exchange(ref _meters, newMeters);
         Interlocked.Exchange(ref _slots, newSlots);
     }
 
@@ -72,6 +94,11 @@ public sealed class PluginChain
         }
 
         slots[index] = plugin;
+        var meters = Volatile.Read(ref _meters);
+        if ((uint)index < (uint)meters.Length)
+        {
+            meters[index] = new MeterProcessor(_sampleRate);
+        }
     }
 
     public void EnsureCapacity(int count)
@@ -84,6 +111,8 @@ public sealed class PluginChain
 
         var newSlots = new IPlugin?[count];
         Array.Copy(slots, newSlots, slots.Length);
+        var newMeters = CopyAndResizeMeters(count);
+        Interlocked.Exchange(ref _meters, newMeters);
         Interlocked.Exchange(ref _slots, newSlots);
     }
 
@@ -96,25 +125,84 @@ public sealed class PluginChain
         }
 
         (slots[indexA], slots[indexB]) = (slots[indexB], slots[indexA]);
+        var meters = Volatile.Read(ref _meters);
+        if ((uint)indexA < (uint)meters.Length && (uint)indexB < (uint)meters.Length)
+        {
+            (meters[indexA], meters[indexB]) = (meters[indexB], meters[indexA]);
+        }
     }
 
     public void ReplaceAll(IPlugin?[] newSlots)
     {
+        var newMeters = CreateMeters(newSlots.Length);
+        Interlocked.Exchange(ref _meters, newMeters);
         Interlocked.Exchange(ref _slots, newSlots);
     }
 
     public void Process(Span<float> buffer)
     {
         var slots = Volatile.Read(ref _slots);
+        var meters = Volatile.Read(ref _meters);
+        int meterCount = meters.Length;
         for (int i = 0; i < slots.Length; i++)
         {
             var plugin = slots[i];
-            if (plugin is null || plugin.IsBypassed)
+            if (plugin is not null && !plugin.IsBypassed)
             {
-                continue;
+                plugin.Process(buffer);
             }
 
-            plugin.Process(buffer);
+            if (plugin is not null && i < meterCount)
+            {
+                meters[i].Process(buffer);
+            }
         }
+    }
+
+    public void ProcessMeters(Span<float> buffer)
+    {
+        var slots = Volatile.Read(ref _slots);
+        var meters = Volatile.Read(ref _meters);
+        int count = Math.Min(slots.Length, meters.Length);
+        for (int i = 0; i < count; i++)
+        {
+            if (slots[i] is not null)
+            {
+                meters[i].Process(buffer);
+            }
+        }
+    }
+
+    private MeterProcessor[] CopyAndResizeMeters(int count)
+    {
+        if (count <= 0)
+        {
+            return [];
+        }
+
+        var newMeters = CreateMeters(count);
+        var oldMeters = Volatile.Read(ref _meters);
+        int copyCount = Math.Min(oldMeters.Length, newMeters.Length);
+        if (copyCount > 0)
+        {
+            Array.Copy(oldMeters, newMeters, copyCount);
+        }
+        return newMeters;
+    }
+
+    private MeterProcessor[] CreateMeters(int count)
+    {
+        if (count <= 0)
+        {
+            return [];
+        }
+
+        var meters = new MeterProcessor[count];
+        for (int i = 0; i < meters.Length; i++)
+        {
+            meters[i] = new MeterProcessor(_sampleRate);
+        }
+
+        return meters;
     }
 }
