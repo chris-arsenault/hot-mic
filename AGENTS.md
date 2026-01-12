@@ -287,6 +287,12 @@ public class MeterControl : SkiaControl
 4. **Use `MathF`** not `Math` for float operations
 5. **Avoid branches in tight loops** - use branchless techniques where beneficial
 
+### DSP Validation vs UI
+
+- **Do not change DSP algorithms to match UI behavior.** If the UI does not reflect audible behavior, fix the UI scaling/meters/labels first.
+- **Do change DSP algorithms when there are real bugs,** but validate changes against reference implementations or standard formulas for that DSP class.
+- **Document the reference** with a concise inline comment near the relevant code so intent and expected behavior are clear.
+
 ### Compressor Implementation Outline
 
 ```csharp
@@ -512,6 +518,7 @@ public class Vst3PluginWrapper : IPlugin
 | Updating UI from audio callback | Use `Dispatcher.InvokeAsync` or timer polling |
 | String formatting in audio thread | Never - defer to UI thread |
 | Using `Dictionary` for plugin params | Use fixed-size array indexed by param ID |
+| Tweaking DSP to make UI "look right" | Fix the UI or meters; only change DSP when validated against a reference |
 
 ---
 
