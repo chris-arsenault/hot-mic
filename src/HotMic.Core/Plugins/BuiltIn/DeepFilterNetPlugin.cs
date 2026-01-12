@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading;
 using HotMic.Common.Configuration;
 using HotMic.Core.Dsp;
@@ -30,6 +31,16 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private Thread? _workerThread;
     private AutoResetEvent? _frameSignal;
     private volatile int _running;
+    private bool _debugEnabled;
+    private long _debugNextTicks;
+    private int _debugProcessCalls;
+    private int _debugWorkerHops;
+    private int _lastLsnrBits;
+    private int _lastGainMinBits;
+    private int _lastGainMaxBits;
+    private int _lastHopPeakBits;
+    private int _lastHopRmsBits;
+    private int _lastDebugFlags;
 
     private float _reductionPct = 100f;
     private float _attenLimitDb = 40f;
@@ -89,6 +100,8 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         _sampleRate = sampleRate;
         _statusMessage = string.Empty;
         _forcedBypass = false;
+        _debugEnabled = string.Equals(Environment.GetEnvironmentVariable("HOTMIC_DFN_DEBUG"), "1", StringComparison.OrdinalIgnoreCase);
+        _debugNextTicks = 0;
 
         StopWorker();
 
@@ -148,11 +161,20 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
         _inputBuffer.Write(buffer);
         _frameSignal?.Set();
+        if (_debugEnabled)
+        {
+            Interlocked.Increment(ref _debugProcessCalls);
+        }
 
         int read = _outputBuffer.Read(_processedScratch.AsSpan(0, buffer.Length));
 
         float mix = _mixSmoother.Current;
         bool smoothing = _mixSmoother.IsSmoothing;
+        bool debug = _debugEnabled;
+        float peakIn = 0f;
+        float peakDry = 0f;
+        float peakWet = 0f;
+        float peakOut = 0f;
 
         for (int i = 0; i < buffer.Length; i++)
         {
@@ -165,7 +187,8 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             float input = buffer[i];
             float dry = _dryRing[_dryIndex];
             float wet = i < read ? _processedScratch[i] : dry;
-            buffer[i] = dry * (1f - mix) + wet * mix;
+            float output = dry * (1f - mix) + wet * mix;
+            buffer[i] = output;
 
             _dryRing[_dryIndex] = input;
             _dryIndex++;
@@ -173,6 +196,38 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             {
                 _dryIndex = 0;
             }
+
+            if (debug)
+            {
+                float absIn = MathF.Abs(input);
+                if (absIn > peakIn)
+                {
+                    peakIn = absIn;
+                }
+
+                float absDry = MathF.Abs(dry);
+                if (absDry > peakDry)
+                {
+                    peakDry = absDry;
+                }
+
+                float absWet = MathF.Abs(wet);
+                if (absWet > peakWet)
+                {
+                    peakWet = absWet;
+                }
+
+                float absOut = MathF.Abs(output);
+                if (absOut > peakOut)
+                {
+                    peakOut = absOut;
+                }
+            }
+        }
+
+        if (debug)
+        {
+            MaybeLogDebug(peakIn, peakDry, peakWet, peakOut, read, mix);
         }
     }
 
@@ -329,10 +384,51 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
                 bool postFilter = Volatile.Read(ref _postFilterEnabled) >= 0.5f;
                 float attenDb = Volatile.Read(ref _attenLimitDb);
-                _processor.ProcessHop(_hopBuffer, _hopOutput, postFilter, attenDb);
+                _processor.ProcessHop(_hopBuffer, _hopOutput, postFilter, attenDb,
+                    out float lsnr, out int flags, out float gainMin, out float gainMax, out float hopPeak, out float hopRms);
+                Interlocked.Exchange(ref _lastLsnrBits, BitConverter.SingleToInt32Bits(lsnr));
+                Interlocked.Exchange(ref _lastGainMinBits, BitConverter.SingleToInt32Bits(gainMin));
+                Interlocked.Exchange(ref _lastGainMaxBits, BitConverter.SingleToInt32Bits(gainMax));
+                Interlocked.Exchange(ref _lastHopPeakBits, BitConverter.SingleToInt32Bits(hopPeak));
+                Interlocked.Exchange(ref _lastHopRmsBits, BitConverter.SingleToInt32Bits(hopRms));
+                Interlocked.Exchange(ref _lastDebugFlags, flags);
+                if (_debugEnabled)
+                {
+                    Interlocked.Increment(ref _debugWorkerHops);
+                }
                 _outputBuffer.Write(_hopOutput);
             }
         }
+    }
+
+    private void MaybeLogDebug(float peakIn, float peakDry, float peakWet, float peakOut, int read, float mix)
+    {
+        long now = Stopwatch.GetTimestamp();
+        if (now < _debugNextTicks)
+        {
+            return;
+        }
+
+        int processCalls = Interlocked.Exchange(ref _debugProcessCalls, 0);
+        int workerHops = Interlocked.Exchange(ref _debugWorkerHops, 0);
+        _debugNextTicks = now + (Stopwatch.Frequency * 2);
+
+        float lsnr = BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _lastLsnrBits, 0, 0));
+        float gainMin = BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _lastGainMinBits, 0, 0));
+        float gainMax = BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _lastGainMaxBits, 0, 0));
+        float hopPeak = BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _lastHopPeakBits, 0, 0));
+        float hopRms = BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _lastHopRmsBits, 0, 0));
+        int flags = Interlocked.CompareExchange(ref _lastDebugFlags, 0, 0);
+        int inAvail = _inputBuffer?.AvailableRead ?? 0;
+        int outAvail = _outputBuffer?.AvailableRead ?? 0;
+        float attenDb = Volatile.Read(ref _attenLimitDb);
+        bool postFilter = Volatile.Read(ref _postFilterEnabled) >= 0.5f;
+
+        Console.WriteLine(
+            $"[DeepFilterNet] in={peakIn:0.000000} dry={peakDry:0.000000} wet={peakWet:0.000000} out={peakOut:0.000000} " +
+            $"mix={mix:0.000} read={read} inBuf={inAvail} outBuf={outAvail} " +
+            $"lsnr={lsnr:0.00} gainMin={gainMin:0.000} gainMax={gainMax:0.000} hopPeak={hopPeak:0.000000} hopRms={hopRms:0.000000} " +
+            $"flags=0x{flags:X} atten={attenDb:0.0} post={(postFilter ? 1 : 0)} procCalls={processCalls} hops={workerHops}");
     }
 
     private static string ResolveModelDirectory()
