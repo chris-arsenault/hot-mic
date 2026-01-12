@@ -59,6 +59,9 @@ public sealed class EqRenderer : IDisposable
     private readonly SKPaint _bandLabelPaint;
     private readonly SKPaint _meterBackgroundPaint;
 
+    private readonly LevelMeter _inputMeter;
+    private readonly LevelMeter _outputMeter;
+
     // Band colors
     private readonly SKColor _hpfColor = new(0x88, 0x88, 0x88);  // Neutral gray
     private readonly SKColor _lowColor = new(0x3D, 0xA5, 0xF4);  // Blue
@@ -87,6 +90,9 @@ public sealed class EqRenderer : IDisposable
     public EqRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
+
+        _inputMeter = new LevelMeter();
+        _outputMeter = new LevelMeter();
 
         _backgroundPaint = new SKPaint
         {
@@ -355,7 +361,9 @@ public sealed class EqRenderer : IDisposable
             contentTop + 15,
             Padding + MeterWidth,
             contentTop + SpectrumHeight - 15);
-        DrawMeter(canvas, inputMeterRect, state.InputLevel, "IN");
+        _inputMeter.Update(state.InputLevel);
+        _inputMeter.Render(canvas, inputMeterRect, MeterOrientation.Vertical);
+        canvas.DrawText("IN", inputMeterRect.MidX, inputMeterRect.Bottom + 12, _labelPaint);
 
         // Output meter (right of spectrum)
         var outputMeterRect = new SKRect(
@@ -363,7 +371,9 @@ public sealed class EqRenderer : IDisposable
             contentTop + 15,
             size.Width - Padding,
             contentTop + SpectrumHeight - 15);
-        DrawMeter(canvas, outputMeterRect, state.OutputLevel, "OUT");
+        _outputMeter.Update(state.OutputLevel);
+        _outputMeter.Render(canvas, outputMeterRect, MeterOrientation.Vertical);
+        canvas.DrawText("OUT", outputMeterRect.MidX, outputMeterRect.Bottom + 12, _labelPaint);
 
         // Knob section
         float knobSectionTop = contentTop + SpectrumHeight + SpectrumLabelMargin + 10;
@@ -742,53 +752,6 @@ public sealed class EqRenderer : IDisposable
         }
     }
 
-    private void DrawMeter(SKCanvas canvas, SKRect rect, float level, string label)
-    {
-        var roundRect = new SKRoundRect(rect, 3f);
-        canvas.DrawRoundRect(roundRect, _meterBackgroundPaint);
-
-        // Convert to dB
-        float levelDb = 20f * MathF.Log10(level + 1e-10f);
-        levelDb = MathF.Max(levelDb, -60f);
-        float normalizedLevel = (levelDb + 60f) / 60f;
-        normalizedLevel = Math.Clamp(normalizedLevel, 0f, 1f);
-
-        float meterPadding = 2f;
-        float innerHeight = rect.Height - meterPadding * 2;
-        float fillHeight = innerHeight * normalizedLevel;
-
-        if (fillHeight > 0)
-        {
-            var fillRect = new SKRect(
-                rect.Left + meterPadding,
-                rect.Bottom - meterPadding - fillHeight,
-                rect.Right - meterPadding,
-                rect.Bottom - meterPadding);
-
-            using var gradientPaint = new SKPaint
-            {
-                IsAntialias = true,
-                Style = SKPaintStyle.Fill,
-                Shader = SKShader.CreateLinearGradient(
-                    new SKPoint(0, rect.Bottom),
-                    new SKPoint(0, rect.Top),
-                    new[]
-                    {
-                        _theme.WaveformLine,
-                        _theme.WaveformLine,
-                        new SKColor(0xFF, 0xD7, 0x00),
-                        new SKColor(0xFF, 0x50, 0x50)
-                    },
-                    new[] { 0f, 0.6f, 0.85f, 1f },
-                    SKShaderTileMode.Clamp)
-            };
-            canvas.DrawRect(fillRect, gradientPaint);
-        }
-
-        canvas.DrawRoundRect(roundRect, _borderPaint);
-        canvas.DrawText(label, rect.MidX, rect.Bottom + 12, _labelPaint);
-    }
-
     private float FreqToX(float freq, SKRect rect, int sampleRate)
     {
         float minFreq = 20f;
@@ -880,6 +843,8 @@ public sealed class EqRenderer : IDisposable
 
     public void Dispose()
     {
+        _inputMeter.Dispose();
+        _outputMeter.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();

@@ -18,7 +18,7 @@ public sealed class RNNoiseRenderer : IDisposable
 
     private readonly PluginComponentTheme _theme;
     private readonly VadMeter _vadMeter;
-    private readonly ReductionMeter _reductionMeter;
+    private readonly GainReductionMeter _grMeter;
     private readonly AiProcessingIndicator _processingIndicator;
     private readonly RotaryKnob _knob;
 
@@ -43,7 +43,7 @@ public sealed class RNNoiseRenderer : IDisposable
     {
         _theme = theme ?? PluginComponentTheme.Default;
         _vadMeter = new VadMeter(_theme);
-        _reductionMeter = new ReductionMeter(_theme);
+        _grMeter = new GainReductionMeter(_theme);
         _processingIndicator = new AiProcessingIndicator(_theme);
         _knob = new RotaryKnob(_theme);
 
@@ -236,10 +236,10 @@ public sealed class RNNoiseRenderer : IDisposable
             TitleBarHeight + Padding + 24 + 120);
         _vadMeter.Render(canvas, vadRect, state.VadProbability, state.VadThreshold / 100f, state.VadProbability >= state.VadThreshold / 100f);
 
-        // Reduction meter
-        var reductionRect = new SKRect(Padding, y, size.Width - Padding, y + 24);
-        _reductionMeter.Render(canvas, reductionRect, state.ReductionPercent, "Noise Reduction");
-        y += 50;
+        // Gain reduction meter (actual dB reduction) - RNNoise typically < 12dB
+        var grRect = new SKRect(Padding, y, size.Width - Padding, y + 24);
+        _grMeter.Render(canvas, grRect, state.GainReductionDb, "Gain Reduction", maxDb: 12f);
+        y += 55;
 
         // Knobs section
         float knobsY = y + KnobRadius + 16;
@@ -318,7 +318,7 @@ public sealed class RNNoiseRenderer : IDisposable
     public void Dispose()
     {
         _vadMeter.Dispose();
-        _reductionMeter.Dispose();
+        _grMeter.Dispose();
         _processingIndicator.Dispose();
         _knob.Dispose();
         _backgroundPaint.Dispose();
@@ -338,6 +338,7 @@ public record struct RNNoiseState(
     float ReductionPercent,
     float VadThreshold,
     float VadProbability,
+    float GainReductionDb,
     float LatencyMs,
     bool IsBypassed,
     string StatusMessage = "",

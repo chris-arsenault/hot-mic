@@ -14,6 +14,10 @@ public sealed class SaturationPlugin : IPlugin
     private float _mixPct = 50f;
     private int _sampleRate;
 
+    // Thread-safe metering
+    private int _inputLevelBits;
+    private int _outputLevelBits;
+
     private LinearSmoother _driveSmoother = new();
     private LinearSmoother _mixSmoother = new();
 
@@ -36,6 +40,10 @@ public sealed class SaturationPlugin : IPlugin
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
+    public float DrivePct => _drivePct;
+    public float MixPct => _mixPct;
+    public int SampleRate => _sampleRate;
+
     public void Initialize(int sampleRate, int blockSize)
     {
         _sampleRate = sampleRate;
@@ -54,6 +62,8 @@ public sealed class SaturationPlugin : IPlugin
         float mix = _mixSmoother.Current;
         bool driveSmooth = _driveSmoother.IsSmoothing;
         bool mixSmooth = _mixSmoother.IsSmoothing;
+        float inputPeak = 0f;
+        float outputPeak = 0f;
 
         for (int i = 0; i < buffer.Length; i++)
         {
@@ -70,8 +80,26 @@ public sealed class SaturationPlugin : IPlugin
             }
 
             float input = buffer[i];
+            inputPeak = MathF.Max(inputPeak, MathF.Abs(input));
+
             float wet = MathF.Tanh(input * drive);
-            buffer[i] = input * (1f - mix) + wet * mix;
+            float output = input * (1f - mix) + wet * mix;
+            outputPeak = MathF.Max(outputPeak, MathF.Abs(output));
+            buffer[i] = output;
+        }
+
+        // Update metering (thread-safe)
+        UpdatePeakLevel(ref _inputLevelBits, inputPeak);
+        UpdatePeakLevel(ref _outputLevelBits, outputPeak);
+    }
+
+    private static void UpdatePeakLevel(ref int levelBits, float newPeak)
+    {
+        int current = Interlocked.CompareExchange(ref levelBits, 0, 0);
+        float currentPeak = BitConverter.Int32BitsToSingle(current);
+        if (newPeak > currentPeak)
+        {
+            Interlocked.Exchange(ref levelBits, BitConverter.SingleToInt32Bits(newPeak));
         }
     }
 
@@ -122,6 +150,16 @@ public sealed class SaturationPlugin : IPlugin
             _driveSmoother.SetTarget(DrivePercentToGain(_drivePct));
             _mixSmoother.SetTarget(_mixPct / 100f);
         }
+    }
+
+    public float GetAndResetInputLevel()
+    {
+        return BitConverter.Int32BitsToSingle(Interlocked.Exchange(ref _inputLevelBits, 0));
+    }
+
+    public float GetAndResetOutputLevel()
+    {
+        return BitConverter.Int32BitsToSingle(Interlocked.Exchange(ref _outputLevelBits, 0));
     }
 
     public void Dispose()

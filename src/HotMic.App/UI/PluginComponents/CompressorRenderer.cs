@@ -40,6 +40,9 @@ public sealed class CompressorRenderer : IDisposable
     private readonly SKPaint _togglePaint;
     private readonly SKPaint _toggleActivePaint;
 
+    // Gain reduction meter with PPM-style ballistics
+    private readonly GainReductionMeter _grMeter;
+
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
@@ -192,6 +195,9 @@ public sealed class CompressorRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
+
+        // Initialize GR meter with PPM-style ballistics
+        _grMeter = new GainReductionMeter(_theme);
     }
 
     public void Render(
@@ -267,13 +273,13 @@ public sealed class CompressorRenderer : IDisposable
 
         // Section labels
         canvas.DrawText("TRANSFER CURVE", Padding, y - 2, _sectionLabelPaint);
-        canvas.DrawText("GR", grMeterRect.MidX - 6, y - 2, _sectionLabelPaint);
 
         // Draw transfer curve
         DrawTransferCurve(canvas, transferRect, state);
 
-        // Draw GR meter
-        DrawGainReductionMeter(canvas, grMeterRect, state.GainReductionDb);
+        // Draw GR meter with PPM-style ballistics
+        var grLabelRect = new SKRect(grMeterRect.Left, y + 16f, grMeterRect.Right, grMeterRect.Bottom - 16f);
+        _grMeter.Render(canvas, grLabelRect, state.GainReductionDb, "GR", maxDb: 24f);
 
         y += TransferCurveSize + Padding + 8;
 
@@ -599,6 +605,7 @@ public sealed class CompressorRenderer : IDisposable
 
     public void Dispose()
     {
+        _grMeter.Dispose();
         _knob.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();

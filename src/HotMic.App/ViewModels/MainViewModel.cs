@@ -31,7 +31,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private long _nextDebugUpdateTicks;
     private static readonly long DebugUpdateIntervalTicks = Math.Max(1, Stopwatch.Frequency / 4);
     private bool _isInitializing = true; // Skip side effects during initial config load
+#pragma warning disable CS0649 // Field is reserved for future batch preset operations
     private bool _suppressPresetUpdates;
+#pragma warning restore CS0649
 
     // 30-second rolling window for drop tracking
     private readonly Queue<(long ticks, long input1, long input2, long underflow1, long underflow2)> _dropHistory = new();
@@ -1387,6 +1389,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Use specialized window for Limiter
+        if (plugin is LimiterPlugin limiter)
+        {
+            ShowLimiterWindow(channelIndex, slotIndex, limiter);
+            return;
+        }
+
+        // Use specialized window for De-Esser
+        if (plugin is DeEsserPlugin deesser)
+        {
+            ShowDeEsserWindow(channelIndex, slotIndex, deesser);
+            return;
+        }
+
+        // Use specialized window for High-Pass Filter
+        if (plugin is HighPassFilterPlugin hpf)
+        {
+            ShowHighPassFilterWindow(channelIndex, slotIndex, hpf);
+            return;
+        }
+
+        // Use specialized window for Saturation
+        if (plugin is SaturationPlugin saturation)
+        {
+            ShowSaturationWindow(channelIndex, slotIndex, saturation);
+            return;
+        }
+
         var parameterViewModels = plugin.Parameters.Select(parameter =>
         {
             float currentValue = GetPluginParameterValue(channelIndex, slotIndex, parameter.Name, parameter.DefaultValue);
@@ -1550,6 +1580,66 @@ public partial class MainViewModel : ObservableObject, IDisposable
         window.ShowDialog();
     }
 
+    private void ShowLimiterWindow(int channelIndex, int slotIndex, LimiterPlugin plugin)
+    {
+        var window = new LimiterWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.ShowDialog();
+    }
+
+    private void ShowDeEsserWindow(int channelIndex, int slotIndex, DeEsserPlugin plugin)
+    {
+        var window = new DeEsserWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.ShowDialog();
+    }
+
+    private void ShowHighPassFilterWindow(int channelIndex, int slotIndex, HighPassFilterPlugin plugin)
+    {
+        var window = new HighPassFilterWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.ShowDialog();
+    }
+
+    private void ShowSaturationWindow(int channelIndex, int slotIndex, SaturationPlugin plugin)
+    {
+        var window = new SaturationWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.ShowDialog();
+    }
+
     private void SetPluginBypass(int channelIndex, int slotIndex, bool bypassed)
     {
         var channel = channelIndex == 0 ? Channel1 : Channel2;
@@ -1603,16 +1693,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var plugin in slots)
         {
             float latencyMs = 0f;
-            if (plugin is not null && _audioEngine.SampleRate > 0)
+            string pluginId = string.Empty;
+            float[] elevatedValues = [];
+
+            if (plugin is not null)
             {
-                latencyMs = plugin.LatencySamples * 1000f / _audioEngine.SampleRate;
+                pluginId = plugin.Id;
+                if (_audioEngine.SampleRate > 0)
+                {
+                    latencyMs = plugin.LatencySamples * 1000f / _audioEngine.SampleRate;
+                }
+
+                // Get elevated parameter values
+                var elevDefs = ElevatedParameterDefinitions.GetElevations(pluginId);
+                if (elevDefs is not null)
+                {
+                    elevatedValues = new float[elevDefs.Length];
+                    for (int i = 0; i < elevDefs.Length; i++)
+                    {
+                        // Read current parameter value from plugin state
+                        var state = plugin.GetState();
+                        var param = plugin.Parameters.FirstOrDefault(p => p.Index == elevDefs[i].Index);
+                        if (param is not null && state.Length >= (elevDefs[i].Index + 1) * sizeof(float))
+                        {
+                            elevatedValues[i] = BitConverter.ToSingle(state, elevDefs[i].Index * sizeof(float));
+                        }
+                        else
+                        {
+                            elevatedValues[i] = elevDefs[i].Default;
+                        }
+                    }
+                }
             }
 
             slotInfos.Add(new PluginSlotInfo
             {
+                PluginId = pluginId,
                 Name = plugin?.Name ?? string.Empty,
                 IsBypassed = plugin?.IsBypassed ?? false,
-                LatencyMs = latencyMs
+                LatencyMs = latencyMs,
+                ElevatedParamValues = elevatedValues
             });
         }
         if (channelIndex == 0)

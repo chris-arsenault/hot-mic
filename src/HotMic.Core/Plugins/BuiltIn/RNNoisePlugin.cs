@@ -33,6 +33,7 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
     private string _statusMessage = string.Empty;
 
     private int _vadBits;
+    private int _gainReductionDbBits;
 
     public RNNoisePlugin()
     {
@@ -186,6 +187,15 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
         get => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _vadBits, 0, 0));
     }
 
+    /// <summary>
+    /// Gets the current gain reduction in dB (positive value = reduction).
+    /// This represents how much RNNoise is attenuating the noise.
+    /// </summary>
+    public float GainReductionDb
+    {
+        get => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _gainReductionDbBits, 0, 0));
+    }
+
     public byte[] GetState()
     {
         var bytes = new byte[sizeof(float) * 2];
@@ -227,6 +237,7 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
     {
         int start = _ringIndex;
         float maxAbs = 0f;
+        float inputEnergy = 0f;
         for (int i = 0; i < FrameSize; i++)
         {
             int index = start + i;
@@ -236,6 +247,7 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
             }
             float sample = _inputRing[index];
             _frameIn[i] = sample * RnnoiseScale;
+            inputEnergy += sample * sample;
             float abs = MathF.Abs(sample);
             if (abs > maxAbs)
             {
@@ -246,15 +258,38 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
         if (maxAbs <= 0f)
         {
             Interlocked.Exchange(ref _vadBits, 0);
+            Interlocked.Exchange(ref _gainReductionDbBits, 0);
             return;
         }
 
         float vad = RNNoiseInterop.rnnoise_process_frame(_state, _frameOut, _frameIn);
         Interlocked.Exchange(ref _vadBits, BitConverter.SingleToInt32Bits(vad));
 
-        if (vad < _vadThresholdPct / 100f)
+        bool bypassNoise = vad < _vadThresholdPct / 100f;
+        if (bypassNoise)
         {
             Array.Copy(_frameIn, _frameOut, FrameSize);
+            Interlocked.Exchange(ref _gainReductionDbBits, 0);
+        }
+        else
+        {
+            // Calculate gain reduction from RNNoise processing
+            float outputEnergy = 0f;
+            for (int i = 0; i < FrameSize; i++)
+            {
+                float outSample = _frameOut[i] * RnnoiseInvScale;
+                outputEnergy += outSample * outSample;
+            }
+
+            // Compute RMS-based gain reduction in dB
+            float inputRms = MathF.Sqrt(inputEnergy / FrameSize);
+            float outputRms = MathF.Sqrt(outputEnergy / FrameSize);
+            float grDb = 0f;
+            if (outputRms > 1e-10f && inputRms > outputRms)
+            {
+                grDb = 20f * MathF.Log10(inputRms / outputRms);
+            }
+            Interlocked.Exchange(ref _gainReductionDbBits, BitConverter.SingleToInt32Bits(grDb));
         }
 
         for (int i = 0; i < FrameSize; i++)
@@ -273,6 +308,7 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
         _ringIndex = 0;
         _hopCounter = 0;
         Interlocked.Exchange(ref _vadBits, 0);
+        Interlocked.Exchange(ref _gainReductionDbBits, 0);
         if (clearBuffers)
         {
             Array.Clear(_inputRing, 0, _inputRing.Length);

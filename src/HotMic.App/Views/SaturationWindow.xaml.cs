@@ -10,27 +10,29 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class RNNoiseWindow : Window
+public partial class SaturationWindow : Window
 {
-    private readonly RNNoiseRenderer _renderer = new();
-    private readonly RNNoisePlugin _plugin;
+    private readonly SaturationRenderer _renderer = new();
+    private readonly SaturationPlugin _plugin;
     private readonly Action<int, float> _parameterCallback;
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
 
-    private int _activeKnob = -1;
+    private SaturationKnob _activeKnob = SaturationKnob.None;
     private float _dragStartY;
     private float _dragStartValue;
-    private int _hoveredKnob = -1;
+    private SaturationKnob _hoveredKnob = SaturationKnob.None;
+    private float _smoothedInputLevel;
+    private float _smoothedOutputLevel;
 
-    public RNNoiseWindow(RNNoisePlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
+    public SaturationWindow(SaturationPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
         InitializeComponent();
         _plugin = plugin;
         _parameterCallback = parameterCallback;
         _bypassCallback = bypassCallback;
 
-        var preferredSize = RNNoiseRenderer.GetPreferredSize();
+        var preferredSize = SaturationRenderer.GetPreferredSize();
         Width = preferredSize.Width;
         Height = preferredSize.Height;
 
@@ -46,6 +48,12 @@ public partial class RNNoiseWindow : Window
 
     private void OnRenderTick(object? sender, EventArgs e)
     {
+        float rawInput = _plugin.GetAndResetInputLevel();
+        float rawOutput = _plugin.GetAndResetOutputLevel();
+
+        _smoothedInputLevel = _smoothedInputLevel * 0.7f + rawInput * 0.3f;
+        _smoothedOutputLevel = _smoothedOutputLevel * 0.7f + rawOutput * 0.3f;
+
         SkiaCanvas.InvalidateVisual();
     }
 
@@ -55,17 +63,13 @@ public partial class RNNoiseWindow : Window
         var size = new SKSize(e.Info.Width, e.Info.Height);
         float dpiScale = GetDpiScale();
 
-        float sampleRate = 48000f; // RNNoise requires 48kHz
-        float latencyMs = _plugin.LatencySamples > 0 ? _plugin.LatencySamples * 1000f / sampleRate : 0f;
-
-        var state = new RNNoiseState(
-            ReductionPercent: GetParameterValue(RNNoisePlugin.ReductionIndex),
-            VadThreshold: GetParameterValue(RNNoisePlugin.VadThresholdIndex),
-            VadProbability: _plugin.VadProbability,
-            GainReductionDb: _plugin.GainReductionDb,
-            LatencyMs: latencyMs,
+        var state = new SaturationState(
+            DrivePct: _plugin.DrivePct,
+            MixPct: _plugin.MixPct,
+            InputLevel: _smoothedInputLevel,
+            OutputLevel: _smoothedOutputLevel,
+            LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
-            StatusMessage: _plugin.StatusMessage,
             HoveredKnob: _hoveredKnob
         );
 
@@ -85,25 +89,25 @@ public partial class RNNoiseWindow : Window
 
         switch (hit.Area)
         {
-            case RNNoiseHitArea.TitleBar:
+            case SaturationHitArea.TitleBar:
                 DragMove();
                 e.Handled = true;
                 break;
 
-            case RNNoiseHitArea.CloseButton:
+            case SaturationHitArea.CloseButton:
                 Close();
                 e.Handled = true;
                 break;
 
-            case RNNoiseHitArea.BypassButton:
+            case SaturationHitArea.BypassButton:
                 _bypassCallback(!_plugin.IsBypassed);
                 e.Handled = true;
                 break;
 
-            case RNNoiseHitArea.Knob:
-                _activeKnob = hit.KnobIndex;
+            case SaturationHitArea.Knob:
+                _activeKnob = hit.Knob;
                 _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
+                _dragStartValue = GetKnobNormalizedValue(hit.Knob);
                 SkiaCanvas.CaptureMouse();
                 e.Handled = true;
                 break;
@@ -116,17 +120,17 @@ public partial class RNNoiseWindow : Window
         float x = (float)pos.X;
         float y = (float)pos.Y;
 
-        if (_activeKnob >= 0 && e.LeftButton == MouseButtonState.Pressed)
+        if (_activeKnob != SaturationKnob.None && e.LeftButton == MouseButtonState.Pressed)
         {
             float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.003f);
+            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.004f);
             ApplyKnobValue(_activeKnob, newNormalized);
             e.Handled = true;
         }
         else
         {
             var hit = _renderer.HitTest(x, y);
-            _hoveredKnob = hit.Area == RNNoiseHitArea.Knob ? hit.KnobIndex : -1;
+            _hoveredKnob = hit.Area == SaturationHitArea.Knob ? hit.Knob : SaturationKnob.None;
         }
     }
 
@@ -135,49 +139,30 @@ public partial class RNNoiseWindow : Window
         if (e.ChangedButton != MouseButton.Left)
             return;
 
-        _activeKnob = -1;
+        _activeKnob = SaturationKnob.None;
         SkiaCanvas.ReleaseMouseCapture();
     }
 
-    private float GetParameterValue(int index)
+    private float GetKnobNormalizedValue(SaturationKnob knob) => knob switch
     {
-        var state = _plugin.GetState();
-        if (state.Length >= (index + 1) * sizeof(float))
-        {
-            return BitConverter.ToSingle(state, index * sizeof(float));
-        }
-        return _plugin.Parameters[index].DefaultValue;
-    }
+        SaturationKnob.Drive => _plugin.DrivePct / 100f,
+        SaturationKnob.Mix => _plugin.MixPct / 100f,
+        _ => 0f
+    };
 
-    private float GetKnobNormalizedValue(int knobIndex)
+    private void ApplyKnobValue(SaturationKnob knob, float normalizedValue)
     {
-        return knobIndex switch
+        switch (knob)
         {
-            0 => GetParameterValue(RNNoisePlugin.ReductionIndex) / 100f,
-            1 => GetParameterValue(RNNoisePlugin.VadThresholdIndex) / 100f,
-            _ => 0f
-        };
-    }
+            case SaturationKnob.Drive:
+                float drivePct = normalizedValue * 100f;
+                _parameterCallback(SaturationPlugin.DriveIndex, drivePct);
+                break;
 
-    private void ApplyKnobValue(int knobIndex, float normalizedValue)
-    {
-        float value = knobIndex switch
-        {
-            0 => normalizedValue * 100f,  // Reduction: 0 to 100%
-            1 => normalizedValue * 100f,  // VAD Threshold: 0 to 100%
-            _ => 0f
-        };
-
-        int paramIndex = knobIndex switch
-        {
-            0 => RNNoisePlugin.ReductionIndex,
-            1 => RNNoisePlugin.VadThresholdIndex,
-            _ => -1
-        };
-
-        if (paramIndex >= 0)
-        {
-            _parameterCallback(paramIndex, value);
+            case SaturationKnob.Mix:
+                float mixPct = normalizedValue * 100f;
+                _parameterCallback(SaturationPlugin.MixIndex, mixPct);
+                break;
         }
     }
 

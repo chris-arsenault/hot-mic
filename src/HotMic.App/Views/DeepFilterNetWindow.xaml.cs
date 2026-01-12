@@ -62,6 +62,7 @@ public partial class DeepFilterNetWindow : Window
             ReductionPercent: GetParameterValue(DeepFilterNetPlugin.ReductionIndex),
             AttenuationLimitDb: GetParameterValue(DeepFilterNetPlugin.AttenuationIndex),
             PostFilterEnabled: GetParameterValue(DeepFilterNetPlugin.PostFilterIndex) >= 0.5f,
+            GainReductionDb: _plugin.GainReductionDb,
             LatencyMs: latencyMs,
             IsBypassed: _plugin.IsBypassed,
             StatusMessage: _plugin.StatusMessage,

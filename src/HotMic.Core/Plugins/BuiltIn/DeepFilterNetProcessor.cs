@@ -71,6 +71,12 @@ internal sealed class DeepFilterNetProcessor : IDisposable
     public int HopSize => _config.HopSize;
     public int LatencySamples => Math.Max(0, (_config.FftSize - _config.HopSize) + _config.Lookahead * _config.HopSize);
 
+    /// <summary>
+    /// Gets the average gain reduction in dB from the last processed frame.
+    /// Returns 0 if no gains were applied, positive values indicate reduction.
+    /// </summary>
+    public float LastGainReductionDb { get; private set; }
+
     public void Reset()
     {
         _stft.Reset();
@@ -110,6 +116,7 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         if (maxAbs <= 0f)
         {
             output.Clear();
+            LastGainReductionDb = 0f;
             return;
         }
 
@@ -126,6 +133,7 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         if (_skipCounter > 5)
         {
             output.Clear();
+            LastGainReductionDb = 0f;
             return;
         }
 
@@ -141,6 +149,7 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         if (_framesProcessed <= _config.Lookahead)
         {
             output.Clear();
+            LastGainReductionDb = 0f;
             return;
         }
 
@@ -174,12 +183,60 @@ internal sealed class DeepFilterNetProcessor : IDisposable
 
         if (attenLimitDb < 100f)
         {
-            float lim = MathF.Pow(10f, -attenLimitDb / 20f);
-            for (int i = 0; i < _specOut.Length; i++)
+            float minGain = MathF.Pow(10f, -attenLimitDb / 20f);
+            int halfSpec = _specOut.Length / 2;
+
+            for (int bin = 0; bin < halfSpec; bin++)
             {
-                _specOut[i] = _specOut[i] * (1f - lim) + noisyTarget[i] * lim;
+                int idx = bin * 2;
+                float outRe = _specOut[idx];
+                float outIm = _specOut[idx + 1];
+                float inRe = noisyTarget[idx];
+                float inIm = noisyTarget[idx + 1];
+
+                float outMag = MathF.Sqrt(outRe * outRe + outIm * outIm);
+                float inMag = MathF.Sqrt(inRe * inRe + inIm * inIm);
+
+                if (inMag > 1e-10f)
+                {
+                    float gain = outMag / inMag;
+                    if (gain < minGain)
+                    {
+                        // Limit gain while preserving original phase
+                        // Output = input * minGain (uses input phase, limited magnitude)
+                        _specOut[idx] = inRe * minGain;
+                        _specOut[idx + 1] = inIm * minGain;
+                    }
+                }
             }
         }
+
+        // Calculate actual GR from spectral energy difference (after all processing)
+        if (stages.applyGains || stages.applyGainZeros)
+        {
+            float inputEnergy = 0f;
+            float outputEnergy = 0f;
+            for (int i = 0; i < _specOut.Length; i++)
+            {
+                inputEnergy += noisyTarget[i] * noisyTarget[i];
+                outputEnergy += _specOut[i] * _specOut[i];
+            }
+
+            if (inputEnergy > 1e-12f && outputEnergy < inputEnergy)
+            {
+                float energyRatio = outputEnergy / inputEnergy;
+                LastGainReductionDb = -10f * MathF.Log10(energyRatio + 1e-10f);
+            }
+            else
+            {
+                LastGainReductionDb = 0f;
+            }
+        }
+        else
+        {
+            LastGainReductionDb = 0f;
+        }
+
         _stft.Synthesize(_specOut, output);
     }
 

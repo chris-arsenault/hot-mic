@@ -44,6 +44,10 @@ public sealed class GainRenderer : IDisposable
     private SKPoint _knobCenter;
     private SKRect _phaseButtonRect;
 
+    // Level meters with PPM-style ballistics
+    private readonly LevelMeter _inputMeter;
+    private readonly LevelMeter _outputMeter;
+
     public GainRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
@@ -212,6 +216,10 @@ public sealed class GainRenderer : IDisposable
             TextAlign = SKTextAlign.Right,
             Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
         };
+
+        // Initialize level meters with PPM-style ballistics
+        _inputMeter = new LevelMeter();
+        _outputMeter = new LevelMeter();
     }
 
     public void Render(
@@ -281,15 +289,19 @@ public sealed class GainRenderer : IDisposable
         float contentTop = TitleBarHeight + Padding;
         float contentHeight = size.Height - TitleBarHeight - Padding * 2;
 
-        // Input meter (left side)
+        // Input meter (left side) with PPM-style ballistics
         float meterY = contentTop + (contentHeight - MeterHeight) / 2 - 10;
         var inputMeterRect = new SKRect(Padding, meterY, Padding + MeterWidth, meterY + MeterHeight);
-        DrawMeter(canvas, inputMeterRect, state.InputLevel, "IN");
+        _inputMeter.Update(state.InputLevel);
+        _inputMeter.Render(canvas, inputMeterRect, MeterOrientation.Vertical);
+        canvas.DrawText("IN", inputMeterRect.MidX, inputMeterRect.Bottom + 16, _labelPaint);
 
-        // Output meter (right side)
+        // Output meter (right side) with PPM-style ballistics
         var outputMeterRect = new SKRect(size.Width - Padding - MeterWidth, meterY,
             size.Width - Padding, meterY + MeterHeight);
-        DrawMeter(canvas, outputMeterRect, state.OutputLevel, "OUT");
+        _outputMeter.Update(state.OutputLevel);
+        _outputMeter.Render(canvas, outputMeterRect, MeterOrientation.Vertical);
+        canvas.DrawText("OUT", outputMeterRect.MidX, outputMeterRect.Bottom + 16, _labelPaint);
 
         // Large center knob
         _knobCenter = new SKPoint(size.Width / 2, contentTop + contentHeight / 2 - 20);
@@ -534,6 +546,8 @@ public sealed class GainRenderer : IDisposable
 
     public void Dispose()
     {
+        _inputMeter.Dispose();
+        _outputMeter.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();

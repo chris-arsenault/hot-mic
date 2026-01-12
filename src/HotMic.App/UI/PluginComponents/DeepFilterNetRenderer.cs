@@ -16,7 +16,7 @@ public sealed class DeepFilterNetRenderer : IDisposable
     private const int KnobCount = 2;
 
     private readonly PluginComponentTheme _theme;
-    private readonly ReductionMeter _reductionMeter;
+    private readonly GainReductionMeter _grMeter;
     private readonly AiProcessingIndicator _processingIndicator;
     private readonly RotaryKnob _knob;
 
@@ -43,7 +43,7 @@ public sealed class DeepFilterNetRenderer : IDisposable
     public DeepFilterNetRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
-        _reductionMeter = new ReductionMeter(_theme);
+        _grMeter = new GainReductionMeter(_theme);
         _processingIndicator = new AiProcessingIndicator(_theme);
         _knob = new RotaryKnob(_theme);
 
@@ -242,10 +242,10 @@ public sealed class DeepFilterNetRenderer : IDisposable
         _processingIndicator.Render(canvas, indicatorCenter, 36f, !state.IsBypassed, state.ReductionPercent / 100f, "DEEP FILTER");
         y += 100;
 
-        // Reduction meter
-        var reductionRect = new SKRect(Padding, y, size.Width - Padding, y + 24);
-        _reductionMeter.Render(canvas, reductionRect, state.ReductionPercent, "Noise Reduction Mix");
-        y += 50;
+        // Gain reduction meter (actual dB reduction)
+        var grRect = new SKRect(Padding, y, size.Width - Padding, y + 24);
+        _grMeter.Render(canvas, grRect, state.GainReductionDb, "Gain Reduction");
+        y += 55;
 
         // Knobs section
         float knobsY = y + KnobRadius + 8;
@@ -347,7 +347,7 @@ public sealed class DeepFilterNetRenderer : IDisposable
 
     public void Dispose()
     {
-        _reductionMeter.Dispose();
+        _grMeter.Dispose();
         _processingIndicator.Dispose();
         _knob.Dispose();
         _backgroundPaint.Dispose();
@@ -369,6 +369,7 @@ public record struct DeepFilterNetState(
     float ReductionPercent,
     float AttenuationLimitDb,
     bool PostFilterEnabled,
+    float GainReductionDb,
     float LatencyMs,
     bool IsBypassed,
     string StatusMessage = "",

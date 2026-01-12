@@ -36,6 +36,11 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private bool _forcedBypass;
     private bool _wasBypassed = true;
     private string _statusMessage = string.Empty;
+    private int _gainReductionDbBits;
+    private float _smoothedGrDb;
+    private const float GrSmoothingAttack = 0.3f;
+    private const float GrSmoothingRelease = 0.85f;
+    private const float SilenceThreshold = 1e-8f;
 
     public DeepFilterNetPlugin()
     {
@@ -82,6 +87,15 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
     public string StatusMessage => _statusMessage;
+
+    /// <summary>
+    /// Gets the current gain reduction in dB (positive value = reduction).
+    /// This represents how much DeepFilterNet is attenuating the noise.
+    /// </summary>
+    public float GainReductionDb
+    {
+        get => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _gainReductionDbBits, 0, 0));
+    }
 
     public void Initialize(int sampleRate, int blockSize)
     {
@@ -136,6 +150,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         if (IsBypassed || _forcedBypass || _processor is null || _inputBuffer is null || _outputBuffer is null)
         {
             _wasBypassed = true;
+            Interlocked.Exchange(ref _gainReductionDbBits, 0);
             return;
         }
 
@@ -153,6 +168,10 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         float mix = _mixSmoother.Current;
         bool smoothing = _mixSmoother.IsSmoothing;
 
+        float currentInputEnergy = 0f;
+        float dryEnergy = 0f;
+        float outputEnergy = 0f;
+
         for (int i = 0; i < buffer.Length; i++)
         {
             if (smoothing)
@@ -167,6 +186,12 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             float output = dry * (1f - mix) + wet * mix;
             buffer[i] = output;
 
+            // Track current input energy for silence detection
+            currentInputEnergy += input * input;
+            // Track delayed input and output for GR measurement
+            dryEnergy += dry * dry;
+            outputEnergy += output * output;
+
             _dryRing[_dryIndex] = input;
             _dryIndex++;
             if (_dryIndex >= _dryRing.Length)
@@ -174,6 +199,36 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 _dryIndex = 0;
             }
         }
+
+        // Calculate GR from actual plugin output vs input (true measurement)
+        // Use current input energy for silence detection (responds immediately to VAD gate)
+        float avgCurrentInputEnergy = currentInputEnergy / buffer.Length;
+
+        if (avgCurrentInputEnergy < SilenceThreshold)
+        {
+            // No signal coming in - decay GR quickly to zero
+            _smoothedGrDb *= 0.5f;
+            if (_smoothedGrDb < 0.1f)
+            {
+                _smoothedGrDb = 0f;
+            }
+        }
+        else
+        {
+            // Calculate GR from delayed input vs output (properly aligned samples)
+            float grDb = 0f;
+            if (dryEnergy > 1e-10f && outputEnergy < dryEnergy)
+            {
+                float energyRatio = outputEnergy / dryEnergy;
+                grDb = -10f * MathF.Log10(energyRatio + 1e-10f);
+            }
+
+            // Smooth the GR display (fast attack, slow release)
+            float smoothing2 = grDb > _smoothedGrDb ? GrSmoothingAttack : GrSmoothingRelease;
+            _smoothedGrDb = _smoothedGrDb * smoothing2 + grDb * (1f - smoothing2);
+        }
+
+        Interlocked.Exchange(ref _gainReductionDbBits, BitConverter.SingleToInt32Bits(_smoothedGrDb));
     }
 
     public void SetParameter(int index, float value)
@@ -260,6 +315,8 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         Array.Clear(_dryRing, 0, _dryRing.Length);
         _dryIndex = 0;
         _processor?.Reset();
+        _smoothedGrDb = 0f;
+        Interlocked.Exchange(ref _gainReductionDbBits, 0);
     }
 
     private void StartWorker()

@@ -15,6 +15,11 @@ public sealed class LimiterPlugin : IPlugin
     private float _gain = 1f;
     private int _sampleRate;
 
+    // Thread-safe metering
+    private int _inputLevelBits;
+    private int _outputLevelBits;
+    private int _gainReductionBits;
+
     public LimiterPlugin()
     {
         Parameters =
@@ -34,6 +39,10 @@ public sealed class LimiterPlugin : IPlugin
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
+    public float CeilingDb => _ceilingDb;
+    public float ReleaseMs => _releaseMs;
+    public int SampleRate => _sampleRate;
+
     public void Initialize(int sampleRate, int blockSize)
     {
         _sampleRate = sampleRate;
@@ -51,11 +60,16 @@ public sealed class LimiterPlugin : IPlugin
         float gain = _gain;
         float ceiling = _ceilingLinear;
         float releaseCoeff = _releaseCoeff;
+        float inputPeak = 0f;
+        float outputPeak = 0f;
+        float minGain = 1f;
 
         for (int i = 0; i < buffer.Length; i++)
         {
             float input = buffer[i];
             float abs = MathF.Abs(input);
+            inputPeak = MathF.Max(inputPeak, abs);
+
             float targetGain = abs > ceiling ? ceiling / abs : 1f;
 
             if (targetGain < gain)
@@ -67,10 +81,29 @@ public sealed class LimiterPlugin : IPlugin
                 gain += releaseCoeff * (targetGain - gain);
             }
 
-            buffer[i] = input * gain;
+            minGain = MathF.Min(minGain, gain);
+            float output = input * gain;
+            outputPeak = MathF.Max(outputPeak, MathF.Abs(output));
+            buffer[i] = output;
         }
 
         _gain = gain;
+
+        // Update metering (thread-safe)
+        UpdatePeakLevel(ref _inputLevelBits, inputPeak);
+        UpdatePeakLevel(ref _outputLevelBits, outputPeak);
+        float grDb = minGain < 1f ? DspUtils.LinearToDb(minGain) : 0f;
+        Interlocked.Exchange(ref _gainReductionBits, BitConverter.SingleToInt32Bits(grDb));
+    }
+
+    private static void UpdatePeakLevel(ref int levelBits, float newPeak)
+    {
+        int current = Interlocked.CompareExchange(ref levelBits, 0, 0);
+        float currentPeak = BitConverter.Int32BitsToSingle(current);
+        if (newPeak > currentPeak)
+        {
+            Interlocked.Exchange(ref levelBits, BitConverter.SingleToInt32Bits(newPeak));
+        }
     }
 
     public void SetParameter(int index, float value)
@@ -110,6 +143,21 @@ public sealed class LimiterPlugin : IPlugin
         }
 
         UpdateCoefficients();
+    }
+
+    public float GetAndResetInputLevel()
+    {
+        return BitConverter.Int32BitsToSingle(Interlocked.Exchange(ref _inputLevelBits, 0));
+    }
+
+    public float GetAndResetOutputLevel()
+    {
+        return BitConverter.Int32BitsToSingle(Interlocked.Exchange(ref _outputLevelBits, 0));
+    }
+
+    public float GetGainReductionDb()
+    {
+        return BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _gainReductionBits, 0, 0));
     }
 
     public void Dispose()
