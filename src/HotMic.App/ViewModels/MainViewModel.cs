@@ -135,6 +135,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     int.TryParse(parts[3], out int paramIndex))
                 {
                     ApplyPluginParameter(channelIndex, pluginIndex, paramIndex, "midi", value);
+
+                    // Update the UI knob (slot indices in PluginSlots are 1-based, +1 for add placeholder)
+                    if (pluginIndex < channel.PluginSlots.Count - 1)
+                    {
+                        var slot = channel.PluginSlots[pluginIndex];
+                        if (slot.ElevatedParams is { } elevParams)
+                        {
+                            // Find which elevated index matches this parameter index
+                            for (int i = 0; i < elevParams.Length; i++)
+                            {
+                                if (elevParams[i].Index == paramIndex)
+                                {
+                                    slot.SetParamValueSilent(i, value);
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
                 break;
         }
