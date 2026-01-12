@@ -1459,7 +1459,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowNoiseGateWindow(int channelIndex, int slotIndex, NoiseGatePlugin plugin)
@@ -1474,7 +1474,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowCompressorWindow(int channelIndex, int slotIndex, CompressorPlugin plugin)
@@ -1489,7 +1489,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowGainWindow(int channelIndex, int slotIndex, GainPlugin plugin)
@@ -1504,7 +1504,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowEqWindow(int channelIndex, int slotIndex, FiveBandEqPlugin plugin)
@@ -1519,7 +1519,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowFFTNoiseWindow(int channelIndex, int slotIndex, FFTNoiseRemovalPlugin plugin)
@@ -1535,7 +1535,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowVoiceGateWindow(int channelIndex, int slotIndex, SileroVoiceGatePlugin plugin)
@@ -1550,7 +1550,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowRNNoiseWindow(int channelIndex, int slotIndex, RNNoisePlugin plugin)
@@ -1565,7 +1565,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowDeepFilterNetWindow(int channelIndex, int slotIndex, DeepFilterNetPlugin plugin)
@@ -1580,7 +1580,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowReverbWindow(int channelIndex, int slotIndex, ConvolutionReverbPlugin plugin)
@@ -1595,7 +1595,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowLimiterWindow(int channelIndex, int slotIndex, LimiterPlugin plugin)
@@ -1610,7 +1610,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowDeEsserWindow(int channelIndex, int slotIndex, DeEsserPlugin plugin)
@@ -1625,7 +1625,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowHighPassFilterWindow(int channelIndex, int slotIndex, HighPassFilterPlugin plugin)
@@ -1640,7 +1640,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowSaturationWindow(int channelIndex, int slotIndex, SaturationPlugin plugin)
@@ -1655,7 +1655,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void SetPluginBypass(int channelIndex, int slotIndex, bool bypassed)
