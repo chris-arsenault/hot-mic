@@ -35,6 +35,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private float _postFilterEnabled = 1f;
     private bool _forcedBypass;
     private bool _wasBypassed = true;
+    private bool _roundTripOnly;
     private string _statusMessage = string.Empty;
     private int _gainReductionDbBits;
     private float _smoothedGrDb;
@@ -102,6 +103,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         _sampleRate = sampleRate;
         _statusMessage = string.Empty;
         _forcedBypass = false;
+        _roundTripOnly = ReadRoundTripOnlyFlag();
 
         StopWorker();
 
@@ -140,6 +142,10 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         }
 
         InitializeBuffers(blockSize);
+        if (_roundTripOnly)
+        {
+            _statusMessage = "DeepFilterNet STFT round-trip mode.";
+        }
         _mixSmoother.Configure(sampleRate, MixSmoothingMs, _reductionPct / 100f);
         StartWorker();
         _wasBypassed = false;
@@ -386,7 +392,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
                 bool postFilter = Volatile.Read(ref _postFilterEnabled) >= 0.5f;
                 float attenDb = Volatile.Read(ref _attenLimitDb);
-                _processor.ProcessHop(_hopBuffer, _hopOutput, postFilter, attenDb);
+                _processor.ProcessHop(_hopBuffer, _hopOutput, postFilter, attenDb, _roundTripOnly);
                 _outputBuffer.Write(_hopOutput);
             }
         }
@@ -408,5 +414,19 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         }
 
         return string.Empty;
+    }
+
+    private static bool ReadRoundTripOnlyFlag()
+    {
+        // Set HOTMIC_DFN_STFT_ONLY=1 to bypass model inference and verify STFT -> ISTFT transparency.
+        string? value = Environment.GetEnvironmentVariable("HOTMIC_DFN_STFT_ONLY");
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+               value.Equals("yes", StringComparison.OrdinalIgnoreCase);
     }
 }

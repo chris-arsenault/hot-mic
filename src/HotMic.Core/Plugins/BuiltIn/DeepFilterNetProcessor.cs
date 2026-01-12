@@ -93,11 +93,21 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         ReadOnlySpan<float> input,
         Span<float> output,
         bool postFilterEnabled,
-        float attenLimitDb)
+        float attenLimitDb,
+        bool roundTripOnly = false)
     {
         if (input.Length != _config.HopSize || output.Length != _config.HopSize)
         {
             throw new ArgumentException("DeepFilterNet hop size mismatch.");
+        }
+
+        if (roundTripOnly)
+        {
+            // Diagnostic mode: verify STFT -> ISTFT reconstruction without model processing.
+            _stft.Analyze(input, _specBuffer);
+            _stft.Synthesize(_specBuffer, output);
+            LastGainReductionDb = 0f;
+            return;
         }
 
         float maxAbs = 0f;
