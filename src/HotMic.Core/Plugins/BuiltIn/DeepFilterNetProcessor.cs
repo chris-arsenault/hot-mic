@@ -103,7 +103,9 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         out float gainMin,
         out float gainMax,
         out float hopPeak,
-        out float hopRms)
+        out float hopRms,
+        out float specPeak,
+        out float outPeak)
     {
         if (input.Length != _config.HopSize || output.Length != _config.HopSize)
         {
@@ -114,6 +116,8 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         debugFlags = 0;
         gainMin = 0f;
         gainMax = 0f;
+        specPeak = 0f;
+        outPeak = 0f;
 
         float maxAbs = 0f;
         float energy = 0f;
@@ -221,7 +225,9 @@ internal sealed class DeepFilterNetProcessor : IDisposable
             debugFlags |= DebugAttenLimit;
         }
 
+        specPeak = ComputeSpecPeak(_specOut);
         _stft.Synthesize(_specOut, output);
+        outPeak = ComputePeak(output);
     }
 
     public void Dispose()
@@ -371,5 +377,48 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         {
             max = 0f;
         }
+    }
+
+    private static float ComputeSpecPeak(float[] spec)
+    {
+        float peak = 0f;
+        for (int i = 0; i + 1 < spec.Length; i += 2)
+        {
+            float re = spec[i];
+            float im = spec[i + 1];
+            if (!float.IsFinite(re) || !float.IsFinite(im))
+            {
+                continue;
+            }
+
+            float mag = MathF.Sqrt(re * re + im * im);
+            if (mag > peak)
+            {
+                peak = mag;
+            }
+        }
+
+        return peak;
+    }
+
+    private static float ComputePeak(ReadOnlySpan<float> data)
+    {
+        float peak = 0f;
+        for (int i = 0; i < data.Length; i++)
+        {
+            float value = data[i];
+            if (!float.IsFinite(value))
+            {
+                continue;
+            }
+
+            float abs = MathF.Abs(value);
+            if (abs > peak)
+            {
+                peak = abs;
+            }
+        }
+
+        return peak;
     }
 }

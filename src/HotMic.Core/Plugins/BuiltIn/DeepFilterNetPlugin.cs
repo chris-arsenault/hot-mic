@@ -40,6 +40,8 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private int _lastGainMaxBits;
     private int _lastHopPeakBits;
     private int _lastHopRmsBits;
+    private int _lastSpecPeakBits;
+    private int _lastOutPeakBits;
     private int _lastDebugFlags;
 
     private float _reductionPct = 100f;
@@ -385,12 +387,15 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 bool postFilter = Volatile.Read(ref _postFilterEnabled) >= 0.5f;
                 float attenDb = Volatile.Read(ref _attenLimitDb);
                 _processor.ProcessHop(_hopBuffer, _hopOutput, postFilter, attenDb,
-                    out float lsnr, out int flags, out float gainMin, out float gainMax, out float hopPeak, out float hopRms);
+                    out float lsnr, out int flags, out float gainMin, out float gainMax, out float hopPeak, out float hopRms,
+                    out float specPeak, out float outPeak);
                 Interlocked.Exchange(ref _lastLsnrBits, BitConverter.SingleToInt32Bits(lsnr));
                 Interlocked.Exchange(ref _lastGainMinBits, BitConverter.SingleToInt32Bits(gainMin));
                 Interlocked.Exchange(ref _lastGainMaxBits, BitConverter.SingleToInt32Bits(gainMax));
                 Interlocked.Exchange(ref _lastHopPeakBits, BitConverter.SingleToInt32Bits(hopPeak));
                 Interlocked.Exchange(ref _lastHopRmsBits, BitConverter.SingleToInt32Bits(hopRms));
+                Interlocked.Exchange(ref _lastSpecPeakBits, BitConverter.SingleToInt32Bits(specPeak));
+                Interlocked.Exchange(ref _lastOutPeakBits, BitConverter.SingleToInt32Bits(outPeak));
                 Interlocked.Exchange(ref _lastDebugFlags, flags);
                 if (_debugEnabled)
                 {
@@ -418,6 +423,8 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         float gainMax = BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _lastGainMaxBits, 0, 0));
         float hopPeak = BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _lastHopPeakBits, 0, 0));
         float hopRms = BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _lastHopRmsBits, 0, 0));
+        float specPeak = BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _lastSpecPeakBits, 0, 0));
+        float outPeak = BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _lastOutPeakBits, 0, 0));
         int flags = Interlocked.CompareExchange(ref _lastDebugFlags, 0, 0);
         int inAvail = _inputBuffer?.AvailableRead ?? 0;
         int outAvail = _outputBuffer?.AvailableRead ?? 0;
@@ -427,7 +434,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         Console.WriteLine(
             $"[DeepFilterNet] in={peakIn:0.000000} dry={peakDry:0.000000} wet={peakWet:0.000000} out={peakOut:0.000000} " +
             $"mix={mix:0.000} read={read} inBuf={inAvail} outBuf={outAvail} " +
-            $"lsnr={lsnr:0.00} gainMin={gainMin:0.000} gainMax={gainMax:0.000} hopPeak={hopPeak:0.000000} hopRms={hopRms:0.000000} " +
+            $"lsnr={lsnr:0.00} gainMin={gainMin:0.000} gainMax={gainMax:0.000} hopPeak={hopPeak:0.000000} hopRms={hopRms:0.000000} specPeak={specPeak:0.000000} outPeak={outPeak:0.000000} " +
             $"flags=0x{flags:X} atten={attenDb:0.0} post={(postFilter ? 1 : 0)} procCalls={processCalls} hops={workerHops}");
     }
 
