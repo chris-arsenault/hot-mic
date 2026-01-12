@@ -3,7 +3,7 @@ using SkiaSharp;
 namespace HotMic.App.UI.PluginComponents;
 
 /// <summary>
-/// 3-Band EQ plugin UI with frequency response curve, spectrum analyzer, and per-band controls.
+/// 5-Band EQ plugin UI with frequency response curve, spectrum analyzer, and per-band controls.
 /// </summary>
 public sealed class EqRenderer : IDisposable
 {
@@ -17,7 +17,7 @@ public sealed class EqRenderer : IDisposable
     private const float SpectrumLabelMargin = 16f; // Space for frequency labels below
 
     // Knob section layout
-    private const float KnobRadius = 26f;
+    private const float KnobRadius = 24f;
     private const float BandLabelHeight = 16f;
     private const float KnobValueHeight = 14f;
     private const float KnobGap = 10f;
@@ -27,7 +27,7 @@ public sealed class EqRenderer : IDisposable
     private const float KnobSectionHeight = 180f;
 
     // Total window: Title(40) + Pad(14) + Spectrum(160) + LabelMargin(16) + Gap(10) + KnobSection(180) + Pad(10) = 430
-    private const float WindowWidth = 460f;
+    private const float WindowWidth = 620f;
     private const float WindowHeight = 430f;
 
     private const float MeterWidth = 18f;
@@ -60,8 +60,10 @@ public sealed class EqRenderer : IDisposable
     private readonly SKPaint _meterBackgroundPaint;
 
     // Band colors
+    private readonly SKColor _hpfColor = new(0x88, 0x88, 0x88);  // Neutral gray
     private readonly SKColor _lowColor = new(0x3D, 0xA5, 0xF4);  // Blue
-    private readonly SKColor _midColor = new(0x00, 0xD4, 0xAA);  // Teal
+    private readonly SKColor _mid1Color = new(0x00, 0xD4, 0xAA); // Teal
+    private readonly SKColor _mid2Color = new(0x5C, 0xD4, 0x6A); // Green
     private readonly SKColor _highColor = new(0xFF, 0x6B, 0x00); // Orange
     private readonly SKColor _spectrumColor = new(0x00, 0xD4, 0xAA, 0x60);
     private readonly SKColor _spectrumPeakColor = new(0x00, 0xD4, 0xAA);
@@ -72,12 +74,15 @@ public sealed class EqRenderer : IDisposable
     private SKRect _spectrumRect;
 
     // Knob positions (center points)
-    private SKPoint _lowGainKnob;
-    private SKPoint _lowFreqKnob;
-    private SKPoint _midGainKnob;
-    private SKPoint _midFreqKnob;
-    private SKPoint _highGainKnob;
-    private SKPoint _highFreqKnob;
+    private SKPoint _hpfFreqKnob;
+    private SKPoint _lowShelfGainKnob;
+    private SKPoint _lowShelfFreqKnob;
+    private SKPoint _mid1GainKnob;
+    private SKPoint _mid1FreqKnob;
+    private SKPoint _mid2GainKnob;
+    private SKPoint _mid2FreqKnob;
+    private SKPoint _highShelfGainKnob;
+    private SKPoint _highShelfFreqKnob;
 
     public EqRenderer(PluginComponentTheme? theme = null)
     {
@@ -301,7 +306,7 @@ public sealed class EqRenderer : IDisposable
         canvas.DrawLine(0, TitleBarHeight, size.Width, TitleBarHeight, _borderPaint);
 
         // Title
-        canvas.DrawText("3-Band EQ", Padding, TitleBarHeight / 2f + 5, _titlePaint);
+        canvas.DrawText("5-Band EQ", Padding, TitleBarHeight / 2f + 5, _titlePaint);
 
         // Bypass button
         float bypassWidth = 60f;
@@ -362,7 +367,7 @@ public sealed class EqRenderer : IDisposable
 
         // Knob section
         float knobSectionTop = contentTop + SpectrumHeight + SpectrumLabelMargin + 10;
-        float bandWidth = (size.Width - Padding * 2) / 3f;
+        float bandWidth = (size.Width - Padding * 2) / 5f;
 
         // Calculate vertical positions within knob section
         float bandLabelY = knobSectionTop + 12;
@@ -371,26 +376,39 @@ public sealed class EqRenderer : IDisposable
         float freqKnobCenterY = gainValueY + KnobGap + KnobRadius + 4;
         float freqValueY = freqKnobCenterY + KnobRadius + 12;
 
-        // Low band
-        float lowCenterX = Padding + bandWidth / 2;
+        // HPF
+        float hpfCenterX = Padding + bandWidth * 0.5f;
+        DrawSingleKnob(canvas, hpfCenterX, bandLabelY, gainKnobCenterY, gainValueY,
+            "HPF", _hpfColor, state.HpfFreq, 40f, 200f, state.HoveredKnob, 0);
+        _hpfFreqKnob = new SKPoint(hpfCenterX, gainKnobCenterY);
+
+        // Low shelf
+        float lowCenterX = Padding + bandWidth * 1.5f;
         DrawBandControls(canvas, lowCenterX, bandLabelY, gainKnobCenterY, gainValueY, freqKnobCenterY, freqValueY,
-            "LOW", _lowColor, state.LowGainDb, state.LowFreq, 20f, 500f, state.HoveredKnob, 0);
-        _lowGainKnob = new SKPoint(lowCenterX, gainKnobCenterY);
-        _lowFreqKnob = new SKPoint(lowCenterX, freqKnobCenterY);
+            "LOW", _lowColor, state.LowShelfGainDb, state.LowShelfFreq, 60f, 300f, state.HoveredKnob, 1);
+        _lowShelfGainKnob = new SKPoint(lowCenterX, gainKnobCenterY);
+        _lowShelfFreqKnob = new SKPoint(lowCenterX, freqKnobCenterY);
 
-        // Mid band
-        float midCenterX = Padding + bandWidth * 1.5f;
-        DrawBandControls(canvas, midCenterX, bandLabelY, gainKnobCenterY, gainValueY, freqKnobCenterY, freqValueY,
-            "MID", _midColor, state.MidGainDb, state.MidFreq, 200f, 5000f, state.HoveredKnob, 2);
-        _midGainKnob = new SKPoint(midCenterX, gainKnobCenterY);
-        _midFreqKnob = new SKPoint(midCenterX, freqKnobCenterY);
+        // Low-mid
+        float mid1CenterX = Padding + bandWidth * 2.5f;
+        DrawBandControls(canvas, mid1CenterX, bandLabelY, gainKnobCenterY, gainValueY, freqKnobCenterY, freqValueY,
+            "L-MID", _mid1Color, state.Mid1GainDb, state.Mid1Freq, 150f, 800f, state.HoveredKnob, 3);
+        _mid1GainKnob = new SKPoint(mid1CenterX, gainKnobCenterY);
+        _mid1FreqKnob = new SKPoint(mid1CenterX, freqKnobCenterY);
 
-        // High band
-        float highCenterX = Padding + bandWidth * 2.5f;
+        // High-mid
+        float mid2CenterX = Padding + bandWidth * 3.5f;
+        DrawBandControls(canvas, mid2CenterX, bandLabelY, gainKnobCenterY, gainValueY, freqKnobCenterY, freqValueY,
+            "H-MID", _mid2Color, state.Mid2GainDb, state.Mid2Freq, 1000f, 6000f, state.HoveredKnob, 5);
+        _mid2GainKnob = new SKPoint(mid2CenterX, gainKnobCenterY);
+        _mid2FreqKnob = new SKPoint(mid2CenterX, freqKnobCenterY);
+
+        // High shelf
+        float highCenterX = Padding + bandWidth * 4.5f;
         DrawBandControls(canvas, highCenterX, bandLabelY, gainKnobCenterY, gainValueY, freqKnobCenterY, freqValueY,
-            "HIGH", _highColor, state.HighGainDb, state.HighFreq, 2000f, 20000f, state.HoveredKnob, 4);
-        _highGainKnob = new SKPoint(highCenterX, gainKnobCenterY);
-        _highFreqKnob = new SKPoint(highCenterX, freqKnobCenterY);
+            "HIGH", _highColor, state.HighShelfGainDb, state.HighShelfFreq, 6000f, 16000f, state.HoveredKnob, 7);
+        _highShelfGainKnob = new SKPoint(highCenterX, gainKnobCenterY);
+        _highShelfFreqKnob = new SKPoint(highCenterX, freqKnobCenterY);
 
         // Outer border
         canvas.DrawRoundRect(roundRect, _borderPaint);
@@ -438,9 +456,11 @@ public sealed class EqRenderer : IDisposable
         DrawResponseCurve(canvas, rect, state, zeroY, dbPixelsPerDb);
 
         // Band frequency markers
-        DrawBandMarker(canvas, rect, state.LowFreq, state.LowGainDb, _lowColor, state.SampleRate, zeroY, dbPixelsPerDb);
-        DrawBandMarker(canvas, rect, state.MidFreq, state.MidGainDb, _midColor, state.SampleRate, zeroY, dbPixelsPerDb);
-        DrawBandMarker(canvas, rect, state.HighFreq, state.HighGainDb, _highColor, state.SampleRate, zeroY, dbPixelsPerDb);
+        DrawBandMarker(canvas, rect, state.HpfFreq, 0f, _hpfColor, state.SampleRate, zeroY, dbPixelsPerDb);
+        DrawBandMarker(canvas, rect, state.LowShelfFreq, state.LowShelfGainDb, _lowColor, state.SampleRate, zeroY, dbPixelsPerDb);
+        DrawBandMarker(canvas, rect, state.Mid1Freq, state.Mid1GainDb, _mid1Color, state.SampleRate, zeroY, dbPixelsPerDb);
+        DrawBandMarker(canvas, rect, state.Mid2Freq, state.Mid2GainDb, _mid2Color, state.SampleRate, zeroY, dbPixelsPerDb);
+        DrawBandMarker(canvas, rect, state.HighShelfFreq, state.HighShelfGainDb, _highColor, state.SampleRate, zeroY, dbPixelsPerDb);
 
         canvas.Restore();
 
@@ -532,11 +552,13 @@ public sealed class EqRenderer : IDisposable
             // Log scale frequency
             float freq = minFreq * MathF.Pow(maxFreq / minFreq, t);
 
-            // Calculate combined response of all three bands
+            // Calculate combined response of all bands
             float totalDb = 0f;
-            totalDb += CalculateBiquadResponse(freq, state.LowFreq, state.LowGainDb, state.LowQ, state.SampleRate, FilterType.LowShelf);
-            totalDb += CalculateBiquadResponse(freq, state.MidFreq, state.MidGainDb, state.MidQ, state.SampleRate, FilterType.Peaking);
-            totalDb += CalculateBiquadResponse(freq, state.HighFreq, state.HighGainDb, state.HighQ, state.SampleRate, FilterType.HighShelf);
+            totalDb += CalculateBiquadResponse(freq, state.HpfFreq, 0f, 0.707f, state.SampleRate, FilterType.HighPass);
+            totalDb += CalculateBiquadResponse(freq, state.LowShelfFreq, state.LowShelfGainDb, 0.7f, state.SampleRate, FilterType.LowShelf);
+            totalDb += CalculateBiquadResponse(freq, state.Mid1Freq, state.Mid1GainDb, state.Mid1Q, state.SampleRate, FilterType.Peaking);
+            totalDb += CalculateBiquadResponse(freq, state.Mid2Freq, state.Mid2GainDb, state.Mid2Q, state.SampleRate, FilterType.Peaking);
+            totalDb += CalculateBiquadResponse(freq, state.HighShelfFreq, state.HighShelfGainDb, 0.7f, state.SampleRate, FilterType.HighShelf);
 
             // Clamp to display range
             totalDb = Math.Clamp(totalDb, -24f, 24f);
@@ -593,6 +615,18 @@ public sealed class EqRenderer : IDisposable
         // Vertical line
         _bandMarkerPaint.Color = color.WithAlpha(60);
         canvas.DrawLine(x, rect.Top, x, rect.Bottom, _bandMarkerPaint);
+    }
+
+    private void DrawSingleKnob(SKCanvas canvas, float centerX, float labelY, float knobY, float valueY,
+        string label, SKColor color, float value, float minValue, float maxValue, int hoveredKnob, int knobIndex)
+    {
+        _bandLabelPaint.Color = color;
+        canvas.DrawText(label, centerX, labelY, _bandLabelPaint);
+
+        bool hovered = hoveredKnob == knobIndex;
+        DrawSmallKnob(canvas, new SKPoint(centerX, knobY), value, minValue, maxValue, color, hovered, true);
+        string freqStr = value >= 1000 ? $"{value / 1000f:0.0}k" : $"{value:0}";
+        canvas.DrawText($"{freqStr} Hz", centerX, valueY, _valuePaint);
     }
 
     private void DrawBandControls(SKCanvas canvas, float centerX, float labelY, float gainKnobY, float gainValueY,
@@ -764,17 +798,25 @@ public sealed class EqRenderer : IDisposable
         return rect.Left + t * rect.Width;
     }
 
-    private enum FilterType { LowShelf, Peaking, HighShelf }
+    private enum FilterType { HighPass, LowShelf, Peaking, HighShelf }
 
     private float CalculateBiquadResponse(float freq, float filterFreq, float gainDb, float q, int sampleRate, FilterType type)
     {
-        if (sampleRate <= 0 || MathF.Abs(gainDb) < 0.01f)
+        if (sampleRate <= 0)
+            return 0f;
+        if (type != FilterType.HighPass && MathF.Abs(gainDb) < 0.01f)
             return 0f;
 
         float ratio = freq / filterFreq;
 
         switch (type)
         {
+            case FilterType.HighPass:
+                if (ratio >= 1f)
+                    return 0f;
+                float octaves = -MathF.Log2(MathF.Max(0.001f, ratio));
+                return Math.Clamp(-12f * octaves, -24f, 0f);
+
             case FilterType.LowShelf:
                 if (ratio < 0.5f)
                     return gainDb;
@@ -811,12 +853,15 @@ public sealed class EqRenderer : IDisposable
             return new EqHitTest(EqHitArea.BypassButton, -1);
 
         // Check knobs
-        if (IsInKnob(x, y, _lowGainKnob)) return new EqHitTest(EqHitArea.Knob, 0);
-        if (IsInKnob(x, y, _lowFreqKnob)) return new EqHitTest(EqHitArea.Knob, 1);
-        if (IsInKnob(x, y, _midGainKnob)) return new EqHitTest(EqHitArea.Knob, 2);
-        if (IsInKnob(x, y, _midFreqKnob)) return new EqHitTest(EqHitArea.Knob, 3);
-        if (IsInKnob(x, y, _highGainKnob)) return new EqHitTest(EqHitArea.Knob, 4);
-        if (IsInKnob(x, y, _highFreqKnob)) return new EqHitTest(EqHitArea.Knob, 5);
+        if (IsInKnob(x, y, _hpfFreqKnob)) return new EqHitTest(EqHitArea.Knob, 0);
+        if (IsInKnob(x, y, _lowShelfGainKnob)) return new EqHitTest(EqHitArea.Knob, 1);
+        if (IsInKnob(x, y, _lowShelfFreqKnob)) return new EqHitTest(EqHitArea.Knob, 2);
+        if (IsInKnob(x, y, _mid1GainKnob)) return new EqHitTest(EqHitArea.Knob, 3);
+        if (IsInKnob(x, y, _mid1FreqKnob)) return new EqHitTest(EqHitArea.Knob, 4);
+        if (IsInKnob(x, y, _mid2GainKnob)) return new EqHitTest(EqHitArea.Knob, 5);
+        if (IsInKnob(x, y, _mid2FreqKnob)) return new EqHitTest(EqHitArea.Knob, 6);
+        if (IsInKnob(x, y, _highShelfGainKnob)) return new EqHitTest(EqHitArea.Knob, 7);
+        if (IsInKnob(x, y, _highShelfFreqKnob)) return new EqHitTest(EqHitArea.Knob, 8);
 
         if (_titleBarRect.Contains(x, y))
             return new EqHitTest(EqHitArea.TitleBar, -1);
@@ -866,15 +911,17 @@ public sealed class EqRenderer : IDisposable
 /// State data for rendering the EQ UI.
 /// </summary>
 public record struct EqState(
-    float LowGainDb,
-    float LowFreq,
-    float LowQ,
-    float MidGainDb,
-    float MidFreq,
-    float MidQ,
-    float HighGainDb,
-    float HighFreq,
-    float HighQ,
+    float HpfFreq,
+    float LowShelfGainDb,
+    float LowShelfFreq,
+    float Mid1GainDb,
+    float Mid1Freq,
+    float Mid1Q,
+    float Mid2GainDb,
+    float Mid2Freq,
+    float Mid2Q,
+    float HighShelfGainDb,
+    float HighShelfFreq,
     float InputLevel,
     float OutputLevel,
     int SampleRate,

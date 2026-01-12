@@ -1095,9 +1095,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             new() { Id = "builtin:gain", Name = "Gain", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Simple gain and phase control" },
             new() { Id = "builtin:compressor", Name = "Compressor", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Dynamic range compression with soft knee" },
             new() { Id = "builtin:noisegate", Name = "Noise Gate", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Removes audio below threshold" },
+            new() { Id = "builtin:deesser", Name = "De-Esser", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Tames sibilance in the high band" },
+            new() { Id = "builtin:limiter", Name = "Limiter", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Brick-wall peak control" },
 
             // EQ
-            new() { Id = "builtin:eq3", Name = "3-Band EQ", IsVst3 = false, Category = PluginCategory.Eq, Description = "Parametric equalizer with spectrum analyzer" },
+            new() { Id = "builtin:hpf", Name = "High-Pass Filter", IsVst3 = false, Category = PluginCategory.Eq, Description = "Fast rumble and plosive removal" },
+            new() { Id = "builtin:eq3", Name = "5-Band EQ", IsVst3 = false, Category = PluginCategory.Eq, Description = "HPF + shelves + dual mid bands" },
 
             // Noise Reduction
             new() { Id = "builtin:fft-noise", Name = "FFT Noise Removal", IsVst3 = false, Category = PluginCategory.NoiseReduction, Description = "Learns and removes background noise" },
@@ -1108,6 +1111,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             new() { Id = "builtin:voice-gate", Name = "Voice Gate", IsVst3 = false, Category = PluginCategory.AiMl, Description = "AI-powered voice activity detection" },
 
             // Effects
+            new() { Id = "builtin:saturation", Name = "Saturation", IsVst3 = false, Category = PluginCategory.Effects, Description = "Soft clipping harmonic warmth" },
             new() { Id = "builtin:reverb", Name = "Reverb", IsVst3 = false, Category = PluginCategory.Effects, Description = "Convolution reverb with IR presets" }
         };
 
@@ -1163,8 +1167,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Use specialized window for 3-band EQ
-        if (plugin is ThreeBandEqPlugin eq)
+        // Use specialized window for 5-band EQ
+        if (plugin is FiveBandEqPlugin eq)
         {
             ShowEqWindow(channelIndex, slotIndex, eq);
             return;
@@ -1277,7 +1281,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         window.ShowDialog();
     }
 
-    private void ShowEqWindow(int channelIndex, int slotIndex, ThreeBandEqPlugin plugin)
+    private void ShowEqWindow(int channelIndex, int slotIndex, FiveBandEqPlugin plugin)
     {
         var window = new EqWindow(plugin,
             (paramIndex, value) =>

@@ -12,7 +12,7 @@ namespace HotMic.App.Views;
 public partial class EqWindow : Window
 {
     private readonly EqRenderer _renderer = new();
-    private readonly ThreeBandEqPlugin _plugin;
+    private readonly FiveBandEqPlugin _plugin;
     private readonly Action<int, float> _parameterCallback;
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
@@ -25,21 +25,24 @@ public partial class EqWindow : Window
     private float _smoothedOutputLevel;
 
     // Pre-allocated spectrum buffers to avoid allocations during rendering
-    private readonly float[] _spectrumLevels = new float[ThreeBandEqPlugin.SpectrumBins];
-    private readonly float[] _spectrumPeaks = new float[ThreeBandEqPlugin.SpectrumBins];
+    private readonly float[] _spectrumLevels = new float[FiveBandEqPlugin.SpectrumBins];
+    private readonly float[] _spectrumPeaks = new float[FiveBandEqPlugin.SpectrumBins];
 
     // Knob parameter mapping: index -> (paramIndex, minValue, maxValue, isLogScale)
     private static readonly (int paramIndex, float min, float max, bool log)[] KnobParams =
     {
-        (ThreeBandEqPlugin.LowGainIndex, -24f, 24f, false),    // 0: Low Gain
-        (ThreeBandEqPlugin.LowFreqIndex, 20f, 500f, true),     // 1: Low Freq
-        (ThreeBandEqPlugin.MidGainIndex, -24f, 24f, false),    // 2: Mid Gain
-        (ThreeBandEqPlugin.MidFreqIndex, 200f, 5000f, true),   // 3: Mid Freq
-        (ThreeBandEqPlugin.HighGainIndex, -24f, 24f, false),   // 4: High Gain
-        (ThreeBandEqPlugin.HighFreqIndex, 2000f, 20000f, true) // 5: High Freq
+        (FiveBandEqPlugin.HpfFreqIndex, 40f, 200f, true),           // 0: HPF Freq
+        (FiveBandEqPlugin.LowShelfGainIndex, -24f, 24f, false),     // 1: Low Shelf Gain
+        (FiveBandEqPlugin.LowShelfFreqIndex, 60f, 300f, true),      // 2: Low Shelf Freq
+        (FiveBandEqPlugin.Mid1GainIndex, -24f, 24f, false),         // 3: Low-Mid Gain
+        (FiveBandEqPlugin.Mid1FreqIndex, 150f, 800f, true),         // 4: Low-Mid Freq
+        (FiveBandEqPlugin.Mid2GainIndex, -24f, 24f, false),         // 5: High-Mid Gain
+        (FiveBandEqPlugin.Mid2FreqIndex, 1000f, 6000f, true),       // 6: High-Mid Freq
+        (FiveBandEqPlugin.HighShelfGainIndex, -24f, 24f, false),    // 7: High Shelf Gain
+        (FiveBandEqPlugin.HighShelfFreqIndex, 6000f, 16000f, true)  // 8: High Shelf Freq
     };
 
-    public EqWindow(ThreeBandEqPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
+    public EqWindow(FiveBandEqPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
         InitializeComponent();
         _plugin = plugin;
@@ -80,15 +83,17 @@ public partial class EqWindow : Window
         float dpiScale = GetDpiScale();
 
         var state = new EqState(
-            LowGainDb: _plugin.LowGainDb,
-            LowFreq: _plugin.LowFreq,
-            LowQ: _plugin.LowQ,
-            MidGainDb: _plugin.MidGainDb,
-            MidFreq: _plugin.MidFreq,
-            MidQ: _plugin.MidQ,
-            HighGainDb: _plugin.HighGainDb,
-            HighFreq: _plugin.HighFreq,
-            HighQ: _plugin.HighQ,
+            HpfFreq: _plugin.HpfFreq,
+            LowShelfGainDb: _plugin.LowShelfGainDb,
+            LowShelfFreq: _plugin.LowShelfFreq,
+            Mid1GainDb: _plugin.Mid1GainDb,
+            Mid1Freq: _plugin.Mid1Freq,
+            Mid1Q: _plugin.Mid1Q,
+            Mid2GainDb: _plugin.Mid2GainDb,
+            Mid2Freq: _plugin.Mid2Freq,
+            Mid2Q: _plugin.Mid2Q,
+            HighShelfGainDb: _plugin.HighShelfGainDb,
+            HighShelfFreq: _plugin.HighShelfFreq,
             InputLevel: _smoothedInputLevel,
             OutputLevel: _smoothedOutputLevel,
             SampleRate: _plugin.SampleRate,
@@ -209,15 +214,17 @@ public partial class EqWindow : Window
     {
         return paramIndex switch
         {
-            ThreeBandEqPlugin.LowGainIndex => _plugin.LowGainDb,
-            ThreeBandEqPlugin.LowFreqIndex => _plugin.LowFreq,
-            ThreeBandEqPlugin.LowQIndex => _plugin.LowQ,
-            ThreeBandEqPlugin.MidGainIndex => _plugin.MidGainDb,
-            ThreeBandEqPlugin.MidFreqIndex => _plugin.MidFreq,
-            ThreeBandEqPlugin.MidQIndex => _plugin.MidQ,
-            ThreeBandEqPlugin.HighGainIndex => _plugin.HighGainDb,
-            ThreeBandEqPlugin.HighFreqIndex => _plugin.HighFreq,
-            ThreeBandEqPlugin.HighQIndex => _plugin.HighQ,
+            FiveBandEqPlugin.HpfFreqIndex => _plugin.HpfFreq,
+            FiveBandEqPlugin.LowShelfGainIndex => _plugin.LowShelfGainDb,
+            FiveBandEqPlugin.LowShelfFreqIndex => _plugin.LowShelfFreq,
+            FiveBandEqPlugin.Mid1GainIndex => _plugin.Mid1GainDb,
+            FiveBandEqPlugin.Mid1FreqIndex => _plugin.Mid1Freq,
+            FiveBandEqPlugin.Mid1QIndex => _plugin.Mid1Q,
+            FiveBandEqPlugin.Mid2GainIndex => _plugin.Mid2GainDb,
+            FiveBandEqPlugin.Mid2FreqIndex => _plugin.Mid2Freq,
+            FiveBandEqPlugin.Mid2QIndex => _plugin.Mid2Q,
+            FiveBandEqPlugin.HighShelfGainIndex => _plugin.HighShelfGainDb,
+            FiveBandEqPlugin.HighShelfFreqIndex => _plugin.HighShelfFreq,
             _ => 0f
         };
     }
