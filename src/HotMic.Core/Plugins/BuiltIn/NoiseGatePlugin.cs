@@ -88,6 +88,7 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
         for (int i = 0; i < buffer.Length; i++)
         {
             float sample = buffer[i];
+            float absInput = MathF.Abs(sample);
             // Voice-friendly detector: HPF sidechain + RMS smoothing to reduce plosive bias.
             float sidechain = _sidechainFilter.Process(sample);
             float power = sidechain * sidechain;
@@ -95,10 +96,12 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
             float detectorCoeff = power > _detector ? _detectorAttackCoeff : _detectorReleaseCoeff;
             _detector += detectorCoeff * (power - _detector);
             float env = MathF.Sqrt(_detector + 1e-12f);
+            // Use peak-boosted level for gate state so the threshold aligns with the visible input meter.
+            float gateLevel = MathF.Max(env, absInput);
 
             if (_gateOpen)
             {
-                if (env < _closeThresholdLinear)
+                if (gateLevel < _closeThresholdLinear)
                 {
                     if (_holdSamples <= 0)
                     {
@@ -122,7 +125,7 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
                     _holdSamplesLeft = _holdSamples;
                 }
             }
-            else if (env >= _thresholdLinear)
+            else if (gateLevel >= _thresholdLinear)
             {
                 _gateOpen = true;
                 _holdSamplesLeft = _holdSamples;
@@ -146,10 +149,9 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
             _gain += gainCoeff * (targetGain - _gain);
             buffer[i] = sample * _gain;
 
-            float absVal = MathF.Abs(sample);
-            if (absVal > peak)
+            if (absInput > peak)
             {
-                peak = absVal;
+                peak = absInput;
             }
         }
 
