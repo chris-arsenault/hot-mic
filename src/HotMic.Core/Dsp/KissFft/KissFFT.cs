@@ -142,11 +142,9 @@ internal sealed class KissFFT<kiss_fft_scalar>
         Array<kiss_fft_cpx<kiss_fft_scalar>> tw3;
         Array<kiss_fft_cpx<kiss_fft_scalar>> tw4;
         kiss_fft_cpx<kiss_fft_scalar>[] scratch = new kiss_fft_cpx<kiss_fft_scalar>[13];
+        for (int j = 0; j < 13; j++) scratch[j] = new kiss_fft_cpx<kiss_fft_scalar>();
         kiss_fft_cpx<kiss_fft_scalar> ya;
         kiss_fft_cpx<kiss_fft_scalar> yb;
-        kiss_fft_cpx<kiss_fft_scalar> yc;
-        kiss_fft_cpx<kiss_fft_scalar> yd;
-        kiss_fft_cpx<kiss_fft_scalar> ye;
 
         int k = m;
         int m2 = 2 * m;
@@ -217,8 +215,9 @@ internal sealed class KissFFT<kiss_fft_scalar>
         kiss_fft_cpx<kiss_fft_scalar> t;
         int p = factors[0];
         int m = factors[1];
+        int radix = p; // Save original radix before loop decrements p to 0
         Array<kiss_fft_cpx<kiss_fft_scalar>> fout1;
-        Array<kiss_fft_cpx<kiss_fft_scalar>> fout2;
+        Array<kiss_fft_cpx<kiss_fft_scalar>> foutBeg = new(fout); // Save start position before loop modifies fout
 
         if (m == 1)
         {
@@ -239,26 +238,25 @@ internal sealed class KissFFT<kiss_fft_scalar>
             } while (--p != 0);
         }
 
-        fout2 = new Array<kiss_fft_cpx<kiss_fft_scalar>>(fout);
-        switch (p)
+        switch (radix)
         {
             case 2:
-                kf_bfly2(fout2, fstride, m);
+                kf_bfly2(foutBeg, fstride, m);
                 break;
             case 3:
-                kf_bfly3(fout2, fstride, m);
+                kf_bfly3(foutBeg, fstride, m);
                 break;
             case 4:
-                kf_bfly4(fout2, fstride, m);
+                kf_bfly4(foutBeg, fstride, m);
                 break;
             case 5:
-                kf_bfly5(fout2, fstride, m);
+                kf_bfly5(foutBeg, fstride, m);
                 break;
             default:
                 Array<kiss_fft_cpx<kiss_fft_scalar>> tw;
                 for (int u = 0; u < m; ++u)
                 {
-                    fout1 = new Array<kiss_fft_cpx<kiss_fft_scalar>>(fout2);
+                    fout1 = new Array<kiss_fft_cpx<kiss_fft_scalar>>(foutBeg);
                     for (int k = u; k < _nfft; k += m)
                     {
                         if (k != u)

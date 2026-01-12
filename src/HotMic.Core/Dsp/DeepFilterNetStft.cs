@@ -10,6 +10,7 @@ internal sealed class DeepFilterNetStft
     private readonly int _freqSize;
     private readonly float[] _window;
     private readonly float _wnorm;
+    private readonly float _wnormInv;
     private readonly float[] _analysisMem;
     private readonly float[] _synthesisMem;
     private readonly float[] _timeBuffer;
@@ -29,6 +30,7 @@ internal sealed class DeepFilterNetStft
 
         _window = BuildVorbisWindow(fftSize);
         _wnorm = 1f / (fftSize * fftSize / (2f * hopSize));
+        _wnormInv = _wnorm > 0f ? 1f / _wnorm : 1f;
 
         var arithmetic = new FloatArithmetic();
         _fftForward = new KissFFT<float>(fftSize, inverse: false, arithmetic);
@@ -111,8 +113,16 @@ internal sealed class DeepFilterNetStft
 
         for (int i = 0; i < _freqSize; i++)
         {
-            _fftInput[i].r = specInterleaved[i * 2];
-            _fftInput[i].i = specInterleaved[i * 2 + 1];
+            float re = specInterleaved[i * 2];
+            float im = specInterleaved[i * 2 + 1];
+            if (!float.IsFinite(re) || !float.IsFinite(im))
+            {
+                re = 0f;
+                im = 0f;
+            }
+
+            _fftInput[i].r = re * _wnormInv;
+            _fftInput[i].i = im * _wnormInv;
         }
         for (int i = 1; i < _freqSize - 1; i++)
         {

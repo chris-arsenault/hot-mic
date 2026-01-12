@@ -169,36 +169,28 @@ internal sealed class DeepFilterNetInference : IDisposable
     private static float GetScalar(IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results, string name)
     {
         var tensor = GetTensor(results, name);
-        if (tensor is DenseTensor<float> denseTensor)
+        foreach (var value in tensor)
         {
-            return denseTensor.Buffer.Span[0];
+            return value;
         }
-        return tensor.GetValue(0);
+        return 0f;
     }
 
     private static void CopyTensorTo(float[] destination, Tensor<float> tensor)
     {
-        if (tensor is DenseTensor<float> denseTensor)
+        int count = 0;
+        foreach (var value in tensor)
         {
-            var span = denseTensor.Buffer.Span;
-            int count = Math.Min(destination.Length, span.Length);
-            span[..count].CopyTo(destination);
-            if (count < destination.Length)
+            if (count >= destination.Length)
             {
-                Array.Clear(destination, count, destination.Length - count);
+                break;
             }
+            destination[count++] = value;
         }
-        else
+
+        if (count < destination.Length)
         {
-            int count = Math.Min(destination.Length, (int)tensor.Length);
-            for (int i = 0; i < count; i++)
-            {
-                destination[i] = tensor.GetValue(i);
-            }
-            if (count < destination.Length)
-            {
-                Array.Clear(destination, count, destination.Length - count);
-            }
+            Array.Clear(destination, count, destination.Length - count);
         }
     }
 

@@ -152,7 +152,28 @@ public partial class ChannelStripViewModel : ObservableObject
 
     public void MovePlugin(int fromIndex, int toIndex)
     {
-        if ((uint)fromIndex >= (uint)PluginSlots.Count || (uint)toIndex >= (uint)PluginSlots.Count)
+        // Keep the "+1" placeholder pinned to the end; only reorder real plugins.
+        int lastPluginIndex = PluginSlots.Count - 2;
+        if (lastPluginIndex < 0)
+        {
+            return;
+        }
+
+        if ((uint)fromIndex > (uint)lastPluginIndex)
+        {
+            return;
+        }
+
+        if (toIndex < 0)
+        {
+            toIndex = 0;
+        }
+        else if (toIndex > lastPluginIndex)
+        {
+            toIndex = lastPluginIndex;
+        }
+
+        if (fromIndex == toIndex)
         {
             return;
         }

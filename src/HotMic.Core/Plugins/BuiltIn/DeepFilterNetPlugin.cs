@@ -14,7 +14,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
     private const float MixSmoothingMs = 8f;
 
-    private readonly LinearSmoother _mixSmoother = new();
+    private LinearSmoother _mixSmoother = new();
     private readonly object _workerLock = new();
     private DeepFilterNetProcessor? _processor;
     private LockFreeRingBuffer? _inputBuffer;
@@ -29,8 +29,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private int _sampleRate;
     private Thread? _workerThread;
     private AutoResetEvent? _frameSignal;
-    private volatile int _running;
-
+    private int _running;
     private float _reductionPct = 100f;
     private float _attenLimitDb = 40f;
     private float _postFilterEnabled = 1f;
@@ -165,7 +164,8 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             float input = buffer[i];
             float dry = _dryRing[_dryIndex];
             float wet = i < read ? _processedScratch[i] : dry;
-            buffer[i] = dry * (1f - mix) + wet * mix;
+            float output = dry * (1f - mix) + wet * mix;
+            buffer[i] = output;
 
             _dryRing[_dryIndex] = input;
             _dryIndex++;

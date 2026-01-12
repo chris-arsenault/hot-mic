@@ -12,13 +12,15 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
 
     private const int FrameSize = 480;
     private const float MixSmoothingMs = 8f;
+    private const float RnnoiseScale = 32768f;
+    private const float RnnoiseInvScale = 1f / RnnoiseScale;
 
     private readonly float[] _inputRing = new float[FrameSize];
     private readonly float[] _outputRing = new float[FrameSize];
     private readonly float[] _dryRing = new float[FrameSize];
     private readonly float[] _frameIn = new float[FrameSize];
     private readonly float[] _frameOut = new float[FrameSize];
-    private readonly LinearSmoother _mixSmoother = new();
+    private LinearSmoother _mixSmoother = new();
 
     private IntPtr _state = IntPtr.Zero;
     private int _ringIndex;
@@ -233,7 +235,7 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
                 index -= FrameSize;
             }
             float sample = _inputRing[index];
-            _frameIn[i] = sample;
+            _frameIn[i] = sample * RnnoiseScale;
             float abs = MathF.Abs(sample);
             if (abs > maxAbs)
             {
@@ -262,7 +264,7 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
             {
                 index -= FrameSize;
             }
-            _outputRing[index] = _frameOut[i];
+            _outputRing[index] = _frameOut[i] * RnnoiseInvScale;
         }
     }
 

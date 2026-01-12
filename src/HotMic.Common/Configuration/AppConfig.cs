@@ -11,4 +11,8 @@ public sealed class AppConfig
     public List<string> Vst2SearchPaths { get; set; } = new();
 
     public List<string> Vst3SearchPaths { get; set; } = new();
+
+    public bool EnableVstPlugins { get; set; } = true;
+
+    public MidiConfig Midi { get; set; } = new();
 }

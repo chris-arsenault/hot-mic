@@ -1,11 +1,7 @@
 namespace HotMic.Core.Dsp.KissFft;
 
-internal sealed class kiss_fft_cpx<kiss_fft_scalar>
+internal struct kiss_fft_cpx<kiss_fft_scalar>
 {
-    public kiss_fft_cpx()
-    {
-    }
-
     public kiss_fft_cpx(kiss_fft_cpx<kiss_fft_scalar> other)
     {
         r = other.r;

@@ -67,6 +67,22 @@ public partial class SettingsWindow : Window
             return;
         }
 
+        if (_renderer.HitTestVstCheckbox(x, y))
+        {
+            _viewModel.EnableVstPlugins = !_viewModel.EnableVstPlugins;
+            SkiaCanvas.InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
+
+        if (_renderer.HitTestMidiCheckbox(x, y))
+        {
+            _viewModel.EnableMidi = !_viewModel.EnableMidi;
+            SkiaCanvas.InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
+
         var dropdownHit = _renderer.HitTestDropdownItem(x, y);
         if (dropdownHit.HasValue)
         {
@@ -154,6 +170,10 @@ public partial class SettingsWindow : Window
             case SettingsField.OutputRouting:
                 if ((uint)hit.Index < (uint)_viewModel.OutputRoutingOptions.Count)
                     _viewModel.SelectedOutputRouting = _viewModel.OutputRoutingOptions[hit.Index];
+                break;
+            case SettingsField.MidiDevice:
+                if ((uint)hit.Index < (uint)_viewModel.MidiDevices.Count)
+                    _viewModel.SelectedMidiDevice = _viewModel.MidiDevices[hit.Index];
                 break;
         }
     }

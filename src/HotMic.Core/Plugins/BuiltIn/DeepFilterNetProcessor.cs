@@ -14,7 +14,6 @@ internal sealed class DeepFilterNetProcessor : IDisposable
     private const float MinDbThresh = -10f;
     private const float MaxDbErbThresh = 30f;
     private const float MaxDbDfThresh = 20f;
-
     private readonly DeepFilterNetConfig _config;
     private readonly DeepFilterNetInference _inference;
     private readonly DeepFilterNetStft _stft;
@@ -84,7 +83,11 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         ClearHistory(_enhHistory);
     }
 
-    public void ProcessHop(ReadOnlySpan<float> input, Span<float> output, bool postFilterEnabled, float attenLimitDb)
+    public void ProcessHop(
+        ReadOnlySpan<float> input,
+        Span<float> output,
+        bool postFilterEnabled,
+        float attenLimitDb)
     {
         if (input.Length != _config.HopSize || output.Length != _config.HopSize)
         {
@@ -177,7 +180,6 @@ internal sealed class DeepFilterNetProcessor : IDisposable
                 _specOut[i] = _specOut[i] * (1f - lim) + noisyTarget[i] * lim;
             }
         }
-
         _stft.Synthesize(_specOut, output);
     }
 
@@ -297,4 +299,5 @@ internal sealed class DeepFilterNetProcessor : IDisposable
             Array.Clear(history[i], 0, history[i].Length);
         }
     }
+
 }

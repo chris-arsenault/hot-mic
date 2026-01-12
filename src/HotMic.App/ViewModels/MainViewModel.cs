@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 using HotMic.Common.Configuration;
 using HotMic.Common.Models;
 using HotMic.Core.Engine;
+using HotMic.Core.Midi;
 using HotMic.Core.Plugins;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.App.Models;
@@ -21,6 +22,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly ConfigManager _configManager = new();
     private readonly DeviceManager _deviceManager = new();
     private AudioEngine _audioEngine;
+    private MidiManager? _midiManager;
     private readonly DispatcherTimer _meterTimer;
     private AppConfig _config;
     private long _lastMeterUpdateTicks;
@@ -70,7 +72,84 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _meterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(33) };
         _meterTimer.Tick += (_, _) => UpdateMeters();
         _meterTimer.Start();
+
+        InitializeMidi();
     }
+
+    private void InitializeMidi()
+    {
+        try
+        {
+            _midiManager = new MidiManager(_config.Midi);
+            _midiManager.BindingTriggered += OnMidiBindingTriggered;
+            _midiManager.Start();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[MIDI] Failed to initialize: {ex.Message}");
+        }
+    }
+
+    private void OnMidiBindingTriggered(object? sender, MidiBindingEventArgs e)
+    {
+        System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+        {
+            ApplyMidiBinding(e.TargetPath, e.Value);
+        });
+    }
+
+    private void ApplyMidiBinding(string targetPath, float value)
+    {
+        var parts = targetPath.Split('.');
+        if (parts.Length < 2) return;
+
+        int channelIndex = parts[0] switch
+        {
+            "channel1" => 0,
+            "channel2" => 1,
+            _ => -1
+        };
+
+        if (channelIndex < 0) return;
+
+        var channel = channelIndex == 0 ? Channel1 : Channel2;
+
+        switch (parts[1])
+        {
+            case "inputGain":
+                channel.InputGainDb = value;
+                break;
+            case "outputGain":
+                channel.OutputGainDb = value;
+                break;
+            case "mute":
+                channel.IsMuted = value >= 0.5f;
+                break;
+            case "plugin" when parts.Length >= 4:
+                if (int.TryParse(parts[2], out int pluginIndex) &&
+                    int.TryParse(parts[3], out int paramIndex))
+                {
+                    ApplyPluginParameter(channelIndex, pluginIndex, paramIndex, "midi", value);
+                }
+                break;
+        }
+    }
+
+    public void StartMidiLearn(string targetPath, Action<int, int>? onLearned = null)
+    {
+        _midiManager?.StartLearn(targetPath, onLearned);
+    }
+
+    public void CancelMidiLearn()
+    {
+        _midiManager?.CancelLearn();
+    }
+
+    public bool IsMidiLearning => _midiManager?.IsLearning ?? false;
+
+    public IReadOnlyList<string> MidiDevices => _midiManager?.GetAvailableDevices() ?? [];
+
+    public string? CurrentMidiDevice => _midiManager?.CurrentDevice;
 
     public ChannelStripViewModel Channel1 { get; }
     public ChannelStripViewModel Channel2 { get; }
@@ -286,7 +365,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SelectedBufferSize,
             SelectedInput1Channel,
             SelectedInput2Channel,
-            SelectedOutputRouting);
+            SelectedOutputRouting,
+            _config.EnableVstPlugins,
+            _config.Midi.Enabled,
+            MidiDevices,
+            _config.Midi.DeviceName);
 
         var window = new SettingsWindow(settingsViewModel)
         {
@@ -305,6 +388,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SelectedInput1Channel = settingsViewModel.SelectedInput1Channel;
             SelectedInput2Channel = settingsViewModel.SelectedInput2Channel;
             SelectedOutputRouting = settingsViewModel.SelectedOutputRouting;
+
+            // Apply VST setting
+            if (_config.EnableVstPlugins != settingsViewModel.EnableVstPlugins)
+            {
+                _config.EnableVstPlugins = settingsViewModel.EnableVstPlugins;
+                _configManager.Save(_config);
+            }
+
+            // Apply MIDI settings
+            if (_config.Midi.Enabled != settingsViewModel.EnableMidi ||
+                _config.Midi.DeviceName != settingsViewModel.SelectedMidiDevice)
+            {
+                _config.Midi.Enabled = settingsViewModel.EnableMidi;
+                _config.Midi.DeviceName = settingsViewModel.SelectedMidiDevice;
+                _midiManager?.ApplyConfig(_config.Midi);
+                _configManager.Save(_config);
+            }
 
             ApplyDeviceSelection();
         }
@@ -710,6 +810,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Channel2.OutputPeakLevel = channel2.OutputMeter.GetPeakLevel();
         Channel2.OutputRmsLevel = channel2.OutputMeter.GetRmsLevel();
 
+        UpdatePluginMeters(Channel1, channel1);
+        UpdatePluginMeters(Channel2, channel2);
+
         // Update hotbar stats and diagnostics
         Diagnostics = _audioEngine.GetDiagnosticsSnapshot();
         int sampleRate = Math.Max(1, _audioEngine.SampleRate);
@@ -744,6 +847,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         UpdateDebugInfo(nowTicks);
         _lastMeterUpdateTicks = nowTicks;
+    }
+
+    private static void UpdatePluginMeters(ChannelStripViewModel viewModel, ChannelStrip channel)
+    {
+        var meters = channel.PluginChain.GetMeterSnapshot();
+        int pluginSlots = Math.Max(0, viewModel.PluginSlots.Count - 1);
+        int count = Math.Min(pluginSlots, meters.Length);
+
+        for (int i = 0; i < count; i++)
+        {
+            var slot = viewModel.PluginSlots[i];
+            slot.OutputPeakLevel = meters[i].GetPeakLevel();
+            slot.OutputRmsLevel = meters[i].GetRmsLevel();
+        }
+
+        for (int i = count; i < pluginSlots; i++)
+        {
+            var slot = viewModel.PluginSlots[i];
+            slot.OutputPeakLevel = 0f;
+            slot.OutputRmsLevel = 0f;
+        }
     }
 
     private void UpdateDebugInfo(long nowTicks)
@@ -934,17 +1058,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var strip = _audioEngine.Channels[channelIndex];
         var slots = strip.PluginChain.GetSnapshot();
-        if ((uint)fromIndex >= (uint)slots.Length || (uint)toIndex >= (uint)slots.Length)
+        if (slots.Length == 0 || (uint)fromIndex >= (uint)slots.Length)
         {
             return;
         }
 
-        var newSlots = slots.ToArray();
+        if (toIndex < 0)
+        {
+            toIndex = 0;
+        }
+        else if (toIndex >= slots.Length)
+        {
+            toIndex = slots.Length - 1;
+        }
+
+        if (fromIndex == toIndex)
+        {
+            return;
+        }
+
+        var newSlots = new List<IPlugin?>(slots);
         var item = newSlots[fromIndex];
-        newSlots[fromIndex] = newSlots[toIndex];
-        newSlots[toIndex] = item;
-        strip.PluginChain.ReplaceAll(newSlots);
-        SwapPluginConfig(channelIndex, fromIndex, toIndex);
+        newSlots.RemoveAt(fromIndex);
+        newSlots.Insert(toIndex, item);
+
+        strip.PluginChain.ReplaceAll(newSlots.ToArray());
+        MovePluginConfig(channelIndex, fromIndex, toIndex);
         RefreshPluginViewModels(channelIndex);
     }
 
@@ -952,29 +1091,44 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var choices = new List<PluginChoice>
         {
-            new() { Id = "builtin:gain", Name = "Gain", IsVst3 = false },
-            new() { Id = "builtin:compressor", Name = "Compressor", IsVst3 = false },
-            new() { Id = "builtin:noisegate", Name = "Noise Gate", IsVst3 = false },
-            new() { Id = "builtin:eq3", Name = "3-Band EQ", IsVst3 = false },
-            new() { Id = "builtin:fft-noise", Name = "FFT Noise Removal", IsVst3 = false },
-            new() { Id = "builtin:rnnoise", Name = "RNNoise (AI)", IsVst3 = false },
-            new() { Id = "builtin:deepfilternet", Name = "DeepFilterNet (AI)", IsVst3 = false },
-            new() { Id = "builtin:voice-gate", Name = "Voice Gate (AI)", IsVst3 = false }
+            // Dynamics
+            new() { Id = "builtin:gain", Name = "Gain", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Simple gain and phase control" },
+            new() { Id = "builtin:compressor", Name = "Compressor", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Dynamic range compression with soft knee" },
+            new() { Id = "builtin:noisegate", Name = "Noise Gate", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Removes audio below threshold" },
+
+            // EQ
+            new() { Id = "builtin:eq3", Name = "3-Band EQ", IsVst3 = false, Category = PluginCategory.Eq, Description = "Parametric equalizer with spectrum analyzer" },
+
+            // Noise Reduction
+            new() { Id = "builtin:fft-noise", Name = "FFT Noise Removal", IsVst3 = false, Category = PluginCategory.NoiseReduction, Description = "Learns and removes background noise" },
+
+            // AI/ML
+            new() { Id = "builtin:rnnoise", Name = "RNNoise", IsVst3 = false, Category = PluginCategory.AiMl, Description = "Neural network noise suppression" },
+            new() { Id = "builtin:deepfilternet", Name = "DeepFilterNet", IsVst3 = false, Category = PluginCategory.AiMl, Description = "Deep learning noise reduction" },
+            new() { Id = "builtin:voice-gate", Name = "Voice Gate", IsVst3 = false, Category = PluginCategory.AiMl, Description = "AI-powered voice activity detection" },
+
+            // Effects
+            new() { Id = "builtin:reverb", Name = "Reverb", IsVst3 = false, Category = PluginCategory.Effects, Description = "Convolution reverb with IR presets" }
         };
 
-        var scanner = new Vst3Scanner();
-        foreach (var vst in scanner.Scan(_config.Vst2SearchPaths, _config.Vst3SearchPaths))
+        if (_config.EnableVstPlugins)
         {
-            string prefix = vst.Format == VstPluginFormat.Vst2 ? "vst2:" : "vst3:";
-            string label = vst.Format == VstPluginFormat.Vst2 ? "VST2" : "VST3";
-            choices.Add(new PluginChoice
+            var scanner = new Vst3Scanner();
+            foreach (var vst in scanner.Scan(_config.Vst2SearchPaths, _config.Vst3SearchPaths))
             {
-                Id = $"{prefix}{vst.Path}",
-                Name = $"{vst.Name} ({label})",
-                Path = vst.Path,
-                IsVst3 = true,
-                Format = vst.Format
-            });
+                string prefix = vst.Format == VstPluginFormat.Vst2 ? "vst2:" : "vst3:";
+                string label = vst.Format == VstPluginFormat.Vst2 ? "VST2" : "VST3";
+                choices.Add(new PluginChoice
+                {
+                    Id = $"{prefix}{vst.Path}",
+                    Name = $"{vst.Name} ({label})",
+                    Path = vst.Path,
+                    IsVst3 = true,
+                    Format = vst.Format,
+                    Category = PluginCategory.Vst,
+                    Description = $"External {label} plugin"
+                });
+            }
         }
 
         var viewModel = new PluginBrowserViewModel(choices);
@@ -1023,6 +1177,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Use specialized window for Voice Gate (Silero VAD)
+        if (plugin is SileroVoiceGatePlugin silero)
+        {
+            ShowVoiceGateWindow(channelIndex, slotIndex, silero);
+            return;
+        }
+
+        // Use specialized window for RNNoise
+        if (plugin is RNNoisePlugin rnnoise)
+        {
+            ShowRNNoiseWindow(channelIndex, slotIndex, rnnoise);
+            return;
+        }
+
+        // Use specialized window for DeepFilterNet
+        if (plugin is DeepFilterNetPlugin deepFilter)
+        {
+            ShowDeepFilterNetWindow(channelIndex, slotIndex, deepFilter);
+            return;
+        }
+
+        // Use specialized window for Reverb
+        if (plugin is ConvolutionReverbPlugin reverb)
+        {
+            ShowReverbWindow(channelIndex, slotIndex, reverb);
+            return;
+        }
+
         var parameterViewModels = plugin.Parameters.Select(parameter =>
         {
             float currentValue = GetPluginParameterValue(channelIndex, slotIndex, parameter.Name, parameter.DefaultValue);
@@ -1033,8 +1215,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Action? learnNoiseAction = plugin is FFTNoiseRemovalPlugin ? () => RequestNoiseLearn(channelIndex, slotIndex) : null;
         Func<float>? vadProvider = plugin switch
         {
-            RNNoisePlugin rnnoise => () => rnnoise.VadProbability,
-            SileroVoiceGatePlugin silero => () => silero.VadProbability,
+            RNNoisePlugin rnn => () => rnn.VadProbability,
+            SileroVoiceGatePlugin vad => () => vad.VadProbability,
             _ => null
         };
         string statusMessage = plugin is IPluginStatusProvider statusProvider ? statusProvider.StatusMessage : string.Empty;
@@ -1120,6 +1302,66 @@ public partial class MainViewModel : ObservableObject, IDisposable
             },
             bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed),
             () => RequestNoiseLearn(channelIndex, slotIndex))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.ShowDialog();
+    }
+
+    private void ShowVoiceGateWindow(int channelIndex, int slotIndex, SileroVoiceGatePlugin plugin)
+    {
+        var window = new VoiceGateWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.ShowDialog();
+    }
+
+    private void ShowRNNoiseWindow(int channelIndex, int slotIndex, RNNoisePlugin plugin)
+    {
+        var window = new RNNoiseWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.ShowDialog();
+    }
+
+    private void ShowDeepFilterNetWindow(int channelIndex, int slotIndex, DeepFilterNetPlugin plugin)
+    {
+        var window = new DeepFilterNetWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.ShowDialog();
+    }
+
+    private void ShowReverbWindow(int channelIndex, int slotIndex, ConvolutionReverbPlugin plugin)
+    {
+        var window = new ReverbWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
@@ -1264,12 +1506,31 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _configManager.Save(_config);
     }
 
-    private void SwapPluginConfig(int channelIndex, int fromIndex, int toIndex)
+    private void MovePluginConfig(int channelIndex, int fromIndex, int toIndex)
     {
         var config = GetOrCreateChannelConfig(channelIndex);
-        int maxIndex = Math.Max(fromIndex, toIndex);
-        EnsurePluginListCapacity(config, maxIndex + 1);
-        (config.Plugins[fromIndex], config.Plugins[toIndex]) = (config.Plugins[toIndex], config.Plugins[fromIndex]);
+        if ((uint)fromIndex >= (uint)config.Plugins.Count)
+        {
+            return;
+        }
+
+        if (toIndex < 0)
+        {
+            toIndex = 0;
+        }
+        else if (toIndex >= config.Plugins.Count)
+        {
+            toIndex = config.Plugins.Count - 1;
+        }
+
+        if (fromIndex == toIndex)
+        {
+            return;
+        }
+
+        var item = config.Plugins[fromIndex];
+        config.Plugins.RemoveAt(fromIndex);
+        config.Plugins.Insert(toIndex, item);
         _configManager.Save(_config);
     }
 
@@ -1351,7 +1612,55 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _meterTimer.Stop();
+        _midiManager?.Dispose();
         _audioEngine.Stop();
+    }
+
+    public void AddMidiBinding(string targetPath, int ccNumber, int? channel, float minValue, float maxValue)
+    {
+        if (_midiManager == null) return;
+
+        var binding = new MidiBinding
+        {
+            TargetPath = targetPath,
+            CcNumber = ccNumber,
+            Channel = channel,
+            MinValue = minValue,
+            MaxValue = maxValue
+        };
+
+        _midiManager.AddBinding(binding);
+        _configManager.Save(_config);
+    }
+
+    public void RemoveMidiBinding(string targetPath)
+    {
+        _midiManager?.RemoveBinding(targetPath);
+        _configManager.Save(_config);
+    }
+
+    public MidiBinding? GetMidiBinding(string targetPath)
+    {
+        return _midiManager?.GetBinding(targetPath);
+    }
+
+    public IReadOnlyList<MidiBinding> GetAllMidiBindings()
+    {
+        return _midiManager?.GetAllBindings() ?? [];
+    }
+
+    public void SetMidiEnabled(bool enabled)
+    {
+        _config.Midi.Enabled = enabled;
+        _midiManager?.ApplyConfig(_config.Midi);
+        _configManager.Save(_config);
+    }
+
+    public void SetMidiDevice(string? deviceName)
+    {
+        _config.Midi.DeviceName = deviceName;
+        _midiManager?.ApplyConfig(_config.Midi);
+        _configManager.Save(_config);
     }
 
     private float GetPluginParameterValue(int channelIndex, int slotIndex, string parameterName, float fallback)

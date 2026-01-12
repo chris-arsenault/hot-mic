@@ -33,11 +33,28 @@ public sealed class MeterProcessor
             return;
         }
 
+        if (!float.IsFinite(_rmsSmoothed))
+        {
+            _rmsSmoothed = 0f;
+        }
+
+        if (!float.IsFinite(_peakHold))
+        {
+            _peakHold = 0f;
+            _holdSamplesLeft = 0;
+        }
+
         float peak = 0f;
         double sumSquares = 0d;
+        int validSamples = 0;
         for (int i = 0; i < buffer.Length; i++)
         {
             float sample = buffer[i];
+            if (!float.IsFinite(sample))
+            {
+                continue;
+            }
+
             float abs = MathF.Abs(sample);
             if (abs > peak)
             {
@@ -45,10 +62,18 @@ public sealed class MeterProcessor
             }
 
             sumSquares += abs * abs;
+            validSamples++;
         }
 
         // Calculate instantaneous RMS for this buffer
-        float instantRms = MathF.Sqrt((float)(sumSquares / buffer.Length));
+        float instantRms = validSamples > 0
+            ? MathF.Sqrt((float)(sumSquares / validSamples))
+            : 0f;
+
+        if (!float.IsFinite(instantRms))
+        {
+            instantRms = 0f;
+        }
 
         // Smooth RMS with attack/release envelope follower
         float rmsCoeff = instantRms > _rmsSmoothed ? _rmsAttackCoeff : _rmsReleaseCoeff;

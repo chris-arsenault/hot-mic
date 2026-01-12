@@ -20,7 +20,7 @@ public sealed class ChannelStrip
 
     public ChannelStrip(int sampleRate, int blockSize)
     {
-        _pluginChain = new PluginChain();
+        _pluginChain = new PluginChain(sampleRate);
         _inputMeter = new MeterProcessor(sampleRate);
         _outputMeter = new MeterProcessor(sampleRate);
         _inputGainSmoother.Configure(sampleRate, 5f, 1f);
@@ -70,6 +70,7 @@ public sealed class ChannelStrip
         {
             buffer.Clear();
             _inputMeter.Process(buffer);
+            _pluginChain.ProcessMeters(buffer);
             _outputMeter.Process(buffer);
             return;
         }
