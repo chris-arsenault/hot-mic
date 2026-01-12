@@ -65,9 +65,12 @@ public partial class CompressorWindow : Window
             Ratio: _plugin.Ratio,
             AttackMs: _plugin.AttackMs,
             ReleaseMs: _plugin.ReleaseMs,
+            KneeDb: _plugin.KneeDb,
             MakeupDb: _plugin.MakeupDb,
             GainReductionDb: _plugin.GetGainReductionDb(),
             InputLevel: _smoothedInputLevel,
+            DetectorMode: _plugin.DetectorMode,
+            SidechainHpfEnabled: _plugin.IsSidechainHpfEnabled,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
             HoveredKnob: _hoveredKnob
@@ -89,22 +92,32 @@ public partial class CompressorWindow : Window
 
         switch (hit.Area)
         {
-            case NoiseGateHitArea.TitleBar:
+            case CompressorHitArea.TitleBar:
                 DragMove();
                 e.Handled = true;
                 break;
 
-            case NoiseGateHitArea.CloseButton:
+            case CompressorHitArea.CloseButton:
                 Close();
                 e.Handled = true;
                 break;
 
-            case NoiseGateHitArea.BypassButton:
+            case CompressorHitArea.BypassButton:
                 _bypassCallback(!_plugin.IsBypassed);
                 e.Handled = true;
                 break;
 
-            case NoiseGateHitArea.Knob:
+            case CompressorHitArea.DetectorToggle:
+                CycleDetectorMode();
+                e.Handled = true;
+                break;
+
+            case CompressorHitArea.SidechainToggle:
+                ToggleSidechain();
+                e.Handled = true;
+                break;
+
+            case CompressorHitArea.Knob:
                 _activeKnob = hit.KnobIndex;
                 _dragStartY = y;
                 _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
@@ -130,7 +143,7 @@ public partial class CompressorWindow : Window
         else
         {
             var hit = _renderer.HitTest(x, y);
-            _hoveredKnob = hit.Area == NoiseGateHitArea.Knob ? hit.KnobIndex : -1;
+            _hoveredKnob = hit.Area == CompressorHitArea.Knob ? hit.KnobIndex : -1;
         }
     }
 
@@ -151,7 +164,8 @@ public partial class CompressorWindow : Window
             1 => (_plugin.Ratio - 1f) / (20f - 1f),
             2 => (_plugin.AttackMs - 0.1f) / (100f - 0.1f),
             3 => (_plugin.ReleaseMs - 10f) / (1000f - 10f),
-            4 => _plugin.MakeupDb / 24f,
+            4 => _plugin.KneeDb / 12f,
+            5 => _plugin.MakeupDb / 24f,
             _ => 0f
         };
     }
@@ -164,7 +178,8 @@ public partial class CompressorWindow : Window
             1 => 1f + normalizedValue * 19f,               // Ratio: 1:1 to 20:1
             2 => 0.1f + normalizedValue * 99.9f,           // Attack: 0.1 to 100 ms
             3 => 10f + normalizedValue * 990f,             // Release: 10 to 1000 ms
-            4 => normalizedValue * 24f,                     // Makeup: 0 to 24 dB
+            4 => normalizedValue * 12f,                     // Knee: 0 to 12 dB
+            5 => normalizedValue * 24f,                     // Makeup: 0 to 24 dB
             _ => 0f
         };
 
@@ -174,7 +189,8 @@ public partial class CompressorWindow : Window
             1 => CompressorPlugin.RatioIndex,
             2 => CompressorPlugin.AttackIndex,
             3 => CompressorPlugin.ReleaseIndex,
-            4 => CompressorPlugin.MakeupIndex,
+            4 => CompressorPlugin.KneeIndex,
+            5 => CompressorPlugin.MakeupIndex,
             _ => -1
         };
 
@@ -188,5 +204,21 @@ public partial class CompressorWindow : Window
     {
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
+    }
+
+    private void CycleDetectorMode()
+    {
+        var next = _plugin.DetectorMode switch
+        {
+            CompressorDetectorMode.Peak => CompressorDetectorMode.Rms,
+            CompressorDetectorMode.Rms => CompressorDetectorMode.Blend,
+            _ => CompressorDetectorMode.Peak
+        };
+        _parameterCallback(CompressorPlugin.DetectorIndex, (float)next);
+    }
+
+    private void ToggleSidechain()
+    {
+        _parameterCallback(CompressorPlugin.SidechainIndex, _plugin.IsSidechainHpfEnabled ? 0f : 1f);
     }
 }

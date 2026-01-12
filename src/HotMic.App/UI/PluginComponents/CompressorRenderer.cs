@@ -1,3 +1,4 @@
+using HotMic.Core.Plugins.BuiltIn;
 using SkiaSharp;
 
 namespace HotMic.App.UI.PluginComponents;
@@ -13,9 +14,9 @@ public sealed class CompressorRenderer : IDisposable
     private const float TransferCurveSize = 120f;
     private const float GrMeterWidth = 40f;
     private const float KnobRadius = 24f;
-    private const float KnobSpacing = 72f;
+    private const float KnobSpacing = 64f;
     private const float CornerRadius = 10f;
-    private const int KnobCount = 5;
+    private const int KnobCount = 6;
 
     private readonly PluginComponentTheme _theme;
     private readonly RotaryKnob _knob;
@@ -36,10 +37,14 @@ public sealed class CompressorRenderer : IDisposable
     private readonly SKPaint _grBackgroundPaint;
     private readonly SKPaint _grTextPaint;
     private readonly SKPaint _latencyPaint;
+    private readonly SKPaint _togglePaint;
+    private readonly SKPaint _toggleActivePaint;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
+    private SKRect _detectorToggleRect;
+    private SKRect _sidechainToggleRect;
     private readonly SKRect[] _knobRects = new SKRect[KnobCount];
     private readonly SKPoint[] _knobCenters = new SKPoint[KnobCount];
 
@@ -173,6 +178,20 @@ public sealed class CompressorRenderer : IDisposable
             TextAlign = SKTextAlign.Right,
             Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
         };
+
+        _togglePaint = new SKPaint
+        {
+            Color = _theme.PanelBackgroundLight,
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _toggleActivePaint = new SKPaint
+        {
+            Color = new SKColor(0x40, 0xC0, 0x40),
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
     }
 
     public void Render(
@@ -291,12 +310,32 @@ public sealed class CompressorRenderer : IDisposable
             "RELEASE", $"{state.ReleaseMs:0}", "ms", state.HoveredKnob == 3);
         _knobRects[3] = _knob.GetHitRect(_knobCenters[3], KnobRadius);
 
-        // Makeup knob
+        // Knee knob
         _knobCenters[4] = new SKPoint(knobsStartX + KnobSpacing * 4, knobsY);
-        float makeupNorm = state.MakeupDb / 24f;
-        _knob.Render(canvas, _knobCenters[4], KnobRadius, makeupNorm,
-            "MAKEUP", $"{state.MakeupDb:0.0}", "dB", state.HoveredKnob == 4);
+        float kneeNorm = state.KneeDb / 12f;
+        _knob.Render(canvas, _knobCenters[4], KnobRadius, kneeNorm,
+            "KNEE", $"{state.KneeDb:0.0}", "dB", state.HoveredKnob == 4);
         _knobRects[4] = _knob.GetHitRect(_knobCenters[4], KnobRadius);
+
+        // Makeup knob
+        _knobCenters[5] = new SKPoint(knobsStartX + KnobSpacing * 5, knobsY);
+        float makeupNorm = state.MakeupDb / 24f;
+        _knob.Render(canvas, _knobCenters[5], KnobRadius, makeupNorm,
+            "MAKEUP", $"{state.MakeupDb:0.0}", "dB", state.HoveredKnob == 5);
+        _knobRects[5] = _knob.GetHitRect(_knobCenters[5], KnobRadius);
+
+        float toggleY = knobsY + KnobRadius + 18f;
+        float toggleHeight = 22f;
+        float toggleWidth = 120f;
+        float toggleGap = 10f;
+        float togglesTotalWidth = toggleWidth * 2f + toggleGap;
+        float toggleStartX = (size.Width - togglesTotalWidth) / 2f;
+
+        _detectorToggleRect = new SKRect(toggleStartX, toggleY, toggleStartX + toggleWidth, toggleY + toggleHeight);
+        _sidechainToggleRect = new SKRect(_detectorToggleRect.Right + toggleGap, toggleY, _detectorToggleRect.Right + toggleGap + toggleWidth, toggleY + toggleHeight);
+
+        DrawToggle(canvas, _detectorToggleRect, $"DET: {DetectorLabel(state.DetectorMode)}", true);
+        DrawToggle(canvas, _sidechainToggleRect, $"SC HPF: {(state.SidechainHpfEnabled ? "ON" : "OFF")}", state.SidechainHpfEnabled);
 
         // Outer border
         canvas.DrawRoundRect(roundRect, _borderPaint);
@@ -355,14 +394,13 @@ public sealed class CompressorRenderer : IDisposable
         curvePath.MoveTo(plotLeft, plotBottom);
         curvePath.LineTo(threshX, threshY);
 
-        // Above threshold: apply ratio
+        // Above threshold: apply ratio with soft knee if enabled
         int steps = 20;
         for (int i = 1; i <= steps; i++)
         {
             float t = i / (float)steps;
             float inputDb = state.ThresholdDb + t * (0f - state.ThresholdDb);
-            float overDb = inputDb - state.ThresholdDb;
-            float outputDb = state.ThresholdDb + overDb / state.Ratio;
+            float outputDb = inputDb - ComputeGainReduction(inputDb, state);
             outputDb = MathF.Max(outputDb, -60f);
 
             float inputNorm = (inputDb + 60f) / dbRange;
@@ -386,11 +424,7 @@ public sealed class CompressorRenderer : IDisposable
 
         // Calculate output based on compression
         float markerOutputDb = markerInputDb;
-        if (markerInputDb > state.ThresholdDb)
-        {
-            float over = markerInputDb - state.ThresholdDb;
-            markerOutputDb = state.ThresholdDb + over / state.Ratio;
-        }
+        markerOutputDb = markerInputDb - ComputeGainReduction(markerInputDb, state);
         float markerOutputNorm = (markerOutputDb + 60f) / dbRange;
         float outputY = plotBottom - plotSize * markerOutputNorm;
 
@@ -412,6 +446,56 @@ public sealed class CompressorRenderer : IDisposable
         canvas.DrawText("IN", rect.MidX, rect.Bottom - 2, labelPaint);
         labelPaint.TextAlign = SKTextAlign.Left;
         canvas.DrawText("OUT", rect.Left + 2, rect.MidY, labelPaint);
+    }
+
+    private static float ComputeGainReduction(float inputDb, CompressorState state)
+    {
+        float delta = inputDb - state.ThresholdDb;
+        if (state.KneeDb <= 0.01f)
+        {
+            return delta > 0f ? delta * (1f - 1f / state.Ratio) : 0f;
+        }
+
+        float halfKnee = state.KneeDb * 0.5f;
+        if (delta <= -halfKnee)
+        {
+            return 0f;
+        }
+
+        if (delta >= halfKnee)
+        {
+            return delta * (1f - 1f / state.Ratio);
+        }
+
+        float x = delta + halfKnee;
+        return (1f - 1f / state.Ratio) * x * x / (2f * state.KneeDb);
+    }
+
+    private void DrawToggle(SKCanvas canvas, SKRect rect, string label, bool active)
+    {
+        var round = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(round, active ? _toggleActivePaint : _togglePaint);
+        canvas.DrawRoundRect(round, _borderPaint);
+
+        using var textPaint = new SKPaint
+        {
+            Color = active ? _theme.TextPrimary : _theme.TextSecondary,
+            IsAntialias = true,
+            TextSize = 9f,
+            TextAlign = SKTextAlign.Center,
+            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
+        };
+        canvas.DrawText(label, rect.MidX, rect.MidY + 3f, textPaint);
+    }
+
+    private static string DetectorLabel(CompressorDetectorMode mode)
+    {
+        return mode switch
+        {
+            CompressorDetectorMode.Peak => "PEAK",
+            CompressorDetectorMode.Rms => "RMS",
+            _ => "BLEND"
+        };
     }
 
     private void DrawGainReductionMeter(SKCanvas canvas, SKRect rect, float grDb)
@@ -481,13 +565,19 @@ public sealed class CompressorRenderer : IDisposable
         canvas.DrawRoundRect(roundRect, _borderPaint);
     }
 
-    public NoiseGateHitTest HitTest(float x, float y)
+    public CompressorHitTest HitTest(float x, float y)
     {
         if (_closeButtonRect.Contains(x, y))
-            return new NoiseGateHitTest(NoiseGateHitArea.CloseButton, -1);
+            return new CompressorHitTest(CompressorHitArea.CloseButton, -1);
 
         if (_bypassButtonRect.Contains(x, y))
-            return new NoiseGateHitTest(NoiseGateHitArea.BypassButton, -1);
+            return new CompressorHitTest(CompressorHitArea.BypassButton, -1);
+
+        if (_detectorToggleRect.Contains(x, y))
+            return new CompressorHitTest(CompressorHitArea.DetectorToggle, -1);
+
+        if (_sidechainToggleRect.Contains(x, y))
+            return new CompressorHitTest(CompressorHitArea.SidechainToggle, -1);
 
         for (int i = 0; i < KnobCount; i++)
         {
@@ -495,14 +585,14 @@ public sealed class CompressorRenderer : IDisposable
             float dy = y - _knobCenters[i].Y;
             if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
             {
-                return new NoiseGateHitTest(NoiseGateHitArea.Knob, i);
+                return new CompressorHitTest(CompressorHitArea.Knob, i);
             }
         }
 
         if (_titleBarRect.Contains(x, y))
-            return new NoiseGateHitTest(NoiseGateHitArea.TitleBar, -1);
+            return new CompressorHitTest(CompressorHitArea.TitleBar, -1);
 
-        return new NoiseGateHitTest(NoiseGateHitArea.None, -1);
+        return new CompressorHitTest(CompressorHitArea.None, -1);
     }
 
     public static SKSize GetPreferredSize() => new(420, 320);
@@ -526,6 +616,8 @@ public sealed class CompressorRenderer : IDisposable
         _grBackgroundPaint.Dispose();
         _grTextPaint.Dispose();
         _latencyPaint.Dispose();
+        _togglePaint.Dispose();
+        _toggleActivePaint.Dispose();
     }
 }
 
@@ -537,9 +629,25 @@ public record struct CompressorState(
     float Ratio,
     float AttackMs,
     float ReleaseMs,
+    float KneeDb,
     float MakeupDb,
     float GainReductionDb,
     float InputLevel,
+    CompressorDetectorMode DetectorMode,
+    bool SidechainHpfEnabled,
     float LatencyMs,
     bool IsBypassed,
     int HoveredKnob = -1);
+
+public enum CompressorHitArea
+{
+    None,
+    TitleBar,
+    CloseButton,
+    BypassButton,
+    Knob,
+    DetectorToggle,
+    SidechainToggle
+}
+
+public record struct CompressorHitTest(CompressorHitArea Area, int KnobIndex);

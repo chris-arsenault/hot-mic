@@ -12,6 +12,9 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
     public const int AttackIndex = 2;
     public const int ReleaseIndex = 3;
     public const int MakeupIndex = 4;
+    public const int KneeIndex = 5;
+    public const int DetectorIndex = 6;
+    public const int SidechainIndex = 7;
 
     private float _kneeDb = 6f;
     private float _rmsBlend = 0.7f;
@@ -31,12 +34,14 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
     private float _detectorReleaseCoeff;
 
     private float _rmsPower;
-    private float _envelope;
+    private float _envelopeDb = -120f;
     private float _gainReductionDb;
 
     private int _sampleRate;
     private int _gainReductionBits;
     private int _inputLevelBits;
+    private CompressorDetectorMode _detectorMode = CompressorDetectorMode.Blend;
+    private bool _sidechainHpfEnabled = true;
 
     private readonly OnePoleHighPass _sidechainFilter = new();
 
@@ -48,7 +53,10 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
             new PluginParameter { Index = RatioIndex, Name = "Ratio", MinValue = 1f, MaxValue = 20f, DefaultValue = 4f, Unit = ":1" },
             new PluginParameter { Index = AttackIndex, Name = "Attack", MinValue = 0.1f, MaxValue = 100f, DefaultValue = 10f, Unit = "ms" },
             new PluginParameter { Index = ReleaseIndex, Name = "Release", MinValue = 10f, MaxValue = 1000f, DefaultValue = 100f, Unit = "ms" },
-            new PluginParameter { Index = MakeupIndex, Name = "Makeup", MinValue = 0f, MaxValue = 24f, DefaultValue = 0f, Unit = "dB" }
+            new PluginParameter { Index = MakeupIndex, Name = "Makeup", MinValue = 0f, MaxValue = 24f, DefaultValue = 0f, Unit = "dB" },
+            new PluginParameter { Index = KneeIndex, Name = "Knee", MinValue = 0f, MaxValue = 12f, DefaultValue = 6f, Unit = "dB" },
+            new PluginParameter { Index = DetectorIndex, Name = "Detector", MinValue = 0f, MaxValue = 2f, DefaultValue = 2f, Unit = string.Empty },
+            new PluginParameter { Index = SidechainIndex, Name = "Sidechain HPF", MinValue = 0f, MaxValue = 1f, DefaultValue = 1f, Unit = string.Empty }
         ];
     }
 
@@ -68,7 +76,7 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
     {
         _sampleRate = sampleRate;
         _rmsPower = 0f;
-        _envelope = 0f;
+        _envelopeDb = -120f;
         _gainReductionDb = 0f;
         UpdateCoefficients();
     }
@@ -92,24 +100,36 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
                 peakInput = absInput;
             }
 
-            float sidechain = _sidechainFilter.Process(input);
+            float sidechain = _sidechainHpfEnabled ? _sidechainFilter.Process(input) : input;
             float absSidechain = MathF.Abs(sidechain);
-            float power = absSidechain * absSidechain;
+            float rms = absSidechain;
+            if (_detectorMode != CompressorDetectorMode.Peak)
+            {
+                float power = absSidechain * absSidechain;
+                float detectorCoeff = power > _rmsPower ? _detectorAttackCoeff : _detectorReleaseCoeff;
+                _rmsPower += detectorCoeff * (power - _rmsPower);
+                rms = MathF.Sqrt(_rmsPower + 1e-12f);
+            }
 
-            // RMS detector with attack/release ballistics.
-            float detectorCoeff = power > _rmsPower ? _detectorAttackCoeff : _detectorReleaseCoeff;
-            _rmsPower += detectorCoeff * (power - _rmsPower);
-            float rms = MathF.Sqrt(_rmsPower + 1e-12f);
+            float detectorLinear = _detectorMode switch
+            {
+                CompressorDetectorMode.Rms => rms,
+                CompressorDetectorMode.Peak => absSidechain,
+                _ => absSidechain * (1f - _rmsBlend) + rms * _rmsBlend
+            };
 
-            float detector = absSidechain * (1f - _rmsBlend) + rms * _rmsBlend;
-            float envCoeff = detector > _envelope ? _attackCoeff : _releaseCoeff;
-            _envelope += envCoeff * (detector - _envelope);
+            float detectorDb = DspUtils.LinearToDb(detectorLinear);
+            float envCoeff = detectorDb > _envelopeDb ? _attackCoeff : _releaseCoeff;
+            _envelopeDb += envCoeff * (detectorDb - _envelopeDb);
 
-            float envDb = DspUtils.LinearToDb(_envelope);
-            float delta = envDb - _thresholdDb;
+            float delta = _envelopeDb - _thresholdDb;
 
             float desiredReductionDb;
-            if (delta <= -_kneeDb * 0.5f)
+            if (_kneeDb <= 0.001f)
+            {
+                desiredReductionDb = delta > 0f ? delta * (1f - 1f / _ratio) : 0f;
+            }
+            else if (delta <= -_kneeDb * 0.5f)
             {
                 desiredReductionDb = 0f;
             }
@@ -168,6 +188,21 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
             case MakeupIndex:
                 _makeupDb = value;
                 break;
+            case KneeIndex:
+                _kneeDb = Math.Clamp(value, 0f, 12f);
+                break;
+            case DetectorIndex:
+                _detectorMode = value switch
+                {
+                    >= 1.5f => CompressorDetectorMode.Blend,
+                    >= 0.5f => CompressorDetectorMode.Rms,
+                    _ => CompressorDetectorMode.Peak
+                };
+                break;
+            case SidechainIndex:
+                _sidechainHpfEnabled = value >= 0.5f;
+                _sidechainFilter.Reset();
+                break;
         }
 
         UpdateCoefficients();
@@ -184,15 +219,21 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
     public float AttackMs => _attackMs;
     public float ReleaseMs => _releaseMs;
     public float MakeupDb => _makeupDb;
+    public float KneeDb => _kneeDb;
+    public CompressorDetectorMode DetectorMode => _detectorMode;
+    public bool IsSidechainHpfEnabled => _sidechainHpfEnabled;
 
     public byte[] GetState()
     {
-        var bytes = new byte[sizeof(float) * 5];
+        var bytes = new byte[sizeof(float) * 8];
         Buffer.BlockCopy(BitConverter.GetBytes(_thresholdDb), 0, bytes, 0, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_ratio), 0, bytes, 4, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_attackMs), 0, bytes, 8, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_releaseMs), 0, bytes, 12, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_makeupDb), 0, bytes, 16, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_kneeDb), 0, bytes, 20, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_detectorMode), 0, bytes, 24, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_sidechainHpfEnabled ? 1f : 0f), 0, bytes, 28, 4);
         return bytes;
     }
 
@@ -208,6 +249,24 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
         _attackMs = BitConverter.ToSingle(state, 8);
         _releaseMs = BitConverter.ToSingle(state, 12);
         _makeupDb = BitConverter.ToSingle(state, 16);
+        if (state.Length >= sizeof(float) * 6)
+        {
+            _kneeDb = BitConverter.ToSingle(state, 20);
+        }
+        if (state.Length >= sizeof(float) * 7)
+        {
+            float detector = BitConverter.ToSingle(state, 24);
+            _detectorMode = detector switch
+            {
+                >= 1.5f => CompressorDetectorMode.Blend,
+                >= 0.5f => CompressorDetectorMode.Rms,
+                _ => CompressorDetectorMode.Peak
+            };
+        }
+        if (state.Length >= sizeof(float) * 8)
+        {
+            _sidechainHpfEnabled = BitConverter.ToSingle(state, 28) >= 0.5f;
+        }
         UpdateCoefficients();
     }
 
@@ -239,6 +298,16 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
         _releaseCoeff = DspUtils.TimeToCoefficient(_releaseMs, _sampleRate);
         _detectorAttackCoeff = _attackCoeff;
         _detectorReleaseCoeff = _releaseCoeff;
-        _sidechainFilter.Configure(_sidechainHpfHz, _sampleRate);
+        if (_sidechainHpfEnabled)
+        {
+            _sidechainFilter.Configure(_sidechainHpfHz, _sampleRate);
+        }
     }
+}
+
+public enum CompressorDetectorMode
+{
+    Peak = 0,
+    Rms = 1,
+    Blend = 2
 }
