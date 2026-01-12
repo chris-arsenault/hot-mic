@@ -145,7 +145,10 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             _statusMessage = "DeepFilterNet STFT round-trip mode.";
         }
         _mixSmoother.Configure(sampleRate, MixSmoothingMs, _reductionPct / 100f);
-        StartWorker();
+        if (!DeepFilterNetProcessor.RoundTripOnly)
+        {
+            StartWorker();
+        }
         _wasBypassed = false;
     }
 
@@ -162,6 +165,31 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         {
             ResetBuffers();
             _wasBypassed = false;
+        }
+
+        if (DeepFilterNetProcessor.RoundTripOnly)
+        {
+            _inputBuffer.Write(buffer);
+            while (_inputBuffer.AvailableRead >= _hopSize)
+            {
+                int read = _inputBuffer.Read(_hopBuffer);
+                if (read < _hopSize)
+                {
+                    break;
+                }
+
+                _processor.ProcessHop(_hopBuffer, _hopOutput, postFilterEnabled: false, attenLimitDb: _attenLimitDb);
+                _outputBuffer.Write(_hopOutput);
+            }
+
+            int roundTripRead = _outputBuffer.Read(_processedScratch.AsSpan(0, buffer.Length));
+            for (int i = 0; i < buffer.Length; i++)
+            {
+                buffer[i] = i < roundTripRead ? _processedScratch[i] : 0f;
+            }
+
+            Interlocked.Exchange(ref _gainReductionDbBits, 0);
+            return;
         }
 
         _inputBuffer.Write(buffer);
