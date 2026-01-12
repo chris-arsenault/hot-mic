@@ -137,27 +137,17 @@ internal sealed class KissFFT<kiss_fft_scalar>
 
     private void kf_bfly5(Array<kiss_fft_cpx<kiss_fft_scalar>> fout, int fstride, int m)
     {
-        Array<kiss_fft_cpx<kiss_fft_scalar>> tw1;
-        Array<kiss_fft_cpx<kiss_fft_scalar>> tw2;
-        Array<kiss_fft_cpx<kiss_fft_scalar>> tw3;
-        Array<kiss_fft_cpx<kiss_fft_scalar>> tw4;
-        kiss_fft_cpx<kiss_fft_scalar>[] scratch = new kiss_fft_cpx<kiss_fft_scalar>[13];
-        for (int j = 0; j < 13; j++) scratch[j] = new kiss_fft_cpx<kiss_fft_scalar>();
-        kiss_fft_cpx<kiss_fft_scalar> ya;
-        kiss_fft_cpx<kiss_fft_scalar> yb;
+        Array<kiss_fft_cpx<kiss_fft_scalar>> tw1 = new(_twiddles);
+        Array<kiss_fft_cpx<kiss_fft_scalar>> tw2 = new(_twiddles);
+        Array<kiss_fft_cpx<kiss_fft_scalar>> tw3 = new(_twiddles);
+        Array<kiss_fft_cpx<kiss_fft_scalar>> tw4 = new(_twiddles);
+        kiss_fft_cpx<kiss_fft_scalar> ya = _twiddles[fstride * m];
+        kiss_fft_cpx<kiss_fft_scalar> yb = _twiddles[fstride * 2 * m];
 
         int k = m;
         int m2 = 2 * m;
         int m3 = 3 * m;
         int m4 = 4 * m;
-
-        tw1 = new Array<kiss_fft_cpx<kiss_fft_scalar>>(_twiddles);
-        tw2 = new Array<kiss_fft_cpx<kiss_fft_scalar>>(_twiddles);
-        tw3 = new Array<kiss_fft_cpx<kiss_fft_scalar>>(_twiddles);
-        tw4 = new Array<kiss_fft_cpx<kiss_fft_scalar>>(_twiddles);
-
-        ya = _twiddles[fstride * m];
-        yb = _twiddles[fstride * 2 * m];
 
         do
         {
@@ -167,40 +157,45 @@ internal sealed class KissFFT<kiss_fft_scalar>
             fout[m3] = _a.FixDivide(fout[m3], 5);
             fout[m4] = _a.FixDivide(fout[m4], 5);
 
-            scratch[0] = _a.Multiply(fout[m], tw1[0]);
-            scratch[1] = _a.Multiply(fout[m2], tw2[0]);
-            scratch[2] = _a.Multiply(fout[m3], tw3[0]);
-            scratch[3] = _a.Multiply(fout[m4], tw4[0]);
+            kiss_fft_cpx<kiss_fft_scalar> scratch0 = fout[0];
+            kiss_fft_cpx<kiss_fft_scalar> scratch1 = _a.Multiply(fout[m], tw1[0]);
+            kiss_fft_cpx<kiss_fft_scalar> scratch2 = _a.Multiply(fout[m2], tw2[0]);
+            kiss_fft_cpx<kiss_fft_scalar> scratch3 = _a.Multiply(fout[m3], tw3[0]);
+            kiss_fft_cpx<kiss_fft_scalar> scratch4 = _a.Multiply(fout[m4], tw4[0]);
 
-            scratch[5] = _a.Add(scratch[0], scratch[3]);
-            scratch[6] = _a.Subtract(scratch[0], scratch[3]);
-            scratch[7] = _a.Add(scratch[1], scratch[2]);
-            scratch[8] = _a.Subtract(scratch[1], scratch[2]);
+            kiss_fft_cpx<kiss_fft_scalar> scratch7 = _a.Add(scratch1, scratch4);
+            kiss_fft_cpx<kiss_fft_scalar> scratch10 = _a.Subtract(scratch1, scratch4);
+            kiss_fft_cpx<kiss_fft_scalar> scratch8 = _a.Add(scratch2, scratch3);
+            kiss_fft_cpx<kiss_fft_scalar> scratch9 = _a.Subtract(scratch2, scratch3);
 
-            scratch[9].r = _a.Add(fout[0].r, _a.Add(scratch[5].r, scratch[7].r));
-            scratch[9].i = _a.Add(fout[0].i, _a.Add(scratch[5].i, scratch[7].i));
+            fout[0].r = _a.Add(fout[0].r, _a.Add(scratch7.r, scratch8.r));
+            fout[0].i = _a.Add(fout[0].i, _a.Add(scratch7.i, scratch8.i));
 
-            scratch[10].r = _a.Add(fout[0].r, _a.Add(_a.Multiply(scratch[5].r, ya.r), _a.Multiply(scratch[7].r, yb.r)));
-            scratch[10].i = _a.Add(fout[0].i, _a.Add(_a.Multiply(scratch[5].i, ya.r), _a.Multiply(scratch[7].i, yb.r)));
+            kiss_fft_cpx<kiss_fft_scalar> scratch5;
+            scratch5.r = _a.Add(scratch0.r, _a.Add(_a.Multiply(scratch7.r, ya.r), _a.Multiply(scratch8.r, yb.r)));
+            scratch5.i = _a.Add(scratch0.i, _a.Add(_a.Multiply(scratch7.i, ya.r), _a.Multiply(scratch8.i, yb.r)));
 
-            scratch[11].r = _a.Add(fout[0].r, _a.Add(_a.Multiply(scratch[5].r, yb.r), _a.Multiply(scratch[7].r, ya.r)));
-            scratch[11].i = _a.Add(fout[0].i, _a.Add(_a.Multiply(scratch[5].i, yb.r), _a.Multiply(scratch[7].i, ya.r)));
+            kiss_fft_cpx<kiss_fft_scalar> scratch6;
+            scratch6.r = _a.Add(_a.Multiply(scratch10.i, ya.i), _a.Multiply(scratch9.i, yb.i));
+            scratch6.i = _a.Negate(_a.Add(_a.Multiply(scratch10.r, ya.i), _a.Multiply(scratch9.r, yb.i)));
 
-            scratch[12].r = _a.Add(_a.Multiply(scratch[6].r, ya.i), _a.Multiply(scratch[8].r, yb.i));
-            scratch[12].i = _a.Add(_a.Multiply(scratch[6].i, ya.i), _a.Multiply(scratch[8].i, yb.i));
+            fout[m].r = _a.Subtract(scratch5.r, scratch6.r);
+            fout[m].i = _a.Subtract(scratch5.i, scratch6.i);
+            fout[m4].r = _a.Add(scratch5.r, scratch6.r);
+            fout[m4].i = _a.Add(scratch5.i, scratch6.i);
 
-            scratch[4].r = _a.Subtract(_a.Multiply(scratch[6].r, yb.i), _a.Multiply(scratch[8].r, ya.i));
-            scratch[4].i = _a.Subtract(_a.Multiply(scratch[6].i, yb.i), _a.Multiply(scratch[8].i, ya.i));
+            kiss_fft_cpx<kiss_fft_scalar> scratch11;
+            scratch11.r = _a.Add(scratch0.r, _a.Add(_a.Multiply(scratch7.r, yb.r), _a.Multiply(scratch8.r, ya.r)));
+            scratch11.i = _a.Add(scratch0.i, _a.Add(_a.Multiply(scratch7.i, yb.r), _a.Multiply(scratch8.i, ya.r)));
 
-            fout[0] = scratch[9];
-            fout[m].r = _a.Subtract(scratch[10].r, scratch[12].i);
-            fout[m].i = _a.Add(scratch[10].i, scratch[12].r);
-            fout[m2].r = _a.Subtract(scratch[11].r, scratch[4].i);
-            fout[m2].i = _a.Add(scratch[11].i, scratch[4].r);
-            fout[m3].r = _a.Add(scratch[11].r, scratch[4].i);
-            fout[m3].i = _a.Subtract(scratch[11].i, scratch[4].r);
-            fout[m4].r = _a.Add(scratch[10].r, scratch[12].i);
-            fout[m4].i = _a.Subtract(scratch[10].i, scratch[12].r);
+            kiss_fft_cpx<kiss_fft_scalar> scratch12;
+            scratch12.r = _a.Add(_a.Negate(_a.Multiply(scratch10.i, yb.i)), _a.Multiply(scratch9.i, ya.i));
+            scratch12.i = _a.Subtract(_a.Multiply(scratch10.r, yb.i), _a.Multiply(scratch9.r, ya.i));
+
+            fout[m2].r = _a.Add(scratch11.r, scratch12.r);
+            fout[m2].i = _a.Add(scratch11.i, scratch12.i);
+            fout[m3].r = _a.Subtract(scratch11.r, scratch12.r);
+            fout[m3].i = _a.Subtract(scratch11.i, scratch12.i);
 
             tw1 += fstride;
             tw2 += fstride * 2;
