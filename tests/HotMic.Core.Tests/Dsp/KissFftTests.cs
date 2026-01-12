@@ -36,7 +36,7 @@ public class KissFftTests
                 sumIm += sample * Math.Sin(angle);
             }
 
-            AssertComplexClose(output[k], sumRe, sumIm, relTol: 2e-4, absTol: 1e-2);
+            AssertComplexClose(output[k], sumRe, sumIm, relTol: 2e-4, absTol: 1e-2, k, nfft);
         }
     }
 
@@ -100,17 +100,67 @@ public class KissFftTests
                 sumIm += re * sin + im * cos;
             }
 
-            AssertComplexClose(output[k], sumRe, sumIm, relTol: 2e-4, absTol: 1e-2);
+            AssertComplexClose(output[k], sumRe, sumIm, relTol: 2e-4, absTol: 1e-2, k, nfft);
         }
     }
 
-    private static void AssertComplexClose(kiss_fft_cpx<float> actual, double expectedRe, double expectedIm, double relTol, double absTol)
+    [Theory]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(10)]
+    [InlineData(12)]
+    [InlineData(15)]
+    [InlineData(16)]
+    [InlineData(25)]
+    public void KissFFT_Forward_MatchesNaiveDft_SmallSizes(int nfft)
+    {
+        var input = new kiss_fft_cpx<float>[nfft];
+        for (int i = 0; i < nfft; i++)
+        {
+            input[i] = new kiss_fft_cpx<float>(
+                (float)(0.7 * Math.Sin(2 * Math.PI * 1 * i / nfft)),
+                (float)(0.4 * Math.Cos(2 * Math.PI * 2 * i / nfft)));
+        }
+
+        var fft = new KissFFT<float>(nfft, inverse: false, new FloatArithmetic());
+        var output = new kiss_fft_cpx<float>[nfft];
+        fft.kiss_fft(new Array<kiss_fft_cpx<float>>(input), new Array<kiss_fft_cpx<float>>(output));
+
+        double twoPiByN = 2.0 * Math.PI / nfft;
+        for (int k = 0; k < nfft; k++)
+        {
+            double sumRe = 0.0;
+            double sumIm = 0.0;
+            double step = -twoPiByN * k;
+            for (int t = 0; t < nfft; t++)
+            {
+                double angle = step * t;
+                double cos = Math.Cos(angle);
+                double sin = Math.Sin(angle);
+                double re = input[t].r;
+                double im = input[t].i;
+                sumRe += re * cos - im * sin;
+                sumIm += re * sin + im * cos;
+            }
+
+            AssertComplexClose(output[k], sumRe, sumIm, relTol: 5e-4, absTol: 1e-2, k, nfft);
+        }
+    }
+
+    private static void AssertComplexClose(
+        kiss_fft_cpx<float> actual,
+        double expectedRe,
+        double expectedIm,
+        double relTol,
+        double absTol,
+        int k,
+        int nfft)
     {
         double errRe = actual.r - expectedRe;
         double errIm = actual.i - expectedIm;
         double err = Math.Sqrt(errRe * errRe + errIm * errIm);
         double mag = Math.Sqrt(expectedRe * expectedRe + expectedIm * expectedIm);
         double tol = absTol + relTol * mag;
-        Assert.True(err <= tol, $"Expected ({expectedRe}, {expectedIm}) got ({actual.r}, {actual.i}) err {err} tol {tol}");
+        Assert.True(err <= tol, $"n={nfft} k={k} expected ({expectedRe}, {expectedIm}) got ({actual.r}, {actual.i}) err {err} tol {tol}");
     }
 }
