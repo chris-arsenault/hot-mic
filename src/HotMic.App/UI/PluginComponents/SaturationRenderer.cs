@@ -17,6 +17,7 @@ public sealed class SaturationRenderer : IDisposable
 
     private readonly PluginComponentTheme _theme;
     private readonly RotaryKnob _knob;
+    private readonly PluginPresetBar _presetBar;
     private readonly LevelMeter _inputMeter;
     private readonly LevelMeter _outputMeter;
 
@@ -39,13 +40,14 @@ public sealed class SaturationRenderer : IDisposable
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
-    private SKPoint _driveKnobCenter;
-    private SKPoint _mixKnobCenter;
+    private SKPoint _warmthKnobCenter;
+    private SKPoint _blendKnobCenter;
 
     public SaturationRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
         _knob = new RotaryKnob(_theme);
+        _presetBar = new PluginPresetBar(_theme);
         _inputMeter = new LevelMeter();
         _outputMeter = new LevelMeter();
 
@@ -195,6 +197,11 @@ public sealed class SaturationRenderer : IDisposable
         // Title
         canvas.DrawText("Saturation", Padding, TitleBarHeight / 2f + 5, _titlePaint);
 
+        // Preset bar
+        float presetBarX = Padding + 80;
+        float presetBarY = (TitleBarHeight - PluginPresetBar.TotalHeight) / 2f;
+        _presetBar.Render(canvas, presetBarX, presetBarY, state.PresetName);
+
         // Bypass button
         float bypassWidth = 60f;
         _bypassButtonRect = new SKRect(
@@ -246,21 +253,21 @@ public sealed class SaturationRenderer : IDisposable
         float curveX = outputMeterRect.Right + 20;
         float curveY = contentTop + 10;
         var curveRect = new SKRect(curveX, curveY, curveX + CurveSize, curveY + CurveSize);
-        DrawTransferCurve(canvas, curveRect, state.DrivePct);
+        DrawTransferCurve(canvas, curveRect, state.WarmthPct);
 
         // Knobs
         float knobAreaX = curveRect.Right + 20;
         float knobY = meterY + 30;
 
-        // Drive knob
-        _driveKnobCenter = new SKPoint(knobAreaX + KnobRadius, knobY);
-        float driveNorm = state.DrivePct / 100f;
-        _knob.Render(canvas, _driveKnobCenter, KnobRadius, driveNorm, "DRIVE", $"{state.DrivePct:0}", "%", state.HoveredKnob == SaturationKnob.Drive);
+        // Warmth knob
+        _warmthKnobCenter = new SKPoint(knobAreaX + KnobRadius, knobY);
+        float warmthNorm = state.WarmthPct / 100f;
+        _knob.Render(canvas, _warmthKnobCenter, KnobRadius, warmthNorm, "WARMTH", $"{state.WarmthPct:0}", "%", state.HoveredKnob == SaturationKnob.Warmth);
 
-        // Mix knob
-        _mixKnobCenter = new SKPoint(knobAreaX + KnobRadius, knobY + 90);
-        float mixNorm = state.MixPct / 100f;
-        _knob.Render(canvas, _mixKnobCenter, KnobRadius, mixNorm, "MIX", $"{state.MixPct:0}", "%", state.HoveredKnob == SaturationKnob.Mix);
+        // Blend knob
+        _blendKnobCenter = new SKPoint(knobAreaX + KnobRadius, knobY + 90);
+        float blendNorm = state.BlendPct / 100f;
+        _knob.Render(canvas, _blendKnobCenter, KnobRadius, blendNorm, "BLEND", $"{state.BlendPct:0}", "%", state.HoveredKnob == SaturationKnob.Blend);
 
         // Outer border
         canvas.DrawRoundRect(roundRect, _borderPaint);
@@ -268,7 +275,7 @@ public sealed class SaturationRenderer : IDisposable
         canvas.Restore();
     }
 
-    private void DrawTransferCurve(SKCanvas canvas, SKRect rect, float drivePct)
+    private void DrawTransferCurve(SKCanvas canvas, SKRect rect, float warmthPct)
     {
         // Background
         var roundRect = new SKRoundRect(rect, 4f);
@@ -281,17 +288,26 @@ public sealed class SaturationRenderer : IDisposable
         // Linear reference (diagonal)
         canvas.DrawLine(rect.Left + 4, rect.Bottom - 4, rect.Right - 4, rect.Top + 4, _curveLinearPaint);
 
-        // Calculate drive gain
-        float drive = 1f + (drivePct / 100f) * 9f;
+        float warmth = Math.Clamp(warmthPct / 100f, 0f, 1f);
+        float env = 0.6f; // nominal level for previewing the dynamic curve
+        float bias = 0.04f * warmth;
+        float driveK = 0.6f * warmth;
+        float shaperA = (0.18f + (0.25f - 0.18f) * warmth) * warmth;
+        float shaperB = (0.015f + (0.03f - 0.015f) * warmth) * warmth;
+        float drive = 1f + driveK * env;
 
-        // Draw tanh transfer curve
+        // Draw polynomial transfer curve
         using var curvePath = new SKPath();
         bool first = true;
 
         for (float i = 0; i <= 1f; i += 0.02f)
         {
             float input = i * 2f - 1f; // -1 to 1
-            float output = MathF.Tanh(input * drive);
+            float x = (input + bias) * drive;
+            float x2 = x * x;
+            float x3 = x2 * x;
+            float x5 = x3 * x2;
+            float output = x - shaperA * x3 + shaperB * x5;
 
             float x = rect.Left + 4 + (rect.Width - 8) * i;
             float y = rect.Bottom - 4 - (rect.Height - 8) * ((output + 1f) / 2f);
@@ -324,21 +340,29 @@ public sealed class SaturationRenderer : IDisposable
         if (_bypassButtonRect.Contains(x, y))
             return new SaturationHitTest(SaturationHitArea.BypassButton, SaturationKnob.None);
 
-        float dx = x - _driveKnobCenter.X;
-        float dy = y - _driveKnobCenter.Y;
-        if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
-            return new SaturationHitTest(SaturationHitArea.Knob, SaturationKnob.Drive);
+        var presetHit = _presetBar.HitTest(x, y);
+        if (presetHit == PresetBarHitArea.Dropdown)
+            return new SaturationHitTest(SaturationHitArea.PresetDropdown, SaturationKnob.None);
+        if (presetHit == PresetBarHitArea.SaveButton)
+            return new SaturationHitTest(SaturationHitArea.PresetSave, SaturationKnob.None);
 
-        dx = x - _mixKnobCenter.X;
-        dy = y - _mixKnobCenter.Y;
+        float dx = x - _warmthKnobCenter.X;
+        float dy = y - _warmthKnobCenter.Y;
         if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
-            return new SaturationHitTest(SaturationHitArea.Knob, SaturationKnob.Mix);
+            return new SaturationHitTest(SaturationHitArea.Knob, SaturationKnob.Warmth);
+
+        dx = x - _blendKnobCenter.X;
+        dy = y - _blendKnobCenter.Y;
+        if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
+            return new SaturationHitTest(SaturationHitArea.Knob, SaturationKnob.Blend);
 
         if (_titleBarRect.Contains(x, y))
             return new SaturationHitTest(SaturationHitArea.TitleBar, SaturationKnob.None);
 
         return new SaturationHitTest(SaturationHitArea.None, SaturationKnob.None);
     }
+
+    public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
 
     public static SKSize GetPreferredSize() => new(340, 260);
 
@@ -347,6 +371,7 @@ public sealed class SaturationRenderer : IDisposable
         _inputMeter.Dispose();
         _outputMeter.Dispose();
         _knob.Dispose();
+        _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -366,13 +391,14 @@ public sealed class SaturationRenderer : IDisposable
 }
 
 public record struct SaturationState(
-    float DrivePct,
-    float MixPct,
+    float WarmthPct,
+    float BlendPct,
     float InputLevel,
     float OutputLevel,
     float LatencyMs,
     bool IsBypassed,
-    SaturationKnob HoveredKnob = SaturationKnob.None);
+    SaturationKnob HoveredKnob = SaturationKnob.None,
+    string PresetName = "Custom");
 
 public enum SaturationHitArea
 {
@@ -380,14 +406,16 @@ public enum SaturationHitArea
     TitleBar,
     CloseButton,
     BypassButton,
-    Knob
+    Knob,
+    PresetDropdown,
+    PresetSave
 }
 
 public enum SaturationKnob
 {
     None,
-    Drive,
-    Mix
+    Warmth,
+    Blend
 }
 
 public record struct SaturationHitTest(SaturationHitArea Area, SaturationKnob Knob);

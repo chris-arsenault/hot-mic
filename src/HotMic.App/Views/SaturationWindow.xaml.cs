@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
+using HotMic.Core.Presets;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
 
@@ -17,6 +19,7 @@ public partial class SaturationWindow : Window
     private readonly Action<int, float> _parameterCallback;
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
+    private readonly PluginPresetHelper _presetHelper;
 
     private SaturationKnob _activeKnob = SaturationKnob.None;
     private float _dragStartY;
@@ -31,6 +34,12 @@ public partial class SaturationWindow : Window
         _plugin = plugin;
         _parameterCallback = parameterCallback;
         _bypassCallback = bypassCallback;
+
+        _presetHelper = new PluginPresetHelper(
+            plugin.Id,
+            PluginPresetManager.Default,
+            ApplyPreset,
+            GetCurrentParameters);
 
         var preferredSize = SaturationRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -64,13 +73,14 @@ public partial class SaturationWindow : Window
         float dpiScale = GetDpiScale();
 
         var state = new SaturationState(
-            DrivePct: _plugin.DrivePct,
-            MixPct: _plugin.MixPct,
+            WarmthPct: _plugin.WarmthPct,
+            BlendPct: _plugin.BlendPct,
             InputLevel: _smoothedInputLevel,
             OutputLevel: _smoothedOutputLevel,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
-            HoveredKnob: _hoveredKnob
+            HoveredKnob: _hoveredKnob,
+            PresetName: _presetHelper.CurrentPresetName
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
@@ -111,6 +121,16 @@ public partial class SaturationWindow : Window
                 SkiaCanvas.CaptureMouse();
                 e.Handled = true;
                 break;
+
+            case SaturationHitArea.PresetDropdown:
+                _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
+                e.Handled = true;
+                break;
+
+            case SaturationHitArea.PresetSave:
+                _presetHelper.ShowSaveMenu(SkiaCanvas, this);
+                e.Handled = true;
+                break;
         }
     }
 
@@ -145,8 +165,8 @@ public partial class SaturationWindow : Window
 
     private float GetKnobNormalizedValue(SaturationKnob knob) => knob switch
     {
-        SaturationKnob.Drive => _plugin.DrivePct / 100f,
-        SaturationKnob.Mix => _plugin.MixPct / 100f,
+        SaturationKnob.Warmth => _plugin.WarmthPct / 100f,
+        SaturationKnob.Blend => _plugin.BlendPct / 100f,
         _ => 0f
     };
 
@@ -154,16 +174,46 @@ public partial class SaturationWindow : Window
     {
         switch (knob)
         {
-            case SaturationKnob.Drive:
-                float drivePct = normalizedValue * 100f;
-                _parameterCallback(SaturationPlugin.DriveIndex, drivePct);
+            case SaturationKnob.Warmth:
+                float warmthPct = normalizedValue * 100f;
+                _parameterCallback(SaturationPlugin.WarmthIndex, warmthPct);
                 break;
 
-            case SaturationKnob.Mix:
-                float mixPct = normalizedValue * 100f;
-                _parameterCallback(SaturationPlugin.MixIndex, mixPct);
+            case SaturationKnob.Blend:
+                float blendPct = normalizedValue * 100f;
+                _parameterCallback(SaturationPlugin.BlendIndex, blendPct);
                 break;
         }
+        _presetHelper.MarkAsCustom();
+    }
+
+    private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)
+    {
+        foreach (var (name, value) in parameters)
+        {
+            int paramIndex = name switch
+            {
+                "Warmth" => SaturationPlugin.WarmthIndex,
+                "Blend" => SaturationPlugin.BlendIndex,
+                "Drive" => SaturationPlugin.WarmthIndex,
+                "Mix" => SaturationPlugin.BlendIndex,
+                _ => -1
+            };
+
+            if (paramIndex >= 0)
+            {
+                _parameterCallback(paramIndex, value);
+            }
+        }
+    }
+
+    private Dictionary<string, float> GetCurrentParameters()
+    {
+        return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Warmth"] = _plugin.WarmthPct,
+            ["Blend"] = _plugin.BlendPct
+        };
     }
 
     private float GetDpiScale()

@@ -7,25 +7,22 @@ public sealed record PluginPreset(string Name, IReadOnlyDictionary<string, float
 public sealed class PluginPresetBank
 {
     private readonly Dictionary<string, PluginPreset> _presetLookup;
-    private readonly string[] _presetNames;
+    private readonly List<string> _presetNames;
 
     public PluginPresetBank(string pluginId, IReadOnlyList<PluginPreset> presets)
     {
         PluginId = pluginId;
-        Presets = presets;
         _presetLookup = new Dictionary<string, PluginPreset>(StringComparer.OrdinalIgnoreCase);
-        _presetNames = new string[presets.Count];
+        _presetNames = new List<string>(presets.Count);
         for (int i = 0; i < presets.Count; i++)
         {
             var preset = presets[i];
             _presetLookup[preset.Name] = preset;
-            _presetNames[i] = preset.Name;
+            _presetNames.Add(preset.Name);
         }
     }
 
     public string PluginId { get; }
-
-    public IReadOnlyList<PluginPreset> Presets { get; }
 
     public IReadOnlyList<string> PresetNames => _presetNames;
 
@@ -33,11 +30,30 @@ public sealed class PluginPresetBank
     {
         return _presetLookup.TryGetValue(name, out preset!);
     }
+
+    internal void AddPreset(PluginPreset preset)
+    {
+        _presetLookup[preset.Name] = preset;
+        if (!_presetNames.Contains(preset.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            _presetNames.Add(preset.Name);
+        }
+    }
+
+    internal bool RemovePreset(string name)
+    {
+        if (_presetLookup.Remove(name))
+        {
+            _presetNames.RemoveAll(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
+            return true;
+        }
+        return false;
+    }
 }
 
-public sealed record ChainPresetEntry(string PluginId, string PresetName);
+public sealed record ChainPresetEntry(string PluginId, string PresetName, IReadOnlyDictionary<string, float>? Parameters = null);
 
-public sealed record ChainPreset(string Name, IReadOnlyList<ChainPresetEntry> Entries);
+public sealed record ChainPreset(string Name, IReadOnlyList<ChainPresetEntry> Entries, bool IsBuiltIn = true);
 
 public sealed class PluginPresetManager
 {
@@ -59,11 +75,16 @@ public sealed class PluginPresetManager
 
     private readonly Dictionary<string, PluginPresetBank> _banks;
     private readonly Dictionary<string, ChainPreset> _chainLookup;
-    private readonly ChainPreset[] _chainPresets;
-    private readonly string[] _chainPresetNames;
+    private readonly List<ChainPreset> _builtInChainPresets;
+    private readonly List<ChainPreset> _userChainPresets;
+    private readonly HashSet<string> _builtInChainNames;
+    private readonly UserPresetStorage _storage;
+
+    public event EventHandler? PresetsChanged;
 
     private PluginPresetManager()
     {
+        _storage = new UserPresetStorage();
         _banks = new Dictionary<string, PluginPresetBank>(StringComparer.OrdinalIgnoreCase)
         {
             ["builtin:hpf"] = BuildHpfBank(),
@@ -77,7 +98,7 @@ public sealed class PluginPresetManager
             ["builtin:limiter"] = BuildLimiterBank()
         };
 
-        _chainPresets =
+        _builtInChainPresets =
         [
             new ChainPreset(BroadcastChainName,
             [
@@ -88,7 +109,7 @@ public sealed class PluginPresetManager
                 new ChainPresetEntry("builtin:compressor", BroadcastPresetName),
                 new ChainPresetEntry("builtin:eq3", BroadcastPresetName),
                 new ChainPresetEntry("builtin:limiter", BroadcastPresetName)
-            ]),
+            ], IsBuiltIn: true),
             new ChainPreset(CleanChainName,
             [
                 new ChainPresetEntry("builtin:hpf", CleanPresetName),
@@ -98,7 +119,7 @@ public sealed class PluginPresetManager
                 new ChainPresetEntry("builtin:compressor", CleanPresetName),
                 new ChainPresetEntry("builtin:eq3", CleanPresetName),
                 new ChainPresetEntry("builtin:limiter", CleanPresetName)
-            ]),
+            ], IsBuiltIn: true),
             new ChainPreset(PodcastChainName,
             [
                 new ChainPresetEntry("builtin:hpf", PodcastPresetName),
@@ -109,7 +130,7 @@ public sealed class PluginPresetManager
                 new ChainPresetEntry("builtin:eq3", PodcastPresetName),
                 new ChainPresetEntry("builtin:saturation", PodcastPresetName),
                 new ChainPresetEntry("builtin:limiter", PodcastPresetName)
-            ]),
+            ], IsBuiltIn: true),
             new ChainPreset(Sm7bChainName,
             [
                 new ChainPresetEntry("builtin:hpf", BroadcastPresetName),
@@ -119,7 +140,7 @@ public sealed class PluginPresetManager
                 new ChainPresetEntry("builtin:compressor", BroadcastPresetName),
                 new ChainPresetEntry("builtin:eq3", Sm7bPresetName),
                 new ChainPresetEntry("builtin:limiter", BroadcastPresetName)
-            ]),
+            ], IsBuiltIn: true),
             new ChainPreset(Nt1ChainName,
             [
                 new ChainPresetEntry("builtin:hpf", BroadcastPresetName),
@@ -129,37 +150,173 @@ public sealed class PluginPresetManager
                 new ChainPresetEntry("builtin:compressor", BroadcastPresetName),
                 new ChainPresetEntry("builtin:eq3", Nt1PresetName),
                 new ChainPresetEntry("builtin:limiter", BroadcastPresetName)
-            ])
+            ], IsBuiltIn: true)
         ];
 
+        _builtInChainNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         _chainLookup = new Dictionary<string, ChainPreset>(StringComparer.OrdinalIgnoreCase);
-        _chainPresetNames = new string[_chainPresets.Length];
-        for (int i = 0; i < _chainPresets.Length; i++)
+        foreach (var preset in _builtInChainPresets)
         {
-            var preset = _chainPresets[i];
             _chainLookup[preset.Name] = preset;
-            _chainPresetNames[i] = preset.Name;
+            _builtInChainNames.Add(preset.Name);
+        }
+
+        // Load user presets
+        _userChainPresets = new List<ChainPreset>();
+        LoadUserPresets();
+    }
+
+    private void LoadUserPresets()
+    {
+        _userChainPresets.Clear();
+        var storedPresets = _storage.LoadChainPresets();
+
+        foreach (var stored in storedPresets)
+        {
+            // Skip if name conflicts with built-in
+            if (_builtInChainNames.Contains(stored.Name))
+            {
+                continue;
+            }
+
+            var entries = new List<ChainPresetEntry>();
+            foreach (var plugin in stored.Plugins)
+            {
+                var parameters = new Dictionary<string, float>(plugin.Parameters, StringComparer.OrdinalIgnoreCase);
+                entries.Add(new ChainPresetEntry(plugin.PluginId, CustomPresetName, parameters));
+            }
+
+            var preset = new ChainPreset(stored.Name, entries, IsBuiltIn: false);
+            _userChainPresets.Add(preset);
+            _chainLookup[preset.Name] = preset;
         }
     }
 
-    public IReadOnlyList<ChainPreset> ChainPresets => _chainPresets;
+    public IReadOnlyList<ChainPreset> BuiltInChainPresets => _builtInChainPresets;
+
+    public IReadOnlyList<ChainPreset> UserChainPresets => _userChainPresets;
 
     public IReadOnlyList<string> GetChainPresetNames(bool includeCustom = true)
     {
-        if (!includeCustom)
+        var names = new List<string>();
+
+        if (includeCustom)
         {
-            return _chainPresetNames;
+            names.Add(CustomPresetName);
         }
 
-        var names = new string[_chainPresetNames.Length + 1];
-        names[0] = CustomPresetName;
-        Array.Copy(_chainPresetNames, 0, names, 1, _chainPresetNames.Length);
+        // Built-in presets first
+        foreach (var preset in _builtInChainPresets)
+        {
+            names.Add(preset.Name);
+        }
+
+        // Then user presets
+        foreach (var preset in _userChainPresets)
+        {
+            names.Add(preset.Name);
+        }
+
         return names;
     }
 
     public bool TryGetChainPreset(string name, out ChainPreset preset)
     {
         return _chainLookup.TryGetValue(name, out preset!);
+    }
+
+    public bool IsBuiltInPreset(string name)
+    {
+        return _builtInChainNames.Contains(name);
+    }
+
+    /// <summary>
+    /// Saves a new user chain preset or overwrites an existing user preset.
+    /// Returns false if trying to overwrite a built-in preset.
+    /// </summary>
+    public bool SaveChainPreset(string name, IReadOnlyList<(string pluginId, Dictionary<string, float> parameters)> plugins)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        // Cannot overwrite built-in presets
+        if (_builtInChainNames.Contains(name))
+        {
+            return false;
+        }
+
+        var stored = new StoredChainPreset
+        {
+            Name = name,
+            Plugins = plugins.Select(p => new StoredChainEntry
+            {
+                PluginId = p.pluginId,
+                Parameters = new Dictionary<string, float>(p.parameters)
+            }).ToList()
+        };
+
+        if (!_storage.SaveChainPreset(stored))
+        {
+            return false;
+        }
+
+        // Update in-memory cache
+        var entries = plugins.Select(p =>
+            new ChainPresetEntry(p.pluginId, CustomPresetName, p.parameters)).ToList();
+        var preset = new ChainPreset(name, entries, IsBuiltIn: false);
+
+        // Remove old version if exists
+        _userChainPresets.RemoveAll(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+        _userChainPresets.Add(preset);
+        _chainLookup[name] = preset;
+
+        PresetsChanged?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
+
+    /// <summary>
+    /// Deletes a user chain preset. Returns false if preset doesn't exist or is built-in.
+    /// </summary>
+    public bool DeleteChainPreset(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        // Cannot delete built-in presets
+        if (_builtInChainNames.Contains(name))
+        {
+            return false;
+        }
+
+        if (!_storage.DeleteChainPreset(name))
+        {
+            return false;
+        }
+
+        _userChainPresets.RemoveAll(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+        _chainLookup.Remove(name);
+
+        PresetsChanged?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
+
+    /// <summary>
+    /// Reloads user presets from disk.
+    /// </summary>
+    public void RefreshUserPresets()
+    {
+        // Remove old user presets from lookup
+        foreach (var preset in _userChainPresets)
+        {
+            _chainLookup.Remove(preset.Name);
+        }
+
+        LoadUserPresets();
+        PresetsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public bool TryGetPreset(string pluginId, string presetName, out PluginPreset preset)
@@ -411,8 +568,8 @@ public sealed class PluginPresetManager
         return new PluginPresetBank("builtin:saturation",
         [
             CreatePreset(PodcastPresetName,
-                ("Drive", 20f),
-                ("Mix", 40f))
+                ("Warmth", 35f),
+                ("Blend", 100f))
         ]);
     }
 
