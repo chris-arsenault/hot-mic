@@ -34,7 +34,8 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
     private int _inputLevelBits;
 
     private float _detector;
-    private readonly OnePoleHighPass _sidechainFilter = new();
+    // Mutable struct: keep non-readonly so filter state persists across samples.
+    private OnePoleHighPass _sidechainFilter = new();
     private float _sidechainHpfHz = 80f;
     private float _gateRatio = 3f;
     private float _maxRangeDb = 24f;
@@ -88,7 +89,6 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
         for (int i = 0; i < buffer.Length; i++)
         {
             float sample = buffer[i];
-            float absInput = MathF.Abs(sample);
             // Voice-friendly detector: HPF sidechain + RMS smoothing to reduce plosive bias.
             float sidechain = _sidechainFilter.Process(sample);
             float power = sidechain * sidechain;
@@ -96,12 +96,10 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
             float detectorCoeff = power > _detector ? _detectorAttackCoeff : _detectorReleaseCoeff;
             _detector += detectorCoeff * (power - _detector);
             float env = MathF.Sqrt(_detector + 1e-12f);
-            // Use peak-boosted level for gate state so the threshold aligns with the visible input meter.
-            float gateLevel = MathF.Max(env, absInput);
 
             if (_gateOpen)
             {
-                if (gateLevel < _closeThresholdLinear)
+                if (env < _closeThresholdLinear)
                 {
                     if (_holdSamples <= 0)
                     {
@@ -125,7 +123,7 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
                     _holdSamplesLeft = _holdSamples;
                 }
             }
-            else if (gateLevel >= _thresholdLinear)
+            else if (env >= _thresholdLinear)
             {
                 _gateOpen = true;
                 _holdSamplesLeft = _holdSamples;
@@ -149,6 +147,7 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
             _gain += gainCoeff * (targetGain - _gain);
             buffer[i] = sample * _gain;
 
+            float absInput = MathF.Abs(sample);
             if (absInput > peak)
             {
                 peak = absInput;

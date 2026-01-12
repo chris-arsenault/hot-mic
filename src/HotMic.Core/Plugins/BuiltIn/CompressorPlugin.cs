@@ -43,7 +43,8 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
     private CompressorDetectorMode _detectorMode = CompressorDetectorMode.Blend;
     private bool _sidechainHpfEnabled = true;
 
-    private readonly OnePoleHighPass _sidechainFilter = new();
+    // Mutable struct: keep non-readonly so filter state persists across samples.
+    private OnePoleHighPass _sidechainFilter = new();
 
     public CompressorPlugin()
     {
@@ -111,12 +112,11 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
                 rms = MathF.Sqrt(_rmsPower + 1e-12f);
             }
 
-            // Keep a full-band peak path so sidechain HPF does not null low-frequency detection.
             float detectorLinear = _detectorMode switch
             {
                 CompressorDetectorMode.Rms => rms,
-                CompressorDetectorMode.Peak => absInput,
-                _ => absInput * (1f - _rmsBlend) + rms * _rmsBlend
+                CompressorDetectorMode.Peak => absSidechain,
+                _ => absSidechain * (1f - _rmsBlend) + rms * _rmsBlend
             };
 
             float detectorDb = DspUtils.LinearToDb(detectorLinear);
