@@ -70,6 +70,7 @@ public sealed class MainRenderer
     private SKRect _statsAreaRect;
     private SKRect _preset1DropdownRect;
     private SKRect _preset2DropdownRect;
+    private SKRect _masterMeterRect;
 
     public MainRenderer()
     {
@@ -546,6 +547,17 @@ public sealed class MainRenderer
         canvas.DrawRoundRect(roundRect, _borderPaint);
 
         canvas.DrawText("MASTER", x + 6f, y + 12f, _smallTextPaint);
+        bool lufsMode = viewModel.MasterMeterLufs;
+        float? voxTargetDb = viewModel.MeterScaleVox
+            ? (lufsMode ? -16f : -18f)
+            : null;
+        string modeLabel = lufsMode ? "LUFS" : "dB";
+        if (voxTargetDb.HasValue)
+        {
+            modeLabel = $"{modeLabel} {voxTargetDb.Value:0}";
+        }
+        float modeWidth = _tinyTextPaint.MeasureText(modeLabel);
+        canvas.DrawText(modeLabel, x + width - modeWidth - 6f, y + 12f, _tinyTextPaint);
 
         // Meters on the left side
         float meterY = y + 18f;
@@ -557,29 +569,72 @@ public sealed class MainRenderer
         canvas.DrawText("R", rightMeterX + 4f, meterY - 2f, _tinyTextPaint);
 
         float leftPeak, rightPeak, leftRms, rightRms;
-        if (viewModel.MasterIsStereo)
+        float leftReadout, rightReadout;
+
+        if (lufsMode)
         {
-            leftPeak = viewModel.Channel1.OutputPeakLevel;
-            rightPeak = viewModel.Channel2.OutputPeakLevel;
-            leftRms = viewModel.Channel1.OutputRmsLevel;
-            rightRms = viewModel.Channel2.OutputRmsLevel;
+            // LUFS mode: momentary drives the bar, short-term drives the peak marker.
+            const float minLufs = -70f;
+            float leftMomentary = viewModel.MasterLufsMomentaryLeft;
+            float rightMomentary = viewModel.MasterLufsMomentaryRight;
+            float leftShortTerm = viewModel.MasterLufsShortTermLeft;
+            float rightShortTerm = viewModel.MasterLufsShortTermRight;
+
+            if (!viewModel.MasterIsStereo)
+            {
+                float momentary = (leftMomentary + rightMomentary) * 0.5f;
+                float shortTerm = (leftShortTerm + rightShortTerm) * 0.5f;
+                leftMomentary = rightMomentary = momentary;
+                leftShortTerm = rightShortTerm = shortTerm;
+            }
+
+            if (viewModel.MasterMuted)
+            {
+                leftMomentary = rightMomentary = minLufs;
+                leftShortTerm = rightShortTerm = minLufs;
+            }
+
+            float leftPeakLufs = MathF.Max(leftMomentary, leftShortTerm);
+            float rightPeakLufs = MathF.Max(rightMomentary, rightShortTerm);
+
+            leftRms = LufsToLinear(leftShortTerm);
+            rightRms = LufsToLinear(rightShortTerm);
+            leftPeak = LufsToLinear(leftPeakLufs);
+            rightPeak = LufsToLinear(rightPeakLufs);
+            leftReadout = leftShortTerm;
+            rightReadout = rightShortTerm;
         }
         else
         {
-            float sumPeak = MathF.Max(viewModel.Channel1.OutputPeakLevel, viewModel.Channel2.OutputPeakLevel);
-            float sumRms = (viewModel.Channel1.OutputRmsLevel + viewModel.Channel2.OutputRmsLevel) / 2f;
-            leftPeak = rightPeak = sumPeak;
-            leftRms = rightRms = sumRms;
+            if (viewModel.MasterIsStereo)
+            {
+                leftPeak = viewModel.Channel1.OutputPeakLevel;
+                rightPeak = viewModel.Channel2.OutputPeakLevel;
+                leftRms = viewModel.Channel1.OutputRmsLevel;
+                rightRms = viewModel.Channel2.OutputRmsLevel;
+            }
+            else
+            {
+                float sumPeak = MathF.Max(viewModel.Channel1.OutputPeakLevel, viewModel.Channel2.OutputPeakLevel);
+                float sumRms = (viewModel.Channel1.OutputRmsLevel + viewModel.Channel2.OutputRmsLevel) / 2f;
+                leftPeak = rightPeak = sumPeak;
+                leftRms = rightRms = sumRms;
+            }
+
+            // If master muted, show zero levels on meters
+            if (viewModel.MasterMuted)
+            {
+                leftPeak = rightPeak = leftRms = rightRms = 0f;
+            }
+
+            leftReadout = LinearToDb(leftPeak);
+            rightReadout = LinearToDb(rightPeak);
         }
 
-        // If master muted, show zero levels on meters
-        if (viewModel.MasterMuted)
-        {
-            leftPeak = rightPeak = leftRms = rightRms = 0f;
-        }
+        _masterMeterRect = new SKRect(leftMeterX, meterY, rightMeterX + MeterWidth, meterY + meterHeight);
 
-        DrawVerticalMeter(canvas, leftMeterX, meterY, MeterWidth, meterHeight, leftPeak, leftRms, viewModel.MeterScaleVox);
-        DrawVerticalMeter(canvas, rightMeterX, meterY, MeterWidth, meterHeight, rightPeak, rightRms, viewModel.MeterScaleVox);
+        DrawVerticalMeter(canvas, leftMeterX, meterY, MeterWidth, meterHeight, leftPeak, leftRms, viewModel.MeterScaleVox, voxTargetDb);
+        DrawVerticalMeter(canvas, rightMeterX, meterY, MeterWidth, meterHeight, rightPeak, rightRms, viewModel.MeterScaleVox, voxTargetDb);
 
         // Toggles on the right side (stacked: ST, M)
         float toggleX = x + width - ToggleSize - 6f;
@@ -597,12 +652,12 @@ public sealed class MainRenderer
         DrawToggleButton(canvas, muteRect, "M", viewModel.MasterMuted, _mutePaint);
         _toggleRects.Add(new ToggleRect(-1, ToggleType.MasterMute, muteRect));
 
-        // dB readings at bottom
+        // Readings at bottom
         float dbY = y + height - 8f;
-        string leftDb = $"{LinearToDb(leftPeak):0.0}";
-        string rightDb = $"{LinearToDb(rightPeak):0.0}";
-        canvas.DrawText(leftDb, leftMeterX, dbY, _tinyTextPaint);
-        canvas.DrawText(rightDb, rightMeterX, dbY, _tinyTextPaint);
+        string leftLabel = $"{leftReadout:0.0}";
+        string rightLabel = $"{rightReadout:0.0}";
+        canvas.DrawText(leftLabel, leftMeterX, dbY, _tinyTextPaint);
+        canvas.DrawText(rightLabel, rightMeterX, dbY, _tinyTextPaint);
     }
 
     private void DrawDebugOverlay(SKCanvas canvas, SKSize size, MainViewModel viewModel)
@@ -699,7 +754,7 @@ public sealed class MainRenderer
         }
     }
 
-    private void DrawVerticalMeter(SKCanvas canvas, float x, float y, float width, float height, float peakLevel, float rmsLevel, bool voxScale)
+    private void DrawVerticalMeter(SKCanvas canvas, float x, float y, float width, float height, float peakLevel, float rmsLevel, bool voxScale, float? voxTargetDb = null)
     {
         canvas.DrawRect(new SKRect(x, y, x + width, y + height), _meterBackgroundPaint);
 
@@ -750,10 +805,11 @@ public sealed class MainRenderer
             canvas.DrawLine(x, peakY, x + width, peakY, CreateStrokePaint(peakColor, 1.5f));
         }
 
-        // VOX mode: draw -18dBFS target reference line
+        // VOX mode: draw target reference line
         if (voxScale)
         {
-            float targetPos = DbToVoxMeterPosition(-18f);
+            float targetDb = voxTargetDb ?? -18f;
+            float targetPos = DbToVoxMeterPosition(targetDb);
             float targetY = y + height - height * targetPos;
             canvas.DrawLine(x, targetY, x + width, targetY, CreateStrokePaint(_theme.Accent, 1f));
         }
@@ -788,6 +844,19 @@ public sealed class MainRenderer
     /// Convert linear level (0-1) to dB.
     /// </summary>
     private static float LinearToDb(float linear) => linear <= 0f ? -60f : 20f * MathF.Log10(linear + 1e-10f);
+
+    /// <summary>
+    /// Convert LUFS (dB) value to linear magnitude for meter positioning.
+    /// </summary>
+    private static float LufsToLinear(float lufs)
+    {
+        if (!float.IsFinite(lufs))
+        {
+            return 0f;
+        }
+
+        return MathF.Pow(10f, lufs / 20f);
+    }
 
     /// <summary>
     /// Voice-optimized dB to meter position conversion.
@@ -1028,6 +1097,7 @@ public sealed class MainRenderer
         _pluginKnobRects.Clear();
         _pluginSlots.Clear();
         _toggleRects.Clear();
+        _masterMeterRect = SKRect.Empty;
     }
 
     // Hit testing
@@ -1072,6 +1142,8 @@ public sealed class MainRenderer
             if (toggle.Rect.Contains(x, y)) return new ToggleHit(toggle.ChannelIndex, toggle.ToggleType);
         return null;
     }
+
+    public bool HitTestMasterMeter(float x, float y) => _masterMeterRect.Contains(x, y);
 
     public bool HitTestMeterScaleToggle(float x, float y) => _meterScaleToggleRect.Contains(x, y);
 

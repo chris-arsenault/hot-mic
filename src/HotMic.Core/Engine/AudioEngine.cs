@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using HotMic.Common.Configuration;
+using HotMic.Core.Metering;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Threading;
 using NAudio.CoreAudioApi;
@@ -20,6 +21,8 @@ public sealed class AudioEngine : IDisposable
     private readonly LockFreeRingBuffer _inputBuffer2;
     private LockFreeRingBuffer? _monitorBuffer;
     private readonly ChannelStrip[] _channels;
+    private readonly LufsMeterProcessor _masterLufsLeft;
+    private readonly LufsMeterProcessor _masterLufsRight;
     private readonly int _sampleRate;
     private readonly int _blockSize;
     private readonly int _latencyMs;
@@ -86,6 +89,8 @@ public sealed class AudioEngine : IDisposable
             new ChannelStrip(_sampleRate, _blockSize),
             new ChannelStrip(_sampleRate, _blockSize)
         ];
+        _masterLufsLeft = new LufsMeterProcessor(_sampleRate);
+        _masterLufsRight = new LufsMeterProcessor(_sampleRate);
 
         ConfigureDevices(settings.InputDevice1Id, settings.InputDevice2Id, settings.OutputDeviceId, settings.MonitorOutputDeviceId);
     }
@@ -95,6 +100,16 @@ public sealed class AudioEngine : IDisposable
     public int SampleRate => _sampleRate;
 
     public int BlockSize => _blockSize;
+
+    /// <summary>
+    /// K-weighted LUFS meter for the master left output channel.
+    /// </summary>
+    public LufsMeterProcessor MasterLufsLeft => _masterLufsLeft;
+
+    /// <summary>
+    /// K-weighted LUFS meter for the master right output channel.
+    /// </summary>
+    public LufsMeterProcessor MasterLufsRight => _masterLufsRight;
 
     public void ConfigureDevices(string input1Id, string input2Id, string outputId, string? monitorOutputId)
     {
@@ -137,6 +152,8 @@ public sealed class AudioEngine : IDisposable
             ReportOutputUnderflow1,
             ReportOutputUnderflow2,
             () => (OutputRoutingMode)Volatile.Read(ref _outputRoutingMode),
+            _masterLufsLeft,
+            _masterLufsRight,
             outputFormat);
 
         _output = new WasapiOut(outputDevice, AudioClientShareMode.Shared, true, _latencyMs);
@@ -735,6 +752,8 @@ public sealed class AudioEngine : IDisposable
         private readonly float[] _channel2Buffer;
         private LockFreeRingBuffer? _monitorBuffer;
         private int _masterMuted;
+        private readonly LufsMeterProcessor _masterLufsLeft;
+        private readonly LufsMeterProcessor _masterLufsRight;
 
         private readonly Action<int> _reportOutput;
         private readonly Action<int> _reportUnderflow1;
@@ -751,6 +770,8 @@ public sealed class AudioEngine : IDisposable
             Action<int> reportUnderflow1,
             Action<int> reportUnderflow2,
             Func<OutputRoutingMode> getRoutingMode,
+            LufsMeterProcessor masterLufsLeft,
+            LufsMeterProcessor masterLufsRight,
             WaveFormat waveFormat)
         {
             _channels = channels;
@@ -762,6 +783,8 @@ public sealed class AudioEngine : IDisposable
             _reportUnderflow1 = reportUnderflow1;
             _reportUnderflow2 = reportUnderflow2;
             _getRoutingMode = getRoutingMode;
+            _masterLufsLeft = masterLufsLeft;
+            _masterLufsRight = masterLufsRight;
             WaveFormat = waveFormat;
             _channel1Buffer = new float[blockSize];
             _channel2Buffer = new float[blockSize];
@@ -830,6 +853,8 @@ public sealed class AudioEngine : IDisposable
                     }
                 }
 
+                _masterLufsLeft.ProcessInterleaved(outputSlice, 2, 0);
+                _masterLufsRight.ProcessInterleaved(outputSlice, 2, 1);
                 _monitorBuffer?.Write(outputSlice);
                 processed += chunk;
             }

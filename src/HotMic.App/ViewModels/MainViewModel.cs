@@ -259,6 +259,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool meterScaleVox;
 
+    // Master meter display mode (false = dB, true = LUFS)
+    [ObservableProperty]
+    private bool masterMeterLufs;
+
+    [ObservableProperty]
+    private float masterLufsMomentaryLeft = -70f;
+
+    [ObservableProperty]
+    private float masterLufsMomentaryRight = -70f;
+
+    [ObservableProperty]
+    private float masterLufsShortTermLeft = -70f;
+
+    [ObservableProperty]
+    private float masterLufsShortTermRight = -70f;
+
     [ObservableProperty]
     private AudioQualityMode qualityMode;
 
@@ -458,6 +474,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (_isInitializing) return;
         _config.Ui.MeterScaleVox = value;
+        _configManager.Save(_config);
+    }
+
+    partial void OnMasterMeterLufsChanged(bool value)
+    {
+        if (_isInitializing) return;
+        _config.Ui.MasterMeterLufs = value;
         _configManager.Save(_config);
     }
 
@@ -693,6 +716,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsMinimalView = string.Equals(_config.Ui.ViewMode, "minimal", StringComparison.OrdinalIgnoreCase);
         AlwaysOnTop = _config.Ui.AlwaysOnTop;
         MeterScaleVox = _config.Ui.MeterScaleVox;
+        MasterMeterLufs = _config.Ui.MasterMeterLufs;
         WindowX = _config.Ui.WindowPosition.X;
         WindowY = _config.Ui.WindowPosition.Y;
 
@@ -993,6 +1017,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Channel2.InputRmsLevel = channel2.InputMeter.GetRmsLevel();
         Channel2.OutputPeakLevel = channel2.OutputMeter.GetPeakLevel();
         Channel2.OutputRmsLevel = channel2.OutputMeter.GetRmsLevel();
+
+        MasterLufsMomentaryLeft = _audioEngine.MasterLufsLeft.GetMomentaryLufs();
+        MasterLufsShortTermLeft = _audioEngine.MasterLufsLeft.GetShortTermLufs();
+        MasterLufsMomentaryRight = _audioEngine.MasterLufsRight.GetMomentaryLufs();
+        MasterLufsShortTermRight = _audioEngine.MasterLufsRight.GetShortTermLufs();
 
         UpdatePluginMeters(Channel1, channel1);
         UpdatePluginMeters(Channel2, channel2);

@@ -100,6 +100,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_renderer.HitTestMasterMeter(x, y))
+        {
+            viewModel.MasterMeterLufs = !viewModel.MasterMeterLufs;
+            e.Handled = true;
+            return;
+        }
+
         // Stats area click toggles debug overlay
         if (_renderer.HitTestStatsArea(x, y))
         {

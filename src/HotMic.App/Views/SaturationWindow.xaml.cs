@@ -72,6 +72,7 @@ public partial class SaturationWindow : Window
         var size = new SKSize(e.Info.Width, e.Info.Height);
         float dpiScale = GetDpiScale();
 
+        var diagnostics = _plugin.Diagnostics;
         var state = new SaturationState(
             WarmthPct: _plugin.WarmthPct,
             BlendPct: _plugin.BlendPct,
@@ -80,7 +81,11 @@ public partial class SaturationWindow : Window
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
             HoveredKnob: _hoveredKnob,
-            PresetName: _presetHelper.CurrentPresetName
+            PresetName: _presetHelper.CurrentPresetName,
+            SampleRate: _plugin.SampleRate,
+            GetTransferCurveSamples: diagnostics.GetTransferCurveSamples,
+            GetScopeSamples: diagnostics.GetScopeSamples,
+            GetFftSamples: diagnostics.GetFftSamples
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
