@@ -127,12 +127,17 @@ public sealed class SettingsRenderer
         DrawFieldRow(canvas, "Output Routing", FormatOutputRouting(viewModel.SelectedOutputRouting), Padding + (thirdWidth + ColumnSpacing) * 2f, y, thirdWidth, SettingsField.OutputRouting);
         y += LabelHeight + 6f + FieldHeight + RowSpacing;
 
-        // Row 5: VST Plugins checkbox + MIDI checkbox
+        // Row 5: Channel presets
+        DrawFieldRow(canvas, "Preset (Ch 1)", viewModel.SelectedChannel1Preset, Padding, y, halfWidth, SettingsField.Channel1Preset);
+        DrawFieldRow(canvas, "Preset (Ch 2)", viewModel.SelectedChannel2Preset, Padding + halfWidth + ColumnSpacing, y, halfWidth, SettingsField.Channel2Preset);
+        y += LabelHeight + 6f + FieldHeight + RowSpacing;
+
+        // Row 6: VST Plugins checkbox + MIDI checkbox
         DrawCheckbox(canvas, "Enable VST Plugins", viewModel.EnableVstPlugins, Padding, y, out _vstCheckboxRect);
         DrawCheckbox(canvas, "Enable MIDI", viewModel.EnableMidi, Padding + halfWidth + ColumnSpacing, y, out _midiCheckboxRect);
         y += FieldHeight + RowSpacing;
 
-        // Row 6: MIDI Device dropdown (only if MIDI enabled)
+        // Row 7: MIDI Device dropdown (only if MIDI enabled)
         if (viewModel.EnableMidi)
         {
             DrawFieldRow(canvas, "MIDI Device", viewModel.SelectedMidiDevice ?? "Select...", Padding, y, halfWidth, SettingsField.MidiDevice);
@@ -271,6 +276,8 @@ public sealed class SettingsRenderer
             SettingsField.Input1Channel => BuildEnumList(viewModel.InputChannelOptions, viewModel.SelectedInput1Channel, FormatInputChannel, out selectedIndex),
             SettingsField.Input2Channel => BuildEnumList(viewModel.InputChannelOptions, viewModel.SelectedInput2Channel, FormatInputChannel, out selectedIndex),
             SettingsField.OutputRouting => BuildEnumList(viewModel.OutputRoutingOptions, viewModel.SelectedOutputRouting, FormatOutputRouting, out selectedIndex),
+            SettingsField.Channel1Preset => BuildStringList(viewModel.ChannelPresetOptions, viewModel.SelectedChannel1Preset, out selectedIndex),
+            SettingsField.Channel2Preset => BuildStringList(viewModel.ChannelPresetOptions, viewModel.SelectedChannel2Preset, out selectedIndex),
             SettingsField.MidiDevice => BuildMidiDeviceList(viewModel.MidiDevices, viewModel.SelectedMidiDevice, out selectedIndex),
             _ => []
         };
@@ -314,6 +321,21 @@ public sealed class SettingsRenderer
         {
             list.Add(format(options[i]));
             if (options[i] == selected) selectedIndex = i;
+        }
+        return list;
+    }
+
+    private static IReadOnlyList<string> BuildStringList(IReadOnlyList<string> options, string? selected, out int selectedIndex)
+    {
+        selectedIndex = -1;
+        var list = new List<string>(options.Count);
+        for (int i = 0; i < options.Count; i++)
+        {
+            list.Add(options[i]);
+            if (string.Equals(options[i], selected, StringComparison.OrdinalIgnoreCase))
+            {
+                selectedIndex = i;
+            }
         }
         return list;
     }
@@ -420,6 +442,7 @@ public enum SettingsField
     Input1, Input2, Output, Monitor,
     SampleRate, BufferSize,
     Input1Channel, Input2Channel, OutputRouting,
+    Channel1Preset, Channel2Preset,
     MidiDevice
 }
 

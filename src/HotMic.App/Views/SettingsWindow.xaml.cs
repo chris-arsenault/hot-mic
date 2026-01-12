@@ -171,6 +171,14 @@ public partial class SettingsWindow : Window
                 if ((uint)hit.Index < (uint)_viewModel.OutputRoutingOptions.Count)
                     _viewModel.SelectedOutputRouting = _viewModel.OutputRoutingOptions[hit.Index];
                 break;
+            case SettingsField.Channel1Preset:
+                if ((uint)hit.Index < (uint)_viewModel.ChannelPresetOptions.Count)
+                    _viewModel.SelectedChannel1Preset = _viewModel.ChannelPresetOptions[hit.Index];
+                break;
+            case SettingsField.Channel2Preset:
+                if ((uint)hit.Index < (uint)_viewModel.ChannelPresetOptions.Count)
+                    _viewModel.SelectedChannel2Preset = _viewModel.ChannelPresetOptions[hit.Index];
+                break;
             case SettingsField.MidiDevice:
                 if ((uint)hit.Index < (uint)_viewModel.MidiDevices.Count)
                     _viewModel.SelectedMidiDevice = _viewModel.MidiDevices[hit.Index];
