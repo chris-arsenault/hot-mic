@@ -14,16 +14,6 @@ internal sealed class DeepFilterNetProcessor : IDisposable
     private const float MinDbThresh = -10f;
     private const float MaxDbErbThresh = 30f;
     private const float MaxDbDfThresh = 20f;
-    private const int DebugApplyGains = 1 << 0;
-    private const int DebugApplyGainZeros = 1 << 1;
-    private const int DebugApplyDf = 1 << 2;
-    private const int DebugPostFilter = 1 << 3;
-    private const int DebugAttenLimit = 1 << 4;
-    private const int DebugOutputCleared = 1 << 5;
-    private const int DebugWarmup = 1 << 6;
-    private const int DebugLowInput = 1 << 7;
-    private const int DebugSkipLowRms = 1 << 8;
-
     private readonly DeepFilterNetConfig _config;
     private readonly DeepFilterNetInference _inference;
     private readonly DeepFilterNetStft _stft;
@@ -97,27 +87,12 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         ReadOnlySpan<float> input,
         Span<float> output,
         bool postFilterEnabled,
-        float attenLimitDb,
-        out float lsnr,
-        out int debugFlags,
-        out float gainMin,
-        out float gainMax,
-        out float hopPeak,
-        out float hopRms,
-        out float specPeak,
-        out float outPeak)
+        float attenLimitDb)
     {
         if (input.Length != _config.HopSize || output.Length != _config.HopSize)
         {
             throw new ArgumentException("DeepFilterNet hop size mismatch.");
         }
-
-        lsnr = 0f;
-        debugFlags = 0;
-        gainMin = 0f;
-        gainMax = 0f;
-        specPeak = 0f;
-        outPeak = 0f;
 
         float maxAbs = 0f;
         float energy = 0f;
@@ -132,13 +107,9 @@ internal sealed class DeepFilterNetProcessor : IDisposable
             energy += sample * sample;
         }
 
-        hopPeak = maxAbs;
-        hopRms = input.Length > 0 ? MathF.Sqrt(energy / input.Length) : 0f;
-
         if (maxAbs <= 0f)
         {
             output.Clear();
-            debugFlags |= DebugOutputCleared | DebugLowInput;
             return;
         }
 
@@ -155,7 +126,6 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         if (_skipCounter > 5)
         {
             output.Clear();
-            debugFlags |= DebugOutputCleared | DebugSkipLowRms;
             return;
         }
 
@@ -165,13 +135,12 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         ComputeFeatures();
 
         using var enc = _inference.RunEncoder(_erbFeatures, _specFeatures);
-        lsnr = enc.Lsnr;
+        float lsnr = enc.Lsnr;
         var stages = ApplyStages(lsnr);
 
         if (_framesProcessed <= _config.Lookahead)
         {
             output.Clear();
-            debugFlags |= DebugOutputCleared | DebugWarmup;
             return;
         }
 
@@ -182,22 +151,12 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         if (stages.applyGains)
         {
             _inference.FillGains(enc, _gains);
-            CalculateGainStats(_gains, out gainMin, out gainMax);
             DeepFilterNetDsp.ApplyInterpBandGain(enhTarget, _gains, _erbBands);
-            debugFlags |= DebugApplyGains;
         }
         else if (stages.applyGainZeros)
         {
             Array.Clear(_gains, 0, _gains.Length);
-            gainMin = 0f;
-            gainMax = 0f;
             DeepFilterNetDsp.ApplyInterpBandGain(enhTarget, _gains, _erbBands);
-            debugFlags |= DebugApplyGainZeros;
-        }
-        else
-        {
-            gainMin = 1f;
-            gainMax = 1f;
         }
 
         Array.Copy(enhTarget, _specOut, _specOut.Length);
@@ -206,13 +165,11 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         {
             _inference.FillCoefs(enc, _coefs);
             ApplyDeepFilter(_specOut, targetIndex);
-            debugFlags |= DebugApplyDf;
         }
 
         if (stages.applyGains && postFilterEnabled)
         {
             DeepFilterNetDsp.PostFilter(noisyTarget, _specOut, postFilterEnabled ? DefaultPostFilterBeta : 0f);
-            debugFlags |= DebugPostFilter;
         }
 
         if (attenLimitDb < 100f)
@@ -222,12 +179,8 @@ internal sealed class DeepFilterNetProcessor : IDisposable
             {
                 _specOut[i] = _specOut[i] * (1f - lim) + noisyTarget[i] * lim;
             }
-            debugFlags |= DebugAttenLimit;
         }
-
-        specPeak = ComputeSpecPeak(_specOut);
         _stft.Synthesize(_specOut, output);
-        outPeak = ComputePeak(output);
     }
 
     public void Dispose()
@@ -347,78 +300,4 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         }
     }
 
-    private static void CalculateGainStats(float[] gains, out float min, out float max)
-    {
-        min = float.PositiveInfinity;
-        max = 0f;
-        for (int i = 0; i < gains.Length; i++)
-        {
-            float value = gains[i];
-            if (!float.IsFinite(value))
-            {
-                continue;
-            }
-
-            if (value < min)
-            {
-                min = value;
-            }
-            if (value > max)
-            {
-                max = value;
-            }
-        }
-
-        if (!float.IsFinite(min))
-        {
-            min = 0f;
-        }
-        if (!float.IsFinite(max))
-        {
-            max = 0f;
-        }
-    }
-
-    private static float ComputeSpecPeak(float[] spec)
-    {
-        float peak = 0f;
-        for (int i = 0; i + 1 < spec.Length; i += 2)
-        {
-            float re = spec[i];
-            float im = spec[i + 1];
-            if (!float.IsFinite(re) || !float.IsFinite(im))
-            {
-                continue;
-            }
-
-            float mag = MathF.Sqrt(re * re + im * im);
-            if (mag > peak)
-            {
-                peak = mag;
-            }
-        }
-
-        return peak;
-    }
-
-    private static float ComputePeak(ReadOnlySpan<float> data)
-    {
-        float peak = 0f;
-        for (int i = 0; i < data.Length; i++)
-        {
-            float value = data[i];
-            if (!float.IsFinite(value))
-            {
-                continue;
-            }
-
-            float abs = MathF.Abs(value);
-            if (abs > peak)
-            {
-                peak = abs;
-            }
-        }
-
-        return peak;
-    }
 }
