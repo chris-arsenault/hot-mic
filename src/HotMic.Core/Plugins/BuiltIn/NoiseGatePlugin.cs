@@ -38,6 +38,8 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
     private float _sidechainHpfHz = 80f;
     private float _gateRatio = 3f;
     private float _maxRangeDb = 24f;
+    private const float ClosedGateFloorDb = 90f; // Minimum attenuation (in dB) when the gate is closed.
+    private float _closedGateFloorLinear;
 
     public NoiseGatePlugin()
     {
@@ -137,6 +139,7 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
                 float overDb = _thresholdDb - envDb;
                 float reductionDb = MathF.Min(_maxRangeDb, overDb * (1f - 1f / _gateRatio));
                 targetGain = DspUtils.DbToLinear(-reductionDb);
+                targetGain = MathF.Min(targetGain, _closedGateFloorLinear);
             }
 
             float gainCoeff = targetGain > _gain ? _gainAttackCoeff : _gainReleaseCoeff;
@@ -264,6 +267,8 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
         _gainAttackCoeff = _detectorAttackCoeff;
         _gainReleaseCoeff = _detectorReleaseCoeff;
         _holdSamples = (int)(_holdMs * 0.001f * _sampleRate);
+        float gateFloorDb = MathF.Max(_maxRangeDb, ClosedGateFloorDb);
+        _closedGateFloorLinear = DspUtils.DbToLinear(-gateFloorDb);
         _sidechainFilter.Configure(_sidechainHpfHz, _sampleRate);
     }
 }
