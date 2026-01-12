@@ -303,23 +303,23 @@ public sealed class SaturationRenderer : IDisposable
         for (float i = 0; i <= 1f; i += 0.02f)
         {
             float input = i * 2f - 1f; // -1 to 1
-            float x = (input + bias) * drive;
-            float x2 = x * x;
-            float x3 = x2 * x;
+            float shapedInput = (input + bias) * drive;
+            float x2 = shapedInput * shapedInput;
+            float x3 = x2 * shapedInput;
             float x5 = x3 * x2;
-            float output = x - shaperA * x3 + shaperB * x5;
+            float output = shapedInput - shaperA * x3 + shaperB * x5;
 
-            float x = rect.Left + 4 + (rect.Width - 8) * i;
-            float y = rect.Bottom - 4 - (rect.Height - 8) * ((output + 1f) / 2f);
+            float xPos = rect.Left + 4 + (rect.Width - 8) * i;
+            float yPos = rect.Bottom - 4 - (rect.Height - 8) * ((output + 1f) / 2f);
 
             if (first)
             {
-                curvePath.MoveTo(x, y);
+                curvePath.MoveTo(xPos, yPos);
                 first = false;
             }
             else
             {
-                curvePath.LineTo(x, y);
+                curvePath.LineTo(xPos, yPos);
             }
         }
 
