@@ -173,6 +173,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             _wasBypassed = false;
         }
 
+        int read = 0;
         if (DeepFilterNetProcessor.RoundTripOnly)
         {
             _inputBuffer.Write(buffer);
@@ -210,7 +211,6 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             return;
         }
 
-        int read = 0;
         _inputBuffer.Write(buffer);
         _frameSignal?.Set();
         read = _outputBuffer.Read(_processedScratch.AsSpan(0, buffer.Length));
