@@ -26,11 +26,7 @@ internal sealed class Array<T>
         _offset = array._offset + offset;
     }
 
-    public T this[int index]
-    {
-        get => _fullArray[_offset + index];
-        set => _fullArray[_offset + index] = value;
-    }
+    public ref T this[int index] => ref _fullArray[_offset + index];
 
     public override bool Equals(object? o)
     {

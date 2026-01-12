@@ -30,7 +30,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private int _sampleRate;
     private Thread? _workerThread;
     private AutoResetEvent? _frameSignal;
-    private volatile int _running;
+    private int _running;
     private bool _debugEnabled;
     private long _debugNextTicks;
     private int _debugProcessCalls;
