@@ -144,11 +144,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         InitializeBuffers(blockSize);
         if (DeepFilterNetProcessor.RoundTripOnly)
         {
-            _statusMessage = "DeepFilterNet STFT round-trip mode.";
-            int hop = Math.Max(1, _hopSize);
-            int minOutput = ((blockSize / hop) + 2) * hop;
-            _roundTripMinOutput = Math.Min(_outputBuffer!.Capacity, Math.Max(hop * 2, minOutput));
-            _roundTripPrimed = false;
+            _statusMessage = "DeepFilterNet passthrough mode (no STFT).";
         }
         _mixSmoother.Configure(sampleRate, MixSmoothingMs, _reductionPct / 100f);
         if (!DeepFilterNetProcessor.RoundTripOnly)
@@ -173,44 +169,14 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             _wasBypassed = false;
         }
 
-        int read = 0;
         if (DeepFilterNetProcessor.RoundTripOnly)
         {
-            _inputBuffer.Write(buffer);
-            while (_inputBuffer.AvailableRead >= _hopSize)
-            {
-                int hopRead = _inputBuffer.Read(_hopBuffer);
-                if (hopRead < _hopSize)
-                {
-                    break;
-                }
-
-                _processor.ProcessHop(_hopBuffer, _hopOutput, postFilterEnabled: false, attenLimitDb: _attenLimitDb);
-                _outputBuffer.Write(_hopOutput);
-            }
-
-            if (!_roundTripPrimed && _outputBuffer.AvailableRead >= _roundTripMinOutput)
-            {
-                _roundTripPrimed = true;
-            }
-
-            if (!_roundTripPrimed)
-            {
-                buffer.Clear();
-                Interlocked.Exchange(ref _gainReductionDbBits, 0);
-                return;
-            }
-
-            read = _outputBuffer.Read(buffer);
-            if (read < buffer.Length)
-            {
-                buffer.Slice(read).Clear();
-            }
-
+            // Passthrough to confirm the DFN wrapper is not introducing artifacts.
             Interlocked.Exchange(ref _gainReductionDbBits, 0);
             return;
         }
 
+        int read = 0;
         _inputBuffer.Write(buffer);
         _frameSignal?.Set();
         read = _outputBuffer.Read(_processedScratch.AsSpan(0, buffer.Length));
