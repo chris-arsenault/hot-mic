@@ -10,7 +10,6 @@ internal sealed class DeepFilterNetStft
     private readonly int _freqSize;
     private readonly float[] _window;
     private readonly float _wnorm;
-    private readonly float _wnormInv;
     private readonly float[] _analysisMem;
     private readonly float[] _synthesisMem;
     private readonly float[] _timeBuffer;
@@ -29,8 +28,8 @@ internal sealed class DeepFilterNetStft
         _timeBuffer = new float[fftSize];
 
         _window = BuildVorbisWindow(fftSize);
+        // Match libDF normalization: apply wnorm in analysis only.
         _wnorm = 1f / (fftSize * fftSize / (2f * hopSize));
-        _wnormInv = _wnorm > 0f ? 1f / _wnorm : 1f;
 
         var arithmetic = new FloatArithmetic();
         _fftForward = new KissFFT<float>(fftSize, inverse: false, arithmetic);
@@ -121,8 +120,8 @@ internal sealed class DeepFilterNetStft
                 im = 0f;
             }
 
-            _fftInput[i].r = re * _wnormInv;
-            _fftInput[i].i = im * _wnormInv;
+            _fftInput[i].r = re;
+            _fftInput[i].i = im;
         }
         for (int i = 1; i < _freqSize - 1; i++)
         {
@@ -133,10 +132,9 @@ internal sealed class DeepFilterNetStft
 
         _fftInverse.kiss_fft(new Array<kiss_fft_cpx<float>>(_fftInput), new Array<kiss_fft_cpx<float>>(_fftOutput));
 
-        float inv = 1f / _fftSize;
         for (int i = 0; i < _fftSize; i++)
         {
-            _timeBuffer[i] = _fftOutput[i].r * inv * _window[i];
+            _timeBuffer[i] = _fftOutput[i].r * _window[i];
         }
 
         for (int i = 0; i < _hopSize; i++)
