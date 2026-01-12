@@ -14,6 +14,8 @@ public sealed class SaturationRenderer : IDisposable
     private const float MeterHeight = 120f;
     private const float CurveSize = 100f;
     private const float CornerRadius = 10f;
+    private const float WarmthPivotPct = 50f;
+    private const float WarmthOverdriveMax = 2f;
 
     private readonly PluginComponentTheme _theme;
     private readonly RotaryKnob _knob;
@@ -288,7 +290,7 @@ public sealed class SaturationRenderer : IDisposable
         // Linear reference (diagonal)
         canvas.DrawLine(rect.Left + 4, rect.Bottom - 4, rect.Right - 4, rect.Top + 4, _curveLinearPaint);
 
-        float warmth = Math.Clamp(warmthPct / 100f, 0f, 1f);
+        float warmth = MapWarmthPreview(warmthPct);
         float env = 0.6f; // nominal level for previewing the dynamic curve
         float bias = 0.04f * warmth;
         float driveK = 0.6f * warmth;
@@ -330,6 +332,18 @@ public sealed class SaturationRenderer : IDisposable
 
         // Label
         canvas.DrawText("CURVE", rect.MidX, rect.Bottom + 14, _labelPaint);
+    }
+
+    private static float MapWarmthPreview(float warmthPct)
+    {
+        float clamped = Math.Clamp(warmthPct, 0f, 100f);
+        if (clamped <= WarmthPivotPct)
+        {
+            return clamped / WarmthPivotPct;
+        }
+
+        float t = (clamped - WarmthPivotPct) / (100f - WarmthPivotPct);
+        return 1f + t * (WarmthOverdriveMax - 1f);
     }
 
     public SaturationHitTest HitTest(float x, float y)

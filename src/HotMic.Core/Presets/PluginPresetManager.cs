@@ -568,7 +568,7 @@ public sealed class PluginPresetManager
         return new PluginPresetBank("builtin:saturation",
         [
             CreatePreset(PodcastPresetName,
-                ("Warmth", 35f),
+                ("Warmth", 50f),
                 ("Blend", 100f))
         ]);
     }

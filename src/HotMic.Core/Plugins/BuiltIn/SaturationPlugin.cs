@@ -16,6 +16,8 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
     private const float PreEmphasisHz = 6000f;
     private const float HfSplitHz = 3500f;
     private const float FilterQ = 0.707f;
+    private const float WarmthPivotPct = 50f;
+    private const float WarmthOverdriveMax = 2f;
     private const float MaxDriveK = 0.6f;
     private const float MaxBias = 0.04f;
     private const float MinShaperA = 0.18f;
@@ -24,7 +26,7 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
     private const float MaxShaperB = 0.03f;
     private const float OutputTrimMax = 0.95f;
 
-    private float _warmthPct = 30f;
+    private float _warmthPct = 50f;
     private float _blendPct = 100f;
     private int _sampleRate;
     private int _blockSize;
@@ -53,7 +55,7 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
     {
         Parameters =
         [
-            new PluginParameter { Index = WarmthIndex, Name = "Warmth", MinValue = 0f, MaxValue = 100f, DefaultValue = 30f, Unit = "%" },
+            new PluginParameter { Index = WarmthIndex, Name = "Warmth", MinValue = 0f, MaxValue = 100f, DefaultValue = 50f, Unit = "%" },
             new PluginParameter { Index = BlendIndex, Name = "Blend", MinValue = 0f, MaxValue = 100f, DefaultValue = 100f, Unit = "%" }
         ];
     }
@@ -206,8 +208,9 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
                 _warmthPct = Math.Clamp(value, 0f, 100f);
                 if (_sampleRate > 0)
                 {
-                    _warmthSmoother.SetTarget(_warmthPct / 100f);
-                    UpdateToneFilters(_warmthPct / 100f);
+                    float normalized = MapWarmthNormalized(_warmthPct);
+                    _warmthSmoother.SetTarget(normalized);
+                    UpdateToneFilters(normalized);
                 }
                 break;
             case BlendIndex:
@@ -243,9 +246,9 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
 
         if (_sampleRate > 0)
         {
-            _warmthSmoother.SetTarget(_warmthPct / 100f);
+            _warmthSmoother.SetTarget(MapWarmthNormalized(_warmthPct));
             _blendSmoother.SetTarget(_blendPct / 100f);
-            UpdateToneFilters(_warmthPct / 100f);
+            UpdateToneFilters(MapWarmthNormalized(_warmthPct));
         }
     }
 
@@ -297,7 +300,7 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
         _dryBuffer = new float[_blockSize];
         _oversampledSampleRate = _sampleRate * _oversampleFactor;
 
-        _warmthSmoother.Configure(_oversampledSampleRate, SmoothingMs, _warmthPct / 100f);
+        _warmthSmoother.Configure(_oversampledSampleRate, SmoothingMs, MapWarmthNormalized(_warmthPct));
         _blendSmoother.Configure(_sampleRate, SmoothingMs, _blendPct / 100f);
         _envelope.Configure(AttackMs, ReleaseMs, _oversampledSampleRate);
         _envelope.Reset();
@@ -305,7 +308,7 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
         _preEmphasis.Reset();
         _postEmphasis.Reset();
         _hfLowpass.Reset();
-        UpdateToneFilters(_warmthPct / 100f);
+        UpdateToneFilters(MapWarmthNormalized(_warmthPct));
         UpdateLatency();
     }
 
@@ -320,6 +323,18 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
         _preEmphasis.SetHighShelf(_oversampledSampleRate, PreEmphasisHz, emphasisDb, FilterQ);
         _postEmphasis.SetHighShelf(_oversampledSampleRate, PreEmphasisHz, -emphasisDb, FilterQ);
         _hfLowpass.SetLowPass(_oversampledSampleRate, HfSplitHz, FilterQ);
+    }
+
+    private static float MapWarmthNormalized(float warmthPct)
+    {
+        float clamped = Math.Clamp(warmthPct, 0f, 100f);
+        if (clamped <= WarmthPivotPct)
+        {
+            return clamped / WarmthPivotPct;
+        }
+
+        float t = (clamped - WarmthPivotPct) / (100f - WarmthPivotPct);
+        return 1f + t * (WarmthOverdriveMax - 1f);
     }
 
     private void UpdateLatency()

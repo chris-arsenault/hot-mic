@@ -50,7 +50,7 @@ public static class ElevatedParameterDefinitions
         ["builtin:eq5"] = [new(4, "Lo-Mid", -12f, 12f, 0f, "dB"), new(7, "Hi-Mid", -12f, 12f, 0f, "dB")],
         ["builtin:hpf"] = [new(0, "Cutoff", 20f, 500f, 80f, "Hz"), new(1, "Slope", 0f, 3f, 1f, "")],
         ["builtin:deesser"] = [new(2, "Thresh", -60f, 0f, -20f, "dB"), new(3, "Reduce", 0f, 100f, 50f, "%")],
-        ["builtin:saturation"] = [new(0, "Drive", 0f, 100f, 20f, "%"), new(1, "Mix", 0f, 100f, 100f, "%")],
+        ["builtin:saturation"] = [new(0, "Warmth", 0f, 100f, 50f, "%"), new(1, "Blend", 0f, 100f, 100f, "%")],
         ["builtin:limiter"] = [new(0, "Ceiling", -20f, 0f, -1f, "dB"), new(1, "Release", 10f, 500f, 100f, "ms")],
         ["builtin:fft-noise"] = [new(0, "Reduce", 0f, 100f, 50f, "%"), new(1, "Thresh", -60f, 0f, -40f, "dB")],
         ["builtin:rnnoise"] = [new(0, "Reduce", 0f, 100f, 100f, "%"), new(1, "VAD", 0f, 100f, 0f, "%")],
