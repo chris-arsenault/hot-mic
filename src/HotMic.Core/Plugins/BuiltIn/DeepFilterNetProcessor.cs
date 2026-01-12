@@ -14,6 +14,7 @@ internal sealed class DeepFilterNetProcessor : IDisposable
     private const float MinDbThresh = -10f;
     private const float MaxDbErbThresh = 30f;
     private const float MaxDbDfThresh = 20f;
+    internal const bool RoundTripOnly = true;
     private readonly DeepFilterNetConfig _config;
     private readonly DeepFilterNetInference _inference;
     private readonly DeepFilterNetStft _stft;
@@ -100,14 +101,153 @@ internal sealed class DeepFilterNetProcessor : IDisposable
             throw new ArgumentException("DeepFilterNet hop size mismatch.");
         }
 
-        _ = postFilterEnabled;
-        _ = attenLimitDb;
+        if (RoundTripOnly)
+        {
+            // Diagnostic mode: verify STFT -> ISTFT reconstruction without model processing.
+            _stft.Analyze(input, _specBuffer);
+            _stft.Synthesize(_specBuffer, output);
+            LastGainReductionDb = 0f;
+            return;
+        }
 
-        // Diagnostic mode: verify STFT -> ISTFT reconstruction without model processing.
+        float maxAbs = 0f;
+        float energy = 0f;
+        for (int i = 0; i < input.Length; i++)
+        {
+            float sample = input[i];
+            float abs = MathF.Abs(sample);
+            if (abs > maxAbs)
+            {
+                maxAbs = abs;
+            }
+            energy += sample * sample;
+        }
+
+        if (maxAbs <= 0f)
+        {
+            output.Clear();
+            LastGainReductionDb = 0f;
+            return;
+        }
+
+        float rms = energy / input.Length;
+        if (rms < 1e-7f)
+        {
+            _skipCounter++;
+        }
+        else
+        {
+            _skipCounter = 0;
+        }
+
+        if (_skipCounter > 5)
+        {
+            output.Clear();
+            LastGainReductionDb = 0f;
+            return;
+        }
+
         _stft.Analyze(input, _specBuffer);
-        _stft.Synthesize(_specBuffer, output);
-        LastGainReductionDb = 0f;
-        return;
+        PushHistory(_specBuffer);
+
+        ComputeFeatures();
+
+        using var enc = _inference.RunEncoder(_erbFeatures, _specFeatures);
+        float lsnr = enc.Lsnr;
+        var stages = ApplyStages(lsnr);
+
+        if (_framesProcessed <= _config.Lookahead)
+        {
+            output.Clear();
+            LastGainReductionDb = 0f;
+            return;
+        }
+
+        int targetIndex = GetHistoryIndex(_config.Lookahead);
+        float[] noisyTarget = _noisyHistory[targetIndex];
+        float[] enhTarget = _enhHistory[targetIndex];
+
+        if (stages.applyGains)
+        {
+            _inference.FillGains(enc, _gains);
+            DeepFilterNetDsp.ApplyInterpBandGain(enhTarget, _gains, _erbBands);
+        }
+        else if (stages.applyGainZeros)
+        {
+            Array.Clear(_gains, 0, _gains.Length);
+            DeepFilterNetDsp.ApplyInterpBandGain(enhTarget, _gains, _erbBands);
+        }
+
+        Array.Copy(enhTarget, _specOut, _specOut.Length);
+
+        if (stages.applyDf)
+        {
+            _inference.FillCoefs(enc, _coefs);
+            ApplyDeepFilter(_specOut, targetIndex);
+        }
+
+        if (stages.applyGains && postFilterEnabled)
+        {
+            DeepFilterNetDsp.PostFilter(noisyTarget, _specOut, postFilterEnabled ? DefaultPostFilterBeta : 0f);
+        }
+
+        if (attenLimitDb < 100f)
+        {
+            float minGain = MathF.Pow(10f, -attenLimitDb / 20f);
+            int halfSpec = _specOut.Length / 2;
+
+            for (int bin = 0; bin < halfSpec; bin++)
+            {
+                int idx = bin * 2;
+                float outRe = _specOut[idx];
+                float outIm = _specOut[idx + 1];
+                float inRe = noisyTarget[idx];
+                float inIm = noisyTarget[idx + 1];
+
+                float outMag = MathF.Sqrt(outRe * outRe + outIm * outIm);
+                float inMag = MathF.Sqrt(inRe * inRe + inIm * inIm);
+
+                if (inMag > 1e-10f)
+                {
+                    float gain = outMag / inMag;
+                    if (gain < minGain)
+                    {
+                        // Limit gain while preserving original phase
+                        // Output = input * minGain (uses input phase, limited magnitude)
+                        _specOut[idx] = inRe * minGain;
+                        _specOut[idx + 1] = inIm * minGain;
+                    }
+                }
+            }
+        }
+
+        // Calculate actual GR from spectral energy difference (after all processing)
+        if (stages.applyGains || stages.applyGainZeros)
+        {
+            float inputEnergy = 0f;
+            float outputEnergy = 0f;
+            for (int i = 0; i < _specOut.Length; i++)
+            {
+                inputEnergy += noisyTarget[i] * noisyTarget[i];
+                outputEnergy += _specOut[i] * _specOut[i];
+            }
+
+            if (inputEnergy > 1e-12f && outputEnergy < inputEnergy)
+            {
+                float energyRatio = outputEnergy / inputEnergy;
+                LastGainReductionDb = -10f * MathF.Log10(energyRatio + 1e-10f);
+            }
+            else
+            {
+                LastGainReductionDb = 0f;
+            }
+        }
+        else
+        {
+            LastGainReductionDb = 0f;
+        }
+
+        _stft.Synthesize(_specOut, output);
     }
 
     public void Dispose()

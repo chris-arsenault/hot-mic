@@ -140,7 +140,10 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         }
 
         InitializeBuffers(blockSize);
-        _statusMessage = "DeepFilterNet STFT round-trip mode.";
+        if (DeepFilterNetProcessor.RoundTripOnly)
+        {
+            _statusMessage = "DeepFilterNet STFT round-trip mode.";
+        }
         _mixSmoother.Configure(sampleRate, MixSmoothingMs, _reductionPct / 100f);
         StartWorker();
         _wasBypassed = false;
