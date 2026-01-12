@@ -172,8 +172,8 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             _inputBuffer.Write(buffer);
             while (_inputBuffer.AvailableRead >= _hopSize)
             {
-                int read = _inputBuffer.Read(_hopBuffer);
-                if (read < _hopSize)
+                int hopRead = _inputBuffer.Read(_hopBuffer);
+                if (hopRead < _hopSize)
                 {
                     break;
                 }
