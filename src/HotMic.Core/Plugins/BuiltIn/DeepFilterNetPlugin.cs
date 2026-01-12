@@ -173,6 +173,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             _wasBypassed = false;
         }
 
+        int read = 0;
         if (DeepFilterNetProcessor.RoundTripOnly)
         {
             _inputBuffer.Write(buffer);
@@ -188,24 +189,22 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 _outputBuffer.Write(_hopOutput);
             }
 
-            if (!_roundTripPrimed)
+            if (!_roundTripPrimed && _outputBuffer.AvailableRead >= _roundTripMinOutput)
             {
-                if (_outputBuffer.AvailableRead >= _roundTripMinOutput)
-                {
-                    _roundTripPrimed = true;
-                }
-                else
-                {
-                    buffer.Clear();
-                    Interlocked.Exchange(ref _gainReductionDbBits, 0);
-                    return;
-                }
+                _roundTripPrimed = true;
             }
 
-            int roundTripRead = _outputBuffer.Read(_processedScratch.AsSpan(0, buffer.Length));
-            for (int i = 0; i < buffer.Length; i++)
+            if (!_roundTripPrimed)
             {
-                buffer[i] = i < roundTripRead ? _processedScratch[i] : 0f;
+                buffer.Clear();
+                Interlocked.Exchange(ref _gainReductionDbBits, 0);
+                return;
+            }
+
+            read = _outputBuffer.Read(buffer);
+            if (read < buffer.Length)
+            {
+                buffer.Slice(read).Clear();
             }
 
             Interlocked.Exchange(ref _gainReductionDbBits, 0);
@@ -214,8 +213,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
         _inputBuffer.Write(buffer);
         _frameSignal?.Set();
-
-        int read = _outputBuffer.Read(_processedScratch.AsSpan(0, buffer.Length));
+        read = _outputBuffer.Read(_processedScratch.AsSpan(0, buffer.Length));
 
         float mix = _mixSmoother.Current;
         bool smoothing = _mixSmoother.IsSmoothing;
