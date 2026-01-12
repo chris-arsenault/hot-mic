@@ -10,6 +10,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HotMic.Common", "src/HotMic
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HotMic.Vst3", "src/HotMic.Vst3/HotMic.Vst3.csproj", "{0E24617B-2FC2-4D88-A36F-E1C0180D58FD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HotMic.Core.Tests", "tests/HotMic.Core.Tests/HotMic.Core.Tests.csproj", "{35576D06-1AB2-4E86-ACAF-55D7FABB09D6}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -32,5 +34,9 @@ Global
 		{0E24617B-2FC2-4D88-A36F-E1C0180D58FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0E24617B-2FC2-4D88-A36F-E1C0180D58FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0E24617B-2FC2-4D88-A36F-E1C0180D58FD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{35576D06-1AB2-4E86-ACAF-55D7FABB09D6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{35576D06-1AB2-4E86-ACAF-55D7FABB09D6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{35576D06-1AB2-4E86-ACAF-55D7FABB09D6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{35576D06-1AB2-4E86-ACAF-55D7FABB09D6}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

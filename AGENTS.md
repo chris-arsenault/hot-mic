@@ -440,7 +440,7 @@ HotMic/
 │       └── Models/
 │           └── AudioDevice.cs
 │
-├── tests/ (legacy - no new unit tests)
+├── tests/ (verification-only; not used for long-term behavior)
 │   ├── HotMic.Core.Tests/
 │   │   ├── Plugins/
 │   │   │   ├── CompressorPluginTests.cs
@@ -459,9 +459,10 @@ HotMic/
 
 ## Testing Policy
 
-This project should not have unit tests or integration tests. Do not add new tests or update existing ones.
+This project should not rely on long-term unit or integration tests to control behavior.
+Temporary, isolated verification tests are allowed (for example, DSP math or FFT correctness), but should be clearly scoped and may be removed once validated.
 
-Instead, document complex DSP or UI behavior with concise inline comments near the relevant code so intent and assumptions are captured in context.
+Still document complex DSP or UI behavior with concise inline comments near the relevant code so intent and assumptions are captured in context.
 
 ---
 
