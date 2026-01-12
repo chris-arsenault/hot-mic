@@ -128,12 +128,20 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
             float env = _envelope.Process(x1);
             float drive = 1f + driveK * env;
             float x2 = (x1 + bias) * drive;
+            float biasSignal = bias * drive;
 
             // Polynomial shaper (spec: y = x - a*x^3 + b*x^5) for even-harmonic warmth.
             float x2Sq = x2 * x2;
             float x2Cube = x2Sq * x2;
             float x2Pow5 = x2Cube * x2Sq;
             float shaped = x2 - shaperA * x2Cube + shaperB * x2Pow5;
+
+            // Remove DC offset introduced by the bias so silence stays silent.
+            float biasSq = biasSignal * biasSignal;
+            float biasCube = biasSq * biasSignal;
+            float biasPow5 = biasCube * biasSq;
+            float biasOutput = biasSignal - shaperA * biasCube + shaperB * biasPow5;
+            shaped -= biasOutput;
 
             float low = _hfLowpass.Process(shaped);
             float high = shaped - low;

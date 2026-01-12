@@ -68,8 +68,8 @@ internal sealed class HalfbandResampler
                 }
             }
 
-            output[outIndex++] = even;
-            output[outIndex++] = odd;
+            output[outIndex++] = even * 2f;
+            output[outIndex++] = odd * 2f;
 
             if (++_index == TapCount)
             {
