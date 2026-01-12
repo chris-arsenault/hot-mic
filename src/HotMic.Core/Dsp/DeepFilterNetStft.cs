@@ -13,10 +13,9 @@ internal sealed class DeepFilterNetStft
     private readonly float[] _analysisMem;
     private readonly float[] _synthesisMem;
     private readonly float[] _timeBuffer;
-    private readonly KissFFT<float> _fftForward;
-    private readonly KissFFT<float> _fftInverse;
-    private readonly kiss_fft_cpx<float>[] _fftInput;
-    private readonly kiss_fft_cpx<float>[] _fftOutput;
+    private readonly KissFFTR _fftForward;
+    private readonly KissFFTR _fftInverse;
+    private readonly kiss_fft_cpx<float>[] _freqBuffer;
 
     public DeepFilterNetStft(int fftSize, int hopSize)
     {
@@ -31,16 +30,9 @@ internal sealed class DeepFilterNetStft
         // Match libDF normalization: apply wnorm in analysis only.
         _wnorm = 1f / (fftSize * fftSize / (2f * hopSize));
 
-        var arithmetic = new FloatArithmetic();
-        _fftForward = new KissFFT<float>(fftSize, inverse: false, arithmetic);
-        _fftInverse = new KissFFT<float>(fftSize, inverse: true, arithmetic);
-        _fftInput = new kiss_fft_cpx<float>[fftSize];
-        _fftOutput = new kiss_fft_cpx<float>[fftSize];
-        for (int i = 0; i < fftSize; i++)
-        {
-            _fftInput[i] = new kiss_fft_cpx<float>(0f, 0f);
-            _fftOutput[i] = new kiss_fft_cpx<float>(0f, 0f);
-        }
+        _fftForward = new KissFFTR(fftSize, inverse: false);
+        _fftInverse = new KissFFTR(fftSize, inverse: true);
+        _freqBuffer = new kiss_fft_cpx<float>[_freqSize];
     }
 
     public int FftSize => _fftSize;
@@ -84,18 +76,12 @@ internal sealed class DeepFilterNetStft
             _analysisMem[analysisSplit + i] = inputHop[i];
         }
 
-        for (int i = 0; i < _fftSize; i++)
-        {
-            _fftInput[i].r = _timeBuffer[i];
-            _fftInput[i].i = 0f;
-        }
-
-        _fftForward.kiss_fft(new Array<kiss_fft_cpx<float>>(_fftInput), new Array<kiss_fft_cpx<float>>(_fftOutput));
+        _fftForward.Forward(_timeBuffer, _freqBuffer);
 
         for (int i = 0; i < _freqSize; i++)
         {
-            specInterleaved[i * 2] = _fftOutput[i].r * _wnorm;
-            specInterleaved[i * 2 + 1] = _fftOutput[i].i * _wnorm;
+            specInterleaved[i * 2] = _freqBuffer[i].r * _wnorm;
+            specInterleaved[i * 2 + 1] = _freqBuffer[i].i * _wnorm;
         }
     }
 
@@ -120,21 +106,15 @@ internal sealed class DeepFilterNetStft
                 im = 0f;
             }
 
-            _fftInput[i].r = re;
-            _fftInput[i].i = im;
-        }
-        for (int i = 1; i < _freqSize - 1; i++)
-        {
-            int mirror = _fftSize - i;
-            _fftInput[mirror].r = _fftInput[i].r;
-            _fftInput[mirror].i = -_fftInput[i].i;
+            _freqBuffer[i].r = re;
+            _freqBuffer[i].i = im;
         }
 
-        _fftInverse.kiss_fft(new Array<kiss_fft_cpx<float>>(_fftInput), new Array<kiss_fft_cpx<float>>(_fftOutput));
+        _fftInverse.Inverse(_freqBuffer, _timeBuffer);
 
         for (int i = 0; i < _fftSize; i++)
         {
-            _timeBuffer[i] = _fftOutput[i].r * _window[i];
+            _timeBuffer[i] *= _window[i];
         }
 
         for (int i = 0; i < _hopSize; i++)
@@ -147,7 +127,11 @@ internal sealed class DeepFilterNetStft
         {
             System.Array.Copy(_synthesisMem, _hopSize, _synthesisMem, 0, split);
         }
-        for (int i = 0; i < _synthesisMem.Length; i++)
+        for (int i = 0; i < split; i++)
+        {
+            _synthesisMem[i] += _timeBuffer[_hopSize + i];
+        }
+        for (int i = split; i < _synthesisMem.Length; i++)
         {
             _synthesisMem[i] = _timeBuffer[_hopSize + i];
         }
