@@ -69,7 +69,8 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         _specOut = new float[_specLength];
         _erbFeatures = new float[_config.NbErb];
         _specFeatures = new float[_config.NbDf * 2];
-        _featureFrames = Math.Max(1, _config.ConvLookahead + 1);
+        // Encoder ONNX is stateless; keep a short temporal window to approximate pulsed GRU state.
+        _featureFrames = Math.Max(8, _config.DfOrder + _config.ConvLookahead);
         _specFeatureStride = _config.NbDf * 2;
         _erbFeatureHistory = new float[_featureFrames * _config.NbErb];
         _specFeatureHistory = new float[_featureFrames * _specFeatureStride];
