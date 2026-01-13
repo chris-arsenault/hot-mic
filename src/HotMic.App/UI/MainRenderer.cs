@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using HotMic.App.ViewModels;
+using HotMic.Core.Dsp;
 using SkiaSharp;
 
 namespace HotMic.App.UI;
@@ -19,9 +20,10 @@ public sealed class MainRenderer
 
     // Section dimensions
     private const float InputSectionWidth = 70f;
-    private const float PluginSlotWidth = 68f; // Wide enough for 2 mini knobs stacked
+    private const float PluginSlotWidth = 130f; // 32 bands × 4px = 128px + 2px padding for delta strip
     private const float PluginSlotSpacing = 2f;
     private const float OutputSectionWidth = 70f;
+    private const float DeltaStripHeight = 18f;
     private const float MeterWidth = 16f;
     private const float MiniMeterWidth = 6f;
     private const float StereoMeterWidth = 36f;
@@ -411,10 +413,11 @@ public sealed class MainRenderer
         canvas.DrawRoundRect(roundRect, bgPaint);
         canvas.DrawRoundRect(roundRect, _borderPaint);
 
-        canvas.DrawText($"{slotIndex + 1}", x + 3f, y + 10f, _tinyTextPaint);
-
         if (slot.IsEmpty)
         {
+            // Slot number in corner
+            canvas.DrawText($"{slotIndex + 1}", x + 3f, y + 10f, _tinyTextPaint);
+
             float centerX = x + width / 2f;
             float centerY = y + height / 2f;
             canvas.DrawLine(centerX - 6f, centerY, centerX + 6f, centerY, _iconPaint);
@@ -422,68 +425,103 @@ public sealed class MainRenderer
         }
         else
         {
-            // Bypass button - top right
-            const float bypassBtnSize = 14f;
-            float bypassX = x + width - bypassBtnSize - 2f;
-            float bypassY = y + 2f;
-            var bypassRect = new SKRect(bypassX, bypassY, bypassX + bypassBtnSize, bypassY + bypassBtnSize);
+            // Top row: [BYP] ... Plugin Name ... [X]
+            float topRowY = y + 2f;
+            float topRowH = 12f;
+
+            // Bypass button - left side
+            float bypassW = 20f;
+            float bypassX = x + 3f;
+            var bypassRect = new SKRect(bypassX, topRowY, bypassX + bypassW, topRowY + topRowH);
             var bypassColor = slot.IsBypassed ? _theme.Bypass : _theme.Surface;
             canvas.DrawRoundRect(new SKRoundRect(bypassRect, 2f), CreateFillPaint(bypassColor));
-            canvas.DrawRoundRect(new SKRoundRect(bypassRect, 2f), _borderPaint);
             var bypassTextPaint = slot.IsBypassed
-                ? CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 8f, SKFontStyle.Bold)
-                : CreateCenteredTextPaint(_theme.TextMuted, 8f);
-            canvas.DrawText("B", bypassRect.MidX, bypassRect.MidY + 3f, bypassTextPaint);
+                ? CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 7f, SKFontStyle.Bold)
+                : CreateCenteredTextPaint(_theme.TextMuted, 7f);
+            canvas.DrawText("BYP", bypassRect.MidX, bypassRect.MidY + 2.5f, bypassTextPaint);
 
-            // Draw 2 parameter knobs if plugin has elevated parameters
+            // Remove button (X) - right side
+            float removeSize = 8f;
+            float removeX = x + width - removeSize - 4f;
+            float removeY = topRowY + (topRowH - removeSize) / 2f;
+            var removeIconPaint = CreateStrokePaint(_theme.TextMuted, 1.2f);
+            canvas.DrawLine(removeX, removeY, removeX + removeSize, removeY + removeSize, removeIconPaint);
+            canvas.DrawLine(removeX + removeSize, removeY, removeX, removeY + removeSize, removeIconPaint);
+
+            // Plugin name - centered between bypass and X
+            string displayText = $"{slotIndex + 1}. {slot.DisplayName}";
+            var namePaint = slot.IsBypassed
+                ? CreateCenteredTextPaint(_theme.TextMuted, 8f)
+                : CreateCenteredTextPaint(_theme.TextSecondary, 8f);
+            float nameY = topRowY + topRowH - 2f;
+            float nameLeftEdge = bypassX + bypassW + 4f;
+            float nameRightEdge = removeX - 4f;
+            float maxNameWidth = nameRightEdge - nameLeftEdge;
+            float nameCenterX = nameLeftEdge + maxNameWidth / 2f;
+
+            // Truncate if needed
+            if (namePaint.MeasureText(displayText) > maxNameWidth)
+            {
+                int len = displayText.Length;
+                while (len > 0 && namePaint.MeasureText(displayText[..len] + "..") > maxNameWidth)
+                    len--;
+                displayText = len > 0 ? displayText[..len] + ".." : "..";
+            }
+            canvas.DrawText(displayText, nameCenterX, nameY, namePaint);
+
+            // Draw 2 parameter knobs side by side horizontally (larger, moved down)
+            float largerKnobSize = PluginKnobSize + 4f; // 28px instead of 24px
             if (slot.ElevatedParams is { Length: > 0 } elevParams)
             {
-                float knobCenterX = x + width / 2f;
-                float knobY0 = y + 20f;
-                float knobY1 = y + 20f + PluginKnobSize + 4f;
-                float knobRadius = PluginKnobSize / 2f - 2f;
+                float knobRadius = largerKnobSize / 2f - 2f;
+                float knobY = y + 20f; // Below title row
+                float knobSpacing = 14f;
+                float totalKnobWidth = (largerKnobSize * 2) + knobSpacing;
+                float knobStartX = x + (width - totalKnobWidth) / 2f;
 
-                // Knob 0 (top)
+                // Knob 0 (left)
                 if (elevParams.Length > 0)
                 {
+                    float knob0X = knobStartX + largerKnobSize / 2f;
                     var def0 = elevParams[0];
                     float norm0 = (slot.Param0Value - def0.Min) / (def0.Max - def0.Min);
                     norm0 = Math.Clamp(norm0, 0f, 1f);
-                    DrawPluginKnob(canvas, knobCenterX, knobY0 + knobRadius, knobRadius, norm0, def0.Name, slot.IsBypassed);
-                    var knobRect0 = new SKRect(knobCenterX - knobRadius - 2f, knobY0, knobCenterX + knobRadius + 2f, knobY0 + PluginKnobSize);
+                    DrawPluginKnob(canvas, knob0X, knobY + knobRadius, knobRadius, norm0, def0.Name, slot.IsBypassed);
+                    var knobRect0 = new SKRect(knob0X - knobRadius - 2f, knobY, knob0X + knobRadius + 2f, knobY + largerKnobSize);
                     _pluginKnobRects.Add(new PluginKnobRect(channelIndex, slotIndex, 0, knobRect0, def0.Min, def0.Max));
                 }
 
-                // Knob 1 (bottom)
+                // Knob 1 (right)
                 if (elevParams.Length > 1)
                 {
+                    float knob1X = knobStartX + largerKnobSize + knobSpacing + largerKnobSize / 2f;
                     var def1 = elevParams[1];
                     float norm1 = (slot.Param1Value - def1.Min) / (def1.Max - def1.Min);
                     norm1 = Math.Clamp(norm1, 0f, 1f);
-                    DrawPluginKnob(canvas, knobCenterX, knobY1 + knobRadius, knobRadius, norm1, def1.Name, slot.IsBypassed);
-                    var knobRect1 = new SKRect(knobCenterX - knobRadius - 2f, knobY1, knobCenterX + knobRadius + 2f, knobY1 + PluginKnobSize);
+                    DrawPluginKnob(canvas, knob1X, knobY + knobRadius, knobRadius, norm1, def1.Name, slot.IsBypassed);
+                    var knobRect1 = new SKRect(knob1X - knobRadius - 2f, knobY, knob1X + knobRadius + 2f, knobY + largerKnobSize);
                     _pluginKnobRects.Add(new PluginKnobRect(channelIndex, slotIndex, 1, knobRect1, def1.Min, def1.Max));
                 }
             }
 
-            // Plugin name - vertical text on left side
-            canvas.Save();
-            canvas.RotateDegrees(-90f, x + 10f, y + height - 4f);
-            var textPaint = slot.IsBypassed ? _tinyTextPaint : _smallTextPaint;
-            DrawEllipsizedText(canvas, slot.DisplayName, x + 10f, y + height - 4f, height - 24f, textPaint);
-            canvas.Restore();
+            // F/V mode toggle - small indicator above delta strip on the left
+            float deltaY = y + height - DeltaStripHeight - 2f;
+            string modeChar = slot.DeltaDisplayMode == DeltaDisplayMode.VocalRange ? "V" : "F";
+            var modePaint = CreateCenteredTextPaint(_theme.TextMuted, 7f);
+            float modeX = x + 8f;
+            float modeY = deltaY - 3f;
+            canvas.DrawText(modeChar, modeX, modeY, modePaint);
 
-            // Remove button - bottom right X icon
-            float removeSize = 8f;
-            float removeX = x + width - removeSize - 3f;
-            float removeY = y + height - removeSize - 3f;
-            canvas.DrawLine(removeX, removeY, removeX + removeSize, removeY + removeSize, _iconPaint);
-            canvas.DrawLine(removeX + removeSize, removeY, removeX, removeY + removeSize, _iconPaint);
+            // Delta strip at bottom
+            float deltaWidth = width - 4f;
+            DrawDeltaStrip(canvas, x + 2f, deltaY, deltaWidth, DeltaStripHeight, slot.SpectralDelta, slot.DeltaDisplayMode, slot.IsBypassed);
         }
 
-        var bypassHitRect = new SKRect(x + width - 18f, y + 1f, x + width - 1f, y + 18f);
-        var removeHitRect = new SKRect(x + width - 14f, y + height - 14f, x + width - 1f, y + height - 1f);
-        _pluginSlots.Add(new PluginSlotRect(channelIndex, slotIndex, rect, bypassHitRect, removeHitRect));
+        // Hit rects - bypass on left of title row, X on right of title row
+        var bypassHitRect = slot.IsEmpty ? SKRect.Empty : new SKRect(x + 1f, y + 1f, x + 26f, y + 16f);
+        var removeHitRect = slot.IsEmpty ? SKRect.Empty : new SKRect(x + width - 16f, y + 1f, x + width - 1f, y + 16f);
+        var deltaHitRect = slot.IsEmpty ? SKRect.Empty : new SKRect(x + 2f, y + height - DeltaStripHeight - 2f, x + width - 2f, y + height - 2f);
+        _pluginSlots.Add(new PluginSlotRect(channelIndex, slotIndex, rect, bypassHitRect, removeHitRect, deltaHitRect));
     }
 
     private void DrawPluginKnob(SKCanvas canvas, float cx, float cy, float radius, float normalizedValue, string label, bool dimmed)
@@ -515,6 +553,51 @@ public sealed class MainRenderer
         var labelColor = dimmed ? _theme.TextMuted.WithAlpha(100) : _theme.TextMuted;
         var labelPaint = CreateCenteredTextPaint(labelColor, 6f);
         canvas.DrawText(label, cx, cy + radius + 7f, labelPaint);
+    }
+
+    private void DrawDeltaStrip(SKCanvas canvas, float x, float y, float width, float height,
+                                float[]? deltas, DeltaDisplayMode mode, bool bypassed)
+    {
+        // Background
+        var bgColor = bypassed ? _theme.DeltaNeutral.WithAlpha(100) : _theme.DeltaNeutral;
+        canvas.DrawRect(new SKRect(x, y, x + width, y + height), CreateFillPaint(bgColor));
+
+        if (deltas is null || bypassed) return;
+
+        const int numBands = 32;
+        float bandWidth = width / numBands;
+        float centerY = y + height / 2f;
+        float maxBarHeight = (height - 2f) / 2f;
+
+        // Center line
+        canvas.DrawLine(x, centerY, x + width, centerY, CreateStrokePaint(_theme.DeltaCenterLine, 0.5f));
+
+        for (int i = 0; i < numBands && i < deltas.Length; i++)
+        {
+            float delta = deltas[i];
+            if (MathF.Abs(delta) < 0.5f) continue; // Skip insignificant changes
+
+            // Scale: ±12dB maps to full bar height
+            float barHeight = MathF.Min(MathF.Abs(delta) / 12f, 1f) * maxBarHeight;
+            float barX = x + i * bandWidth + 0.5f;
+            float barW = bandWidth - 1f;
+
+            SKColor color;
+            float barY;
+
+            if (delta > 0) // Boost
+            {
+                color = _theme.DeltaBoost;
+                barY = centerY - barHeight;
+            }
+            else // Cut
+            {
+                color = _theme.DeltaCut;
+                barY = centerY;
+            }
+
+            canvas.DrawRect(new SKRect(barX, barY, barX + barW, barY + barHeight), CreateFillPaint(color));
+        }
     }
 
     private void DrawOutputSection(SKCanvas canvas, float x, float y, float width, float height, ChannelStripViewModel channel, int channelIndex, bool voxScale)
@@ -1129,6 +1212,7 @@ public sealed class MainRenderer
             if (!slot.Rect.Contains(x, y)) continue;
             if (slot.BypassRect.Contains(x, y)) { region = PluginSlotRegion.Bypass; return new PluginSlotHit(slot.ChannelIndex, slot.SlotIndex); }
             if (slot.RemoveRect.Contains(x, y)) { region = PluginSlotRegion.Remove; return new PluginSlotHit(slot.ChannelIndex, slot.SlotIndex); }
+            if (slot.DeltaStripRect.Contains(x, y)) { region = PluginSlotRegion.DeltaStrip; return new PluginSlotHit(slot.ChannelIndex, slot.SlotIndex); }
             region = PluginSlotRegion.Action;
             return new PluginSlotHit(slot.ChannelIndex, slot.SlotIndex);
         }
@@ -1179,7 +1263,7 @@ public sealed class MainRenderer
     // Internal records
     private sealed record KnobRect(int ChannelIndex, KnobType KnobType, SKRect Rect);
     private sealed record PluginKnobRect(int ChannelIndex, int SlotIndex, int ParamIndex, SKRect Rect, float MinValue, float MaxValue);
-    private sealed record PluginSlotRect(int ChannelIndex, int SlotIndex, SKRect Rect, SKRect BypassRect, SKRect RemoveRect);
+    private sealed record PluginSlotRect(int ChannelIndex, int SlotIndex, SKRect Rect, SKRect BypassRect, SKRect RemoveRect, SKRect DeltaStripRect);
     private sealed record ToggleRect(int ChannelIndex, ToggleType ToggleType, SKRect Rect);
     private enum IconType { Close, Minimize, Pin, Settings }
 }
@@ -1187,5 +1271,5 @@ public sealed class MainRenderer
 public readonly record struct KnobHit(int ChannelIndex, KnobType KnobType);
 public readonly record struct PluginKnobHit(int ChannelIndex, int SlotIndex, int ParamIndex, float MinValue, float MaxValue);
 public readonly record struct PluginSlotHit(int ChannelIndex, int SlotIndex);
-public enum PluginSlotRegion { None, Action, Bypass, Remove, Knob }
+public enum PluginSlotRegion { None, Action, Bypass, Remove, Knob, DeltaStrip }
 public readonly record struct ToggleHit(int ChannelIndex, ToggleType ToggleType);

@@ -407,6 +407,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (region == PluginSlotRegion.DeltaStrip)
+        {
+            if (!slot.IsEmpty)
+            {
+                slot.ToggleDeltaDisplayMode();
+            }
+            return;
+        }
+
         if (slot.IsEmpty)
         {
             slot.ActionCommand.Execute(null);

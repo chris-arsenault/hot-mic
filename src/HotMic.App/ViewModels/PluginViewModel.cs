@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using HotMic.App.Models;
+using HotMic.Core.Dsp;
 
 namespace HotMic.App.ViewModels;
 
@@ -49,6 +50,14 @@ public partial class PluginViewModel : ObservableObject
     [ObservableProperty]
     private float outputRmsLevel;
 
+    // Spectral delta data for the delta strip visualization (32 bands)
+    [ObservableProperty]
+    private float[]? spectralDelta;
+
+    // Display mode for the delta strip (Full Spectrum vs Vocal Range)
+    [ObservableProperty]
+    private DeltaDisplayMode deltaDisplayMode = DeltaDisplayMode.VocalRange;
+
     // Elevated parameter definitions (from ElevatedParameterDefinitions)
     public ElevatedParameterDefinitions.ParamDef[]? ElevatedParams { get; private set; }
 
@@ -64,6 +73,16 @@ public partial class PluginViewModel : ObservableObject
     public IRelayCommand ActionCommand { get; }
 
     public IRelayCommand RemoveCommand { get; }
+
+    /// <summary>
+    /// Toggle between Full Spectrum and Vocal Range display modes for the delta strip.
+    /// </summary>
+    public void ToggleDeltaDisplayMode()
+    {
+        DeltaDisplayMode = DeltaDisplayMode == DeltaDisplayMode.VocalRange
+            ? DeltaDisplayMode.FullSpectrum
+            : DeltaDisplayMode.VocalRange;
+    }
 
     public static PluginViewModel CreateEmpty(int channelId, int slotIndex, Action? action = null, Action? remove = null, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int, bool>? bypassConfigSink = null)
     {

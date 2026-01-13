@@ -60,4 +60,10 @@ public sealed class HotMicTheme
     public SKColor ChannelPlugins { get; } = new(0x1C, 0x1C, 0x22);
     public SKColor ChannelOutput { get; } = new(0x22, 0x1C, 0x1C);
     public SKColor MasterSection { get; } = new(0x1E, 0x1A, 0x22);
+
+    // Delta strip colors (spectral frequency change visualization)
+    public SKColor DeltaBoost { get; } = new(0x4C, 0xAF, 0x50);      // Green for boost/increase
+    public SKColor DeltaCut { get; } = new(0x21, 0x96, 0xF3);        // Blue for cut/reduction
+    public SKColor DeltaNeutral { get; } = new(0x28, 0x28, 0x30);    // Background
+    public SKColor DeltaCenterLine { get; } = new(0x40, 0x40, 0x48); // Center reference line
 }

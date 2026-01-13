@@ -395,6 +395,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (_isInitializing) return;
         _audioEngine.SetMasterMute(value);
+        _config.Ui.MasterMuted = value;
+        _configManager.Save(_config);
     }
 
     private void OpenSettings()
@@ -562,6 +564,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             _audioEngine.Start();
+            _audioEngine.SetMasterMute(MasterMuted);
         }
         catch (Exception ex)
         {
@@ -701,12 +704,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     // Window size constants (must match MainRenderer layout calculations)
-    // MainRenderer: PluginSlotWidth=68, MiniMeterWidth=6, PluginSlotSpacing=2
-    // Filled slot = (68-6-2) + 6 + 2 = 68px, Empty slot = 36 + 6 + 2 = 44px
+    // MainRenderer: PluginSlotWidth=130, MiniMeterWidth=6, PluginSlotSpacing=2
     private const double FullViewBaseWidth = 300;
-    private const double PluginSlotWidthWithSpacing = 70; // Filled slot width + meter + spacing (60 + 6 + 2 + padding)
-    private const double MaxFullViewWidth = 1200;
-    private const double MinFullViewWidth = 400;
+    private const double PluginSlotWidthWithSpacing = 140; // Filled slot width (130) + meter (6) + spacing (2) + padding
+    private const double MaxFullViewWidth = 1600;
+    private const double MinFullViewWidth = 500;
     private const double FullViewHeight = 290;
     private const double MinimalViewWidth = 400;
     private const double MinimalViewHeight = 140;
@@ -717,6 +719,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         AlwaysOnTop = _config.Ui.AlwaysOnTop;
         MeterScaleVox = _config.Ui.MeterScaleVox;
         MasterMeterLufs = _config.Ui.MasterMeterLufs;
+        MasterMuted = _config.Ui.MasterMuted;
         WindowX = _config.Ui.WindowPosition.X;
         WindowY = _config.Ui.WindowPosition.Y;
 
@@ -1065,21 +1068,43 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private static void UpdatePluginMeters(ChannelStripViewModel viewModel, ChannelStrip channel)
     {
         var meters = channel.PluginChain.GetMeterSnapshot();
+        var deltas = channel.PluginChain.GetDeltaSnapshot();
         int pluginSlots = Math.Max(0, viewModel.PluginSlots.Count - 1);
-        int count = Math.Min(pluginSlots, meters.Length);
+        int meterCount = Math.Min(pluginSlots, meters.Length);
+        int deltaCount = Math.Min(pluginSlots, deltas.Length);
 
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < meterCount; i++)
         {
             var slot = viewModel.PluginSlots[i];
             slot.OutputPeakLevel = meters[i].GetPeakLevel();
             slot.OutputRmsLevel = meters[i].GetRmsLevel();
         }
 
-        for (int i = count; i < pluginSlots; i++)
+        // Update spectral delta data and sync display mode
+        for (int i = 0; i < deltaCount; i++)
+        {
+            var slot = viewModel.PluginSlots[i];
+            var delta = deltas[i];
+
+            // Sync display mode from ViewModel to processor (so V/F toggle works)
+            if (delta.DisplayMode != slot.DeltaDisplayMode)
+            {
+                delta.DisplayMode = slot.DeltaDisplayMode;
+            }
+
+            if (delta.HasUpdate)
+            {
+                slot.SpectralDelta = delta.BandDeltas;
+                delta.HasUpdate = false;
+            }
+        }
+
+        for (int i = meterCount; i < pluginSlots; i++)
         {
             var slot = viewModel.PluginSlots[i];
             slot.OutputPeakLevel = 0f;
             slot.OutputRmsLevel = 0f;
+            slot.SpectralDelta = null;
         }
     }
 
