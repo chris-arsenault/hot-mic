@@ -42,10 +42,6 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private float _smoothedGrDb;
     private long _inputDropSamples;
     private long _outputUnderrunSamples;
-    private long _lastInputDropSamples;
-    private long _lastOutputUnderrunSamples;
-    private int _lastStatusUpdateMs;
-    private bool _statusIsUnderrun;
     private const float GrSmoothingAttack = 0.3f;
     private const float GrSmoothingRelease = 0.85f;
     private const float SilenceThreshold = 1e-8f;
@@ -95,6 +91,10 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
+
+    public long InputDropSamples => Interlocked.Read(ref _inputDropSamples);
+
+    public long OutputUnderrunSamples => Interlocked.Read(ref _outputUnderrunSamples);
 
     /// <summary>
     /// Gets the current gain reduction in dB (positive value = reduction).
@@ -368,10 +368,6 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         _smoothedGrDb = 0f;
         _inputDropSamples = 0;
         _outputUnderrunSamples = 0;
-        _lastInputDropSamples = 0;
-        _lastOutputUnderrunSamples = 0;
-        _lastStatusUpdateMs = 0;
-        _statusIsUnderrun = false;
         Interlocked.Exchange(ref _gainReductionDbBits, 0);
     }
 
@@ -431,7 +427,6 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         while (Volatile.Read(ref _running) == 1)
         {
             _frameSignal.WaitOne(10);
-            UpdateUnderrunStatus();
 
             while (_inputBuffer.AvailableRead >= _hopSize)
             {
@@ -447,40 +442,6 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 _outputBuffer.Write(_hopOutput);
             }
         }
-    }
-
-    private void UpdateUnderrunStatus()
-    {
-        if (_forcedBypass || DeepFilterNetProcessor.RoundTripOnly)
-        {
-            return;
-        }
-
-        if (IsBypassed)
-        {
-            if (_statusIsUnderrun)
-            {
-                _statusMessage = string.Empty;
-                _statusIsUnderrun = false;
-            }
-            return;
-        }
-
-        int now = Environment.TickCount;
-        if (now - _lastStatusUpdateMs < 1000)
-        {
-            return;
-        }
-
-        _lastStatusUpdateMs = now;
-
-        long dropped = Interlocked.Read(ref _inputDropSamples);
-        long underrun = Interlocked.Read(ref _outputUnderrunSamples);
-        _lastInputDropSamples = dropped;
-        _lastOutputUnderrunSamples = underrun;
-
-        _statusMessage = $"DeepFilterNet buffers: dropped {dropped} / short {underrun} samples.";
-        _statusIsUnderrun = true;
     }
 
     private static string ResolveModelDirectory()

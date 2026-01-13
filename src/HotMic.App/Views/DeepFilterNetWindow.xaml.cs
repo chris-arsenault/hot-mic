@@ -67,6 +67,12 @@ public partial class DeepFilterNetWindow : Window
         float sampleRate = 48000f; // DeepFilterNet requires 48kHz
         float latencyMs = _plugin.LatencySamples > 0 ? _plugin.LatencySamples * 1000f / sampleRate : 0f;
 
+        string statusMessage = _plugin.StatusMessage;
+        if (string.IsNullOrEmpty(statusMessage))
+        {
+            statusMessage = $"Buffers: dropped {_plugin.InputDropSamples} / short {_plugin.OutputUnderrunSamples}";
+        }
+
         var state = new DeepFilterNetState(
             ReductionPercent: GetParameterValue(DeepFilterNetPlugin.ReductionIndex),
             AttenuationLimitDb: GetParameterValue(DeepFilterNetPlugin.AttenuationIndex),
@@ -74,7 +80,7 @@ public partial class DeepFilterNetWindow : Window
             GainReductionDb: _plugin.GainReductionDb,
             LatencyMs: latencyMs,
             IsBypassed: _plugin.IsBypassed,
-            StatusMessage: _plugin.StatusMessage,
+            StatusMessage: statusMessage,
             HoveredKnob: _hoveredKnob,
             PresetName: _presetHelper.CurrentPresetName
         );
