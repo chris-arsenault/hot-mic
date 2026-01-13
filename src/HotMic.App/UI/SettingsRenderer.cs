@@ -132,7 +132,7 @@ public sealed class SettingsRenderer
         DrawCheckbox(canvas, "Enable MIDI", viewModel.EnableMidi, Padding + halfWidth + ColumnSpacing, y, out _midiCheckboxRect);
         y += FieldHeight + RowSpacing;
 
-        // Row 6: MIDI Device dropdown (only if MIDI enabled)
+        // Row 7: MIDI Device dropdown (only if MIDI enabled)
         if (viewModel.EnableMidi)
         {
             DrawFieldRow(canvas, "MIDI Device", viewModel.SelectedMidiDevice ?? "Select...", Padding, y, halfWidth, SettingsField.MidiDevice);

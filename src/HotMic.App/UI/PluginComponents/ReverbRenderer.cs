@@ -21,6 +21,7 @@ public sealed class ReverbRenderer : IDisposable
     private readonly PluginComponentTheme _theme;
     private readonly WaveformDisplay _waveformDisplay;
     private readonly RotaryKnob _knob;
+    private readonly PluginPresetBar _presetBar;
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -51,6 +52,7 @@ public sealed class ReverbRenderer : IDisposable
         _theme = theme ?? PluginComponentTheme.Default;
         _waveformDisplay = new WaveformDisplay(_theme);
         _knob = new RotaryKnob(_theme);
+        _presetBar = new PluginPresetBar(_theme);
 
         _backgroundPaint = new SKPaint
         {
@@ -180,6 +182,11 @@ public sealed class ReverbRenderer : IDisposable
 
         // Title
         canvas.DrawText("Convolution Reverb", Padding, TitleBarHeight / 2f + 5, _titlePaint);
+
+        // Preset bar
+        float presetBarX = Padding + 130;
+        float presetBarY = (TitleBarHeight - PluginPresetBar.TotalHeight) / 2f;
+        _presetBar.Render(canvas, presetBarX, presetBarY, state.PresetName);
 
         // Bypass button
         float bypassWidth = 60f;
@@ -493,6 +500,12 @@ public sealed class ReverbRenderer : IDisposable
         if (_bypassButtonRect.Contains(x, y))
             return new ReverbHitTest(ReverbHitArea.BypassButton, -1);
 
+        var presetHit = _presetBar.HitTest(x, y);
+        if (presetHit == PresetBarHitArea.Dropdown)
+            return new ReverbHitTest(ReverbHitArea.PresetDropdown, -1);
+        if (presetHit == PresetBarHitArea.SaveButton)
+            return new ReverbHitTest(ReverbHitArea.PresetSave, -1);
+
         if (!_loadButtonRect.IsEmpty && _loadButtonRect.Contains(x, y))
             return new ReverbHitTest(ReverbHitArea.LoadButton, -1);
 
@@ -520,12 +533,15 @@ public sealed class ReverbRenderer : IDisposable
         return new ReverbHitTest(ReverbHitArea.None, -1);
     }
 
+    public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
+
     public static SKSize GetPreferredSize() => new(450, 450);
 
     public void Dispose()
     {
         _waveformDisplay.Dispose();
         _knob.Dispose();
+        _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -551,7 +567,8 @@ public record struct ReverbState(
     string StatusMessage,
     string? LoadedIrPath,
     bool IsBypassed,
-    int HoveredKnob = -1);
+    int HoveredKnob = -1,
+    string PresetName = "Custom");
 
 public enum ReverbHitArea
 {
@@ -561,7 +578,9 @@ public enum ReverbHitArea
     BypassButton,
     Knob,
     Preset,
-    LoadButton
+    LoadButton,
+    PresetDropdown,
+    PresetSave
 }
 
 public record struct ReverbHitTest(ReverbHitArea Area, int Index);

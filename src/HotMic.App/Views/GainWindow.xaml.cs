@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
+using HotMic.Core.Presets;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
 
@@ -17,6 +19,7 @@ public partial class GainWindow : Window
     private readonly Action<int, float> _parameterCallback;
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
+    private readonly PluginPresetHelper _presetHelper;
 
     private bool _isKnobActive;
     private float _dragStartY;
@@ -31,6 +34,12 @@ public partial class GainWindow : Window
         _plugin = plugin;
         _parameterCallback = parameterCallback;
         _bypassCallback = bypassCallback;
+
+        _presetHelper = new PluginPresetHelper(
+            plugin.Id,
+            PluginPresetManager.Default,
+            ApplyPreset,
+            GetCurrentParameters);
 
         var preferredSize = GainRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -70,7 +79,8 @@ public partial class GainWindow : Window
             IsPhaseInverted: _plugin.IsPhaseInverted,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
-            IsKnobHovered: _isKnobHovered
+            IsKnobHovered: _isKnobHovered,
+            PresetName: _presetHelper.CurrentPresetName
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
@@ -107,6 +117,17 @@ public partial class GainWindow : Window
             case GainHitArea.PhaseButton:
                 float newPhase = _plugin.IsPhaseInverted ? 0f : 1f;
                 _parameterCallback(GainPlugin.PhaseInvertIndex, newPhase);
+                _presetHelper.MarkAsCustom();
+                e.Handled = true;
+                break;
+
+            case GainHitArea.PresetDropdown:
+                _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
+                e.Handled = true;
+                break;
+
+            case GainHitArea.PresetSave:
+                _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
 
@@ -160,6 +181,34 @@ public partial class GainWindow : Window
         // 0 to 1 maps to -24 to +24 dB
         float gainDb = -24f + normalizedValue * 48f;
         _parameterCallback(GainPlugin.GainIndex, gainDb);
+        _presetHelper.MarkAsCustom();
+    }
+
+    private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)
+    {
+        foreach (var (name, value) in parameters)
+        {
+            int paramIndex = name switch
+            {
+                "Gain" => GainPlugin.GainIndex,
+                "PhaseInvert" => GainPlugin.PhaseInvertIndex,
+                _ => -1
+            };
+
+            if (paramIndex >= 0)
+            {
+                _parameterCallback(paramIndex, value);
+            }
+        }
+    }
+
+    private Dictionary<string, float> GetCurrentParameters()
+    {
+        return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Gain"] = _plugin.GainDb,
+            ["PhaseInvert"] = _plugin.IsPhaseInverted ? 1f : 0f
+        };
     }
 
     private float GetDpiScale()

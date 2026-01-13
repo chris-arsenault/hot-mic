@@ -11,6 +11,7 @@ using HotMic.Core.Engine;
 using HotMic.Core.Midi;
 using HotMic.Core.Plugins;
 using HotMic.Core.Plugins.BuiltIn;
+using HotMic.Core.Presets;
 using HotMic.App.Models;
 using HotMic.App.Views;
 using HotMic.Vst3;
@@ -25,10 +26,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private MidiManager? _midiManager;
     private readonly DispatcherTimer _meterTimer;
     private AppConfig _config;
+    private readonly PluginPresetManager _presetManager = PluginPresetManager.Default;
     private long _lastMeterUpdateTicks;
     private long _nextDebugUpdateTicks;
     private static readonly long DebugUpdateIntervalTicks = Math.Max(1, Stopwatch.Frequency / 4);
     private bool _isInitializing = true; // Skip side effects during initial config load
+#pragma warning disable CS0649 // Field is reserved for future batch preset operations
+    private bool _suppressPresetUpdates;
+#pragma warning restore CS0649
 
     // 30-second rolling window for drop tracking
     private readonly Queue<(long ticks, long input1, long input2, long underflow1, long underflow2)> _dropHistory = new();
@@ -130,6 +135,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     int.TryParse(parts[3], out int paramIndex))
                 {
                     ApplyPluginParameter(channelIndex, pluginIndex, paramIndex, "midi", value);
+
+                    // Update the UI knob (slot indices in PluginSlots are 1-based, +1 for add placeholder)
+                    if (pluginIndex < channel.PluginSlots.Count - 1)
+                    {
+                        var slot = channel.PluginSlots[pluginIndex];
+                        if (slot.ElevatedParams is { } elevParams)
+                        {
+                            // Find which elevated index matches this parameter index
+                            for (int i = 0; i < elevParams.Length; i++)
+                            {
+                                if (elevParams[i].Index == paramIndex)
+                                {
+                                    slot.SetParamValueSilent(i, value);
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
                 break;
         }
@@ -236,6 +259,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool meterScaleVox;
 
+    // Master meter display mode (false = dB, true = LUFS)
+    [ObservableProperty]
+    private bool masterMeterLufs;
+
+    [ObservableProperty]
+    private float masterLufsMomentaryLeft = -70f;
+
+    [ObservableProperty]
+    private float masterLufsMomentaryRight = -70f;
+
+    [ObservableProperty]
+    private float masterLufsShortTermLeft = -70f;
+
+    [ObservableProperty]
+    private float masterLufsShortTermRight = -70f;
+
     [ObservableProperty]
     private AudioQualityMode qualityMode;
 
@@ -270,6 +309,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private AudioEngineDiagnosticsSnapshot diagnostics;
+
+    [ObservableProperty]
+    private string channel1PresetName = PluginPresetManager.CustomPresetName;
+
+    [ObservableProperty]
+    private string channel2PresetName = PluginPresetManager.CustomPresetName;
 
     public string ViewToggleLabel => IsMinimalView ? "Full" : "Minimal";
 
@@ -429,6 +474,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (_isInitializing) return;
         _config.Ui.MeterScaleVox = value;
+        _configManager.Save(_config);
+    }
+
+    partial void OnMasterMeterLufsChanged(bool value)
+    {
+        if (_isInitializing) return;
+        _config.Ui.MasterMeterLufs = value;
         _configManager.Save(_config);
     }
 
@@ -649,10 +701,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     }
 
     // Window size constants (must match MainRenderer layout calculations)
-    // Layout calculation: pluginArea = windowWidth - 294 (from MainRenderer layout)
-    // Each slot needs 54px, so: windowWidth = 300 + N * 54 gives comfortable fit
+    // MainRenderer: PluginSlotWidth=68, MiniMeterWidth=6, PluginSlotSpacing=2
+    // Filled slot = (68-6-2) + 6 + 2 = 68px, Empty slot = 36 + 6 + 2 = 44px
     private const double FullViewBaseWidth = 300;
-    private const double PluginSlotWidthWithSpacing = 54; // Narrow slot width + spacing (52 + 2)
+    private const double PluginSlotWidthWithSpacing = 70; // Filled slot width + meter + spacing (60 + 6 + 2 + padding)
     private const double MaxFullViewWidth = 1200;
     private const double MinFullViewWidth = 400;
     private const double FullViewHeight = 290;
@@ -664,6 +716,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         IsMinimalView = string.Equals(_config.Ui.ViewMode, "minimal", StringComparison.OrdinalIgnoreCase);
         AlwaysOnTop = _config.Ui.AlwaysOnTop;
         MeterScaleVox = _config.Ui.MeterScaleVox;
+        MasterMeterLufs = _config.Ui.MasterMeterLufs;
         WindowX = _config.Ui.WindowPosition.X;
         WindowY = _config.Ui.WindowPosition.Y;
 
@@ -708,6 +761,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Channel2.IsMuted = channel2Config.IsMuted;
             Channel2.IsSoloed = channel2Config.IsSoloed;
         }
+
+        // Initialize preset names
+        Channel1PresetName = GetChannelPresetName(0);
+        Channel2PresetName = GetChannelPresetName(1);
     }
 
     private void LoadPluginsFromConfig()
@@ -723,6 +780,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
         {
+            return;
+        }
+
+        if (config is not null &&
+            config.Plugins.Count == 0 &&
+            !IsCustomPreset(config.PresetName))
+        {
+            ApplyChannelPreset(channelIndex, config.PresetName);
             return;
         }
 
@@ -767,11 +832,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 plugin.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
                 plugin.IsBypassed = pluginConfig.IsBypassed;
 
-                foreach (var parameter in plugin.Parameters)
+                bool appliedPreset = false;
+                if (pluginConfig.Parameters.Count == 0 &&
+                    !string.IsNullOrWhiteSpace(pluginConfig.PresetName) &&
+                    !IsCustomPreset(pluginConfig.PresetName) &&
+                    _presetManager.TryGetPreset(plugin.Id, pluginConfig.PresetName, out var preset))
                 {
-                    if (pluginConfig.Parameters.TryGetValue(parameter.Name, out var value))
+                    pluginConfig.Parameters = ApplyPresetParameters(plugin, preset);
+                    appliedPreset = true;
+                }
+
+                if (!appliedPreset)
+                {
+                    foreach (var parameter in plugin.Parameters)
                     {
-                        plugin.SetParameter(parameter.Index, value);
+                        if (pluginConfig.Parameters.TryGetValue(parameter.Name, out var value))
+                        {
+                            plugin.SetParameter(parameter.Index, value);
+                        }
                     }
                 }
 
@@ -786,6 +864,136 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         strip.PluginChain.ReplaceAll(pluginList.ToArray());
         RefreshPluginViewModels(channelIndex);
+    }
+
+    private static bool IsCustomPreset(string? presetName)
+    {
+        return string.IsNullOrWhiteSpace(presetName) ||
+               presetName.Equals(PluginPresetManager.CustomPresetName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private Dictionary<string, float> ApplyPresetParameters(IPlugin plugin, PluginPreset preset)
+    {
+        var parameters = new Dictionary<string, float>(plugin.Parameters.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var parameter in plugin.Parameters)
+        {
+            if (preset.Parameters.TryGetValue(parameter.Name, out var value))
+            {
+                plugin.SetParameter(parameter.Index, value);
+                parameters[parameter.Name] = value;
+            }
+            else
+            {
+                parameters[parameter.Name] = parameter.DefaultValue;
+            }
+        }
+        return parameters;
+    }
+
+    private void ApplyChannelPreset(int channelIndex, string presetName)
+    {
+        if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
+        {
+            return;
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        if (IsCustomPreset(presetName))
+        {
+            config.PresetName = PluginPresetManager.CustomPresetName;
+            _configManager.Save(_config);
+            return;
+        }
+
+        if (!_presetManager.TryGetChainPreset(presetName, out var chainPreset))
+        {
+            return;
+        }
+
+        var strip = _audioEngine.Channels[channelIndex];
+        var profile = GetQualityProfile();
+        var pluginList = new List<IPlugin>(chainPreset.Entries.Count);
+        var pluginConfigs = new List<PluginConfig>(chainPreset.Entries.Count);
+
+        foreach (var entry in chainPreset.Entries)
+        {
+            IPlugin? plugin = PluginFactory.Create(entry.PluginId);
+            if (plugin is null)
+            {
+                continue;
+            }
+
+            if (plugin is IQualityConfigurablePlugin qualityPlugin)
+            {
+                qualityPlugin.ApplyQuality(profile);
+            }
+
+            plugin.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
+
+            if (!_presetManager.TryGetPreset(plugin.Id, entry.PresetName, out var preset))
+            {
+                preset = _presetManager.GetDefaultPreset(plugin);
+            }
+
+            var parameterMap = ApplyPresetParameters(plugin, preset);
+
+            pluginList.Add(plugin);
+            pluginConfigs.Add(new PluginConfig
+            {
+                Type = plugin.Id,
+                IsBypassed = plugin.IsBypassed,
+                PresetName = entry.PresetName,
+                Parameters = parameterMap,
+                State = plugin.GetState()
+            });
+        }
+
+        strip.PluginChain.ReplaceAll(pluginList.ToArray());
+        RefreshPluginViewModels(channelIndex);
+        UpdateDynamicWindowWidth();
+
+        config.PresetName = chainPreset.Name;
+        config.Plugins = pluginConfigs;
+        _configManager.Save(_config);
+    }
+
+    private string GetChannelPresetName(int channelIndex)
+    {
+        var config = _config.Channels.ElementAtOrDefault(channelIndex);
+        if (config is null || IsCustomPreset(config.PresetName))
+        {
+            return PluginPresetManager.CustomPresetName;
+        }
+
+        return config.PresetName;
+    }
+
+    private void MarkChannelPresetCustom(ChannelConfig config)
+    {
+        if (_suppressPresetUpdates)
+        {
+            return;
+        }
+
+        if (!IsCustomPreset(config.PresetName))
+        {
+            config.PresetName = PluginPresetManager.CustomPresetName;
+        }
+    }
+
+    private void MarkPluginPresetCustom(ChannelConfig config, int slotIndex)
+    {
+        if (_suppressPresetUpdates)
+        {
+            return;
+        }
+
+        if (slotIndex >= 0 && slotIndex < config.Plugins.Count)
+        {
+            config.Plugins[slotIndex].PresetName = PluginPresetManager.CustomPresetName;
+        }
+
+        config.PresetName = PluginPresetManager.CustomPresetName;
     }
 
     private void UpdateMeters()
@@ -809,6 +1017,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Channel2.InputRmsLevel = channel2.InputMeter.GetRmsLevel();
         Channel2.OutputPeakLevel = channel2.OutputMeter.GetPeakLevel();
         Channel2.OutputRmsLevel = channel2.OutputMeter.GetRmsLevel();
+
+        MasterLufsMomentaryLeft = _audioEngine.MasterLufsLeft.GetMomentaryLufs();
+        MasterLufsShortTermLeft = _audioEngine.MasterLufsLeft.GetShortTermLufs();
+        MasterLufsMomentaryRight = _audioEngine.MasterLufsRight.GetMomentaryLufs();
+        MasterLufsShortTermRight = _audioEngine.MasterLufsRight.GetShortTermLufs();
 
         UpdatePluginMeters(Channel1, channel1);
         UpdatePluginMeters(Channel2, channel2);
@@ -1095,19 +1308,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
             new() { Id = "builtin:gain", Name = "Gain", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Simple gain and phase control" },
             new() { Id = "builtin:compressor", Name = "Compressor", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Dynamic range compression with soft knee" },
             new() { Id = "builtin:noisegate", Name = "Noise Gate", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Removes audio below threshold" },
+            new() { Id = "builtin:deesser", Name = "De-Esser", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Tames sibilance in the high band" },
+            new() { Id = "builtin:limiter", Name = "Limiter", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Brick-wall peak control" },
 
             // EQ
-            new() { Id = "builtin:eq3", Name = "3-Band EQ", IsVst3 = false, Category = PluginCategory.Eq, Description = "Parametric equalizer with spectrum analyzer" },
+            new() { Id = "builtin:hpf", Name = "High-Pass Filter", IsVst3 = false, Category = PluginCategory.Eq, Description = "Fast rumble and plosive removal" },
+            new() { Id = "builtin:eq3", Name = "5-Band EQ", IsVst3 = false, Category = PluginCategory.Eq, Description = "HPF + shelves + dual mid bands" },
 
             // Noise Reduction
             new() { Id = "builtin:fft-noise", Name = "FFT Noise Removal", IsVst3 = false, Category = PluginCategory.NoiseReduction, Description = "Learns and removes background noise" },
 
             // AI/ML
             new() { Id = "builtin:rnnoise", Name = "RNNoise", IsVst3 = false, Category = PluginCategory.AiMl, Description = "Neural network noise suppression" },
-            new() { Id = "builtin:deepfilternet", Name = "DeepFilterNet", IsVst3 = false, Category = PluginCategory.AiMl, Description = "Deep learning noise reduction" },
+            new() { Id = "builtin:speechdenoiser", Name = "Speech Denoiser", IsVst3 = false, Category = PluginCategory.AiMl, Description = "SpeechDenoiser streaming model (DFN3)" },
             new() { Id = "builtin:voice-gate", Name = "Voice Gate", IsVst3 = false, Category = PluginCategory.AiMl, Description = "AI-powered voice activity detection" },
 
             // Effects
+            new() { Id = "builtin:saturation", Name = "Saturation", IsVst3 = false, Category = PluginCategory.Effects, Description = "Soft clipping harmonic warmth" },
             new() { Id = "builtin:reverb", Name = "Reverb", IsVst3 = false, Category = PluginCategory.Effects, Description = "Convolution reverb with IR presets" }
         };
 
@@ -1163,8 +1380,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Use specialized window for 3-band EQ
-        if (plugin is ThreeBandEqPlugin eq)
+        // Use specialized window for 5-band EQ
+        if (plugin is FiveBandEqPlugin eq)
         {
             ShowEqWindow(channelIndex, slotIndex, eq);
             return;
@@ -1191,10 +1408,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Use specialized window for DeepFilterNet
-        if (plugin is DeepFilterNetPlugin deepFilter)
+        // Use specialized window for Speech Denoiser
+        if (plugin is SpeechDenoiserPlugin speechDenoiser)
         {
-            ShowDeepFilterNetWindow(channelIndex, slotIndex, deepFilter);
+            ShowSpeechDenoiserWindow(channelIndex, slotIndex, speechDenoiser);
             return;
         }
 
@@ -1202,6 +1419,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (plugin is ConvolutionReverbPlugin reverb)
         {
             ShowReverbWindow(channelIndex, slotIndex, reverb);
+            return;
+        }
+
+        // Use specialized window for Limiter
+        if (plugin is LimiterPlugin limiter)
+        {
+            ShowLimiterWindow(channelIndex, slotIndex, limiter);
+            return;
+        }
+
+        // Use specialized window for De-Esser
+        if (plugin is DeEsserPlugin deesser)
+        {
+            ShowDeEsserWindow(channelIndex, slotIndex, deesser);
+            return;
+        }
+
+        // Use specialized window for High-Pass Filter
+        if (plugin is HighPassFilterPlugin hpf)
+        {
+            ShowHighPassFilterWindow(channelIndex, slotIndex, hpf);
+            return;
+        }
+
+        // Use specialized window for Saturation
+        if (plugin is SaturationPlugin saturation)
+        {
+            ShowSaturationWindow(channelIndex, slotIndex, saturation);
             return;
         }
 
@@ -1229,7 +1474,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowNoiseGateWindow(int channelIndex, int slotIndex, NoiseGatePlugin plugin)
@@ -1244,7 +1489,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowCompressorWindow(int channelIndex, int slotIndex, CompressorPlugin plugin)
@@ -1259,7 +1504,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowGainWindow(int channelIndex, int slotIndex, GainPlugin plugin)
@@ -1274,10 +1519,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
-    private void ShowEqWindow(int channelIndex, int slotIndex, ThreeBandEqPlugin plugin)
+    private void ShowEqWindow(int channelIndex, int slotIndex, FiveBandEqPlugin plugin)
     {
         var window = new EqWindow(plugin,
             (paramIndex, value) =>
@@ -1289,7 +1534,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowFFTNoiseWindow(int channelIndex, int slotIndex, FFTNoiseRemovalPlugin plugin)
@@ -1305,7 +1550,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowVoiceGateWindow(int channelIndex, int slotIndex, SileroVoiceGatePlugin plugin)
@@ -1320,7 +1565,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowRNNoiseWindow(int channelIndex, int slotIndex, RNNoisePlugin plugin)
@@ -1335,12 +1580,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
-    private void ShowDeepFilterNetWindow(int channelIndex, int slotIndex, DeepFilterNetPlugin plugin)
+    private void ShowSpeechDenoiserWindow(int channelIndex, int slotIndex, SpeechDenoiserPlugin plugin)
     {
-        var window = new DeepFilterNetWindow(plugin,
+        var window = new SpeechDenoiserWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
@@ -1350,7 +1595,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
     }
 
     private void ShowReverbWindow(int channelIndex, int slotIndex, ConvolutionReverbPlugin plugin)
@@ -1365,7 +1610,67 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
-        window.ShowDialog();
+        window.Show();
+    }
+
+    private void ShowLimiterWindow(int channelIndex, int slotIndex, LimiterPlugin plugin)
+    {
+        var window = new LimiterWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowDeEsserWindow(int channelIndex, int slotIndex, DeEsserPlugin plugin)
+    {
+        var window = new DeEsserWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowHighPassFilterWindow(int channelIndex, int slotIndex, HighPassFilterPlugin plugin)
+    {
+        var window = new HighPassFilterWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowSaturationWindow(int channelIndex, int slotIndex, SaturationPlugin plugin)
+    {
+        var window = new SaturationWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
     }
 
     private void SetPluginBypass(int channelIndex, int slotIndex, bool bypassed)
@@ -1398,7 +1703,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         });
     }
 
-    private void ApplyPluginParameter(int channelIndex, int slotIndex, int parameterIndex, string parameterName, float value)
+    private void ApplyPluginParameter(int channelIndex, int slotIndex, int parameterIndex, string parameterName, float value, bool markPresetDirty = true)
     {
         _audioEngine.EnqueueParameterChange(new ParameterChange
         {
@@ -1409,7 +1714,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Value = value
         });
 
-        UpdatePluginParameterConfig(channelIndex, slotIndex, parameterName, value);
+        UpdatePluginParameterConfig(channelIndex, slotIndex, parameterName, value, markPresetDirty);
         UpdatePluginStateConfig(channelIndex, slotIndex);
     }
 
@@ -1421,16 +1726,46 @@ public partial class MainViewModel : ObservableObject, IDisposable
         foreach (var plugin in slots)
         {
             float latencyMs = 0f;
-            if (plugin is not null && _audioEngine.SampleRate > 0)
+            string pluginId = string.Empty;
+            float[] elevatedValues = [];
+
+            if (plugin is not null)
             {
-                latencyMs = plugin.LatencySamples * 1000f / _audioEngine.SampleRate;
+                pluginId = plugin.Id;
+                if (_audioEngine.SampleRate > 0)
+                {
+                    latencyMs = plugin.LatencySamples * 1000f / _audioEngine.SampleRate;
+                }
+
+                // Get elevated parameter values
+                var elevDefs = ElevatedParameterDefinitions.GetElevations(pluginId);
+                if (elevDefs is not null)
+                {
+                    elevatedValues = new float[elevDefs.Length];
+                    for (int i = 0; i < elevDefs.Length; i++)
+                    {
+                        // Read current parameter value from plugin state
+                        var state = plugin.GetState();
+                        var param = plugin.Parameters.FirstOrDefault(p => p.Index == elevDefs[i].Index);
+                        if (param is not null && state.Length >= (elevDefs[i].Index + 1) * sizeof(float))
+                        {
+                            elevatedValues[i] = BitConverter.ToSingle(state, elevDefs[i].Index * sizeof(float));
+                        }
+                        else
+                        {
+                            elevatedValues[i] = elevDefs[i].Default;
+                        }
+                    }
+                }
             }
 
             slotInfos.Add(new PluginSlotInfo
             {
+                PluginId = pluginId,
                 Name = plugin?.Name ?? string.Empty,
                 IsBypassed = plugin?.IsBypassed ?? false,
-                LatencyMs = latencyMs
+                LatencyMs = latencyMs,
+                ElevatedParamValues = elevatedValues
             });
         }
         if (channelIndex == 0)
@@ -1488,11 +1823,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Type = plugin.Id,
             IsBypassed = plugin.IsBypassed,
-            Parameters = plugin.Parameters.ToDictionary(p => p.Name, p => p.DefaultValue),
+            PresetName = PluginPresetManager.CustomPresetName,
+            Parameters = plugin.Parameters.ToDictionary(p => p.Name, p => p.DefaultValue, StringComparer.OrdinalIgnoreCase),
             State = plugin.GetState()
         };
 
         config.Plugins[slotIndex] = pluginConfig;
+        MarkChannelPresetCustom(config);
         _configManager.Save(_config);
     }
 
@@ -1503,6 +1840,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             config.Plugins.RemoveAt(slotIndex);
         }
+        MarkChannelPresetCustom(config);
         _configManager.Save(_config);
     }
 
@@ -1531,10 +1869,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var item = config.Plugins[fromIndex];
         config.Plugins.RemoveAt(fromIndex);
         config.Plugins.Insert(toIndex, item);
+        MarkChannelPresetCustom(config);
         _configManager.Save(_config);
     }
 
-    private void UpdatePluginParameterConfig(int channelIndex, int slotIndex, string parameterName, float value)
+    private void UpdatePluginParameterConfig(int channelIndex, int slotIndex, string parameterName, float value, bool markPresetDirty)
     {
         var config = GetOrCreateChannelConfig(channelIndex);
         if (slotIndex < 0 || slotIndex >= config.Plugins.Count)
@@ -1547,6 +1886,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         config.Plugins[slotIndex].Parameters[parameterName] = value;
+
+        if (markPresetDirty)
+        {
+            MarkPluginPresetCustom(config, slotIndex);
+        }
         _configManager.Save(_config);
     }
 
@@ -1592,6 +1936,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         config.Plugins[slotIndex].IsBypassed = bypass;
+        MarkPluginPresetCustom(config, slotIndex);
         _configManager.Save(_config);
     }
 
@@ -1661,6 +2006,112 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _config.Midi.DeviceName = deviceName;
         _midiManager?.ApplyConfig(_config.Midi);
         _configManager.Save(_config);
+    }
+
+    public IReadOnlyList<string> GetPresetOptions() => _presetManager.GetChainPresetNames();
+
+    public void SelectChannelPreset(int channelIndex, string presetName)
+    {
+        ApplyChannelPreset(channelIndex, presetName);
+        UpdatePresetNameProperty(channelIndex);
+    }
+
+    public void SaveCurrentAsPreset(int channelIndex, string presetName)
+    {
+        if (string.IsNullOrWhiteSpace(presetName))
+        {
+            return;
+        }
+
+        // Cannot overwrite built-in presets
+        if (_presetManager.IsBuiltInPreset(presetName))
+        {
+            return;
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        var plugins = new List<(string pluginId, Dictionary<string, float> parameters)>();
+
+        foreach (var pluginConfig in config.Plugins)
+        {
+            if (string.IsNullOrWhiteSpace(pluginConfig.Type))
+            {
+                continue;
+            }
+
+            var parameters = new Dictionary<string, float>(pluginConfig.Parameters, StringComparer.OrdinalIgnoreCase);
+            plugins.Add((pluginConfig.Type, parameters));
+        }
+
+        if (_presetManager.SaveChainPreset(presetName, plugins))
+        {
+            config.PresetName = presetName;
+            _configManager.Save(_config);
+            UpdatePresetNameProperty(channelIndex);
+        }
+    }
+
+    public bool CanOverwritePreset(string presetName)
+    {
+        if (string.IsNullOrWhiteSpace(presetName))
+        {
+            return false;
+        }
+
+        // Cannot overwrite built-in presets or "Custom"
+        if (_presetManager.IsBuiltInPreset(presetName))
+        {
+            return false;
+        }
+
+        if (string.Equals(presetName, PluginPresetManager.CustomPresetName, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    public bool DeleteUserPreset(string presetName)
+    {
+        if (_presetManager.DeleteChainPreset(presetName))
+        {
+            // Reset any channels using this preset to Custom
+            var channel1Name = GetChannelPresetName(0);
+            var channel2Name = GetChannelPresetName(1);
+
+            if (string.Equals(channel1Name, presetName, StringComparison.OrdinalIgnoreCase))
+            {
+                var config = GetOrCreateChannelConfig(0);
+                config.PresetName = PluginPresetManager.CustomPresetName;
+                Channel1PresetName = PluginPresetManager.CustomPresetName;
+            }
+
+            if (string.Equals(channel2Name, presetName, StringComparison.OrdinalIgnoreCase))
+            {
+                var config = GetOrCreateChannelConfig(1);
+                config.PresetName = PluginPresetManager.CustomPresetName;
+                Channel2PresetName = PluginPresetManager.CustomPresetName;
+            }
+
+            _configManager.Save(_config);
+            return true;
+        }
+
+        return false;
+    }
+
+    private void UpdatePresetNameProperty(int channelIndex)
+    {
+        var presetName = GetChannelPresetName(channelIndex);
+        if (channelIndex == 0)
+        {
+            Channel1PresetName = presetName;
+        }
+        else
+        {
+            Channel2PresetName = presetName;
+        }
     }
 
     private float GetPluginParameterValue(int channelIndex, int slotIndex, string parameterName, float fallback)

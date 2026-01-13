@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
+using HotMic.Core.Presets;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
 
@@ -17,6 +19,7 @@ public partial class VoiceGateWindow : Window
     private readonly Action<int, float> _parameterCallback;
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
+    private readonly PluginPresetHelper _presetHelper;
 
     private int _activeKnob = -1;
     private float _dragStartY;
@@ -29,6 +32,12 @@ public partial class VoiceGateWindow : Window
         _plugin = plugin;
         _parameterCallback = parameterCallback;
         _bypassCallback = bypassCallback;
+
+        _presetHelper = new PluginPresetHelper(
+            plugin.Id,
+            PluginPresetManager.Default,
+            ApplyPreset,
+            GetCurrentParameters);
 
         var preferredSize = VoiceGateRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -73,7 +82,8 @@ public partial class VoiceGateWindow : Window
             IsGateOpen: vad >= threshold,
             IsBypassed: _plugin.IsBypassed,
             StatusMessage: _plugin.StatusMessage,
-            HoveredKnob: _hoveredKnob
+            HoveredKnob: _hoveredKnob,
+            PresetName: _presetHelper.CurrentPresetName
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
@@ -112,6 +122,16 @@ public partial class VoiceGateWindow : Window
                 _dragStartY = y;
                 _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
                 SkiaCanvas.CaptureMouse();
+                e.Handled = true;
+                break;
+
+            case VoiceGateHitArea.PresetDropdown:
+                _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
+                e.Handled = true;
+                break;
+
+            case VoiceGateHitArea.PresetSave:
+                _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
         }
@@ -204,7 +224,39 @@ public partial class VoiceGateWindow : Window
         if (paramIndex >= 0)
         {
             _parameterCallback(paramIndex, value);
+            _presetHelper.MarkAsCustom();
         }
+    }
+
+    private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)
+    {
+        foreach (var (name, value) in parameters)
+        {
+            int paramIndex = name switch
+            {
+                "Threshold" => SileroVoiceGatePlugin.ThresholdIndex,
+                "Attack" => SileroVoiceGatePlugin.AttackIndex,
+                "Release" => SileroVoiceGatePlugin.ReleaseIndex,
+                "Hold" => SileroVoiceGatePlugin.HoldIndex,
+                _ => -1
+            };
+
+            if (paramIndex >= 0)
+            {
+                _parameterCallback(paramIndex, value);
+            }
+        }
+    }
+
+    private Dictionary<string, float> GetCurrentParameters()
+    {
+        return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Threshold"] = GetParameterValue(SileroVoiceGatePlugin.ThresholdIndex),
+            ["Attack"] = GetParameterValue(SileroVoiceGatePlugin.AttackIndex),
+            ["Release"] = GetParameterValue(SileroVoiceGatePlugin.ReleaseIndex),
+            ["Hold"] = GetParameterValue(SileroVoiceGatePlugin.HoldIndex)
+        };
     }
 
     private float GetDpiScale()

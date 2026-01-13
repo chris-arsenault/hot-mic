@@ -139,7 +139,17 @@ public partial class ChannelStripViewModel : ObservableObject
             {
                 int slotIndex = i + 1;
                 int slot = i;
-                var viewModel = PluginViewModel.CreateFilled(ChannelId, slotIndex, slots[i].Name, slots[i].LatencyMs, () => _pluginActionSink?.Invoke(slot), () => _pluginRemoveSink?.Invoke(slot), _parameterSink, (index, value) => _pluginBypassConfigSink?.Invoke(index, value));
+                var viewModel = PluginViewModel.CreateFilled(
+                    ChannelId,
+                    slotIndex,
+                    slots[i].PluginId,
+                    slots[i].Name,
+                    slots[i].LatencyMs,
+                    slots[i].ElevatedParamValues,
+                    () => _pluginActionSink?.Invoke(slot),
+                    () => _pluginRemoveSink?.Invoke(slot),
+                    _parameterSink,
+                    (index, value) => _pluginBypassConfigSink?.Invoke(index, value));
                 viewModel.IsBypassed = slots[i].IsBypassed;
                 PluginSlots.Add(viewModel);
             }
