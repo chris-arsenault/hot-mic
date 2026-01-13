@@ -94,7 +94,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
-    public string StatusMessage => _statusMessage;
+    public string StatusMessage => Volatile.Read(ref _statusMessage);
 
     /// <summary>
     /// Gets the current gain reduction in dB (positive value = reduction).
@@ -456,6 +456,16 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             return;
         }
 
+        if (IsBypassed)
+        {
+            if (_statusIsUnderrun)
+            {
+                _statusMessage = string.Empty;
+                _statusIsUnderrun = false;
+            }
+            return;
+        }
+
         int now = Environment.TickCount;
         if (now - _lastStatusUpdateMs < 1000)
         {
@@ -466,25 +476,10 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
         long dropped = Interlocked.Read(ref _inputDropSamples);
         long underrun = Interlocked.Read(ref _outputUnderrunSamples);
-        if (dropped == _lastInputDropSamples && underrun == _lastOutputUnderrunSamples)
-        {
-            return;
-        }
-
         _lastInputDropSamples = dropped;
         _lastOutputUnderrunSamples = underrun;
 
-        if (dropped == 0 && underrun == 0)
-        {
-            if (_statusIsUnderrun)
-            {
-                _statusMessage = string.Empty;
-                _statusIsUnderrun = false;
-            }
-            return;
-        }
-
-        _statusMessage = $"DeepFilterNet underrun: dropped {dropped} / short {underrun} samples.";
+        _statusMessage = $"DeepFilterNet buffers: dropped {dropped} / short {underrun} samples.";
         _statusIsUnderrun = true;
     }
 
