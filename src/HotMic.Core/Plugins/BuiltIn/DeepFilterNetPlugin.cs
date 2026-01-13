@@ -55,6 +55,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private const int ConsoleLogIntervalMs = 1000;
     private int _lastStatusTick;
     private int _lastConsoleTick;
+    private static int s_traceReady;
 
     public DeepFilterNetPlugin()
     {
@@ -134,6 +135,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         _sampleRate = sampleRate;
         _statusMessage = string.Empty;
         _forcedBypass = false;
+        EnsureTraceReady();
 
         StopWorker();
 
@@ -422,6 +424,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 Name = "DeepFilterNetWorker"
             };
             _workerThread.Start();
+            Trace.WriteLine("[DFN] worker started");
         }
     }
 
@@ -565,7 +568,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         float attenDb = Volatile.Read(ref _attenLimitDb);
         float postFilter = Volatile.Read(ref _postFilterEnabled);
 
-        Debug.WriteLine(
+        Trace.WriteLine(
             $"[DFN] dropped={dropped} short={underrun} lsnr={lsnr:0.0} " +
             $"mask={maskMin:0.00}/{maskMean:0.00}/{maskMax:0.00} " +
             $"stages={gainChar}{zeroChar}{dfChar} reduction={reduction:0.0}% " +
@@ -588,6 +591,16 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         }
 
         return string.Empty;
+    }
+
+    private static void EnsureTraceReady()
+    {
+        if (Interlocked.Exchange(ref s_traceReady, 1) != 0)
+        {
+            return;
+        }
+
+        Trace.AutoFlush = true;
     }
 
 }
