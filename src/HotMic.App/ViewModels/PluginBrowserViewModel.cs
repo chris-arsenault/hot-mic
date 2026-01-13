@@ -88,9 +88,10 @@ public partial class PluginBrowserViewModel : ObservableObject
         PluginCategory.Dynamics => 0,
         PluginCategory.Eq => 1,
         PluginCategory.NoiseReduction => 2,
-        PluginCategory.AiMl => 3,
-        PluginCategory.Effects => 4,
-        PluginCategory.Vst => 5,
+        PluginCategory.Analysis => 3,
+        PluginCategory.AiMl => 4,
+        PluginCategory.Effects => 5,
+        PluginCategory.Vst => 6,
         _ => 99
     };
 
@@ -99,6 +100,7 @@ public partial class PluginBrowserViewModel : ObservableObject
         PluginCategory.Dynamics => "Dynamics",
         PluginCategory.Eq => "Equalizer",
         PluginCategory.NoiseReduction => "Noise Reduction",
+        PluginCategory.Analysis => "Analysis",
         PluginCategory.AiMl => "AI / ML",
         PluginCategory.Effects => "Effects",
         PluginCategory.Vst => "VST Plugins",

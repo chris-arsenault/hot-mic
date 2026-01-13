@@ -7,6 +7,7 @@ public enum PluginCategory
     Dynamics,
     Eq,
     NoiseReduction,
+    Analysis,
     AiMl,
     Effects,
     Vst

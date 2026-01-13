@@ -17,6 +17,8 @@ public static class PluginFactory
             "builtin:limiter" => new LimiterPlugin(),
             "builtin:fft-noise" => new FFTNoiseRemovalPlugin(),
             "builtin:gain" => new GainPlugin(),
+            "builtin:freq-analyzer" => new FrequencyAnalyzerPlugin(),
+            "builtin:vocal-spectrograph" => new VocalSpectrographPlugin(),
             "builtin:rnnoise" => new RNNoisePlugin(),
             "builtin:speechdenoiser" => new SpeechDenoiserPlugin(),
             "builtin:voice-gate" => new SileroVoiceGatePlugin(),

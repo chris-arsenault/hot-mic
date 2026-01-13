@@ -1343,6 +1343,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // Noise Reduction
             new() { Id = "builtin:fft-noise", Name = "FFT Noise Removal", IsVst3 = false, Category = PluginCategory.NoiseReduction, Description = "Learns and removes background noise" },
 
+            // Analysis
+            new() { Id = "builtin:freq-analyzer", Name = "Frequency Analyzer", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Real-time spectrum view with tunable bins" },
+            new() { Id = "builtin:vocal-spectrograph", Name = "Vocal Spectrograph", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Vocal-focused spectrogram with overlays" },
+
             // AI/ML
             new() { Id = "builtin:rnnoise", Name = "RNNoise", IsVst3 = false, Category = PluginCategory.AiMl, Description = "Neural network noise suppression" },
             new() { Id = "builtin:speechdenoiser", Name = "Speech Denoiser", IsVst3 = false, Category = PluginCategory.AiMl, Description = "SpeechDenoiser streaming model (DFN3)" },
@@ -1416,6 +1420,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (plugin is FFTNoiseRemovalPlugin fftNoise)
         {
             ShowFFTNoiseWindow(channelIndex, slotIndex, fftNoise);
+            return;
+        }
+
+        // Use specialized window for Frequency Analyzer
+        if (plugin is FrequencyAnalyzerPlugin analyzer)
+        {
+            ShowFrequencyAnalyzerWindow(channelIndex, slotIndex, analyzer);
+            return;
+        }
+
+        // Use specialized window for Vocal Spectrograph
+        if (plugin is VocalSpectrographPlugin spectrograph)
+        {
+            ShowVocalSpectrographWindow(channelIndex, slotIndex, spectrograph);
             return;
         }
 
@@ -1572,6 +1590,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
             },
             bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed),
             () => RequestNoiseLearn(channelIndex, slotIndex))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowFrequencyAnalyzerWindow(int channelIndex, int slotIndex, FrequencyAnalyzerPlugin plugin)
+    {
+        var window = new FrequencyAnalyzerWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowVocalSpectrographWindow(int channelIndex, int slotIndex, VocalSpectrographPlugin plugin)
+    {
+        var window = new VocalSpectrographWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
