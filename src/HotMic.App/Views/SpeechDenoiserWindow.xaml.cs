@@ -69,6 +69,8 @@ public partial class SpeechDenoiserWindow : Window
 
         var state = new SpeechDenoiserState(
             MixPercent: GetParameterValue(SpeechDenoiserPlugin.DryWetIndex),
+            AttenLimitDb: GetParameterValue(SpeechDenoiserPlugin.AttenLimitIndex),
+            AttenEnabled: GetParameterValue(SpeechDenoiserPlugin.AttenEnableIndex) >= 0.5f,
             LatencyMs: latencyMs,
             IsBypassed: _plugin.IsBypassed,
             StatusMessage: _plugin.StatusMessage,
@@ -106,6 +108,13 @@ public partial class SpeechDenoiserWindow : Window
 
             case SpeechDenoiserHitArea.BypassButton:
                 _bypassCallback(!_plugin.IsBypassed);
+                e.Handled = true;
+                break;
+
+            case SpeechDenoiserHitArea.AttenLimitToggle:
+                float currentValue = GetParameterValue(SpeechDenoiserPlugin.AttenEnableIndex);
+                _parameterCallback(SpeechDenoiserPlugin.AttenEnableIndex, currentValue >= 0.5f ? 0f : 1f);
+                _presetHelper.MarkAsCustom();
                 e.Handled = true;
                 break;
 
@@ -175,6 +184,7 @@ public partial class SpeechDenoiserWindow : Window
         return knobIndex switch
         {
             0 => GetParameterValue(SpeechDenoiserPlugin.DryWetIndex) / 100f,
+            1 => GetParameterValue(SpeechDenoiserPlugin.AttenLimitIndex) / 100f,
             _ => 0f
         };
     }
@@ -184,12 +194,20 @@ public partial class SpeechDenoiserWindow : Window
         float value = knobIndex switch
         {
             0 => normalizedValue * 100f,
+            1 => normalizedValue * 100f,
             _ => 0f
         };
 
         if (knobIndex == 0)
         {
             _parameterCallback(SpeechDenoiserPlugin.DryWetIndex, value);
+            _presetHelper.MarkAsCustom();
+            return;
+        }
+
+        if (knobIndex == 1)
+        {
+            _parameterCallback(SpeechDenoiserPlugin.AttenLimitIndex, value);
             _presetHelper.MarkAsCustom();
         }
     }
@@ -201,6 +219,8 @@ public partial class SpeechDenoiserWindow : Window
             int paramIndex = name switch
             {
                 "DryWet" => SpeechDenoiserPlugin.DryWetIndex,
+                "AttenLimit" => SpeechDenoiserPlugin.AttenLimitIndex,
+                "AttenEnabled" => SpeechDenoiserPlugin.AttenEnableIndex,
                 _ => -1
             };
 
@@ -215,7 +235,9 @@ public partial class SpeechDenoiserWindow : Window
     {
         return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
         {
-            ["DryWet"] = GetParameterValue(SpeechDenoiserPlugin.DryWetIndex)
+            ["DryWet"] = GetParameterValue(SpeechDenoiserPlugin.DryWetIndex),
+            ["AttenLimit"] = GetParameterValue(SpeechDenoiserPlugin.AttenLimitIndex),
+            ["AttenEnabled"] = GetParameterValue(SpeechDenoiserPlugin.AttenEnableIndex) >= 0.5f ? 1f : 0f
         };
     }
 

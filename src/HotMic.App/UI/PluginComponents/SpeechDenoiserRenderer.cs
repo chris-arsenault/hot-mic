@@ -1,3 +1,4 @@
+using System;
 using SkiaSharp;
 
 namespace HotMic.App.UI.PluginComponents;
@@ -11,8 +12,9 @@ public sealed class SpeechDenoiserRenderer : IDisposable
     private const float TitleBarHeight = 40f;
     private const float Padding = 16f;
     private const float KnobRadius = 26f;
+    private const float KnobSpacing = 120f;
     private const float CornerRadius = 10f;
-    private const int KnobCount = 1;
+    private const int KnobCount = 2;
 
     private readonly PluginComponentTheme _theme;
     private readonly AiProcessingIndicator _processingIndicator;
@@ -28,10 +30,18 @@ public sealed class SpeechDenoiserRenderer : IDisposable
     private readonly SKPaint _bypassActivePaint;
     private readonly SKPaint _statusPaint;
     private readonly SKPaint _descriptionPaint;
+    private readonly SKPaint _togglePaint;
+    private readonly SKPaint _toggleActivePaint;
+    private readonly SKPaint _toggleLabelPaint;
+    private readonly SKPaint _toggleCheckPaint;
+    private readonly SKPaint _warningPaint;
+    private readonly SKPaint _warningStrokePaint;
+    private readonly SKPaint _warningDotPaint;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
+    private SKRect _attenToggleRect;
     private readonly SKRect[] _knobRects = new SKRect[KnobCount];
     private readonly SKPoint[] _knobCenters = new SKPoint[KnobCount];
 
@@ -111,6 +121,62 @@ public sealed class SpeechDenoiserRenderer : IDisposable
             TextSize = 10f,
             TextAlign = SKTextAlign.Center,
             Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
+        };
+
+        _togglePaint = new SKPaint
+        {
+            Color = _theme.PanelBackgroundLight,
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _toggleActivePaint = new SKPaint
+        {
+            Color = new SKColor(0x40, 0xC0, 0x40),
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _toggleLabelPaint = new SKPaint
+        {
+            Color = _theme.TextSecondary,
+            IsAntialias = true,
+            TextSize = 9f,
+            TextAlign = SKTextAlign.Left,
+            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
+        };
+
+        _toggleCheckPaint = new SKPaint
+        {
+            Color = _theme.TextPrimary,
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 2f,
+            StrokeCap = SKStrokeCap.Round,
+            StrokeJoin = SKStrokeJoin.Round
+        };
+
+        _warningPaint = new SKPaint
+        {
+            Color = new SKColor(0xF5, 0xA5, 0x24),
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _warningStrokePaint = new SKPaint
+        {
+            Color = new SKColor(0x24, 0x18, 0x00),
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 1.4f,
+            StrokeCap = SKStrokeCap.Round
+        };
+
+        _warningDotPaint = new SKPaint
+        {
+            Color = new SKColor(0x24, 0x18, 0x00),
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
         };
     }
 
@@ -211,11 +277,26 @@ public sealed class SpeechDenoiserRenderer : IDisposable
         y += 100;
 
         float knobsY = y + KnobRadius + 8;
-        _knobCenters[0] = new SKPoint(size.Width / 2, knobsY);
+        float knobsStartX = size.Width / 2 - KnobSpacing / 2f;
+        _knobCenters[0] = new SKPoint(knobsStartX, knobsY);
+        _knobCenters[1] = new SKPoint(knobsStartX + KnobSpacing, knobsY);
+
         float mixNorm = state.MixPercent / 100f;
         _knob.Render(canvas, _knobCenters[0], KnobRadius, mixNorm,
             "DRY / WET", $"{state.MixPercent:0}", "%", state.HoveredKnob == 0);
         _knobRects[0] = _knob.GetHitRect(_knobCenters[0], KnobRadius);
+
+        float attenNorm = MathF.Min(MathF.Max(state.AttenLimitDb / 100f, 0f), 1f);
+        _knob.Render(canvas, _knobCenters[1], KnobRadius, attenNorm,
+            "ATTEN LIMIT", $"{state.AttenLimitDb:0}", "dB", state.HoveredKnob == 1);
+        _knobRects[1] = _knob.GetHitRect(_knobCenters[1], KnobRadius);
+
+        float toggleHeight = 22f;
+        float toggleWidth = 170f;
+        float toggleY = knobsY + KnobRadius + 30f;
+        float toggleX = (size.Width - toggleWidth) / 2f;
+        _attenToggleRect = new SKRect(toggleX, toggleY, toggleX + toggleWidth, toggleY + toggleHeight);
+        DrawAttenToggle(canvas, _attenToggleRect, state.AttenEnabled);
 
         float barHeight = 24f;
         float barY = size.Height - Padding - barHeight;
@@ -266,6 +347,9 @@ public sealed class SpeechDenoiserRenderer : IDisposable
             }
         }
 
+        if (_attenToggleRect.Contains(x, y))
+            return new SpeechDenoiserHitTest(SpeechDenoiserHitArea.AttenLimitToggle, -1);
+
         if (_titleBarRect.Contains(x, y))
             return new SpeechDenoiserHitTest(SpeechDenoiserHitArea.TitleBar, -1);
 
@@ -290,11 +374,67 @@ public sealed class SpeechDenoiserRenderer : IDisposable
         _bypassActivePaint.Dispose();
         _statusPaint.Dispose();
         _descriptionPaint.Dispose();
+        _togglePaint.Dispose();
+        _toggleActivePaint.Dispose();
+        _toggleLabelPaint.Dispose();
+        _toggleCheckPaint.Dispose();
+        _warningPaint.Dispose();
+        _warningStrokePaint.Dispose();
+        _warningDotPaint.Dispose();
+    }
+
+    private void DrawAttenToggle(SKCanvas canvas, SKRect rect, bool enabled)
+    {
+        var round = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(round, enabled ? _toggleActivePaint : _togglePaint);
+        canvas.DrawRoundRect(round, _borderPaint);
+
+        float boxSize = 12f;
+        float boxX = rect.Left + 10f;
+        float boxY = rect.MidY - boxSize / 2f;
+        var boxRect = new SKRect(boxX, boxY, boxX + boxSize, boxY + boxSize);
+        canvas.DrawRect(boxRect, _borderPaint);
+
+        if (enabled)
+        {
+            float checkLeft = boxRect.Left + 2f;
+            float checkMid = boxRect.MidY + 1f;
+            float checkRight = boxRect.Right - 2f;
+            canvas.DrawLine(checkLeft, checkMid, boxRect.MidX - 1f, boxRect.Bottom - 3f, _toggleCheckPaint);
+            canvas.DrawLine(boxRect.MidX - 1f, boxRect.Bottom - 3f, checkRight, boxRect.Top + 3f, _toggleCheckPaint);
+        }
+
+        _toggleLabelPaint.Color = enabled ? _theme.TextPrimary : _theme.TextSecondary;
+        float labelX = boxRect.Right + 8f;
+        canvas.DrawText("ATTEN LIMIT", labelX, rect.MidY + 3f, _toggleLabelPaint);
+
+        float warnSize = 10f;
+        float warnX = rect.Right - 12f;
+        var warnCenter = new SKPoint(warnX, rect.MidY);
+        DrawWarningIcon(canvas, warnCenter, warnSize);
+    }
+
+    private void DrawWarningIcon(SKCanvas canvas, SKPoint center, float size)
+    {
+        float half = size / 2f;
+        using var path = new SKPath();
+        path.MoveTo(center.X, center.Y - half);
+        path.LineTo(center.X + half, center.Y + half);
+        path.LineTo(center.X - half, center.Y + half);
+        path.Close();
+        canvas.DrawPath(path, _warningPaint);
+
+        float lineTop = center.Y - half * 0.2f;
+        float lineBottom = center.Y + half * 0.25f;
+        canvas.DrawLine(center.X, lineTop, center.X, lineBottom, _warningStrokePaint);
+        canvas.DrawCircle(center.X, center.Y + half * 0.45f, 1.2f, _warningDotPaint);
     }
 }
 
 public record struct SpeechDenoiserState(
     float MixPercent,
+    float AttenLimitDb,
+    bool AttenEnabled,
     float LatencyMs,
     bool IsBypassed,
     string StatusMessage = "",
@@ -307,6 +447,7 @@ public enum SpeechDenoiserHitArea
     TitleBar,
     CloseButton,
     BypassButton,
+    AttenLimitToggle,
     Knob,
     PresetDropdown,
     PresetSave

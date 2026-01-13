@@ -13,6 +13,8 @@ namespace HotMic.Core.Plugins.BuiltIn;
 public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
 {
     public const int DryWetIndex = 0;
+    public const int AttenLimitIndex = 1;
+    public const int AttenEnableIndex = 2;
 
     private const int RequiredSampleRate = 48000;
     private const int HopSize = 480;
@@ -20,7 +22,6 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
     private const int StateSize = 45304;
     private const int StartupSkipSamples = FftSize - HopSize;
     private const string ModelFileName = "denoiser_model.onnx";
-    private const int StatusUpdateIntervalMs = 500;
     private const float MixSmoothingMs = 8f;
 
     private readonly object _workerLock = new();
@@ -44,14 +45,11 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
     private bool _forcedBypass;
     private bool _wasBypassed = true;
     private float _dryWetPercent = 100f;
+    private float _attenLimitDb = 100f;
+    private bool _attenEnabled;
     private LinearSmoother _mixSmoother = new();
-    private long _inputDropSamples;
-    private long _outputUnderrunSamples;
     private long _startupSkipRemaining;
-    private long _hopCounter;
-    private float _lastLsnrDb;
     private string _statusMessage = string.Empty;
-    private int _lastStatusTick;
 
     public SpeechDenoiserPlugin()
     {
@@ -65,6 +63,24 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
                 MaxValue = 100f,
                 DefaultValue = 100f,
                 Unit = "%"
+            },
+            new PluginParameter
+            {
+                Index = AttenLimitIndex,
+                Name = "Attenuation Limit",
+                MinValue = 0f,
+                MaxValue = 100f,
+                DefaultValue = 100f,
+                Unit = "dB"
+            },
+            new PluginParameter
+            {
+                Index = AttenEnableIndex,
+                Name = "Attenuation Enable",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 0f,
+                Unit = ""
             }
         ];
     }
@@ -143,11 +159,7 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
             _wasBypassed = false;
         }
 
-        int written = _inputBuffer.Write(buffer);
-        if (written < buffer.Length)
-        {
-            Interlocked.Add(ref _inputDropSamples, buffer.Length - written);
-        }
+        _inputBuffer.Write(buffer);
         _frameSignal?.Set();
 
         DrainStartupSkip();
@@ -158,7 +170,6 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
             read = _outputBuffer.Read(_processedScratch.AsSpan(0, buffer.Length));
             if (read < buffer.Length)
             {
-                Interlocked.Add(ref _outputUnderrunSamples, buffer.Length - read);
                 _processedScratch.AsSpan(read, buffer.Length - read).Clear();
             }
         }
@@ -201,13 +212,27 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
             {
                 _mixSmoother.SetTarget(_dryWetPercent / 100f);
             }
+            return;
+        }
+
+        if (index == AttenLimitIndex)
+        {
+            Volatile.Write(ref _attenLimitDb, Math.Clamp(value, 0f, 100f));
+            return;
+        }
+
+        if (index == AttenEnableIndex)
+        {
+            Volatile.Write(ref _attenEnabled, value >= 0.5f);
         }
     }
 
     public byte[] GetState()
     {
-        var bytes = new byte[sizeof(float)];
+        var bytes = new byte[sizeof(float) * 3];
         Buffer.BlockCopy(BitConverter.GetBytes(_dryWetPercent), 0, bytes, 0, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(Volatile.Read(ref _attenLimitDb)), 0, bytes, 4, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(Volatile.Read(ref _attenEnabled) ? 1f : 0f), 0, bytes, 8, 4);
         return bytes;
     }
 
@@ -218,7 +243,15 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
             return;
         }
 
-        _dryWetPercent = BitConverter.ToSingle(state, 0);
+        _dryWetPercent = Math.Clamp(BitConverter.ToSingle(state, 0), 0f, 100f);
+        if (state.Length >= sizeof(float) * 2)
+        {
+            Volatile.Write(ref _attenLimitDb, Math.Clamp(BitConverter.ToSingle(state, 4), 0f, 100f));
+        }
+        if (state.Length >= sizeof(float) * 3)
+        {
+            Volatile.Write(ref _attenEnabled, BitConverter.ToSingle(state, 8) >= 0.5f);
+        }
         if (_sampleRate > 0)
         {
             _mixSmoother.SetTarget(_dryWetPercent / 100f);
@@ -260,11 +293,6 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
             _atten[0] = 0f;
         }
         _startupSkipRemaining = StartupSkipSamples;
-        _lastLsnrDb = 0f;
-        _hopCounter = 0;
-        _inputDropSamples = 0;
-        _outputUnderrunSamples = 0;
-        _lastStatusTick = unchecked(Environment.TickCount - StatusUpdateIntervalMs);
         _dryIndex = 0;
         if (_dryRing.Length > 0)
         {
@@ -346,10 +374,7 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
 
                 RunInference();
                 _outputBuffer.Write(_outputFrame);
-                _hopCounter++;
             }
-
-            UpdateStatusMessage();
         }
     }
 
@@ -360,7 +385,9 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
             return;
         }
 
-        _atten[0] = 0f;
+        bool attenEnabled = Volatile.Read(ref _attenEnabled);
+        float attenLimit = Volatile.Read(ref _attenLimitDb);
+        _atten[0] = attenEnabled ? attenLimit : 0f;
 
         var inputValue = NamedOnnxValue.CreateFromTensor("input_frame", _inputTensor);
         var stateValue = NamedOnnxValue.CreateFromTensor("states", _stateTensor);
@@ -369,11 +396,9 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
         using var results = _session.Run(new[] { inputValue, stateValue, attenValue });
         var enhanced = GetTensor(results, "enhanced_audio_frame");
         var newStates = GetTensor(results, "new_states");
-        var lsnr = GetTensor(results, "lsnr");
 
         CopyTensorToArray(enhanced, _outputFrame);
         CopyTensorToArray(newStates, _state);
-        _lastLsnrDb = GetLastValue(lsnr);
     }
 
     private void DrainStartupSkip()
@@ -406,23 +431,6 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
 
             _startupSkipRemaining -= skipped;
         }
-    }
-
-    private void UpdateStatusMessage()
-    {
-        int now = Environment.TickCount;
-        if (unchecked(now - _lastStatusTick) < StatusUpdateIntervalMs)
-        {
-            return;
-        }
-        _lastStatusTick = now;
-
-        long dropped = Interlocked.Read(ref _inputDropSamples);
-        long underrun = Interlocked.Read(ref _outputUnderrunSamples);
-        long hops = Interlocked.Read(ref _hopCounter);
-
-        string status = $"SpeechDenoiser | dropped {dropped} / short {underrun} | hops {hops} | lsnr {_lastLsnrDb:0.0}dB";
-        Volatile.Write(ref _statusMessage, status);
     }
 
     private static SessionOptions BuildSessionOptions()
@@ -502,19 +510,4 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
         }
     }
 
-    private static float GetLastValue(Tensor<float> tensor)
-    {
-        if (tensor is DenseTensor<float> dense)
-        {
-            var span = dense.Buffer.Span;
-            return span.Length > 0 ? span[^1] : 0f;
-        }
-
-        float last = 0f;
-        foreach (var value in tensor)
-        {
-            last = value;
-        }
-        return last;
-    }
 }

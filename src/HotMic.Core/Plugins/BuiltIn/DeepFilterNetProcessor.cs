@@ -4,7 +4,7 @@ using HotMic.Core.Dsp;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-internal sealed class DeepFilterNetProcessor : IDeepFilterNetProcessor
+internal sealed class DeepFilterNetProcessor : IDisposable
 {
     private const float MeanNormMin = -60f;
     private const float MeanNormMax = -90f;
