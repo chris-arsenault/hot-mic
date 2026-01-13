@@ -19,13 +19,14 @@ public sealed class MainRenderer
 
     // Section dimensions
     private const float InputSectionWidth = 70f;
-    private const float PluginSlotWidth = 52f; // Narrower for N+1 model (one knob width + buffer)
+    private const float PluginSlotWidth = 68f; // Wide enough for 2 mini knobs stacked
     private const float PluginSlotSpacing = 2f;
     private const float OutputSectionWidth = 70f;
     private const float MeterWidth = 16f;
     private const float MiniMeterWidth = 6f;
     private const float StereoMeterWidth = 36f;
     private const float KnobSize = 36f;
+    private const float PluginKnobSize = 24f; // Smaller knobs for plugin parameters
     private const float ToggleSize = 18f;
 
     // Meter segments
@@ -60,12 +61,16 @@ public sealed class MainRenderer
     // Hit target storage
     private readonly Dictionary<MainButton, SKRect> _topButtonRects = new();
     private readonly List<KnobRect> _knobRects = new();
+    private readonly List<PluginKnobRect> _pluginKnobRects = new();
     private readonly List<PluginSlotRect> _pluginSlots = new();
     private readonly List<ToggleRect> _toggleRects = new();
     private SKRect _titleBarRect;
     private SKRect _meterScaleToggleRect;
     private SKRect _qualityToggleRect;
     private SKRect _statsAreaRect;
+    private SKRect _preset1DropdownRect;
+    private SKRect _preset2DropdownRect;
+    private SKRect _masterMeterRect;
 
     public MainRenderer()
     {
@@ -218,6 +223,15 @@ public sealed class MainRenderer
                                          : CreateCenteredTextPaint(_theme.TextSecondary, 9f);
         canvas.DrawText(qualityLabel, _qualityToggleRect.MidX, _qualityToggleRect.MidY + 3f, qualityPaint);
 
+        // Preset dropdowns (center area)
+        float presetX = _qualityToggleRect.Right + 12f;
+        DrawPresetSelector(canvas, presetX, toggleY, "C1", viewModel.Channel1PresetName, MainButton.SavePreset1, out _preset1DropdownRect, out var save1Rect);
+        _topButtonRects[MainButton.SavePreset1] = save1Rect;
+
+        float preset2X = _preset1DropdownRect.Right + 16f;
+        DrawPresetSelector(canvas, preset2X, toggleY, "C2", viewModel.Channel2PresetName, MainButton.SavePreset2, out _preset2DropdownRect, out var save2Rect);
+        _topButtonRects[MainButton.SavePreset2] = save2Rect;
+
         // Stats on right side (clickable to toggle debug overlay)
         float statsRightX = size.Width - Padding;
         float statsY = y + HotbarHeight / 2f + 3f;
@@ -240,6 +254,47 @@ public sealed class MainRenderer
 
         // Store stats area for hit testing
         _statsAreaRect = new SKRect(statsX - cpuWidth - 4f, y, statsRightX + 4f, y + HotbarHeight);
+    }
+
+    private void DrawPresetSelector(SKCanvas canvas, float x, float y, string label, string presetName, MainButton saveButton, out SKRect dropdownRect, out SKRect saveRect)
+    {
+        // Label
+        canvas.DrawText(label, x, y + 11f, _smallTextPaint);
+        float labelWidth = _smallTextPaint.MeasureText(label);
+
+        // Dropdown
+        float dropdownX = x + labelWidth + 4f;
+        float dropdownWidth = 80f;
+        dropdownRect = new SKRect(dropdownX, y, dropdownX + dropdownWidth, y + 16f);
+
+        canvas.DrawRoundRect(new SKRoundRect(dropdownRect, 3f), _buttonPaint);
+        canvas.DrawRoundRect(new SKRoundRect(dropdownRect, 3f), _borderPaint);
+
+        // Truncate preset name if needed
+        string displayName = presetName.Length > 10 ? presetName[..10] + ".." : presetName;
+        canvas.DrawText(displayName, dropdownX + 4f, y + 11f, _smallTextPaint);
+
+        // Dropdown arrow
+        float arrowX = dropdownX + dropdownWidth - 10f;
+        float arrowY = y + 6f;
+        using var arrowPath = new SKPath();
+        arrowPath.MoveTo(arrowX - 3f, arrowY);
+        arrowPath.LineTo(arrowX + 3f, arrowY);
+        arrowPath.LineTo(arrowX, arrowY + 4f);
+        arrowPath.Close();
+        canvas.DrawPath(arrowPath, CreateFillPaint(_theme.TextMuted));
+
+        // Save button
+        float saveX = dropdownRect.Right + 4f;
+        saveRect = new SKRect(saveX, y, saveX + 18f, y + 16f);
+        canvas.DrawRoundRect(new SKRoundRect(saveRect, 3f), _buttonPaint);
+        canvas.DrawRoundRect(new SKRoundRect(saveRect, 3f), _borderPaint);
+
+        // Save icon (floppy disk outline)
+        float iconCx = saveRect.MidX;
+        float iconCy = saveRect.MidY;
+        canvas.DrawRect(new SKRect(iconCx - 4f, iconCy - 4f, iconCx + 4f, iconCy + 4f), CreateStrokePaint(_theme.TextSecondary, 1f));
+        canvas.DrawRect(new SKRect(iconCx - 2f, iconCy - 4f, iconCx + 2f, iconCy - 1f), CreateFillPaint(_theme.TextSecondary));
     }
 
     private void DrawFull(SKCanvas canvas, SKSize size, MainViewModel viewModel, MainUiState uiState)
@@ -334,14 +389,15 @@ public sealed class MainRenderer
         for (int i = 0; i < channel.PluginSlots.Count; i++)
         {
             var slot = channel.PluginSlots[i];
-            DrawPluginSlot(canvas, slotX, slotY, PluginSlotWidth - MiniMeterWidth - 2f, slotHeight, slot, channelIndex, i, uiState);
+            float slotWidth = slot.IsEmpty ? (PluginSlotWidth - MiniMeterWidth - 2f) * 0.6f : PluginSlotWidth - MiniMeterWidth - 2f;
+            DrawPluginSlot(canvas, slotX, slotY, slotWidth, slotHeight, slot, channelIndex, i, uiState);
 
             // Mini meter after plugin
-            float miniMeterX = slotX + PluginSlotWidth - MiniMeterWidth - 2f;
+            float miniMeterX = slotX + slotWidth;
             float meterLevel = slot.IsEmpty ? 0f : slot.OutputRmsLevel;
             DrawMiniMeter(canvas, miniMeterX, slotY + 2f, MiniMeterWidth, slotHeight - 4f, meterLevel, voxScale);
 
-            slotX += PluginSlotWidth + PluginSlotSpacing;
+            slotX += slotWidth + MiniMeterWidth + PluginSlotSpacing;
         }
     }
 
@@ -366,41 +422,99 @@ public sealed class MainRenderer
         }
         else
         {
-            string latencyLabel = $"{slot.LatencyMs:0.0}ms";
-            canvas.DrawText(latencyLabel, x + 3f, y + 20f, _tinyTextPaint);
-
-            canvas.Save();
-            canvas.RotateDegrees(-90f, x + 14f, y + height - 4f);
-            var textPaint = slot.IsBypassed ? _tinyTextPaint : _smallTextPaint;
-            DrawEllipsizedText(canvas, slot.DisplayName, x + 14f, y + height - 4f, height - 30f, textPaint);
-            canvas.Restore();
-
-            // Bypass button - always visible, larger and more prominent
-            const float bypassBtnSize = 16f;
+            // Bypass button - top right
+            const float bypassBtnSize = 14f;
             float bypassX = x + width - bypassBtnSize - 2f;
             float bypassY = y + 2f;
             var bypassRect = new SKRect(bypassX, bypassY, bypassX + bypassBtnSize, bypassY + bypassBtnSize);
             var bypassColor = slot.IsBypassed ? _theme.Bypass : _theme.Surface;
-            canvas.DrawRoundRect(new SKRoundRect(bypassRect, 3f), CreateFillPaint(bypassColor));
-            canvas.DrawRoundRect(new SKRoundRect(bypassRect, 3f), _borderPaint);
-
-            // Draw "B" label
+            canvas.DrawRoundRect(new SKRoundRect(bypassRect, 2f), CreateFillPaint(bypassColor));
+            canvas.DrawRoundRect(new SKRoundRect(bypassRect, 2f), _borderPaint);
             var bypassTextPaint = slot.IsBypassed
-                ? CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 10f, SKFontStyle.Bold)
-                : CreateCenteredTextPaint(_theme.TextMuted, 10f);
-            canvas.DrawText("B", bypassRect.MidX, bypassRect.MidY + 4f, bypassTextPaint);
+                ? CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 8f, SKFontStyle.Bold)
+                : CreateCenteredTextPaint(_theme.TextMuted, 8f);
+            canvas.DrawText("B", bypassRect.MidX, bypassRect.MidY + 3f, bypassTextPaint);
 
-            // Remove button - larger X icon
-            float removeSize = 10f;
+            // Draw 2 parameter knobs if plugin has elevated parameters
+            if (slot.ElevatedParams is { Length: > 0 } elevParams)
+            {
+                float knobCenterX = x + width / 2f;
+                float knobY0 = y + 20f;
+                float knobY1 = y + 20f + PluginKnobSize + 4f;
+                float knobRadius = PluginKnobSize / 2f - 2f;
+
+                // Knob 0 (top)
+                if (elevParams.Length > 0)
+                {
+                    var def0 = elevParams[0];
+                    float norm0 = (slot.Param0Value - def0.Min) / (def0.Max - def0.Min);
+                    norm0 = Math.Clamp(norm0, 0f, 1f);
+                    DrawPluginKnob(canvas, knobCenterX, knobY0 + knobRadius, knobRadius, norm0, def0.Name, slot.IsBypassed);
+                    var knobRect0 = new SKRect(knobCenterX - knobRadius - 2f, knobY0, knobCenterX + knobRadius + 2f, knobY0 + PluginKnobSize);
+                    _pluginKnobRects.Add(new PluginKnobRect(channelIndex, slotIndex, 0, knobRect0, def0.Min, def0.Max));
+                }
+
+                // Knob 1 (bottom)
+                if (elevParams.Length > 1)
+                {
+                    var def1 = elevParams[1];
+                    float norm1 = (slot.Param1Value - def1.Min) / (def1.Max - def1.Min);
+                    norm1 = Math.Clamp(norm1, 0f, 1f);
+                    DrawPluginKnob(canvas, knobCenterX, knobY1 + knobRadius, knobRadius, norm1, def1.Name, slot.IsBypassed);
+                    var knobRect1 = new SKRect(knobCenterX - knobRadius - 2f, knobY1, knobCenterX + knobRadius + 2f, knobY1 + PluginKnobSize);
+                    _pluginKnobRects.Add(new PluginKnobRect(channelIndex, slotIndex, 1, knobRect1, def1.Min, def1.Max));
+                }
+            }
+
+            // Plugin name - vertical text on left side
+            canvas.Save();
+            canvas.RotateDegrees(-90f, x + 10f, y + height - 4f);
+            var textPaint = slot.IsBypassed ? _tinyTextPaint : _smallTextPaint;
+            DrawEllipsizedText(canvas, slot.DisplayName, x + 10f, y + height - 4f, height - 24f, textPaint);
+            canvas.Restore();
+
+            // Remove button - bottom right X icon
+            float removeSize = 8f;
             float removeX = x + width - removeSize - 3f;
             float removeY = y + height - removeSize - 3f;
             canvas.DrawLine(removeX, removeY, removeX + removeSize, removeY + removeSize, _iconPaint);
             canvas.DrawLine(removeX + removeSize, removeY, removeX, removeY + removeSize, _iconPaint);
         }
 
-        var bypassHitRect = new SKRect(x + width - 20f, y + 1f, x + width - 1f, y + 20f);
-        var removeHitRect = new SKRect(x + width - 16f, y + height - 16f, x + width - 1f, y + height - 1f);
+        var bypassHitRect = new SKRect(x + width - 18f, y + 1f, x + width - 1f, y + 18f);
+        var removeHitRect = new SKRect(x + width - 14f, y + height - 14f, x + width - 1f, y + height - 1f);
         _pluginSlots.Add(new PluginSlotRect(channelIndex, slotIndex, rect, bypassHitRect, removeHitRect));
+    }
+
+    private void DrawPluginKnob(SKCanvas canvas, float cx, float cy, float radius, float normalizedValue, string label, bool dimmed)
+    {
+        // Background circle
+        var bgColor = dimmed ? _theme.Surface.WithAlpha(100) : _theme.Surface;
+        canvas.DrawCircle(cx, cy, radius, CreateFillPaint(bgColor));
+        canvas.DrawCircle(cx, cy, radius, _borderPaint);
+
+        // Arc showing value
+        float startAngle = 135f;
+        float sweepAngle = 270f * normalizedValue;
+        using var arc = new SKPath();
+        arc.AddArc(new SKRect(cx - radius + 2f, cy - radius + 2f, cx + radius - 2f, cy + radius - 2f), startAngle, sweepAngle);
+        var arcColor = dimmed ? _theme.Accent.WithAlpha(100) : _theme.Accent;
+        canvas.DrawPath(arc, CreateStrokePaint(arcColor, 2f));
+
+        // Pointer line
+        float angle = (startAngle + sweepAngle) * MathF.PI / 180f;
+        float innerR = radius * 0.3f;
+        float outerR = radius * 0.7f;
+        var pointerColor = dimmed ? _theme.TextPrimary.WithAlpha(100) : _theme.TextPrimary;
+        canvas.DrawLine(
+            cx + MathF.Cos(angle) * innerR, cy + MathF.Sin(angle) * innerR,
+            cx + MathF.Cos(angle) * outerR, cy + MathF.Sin(angle) * outerR,
+            CreateStrokePaint(pointerColor, 1f));
+
+        // Label below knob
+        var labelColor = dimmed ? _theme.TextMuted.WithAlpha(100) : _theme.TextMuted;
+        var labelPaint = CreateCenteredTextPaint(labelColor, 6f);
+        canvas.DrawText(label, cx, cy + radius + 7f, labelPaint);
     }
 
     private void DrawOutputSection(SKCanvas canvas, float x, float y, float width, float height, ChannelStripViewModel channel, int channelIndex, bool voxScale)
@@ -433,6 +547,17 @@ public sealed class MainRenderer
         canvas.DrawRoundRect(roundRect, _borderPaint);
 
         canvas.DrawText("MASTER", x + 6f, y + 12f, _smallTextPaint);
+        bool lufsMode = viewModel.MasterMeterLufs;
+        float? voxTargetDb = viewModel.MeterScaleVox
+            ? (lufsMode ? -16f : -18f)
+            : null;
+        string modeLabel = lufsMode ? "LUFS" : "dB";
+        if (voxTargetDb.HasValue)
+        {
+            modeLabel = $"{modeLabel} {voxTargetDb.Value:0}";
+        }
+        float modeWidth = _tinyTextPaint.MeasureText(modeLabel);
+        canvas.DrawText(modeLabel, x + width - modeWidth - 6f, y + 12f, _tinyTextPaint);
 
         // Meters on the left side
         float meterY = y + 18f;
@@ -444,29 +569,72 @@ public sealed class MainRenderer
         canvas.DrawText("R", rightMeterX + 4f, meterY - 2f, _tinyTextPaint);
 
         float leftPeak, rightPeak, leftRms, rightRms;
-        if (viewModel.MasterIsStereo)
+        float leftReadout, rightReadout;
+
+        if (lufsMode)
         {
-            leftPeak = viewModel.Channel1.OutputPeakLevel;
-            rightPeak = viewModel.Channel2.OutputPeakLevel;
-            leftRms = viewModel.Channel1.OutputRmsLevel;
-            rightRms = viewModel.Channel2.OutputRmsLevel;
+            // LUFS mode: momentary drives the bar, short-term drives the peak marker.
+            const float minLufs = -70f;
+            float leftMomentary = viewModel.MasterLufsMomentaryLeft;
+            float rightMomentary = viewModel.MasterLufsMomentaryRight;
+            float leftShortTerm = viewModel.MasterLufsShortTermLeft;
+            float rightShortTerm = viewModel.MasterLufsShortTermRight;
+
+            if (!viewModel.MasterIsStereo)
+            {
+                float momentary = (leftMomentary + rightMomentary) * 0.5f;
+                float shortTerm = (leftShortTerm + rightShortTerm) * 0.5f;
+                leftMomentary = rightMomentary = momentary;
+                leftShortTerm = rightShortTerm = shortTerm;
+            }
+
+            if (viewModel.MasterMuted)
+            {
+                leftMomentary = rightMomentary = minLufs;
+                leftShortTerm = rightShortTerm = minLufs;
+            }
+
+            float leftPeakLufs = MathF.Max(leftMomentary, leftShortTerm);
+            float rightPeakLufs = MathF.Max(rightMomentary, rightShortTerm);
+
+            leftRms = LufsToLinear(leftShortTerm);
+            rightRms = LufsToLinear(rightShortTerm);
+            leftPeak = LufsToLinear(leftPeakLufs);
+            rightPeak = LufsToLinear(rightPeakLufs);
+            leftReadout = leftShortTerm;
+            rightReadout = rightShortTerm;
         }
         else
         {
-            float sumPeak = MathF.Max(viewModel.Channel1.OutputPeakLevel, viewModel.Channel2.OutputPeakLevel);
-            float sumRms = (viewModel.Channel1.OutputRmsLevel + viewModel.Channel2.OutputRmsLevel) / 2f;
-            leftPeak = rightPeak = sumPeak;
-            leftRms = rightRms = sumRms;
+            if (viewModel.MasterIsStereo)
+            {
+                leftPeak = viewModel.Channel1.OutputPeakLevel;
+                rightPeak = viewModel.Channel2.OutputPeakLevel;
+                leftRms = viewModel.Channel1.OutputRmsLevel;
+                rightRms = viewModel.Channel2.OutputRmsLevel;
+            }
+            else
+            {
+                float sumPeak = MathF.Max(viewModel.Channel1.OutputPeakLevel, viewModel.Channel2.OutputPeakLevel);
+                float sumRms = (viewModel.Channel1.OutputRmsLevel + viewModel.Channel2.OutputRmsLevel) / 2f;
+                leftPeak = rightPeak = sumPeak;
+                leftRms = rightRms = sumRms;
+            }
+
+            // If master muted, show zero levels on meters
+            if (viewModel.MasterMuted)
+            {
+                leftPeak = rightPeak = leftRms = rightRms = 0f;
+            }
+
+            leftReadout = LinearToDb(leftPeak);
+            rightReadout = LinearToDb(rightPeak);
         }
 
-        // If master muted, show zero levels on meters
-        if (viewModel.MasterMuted)
-        {
-            leftPeak = rightPeak = leftRms = rightRms = 0f;
-        }
+        _masterMeterRect = new SKRect(leftMeterX, meterY, rightMeterX + MeterWidth, meterY + meterHeight);
 
-        DrawVerticalMeter(canvas, leftMeterX, meterY, MeterWidth, meterHeight, leftPeak, leftRms, viewModel.MeterScaleVox);
-        DrawVerticalMeter(canvas, rightMeterX, meterY, MeterWidth, meterHeight, rightPeak, rightRms, viewModel.MeterScaleVox);
+        DrawVerticalMeter(canvas, leftMeterX, meterY, MeterWidth, meterHeight, leftPeak, leftRms, viewModel.MeterScaleVox, voxTargetDb);
+        DrawVerticalMeter(canvas, rightMeterX, meterY, MeterWidth, meterHeight, rightPeak, rightRms, viewModel.MeterScaleVox, voxTargetDb);
 
         // Toggles on the right side (stacked: ST, M)
         float toggleX = x + width - ToggleSize - 6f;
@@ -484,12 +652,12 @@ public sealed class MainRenderer
         DrawToggleButton(canvas, muteRect, "M", viewModel.MasterMuted, _mutePaint);
         _toggleRects.Add(new ToggleRect(-1, ToggleType.MasterMute, muteRect));
 
-        // dB readings at bottom
+        // Readings at bottom
         float dbY = y + height - 8f;
-        string leftDb = $"{LinearToDb(leftPeak):0.0}";
-        string rightDb = $"{LinearToDb(rightPeak):0.0}";
-        canvas.DrawText(leftDb, leftMeterX, dbY, _tinyTextPaint);
-        canvas.DrawText(rightDb, rightMeterX, dbY, _tinyTextPaint);
+        string leftLabel = $"{leftReadout:0.0}";
+        string rightLabel = $"{rightReadout:0.0}";
+        canvas.DrawText(leftLabel, leftMeterX, dbY, _tinyTextPaint);
+        canvas.DrawText(rightLabel, rightMeterX, dbY, _tinyTextPaint);
     }
 
     private void DrawDebugOverlay(SKCanvas canvas, SKSize size, MainViewModel viewModel)
@@ -586,7 +754,7 @@ public sealed class MainRenderer
         }
     }
 
-    private void DrawVerticalMeter(SKCanvas canvas, float x, float y, float width, float height, float peakLevel, float rmsLevel, bool voxScale)
+    private void DrawVerticalMeter(SKCanvas canvas, float x, float y, float width, float height, float peakLevel, float rmsLevel, bool voxScale, float? voxTargetDb = null)
     {
         canvas.DrawRect(new SKRect(x, y, x + width, y + height), _meterBackgroundPaint);
 
@@ -637,10 +805,11 @@ public sealed class MainRenderer
             canvas.DrawLine(x, peakY, x + width, peakY, CreateStrokePaint(peakColor, 1.5f));
         }
 
-        // VOX mode: draw -18dBFS target reference line
+        // VOX mode: draw target reference line
         if (voxScale)
         {
-            float targetPos = DbToVoxMeterPosition(-18f);
+            float targetDb = voxTargetDb ?? -18f;
+            float targetPos = DbToVoxMeterPosition(targetDb);
             float targetY = y + height - height * targetPos;
             canvas.DrawLine(x, targetY, x + width, targetY, CreateStrokePaint(_theme.Accent, 1f));
         }
@@ -675,6 +844,19 @@ public sealed class MainRenderer
     /// Convert linear level (0-1) to dB.
     /// </summary>
     private static float LinearToDb(float linear) => linear <= 0f ? -60f : 20f * MathF.Log10(linear + 1e-10f);
+
+    /// <summary>
+    /// Convert LUFS (dB) value to linear magnitude for meter positioning.
+    /// </summary>
+    private static float LufsToLinear(float lufs)
+    {
+        if (!float.IsFinite(lufs))
+        {
+            return 0f;
+        }
+
+        return MathF.Pow(10f, lufs / 20f);
+    }
 
     /// <summary>
     /// Voice-optimized dB to meter position conversion.
@@ -912,8 +1094,10 @@ public sealed class MainRenderer
     {
         _topButtonRects.Clear();
         _knobRects.Clear();
+        _pluginKnobRects.Clear();
         _pluginSlots.Clear();
         _toggleRects.Clear();
+        _masterMeterRect = SKRect.Empty;
     }
 
     // Hit testing
@@ -928,6 +1112,13 @@ public sealed class MainRenderer
     {
         foreach (var knob in _knobRects)
             if (knob.Rect.Contains(x, y)) return new KnobHit(knob.ChannelIndex, knob.KnobType);
+        return null;
+    }
+
+    public PluginKnobHit? HitTestPluginKnob(float x, float y)
+    {
+        foreach (var knob in _pluginKnobRects)
+            if (knob.Rect.Contains(x, y)) return new PluginKnobHit(knob.ChannelIndex, knob.SlotIndex, knob.ParamIndex, knob.MinValue, knob.MaxValue);
         return null;
     }
 
@@ -952,6 +1143,8 @@ public sealed class MainRenderer
         return null;
     }
 
+    public bool HitTestMasterMeter(float x, float y) => _masterMeterRect.Contains(x, y);
+
     public bool HitTestMeterScaleToggle(float x, float y) => _meterScaleToggleRect.Contains(x, y);
 
     public bool HitTestQualityToggle(float x, float y) => _qualityToggleRect.Contains(x, y);
@@ -959,6 +1152,15 @@ public sealed class MainRenderer
     public bool HitTestStatsArea(float x, float y) => _statsAreaRect.Contains(x, y);
 
     public bool HitTestTitleBar(float x, float y) => _titleBarRect.Contains(x, y);
+
+    public int HitTestPresetDropdown(float x, float y)
+    {
+        if (_preset1DropdownRect.Contains(x, y)) return 0;
+        if (_preset2DropdownRect.Contains(x, y)) return 1;
+        return -1;
+    }
+
+    public SKRect GetPresetDropdownRect(int channelIndex) => channelIndex == 0 ? _preset1DropdownRect : _preset2DropdownRect;
 
     // Paint factories
     private static SKPaint CreateFillPaint(SKColor color) => new() { Color = color, IsAntialias = true, Style = SKPaintStyle.Fill };
@@ -976,12 +1178,14 @@ public sealed class MainRenderer
 
     // Internal records
     private sealed record KnobRect(int ChannelIndex, KnobType KnobType, SKRect Rect);
+    private sealed record PluginKnobRect(int ChannelIndex, int SlotIndex, int ParamIndex, SKRect Rect, float MinValue, float MaxValue);
     private sealed record PluginSlotRect(int ChannelIndex, int SlotIndex, SKRect Rect, SKRect BypassRect, SKRect RemoveRect);
     private sealed record ToggleRect(int ChannelIndex, ToggleType ToggleType, SKRect Rect);
     private enum IconType { Close, Minimize, Pin, Settings }
 }
 
 public readonly record struct KnobHit(int ChannelIndex, KnobType KnobType);
+public readonly record struct PluginKnobHit(int ChannelIndex, int SlotIndex, int ParamIndex, float MinValue, float MaxValue);
 public readonly record struct PluginSlotHit(int ChannelIndex, int SlotIndex);
-public enum PluginSlotRegion { None, Action, Bypass, Remove }
+public enum PluginSlotRegion { None, Action, Bypass, Remove, Knob }
 public readonly record struct ToggleHit(int ChannelIndex, ToggleType ToggleType);

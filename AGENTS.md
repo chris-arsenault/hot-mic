@@ -287,6 +287,12 @@ public class MeterControl : SkiaControl
 4. **Use `MathF`** not `Math` for float operations
 5. **Avoid branches in tight loops** - use branchless techniques where beneficial
 
+### DSP Validation vs UI
+
+- **Do not change DSP algorithms to match UI behavior.** If the UI does not reflect audible behavior, fix the UI scaling/meters/labels first.
+- **Do change DSP algorithms when there are real bugs,** but validate changes against reference implementations or standard formulas for that DSP class.
+- **Document the reference** with a concise inline comment near the relevant code so intent and expected behavior are clear.
+
 ### Compressor Implementation Outline
 
 ```csharp
@@ -434,7 +440,7 @@ HotMic/
 │       └── Models/
 │           └── AudioDevice.cs
 │
-├── tests/
+├── tests/ (verification-only; not used for long-term behavior)
 │   ├── HotMic.Core.Tests/
 │   │   ├── Plugins/
 │   │   │   ├── CompressorPluginTests.cs
@@ -451,50 +457,12 @@ HotMic/
 
 ---
 
-## Testing Guidelines
+## Testing Policy
 
-### Unit Test DSP Plugins
+This project should not rely on long-term unit or integration tests to control behavior.
+Temporary, isolated verification tests are allowed (for example, DSP math or FFT correctness), but should be clearly scoped and may be removed once validated.
 
-```csharp
-[Fact]
-public void Compressor_BelowThreshold_NoGainReduction()
-{
-    var compressor = new CompressorPlugin();
-    compressor.Initialize(48000, 512);
-    compressor.SetParameter(CompressorParams.Threshold, -20f);
-    
-    // Input at -30dB (below threshold)
-    var buffer = GenerateSineWave(frequency: 1000, amplitude: 0.03f, samples: 512);
-    var inputRms = CalculateRms(buffer);
-    
-    compressor.Process(buffer);
-    var outputRms = CalculateRms(buffer);
-    
-    // Should be approximately equal (only makeup gain difference)
-    Assert.InRange(outputRms / inputRms, 0.95f, 1.05f);
-}
-```
-
-### Integration Test Audio Pipeline
-
-```csharp
-[Fact]
-public void ChannelStrip_PluginChain_ProcessesInOrder()
-{
-    var strip = new ChannelStrip();
-    
-    var plugin1 = new TestPlugin("first");
-    var plugin2 = new TestPlugin("second");
-    
-    strip.AddPlugin(plugin1);
-    strip.AddPlugin(plugin2);
-    
-    var buffer = new float[512];
-    strip.Process(buffer);
-    
-    Assert.Equal(new[] { "first", "second" }, TestPlugin.ProcessOrder);
-}
-```
+Still document complex DSP or UI behavior with concise inline comments near the relevant code so intent and assumptions are captured in context.
 
 ---
 
@@ -551,6 +519,7 @@ public class Vst3PluginWrapper : IPlugin
 | Updating UI from audio callback | Use `Dispatcher.InvokeAsync` or timer polling |
 | String formatting in audio thread | Never - defer to UI thread |
 | Using `Dictionary` for plugin params | Use fixed-size array indexed by param ID |
+| Tweaking DSP to make UI "look right" | Fix the UI or meters; only change DSP when validated against a reference |
 
 ---
 
@@ -572,9 +541,6 @@ dotnet build
 # Build release
 dotnet build -c Release
 
-# Run tests
-dotnet test
-
 # Run application
 dotnet run --project src/HotMic.App
 
@@ -590,11 +556,11 @@ A feature is complete when:
 
 - [ ] Implementation matches requirements in REQUIREMENTS.md
 - [ ] No memory allocations in audio callback path (verify with profiler)
-- [ ] Unit tests pass with >80% coverage for DSP code
 - [ ] UI remains responsive during audio processing
 - [ ] No audio glitches under normal operation
 - [ ] Code follows patterns in this document
 - [ ] XML documentation on public APIs
+- [ ] Complex functionality has concise inline comments explaining intent
 
 ## Landing the Plane (Session Completion)
 
@@ -603,7 +569,7 @@ A feature is complete when:
 **MANDATORY WORKFLOW:**
 
 1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
+2. **Run quality gates** (if code changed) - Builds, linters, manual validation notes
 3. **Update issue status** - Close finished work, update in-progress items
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash

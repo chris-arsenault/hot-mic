@@ -5,6 +5,7 @@ public sealed class UiConfig
     public string ViewMode { get; set; } = "full";
     public bool AlwaysOnTop { get; set; }
     public bool MeterScaleVox { get; set; }
+    public bool MasterMeterLufs { get; set; }
     public WindowPositionConfig WindowPosition { get; set; } = new();
     public WindowSizeConfig WindowSize { get; set; } = new();
 }

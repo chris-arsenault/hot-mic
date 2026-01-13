@@ -28,6 +28,21 @@ public sealed class BiquadFilter
         SetCoefficients(FilterType.Peaking, sampleRate, freq, gainDb, q);
     }
 
+    public void SetHighPass(float sampleRate, float freq, float q)
+    {
+        SetCoefficients(FilterType.HighPass, sampleRate, freq, 0f, q);
+    }
+
+    public void SetLowPass(float sampleRate, float freq, float q)
+    {
+        SetCoefficients(FilterType.LowPass, sampleRate, freq, 0f, q);
+    }
+
+    public void SetBandPass(float sampleRate, float freq, float q)
+    {
+        SetCoefficients(FilterType.BandPass, sampleRate, freq, 0f, q);
+    }
+
     public float Process(float input)
     {
         float output = _b0 * input + _z1;
@@ -61,6 +76,36 @@ public sealed class BiquadFilter
 
         switch (type)
         {
+            case FilterType.LowPass:
+            {
+                b0 = (1f - cos) * 0.5f;
+                b1 = 1f - cos;
+                b2 = (1f - cos) * 0.5f;
+                a0 = 1f + alpha;
+                a1 = -2f * cos;
+                a2 = 1f - alpha;
+                break;
+            }
+            case FilterType.HighPass:
+            {
+                b0 = (1f + cos) * 0.5f;
+                b1 = -(1f + cos);
+                b2 = (1f + cos) * 0.5f;
+                a0 = 1f + alpha;
+                a1 = -2f * cos;
+                a2 = 1f - alpha;
+                break;
+            }
+            case FilterType.BandPass:
+            {
+                b0 = alpha;
+                b1 = 0f;
+                b2 = -alpha;
+                a0 = 1f + alpha;
+                a1 = -2f * cos;
+                a2 = 1f - alpha;
+                break;
+            }
             case FilterType.LowShelf:
             {
                 float sqrtA = MathF.Sqrt(a);
@@ -109,6 +154,9 @@ public sealed class BiquadFilter
     {
         LowShelf,
         HighShelf,
-        Peaking
+        Peaking,
+        LowPass,
+        HighPass,
+        BandPass
     }
 }

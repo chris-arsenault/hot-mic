@@ -4,6 +4,7 @@ public sealed class ChannelConfig
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string PresetName { get; set; } = string.Empty;
     public float InputGainDb { get; set; }
     public float OutputGainDb { get; set; }
     public bool IsMuted { get; set; }

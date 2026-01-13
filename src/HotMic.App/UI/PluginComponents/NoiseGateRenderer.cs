@@ -22,6 +22,7 @@ public sealed class NoiseGateRenderer : IDisposable
     private readonly EnvelopeCurveDisplay _envelopeCurve;
     private readonly RotaryKnob _knob;
     private readonly GateIndicator _gateIndicator;
+    private readonly PluginPresetBar _presetBar;
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -49,6 +50,7 @@ public sealed class NoiseGateRenderer : IDisposable
         _envelopeCurve = new EnvelopeCurveDisplay(_theme);
         _knob = new RotaryKnob(_theme);
         _gateIndicator = new GateIndicator(_theme);
+        _presetBar = new PluginPresetBar(_theme);
 
         _backgroundPaint = new SKPaint
         {
@@ -155,6 +157,11 @@ public sealed class NoiseGateRenderer : IDisposable
 
         // Title
         canvas.DrawText("Noise Gate", Padding, TitleBarHeight / 2f + 5, _titlePaint);
+
+        // Preset bar
+        float presetBarX = Padding + 85;
+        float presetBarY = (TitleBarHeight - PluginPresetBar.TotalHeight) / 2f;
+        _presetBar.Render(canvas, presetBarX, presetBarY, state.PresetName);
 
         // Bypass button
         float bypassWidth = 60f;
@@ -274,6 +281,12 @@ public sealed class NoiseGateRenderer : IDisposable
         if (_bypassButtonRect.Contains(x, y))
             return new NoiseGateHitTest(NoiseGateHitArea.BypassButton, -1);
 
+        var presetHit = _presetBar.HitTest(x, y);
+        if (presetHit == PresetBarHitArea.Dropdown)
+            return new NoiseGateHitTest(NoiseGateHitArea.PresetDropdown, -1);
+        if (presetHit == PresetBarHitArea.SaveButton)
+            return new NoiseGateHitTest(NoiseGateHitArea.PresetSave, -1);
+
         for (int i = 0; i < _knobCount; i++)
         {
             float dx = x - _knobCenters[i].X;
@@ -290,6 +303,8 @@ public sealed class NoiseGateRenderer : IDisposable
         return new NoiseGateHitTest(NoiseGateHitArea.None, -1);
     }
 
+    public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
+
     public static SKSize GetPreferredSize() => new(420, 400);
 
     public void Dispose()
@@ -298,6 +313,7 @@ public sealed class NoiseGateRenderer : IDisposable
         _envelopeCurve.Dispose();
         _knob.Dispose();
         _gateIndicator.Dispose();
+        _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -322,7 +338,8 @@ public record struct NoiseGateState(
     float LatencyMs,
     bool IsGateOpen,
     bool IsBypassed,
-    int HoveredKnob = -1);
+    int HoveredKnob = -1,
+    string PresetName = "Custom");
 
 public enum NoiseGateHitArea
 {
@@ -330,7 +347,9 @@ public enum NoiseGateHitArea
     TitleBar,
     CloseButton,
     BypassButton,
-    Knob
+    Knob,
+    PresetDropdown,
+    PresetSave
 }
 
 public record struct NoiseGateHitTest(NoiseGateHitArea Area, int KnobIndex);

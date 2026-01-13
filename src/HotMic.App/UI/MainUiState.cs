@@ -6,7 +6,9 @@ public enum MainButton
     Settings,
     Pin,
     Minimize,
-    Close
+    Close,
+    SavePreset1,
+    SavePreset2
 }
 
 public enum DevicePickerTarget
@@ -20,13 +22,17 @@ public enum DevicePickerTarget
     BufferSize,
     Input1Channel,
     Input2Channel,
-    OutputRouting
+    OutputRouting,
+    Preset1,
+    Preset2
 }
 
 public enum KnobType
 {
     InputGain,
-    OutputGain
+    OutputGain,
+    PluginParam0,
+    PluginParam1
 }
 
 public enum ToggleType
@@ -48,4 +54,4 @@ public sealed class MainUiState
 
 public readonly record struct PluginDragState(int ChannelIndex, int SlotIndex, float StartX, float StartY, float CurrentX, float CurrentY, bool IsDragging);
 
-public readonly record struct KnobDragState(int ChannelIndex, KnobType KnobType, float StartValue, float StartY);
+public readonly record struct KnobDragState(int ChannelIndex, KnobType KnobType, float StartValue, float StartY, int PluginSlotIndex = -1, float MinValue = -60f, float MaxValue = 12f);

@@ -22,6 +22,7 @@
                     MouseDown="SkiaCanvas_MouseDown"
                     MouseMove="SkiaCanvas_MouseMove"
                     MouseUp="SkiaCanvas_MouseUp"
-                    MouseWheel="SkiaCanvas_MouseWheel" />
+                    MouseWheel="SkiaCanvas_MouseWheel"
+                    MouseRightButtonUp="SkiaCanvas_MouseRightButtonUp" />
   </Grid>
 </Window>

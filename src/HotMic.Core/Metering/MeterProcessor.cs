@@ -4,20 +4,23 @@ namespace HotMic.Core.Metering;
 
 public sealed class MeterProcessor
 {
-    private readonly int _holdSamples;
-    private readonly float _peakDecayPerSample;
+    private readonly float _peakAttackCoeff;
+    private readonly float _peakReleaseCoeff;
     private readonly float _rmsAttackCoeff;
     private readonly float _rmsReleaseCoeff;
     private int _peakBits;
     private int _rmsBits;
-    private float _peakHold;
+    private float _peakSmoothed;
     private float _rmsSmoothed;
-    private int _holdSamplesLeft;
 
     public MeterProcessor(int sampleRate, float peakHoldSeconds = 0.5f, float peakDecayPerSecond = 2f)
     {
-        _holdSamples = (int)(sampleRate * peakHoldSeconds);
-        _peakDecayPerSample = peakDecayPerSecond / sampleRate;
+        // Peak smoothing: very fast attack (~1ms), moderate release (~100ms)
+        // This gives responsive peaks that decay smoothly
+        float peakAttackMs = 1f;
+        float peakReleaseMs = 100f;
+        _peakAttackCoeff = 1f - MathF.Exp(-1f / (peakAttackMs * 0.001f * sampleRate));
+        _peakReleaseCoeff = 1f - MathF.Exp(-1f / (peakReleaseMs * 0.001f * sampleRate));
 
         // RMS smoothing: ~50ms attack, ~150ms release for responsive but smooth display
         float rmsAttackMs = 50f;
@@ -38,10 +41,9 @@ public sealed class MeterProcessor
             _rmsSmoothed = 0f;
         }
 
-        if (!float.IsFinite(_peakHold))
+        if (!float.IsFinite(_peakSmoothed))
         {
-            _peakHold = 0f;
-            _holdSamplesLeft = 0;
+            _peakSmoothed = 0f;
         }
 
         float peak = 0f;
@@ -77,13 +79,15 @@ public sealed class MeterProcessor
 
         // Smooth RMS with attack/release envelope follower
         float rmsCoeff = instantRms > _rmsSmoothed ? _rmsAttackCoeff : _rmsReleaseCoeff;
-        // Apply coefficient for the number of samples processed (approximate)
-        float effectiveCoeff = 1f - MathF.Pow(1f - rmsCoeff, buffer.Length);
-        _rmsSmoothed += effectiveCoeff * (instantRms - _rmsSmoothed);
+        float effectiveRmsCoeff = 1f - MathF.Pow(1f - rmsCoeff, buffer.Length);
+        _rmsSmoothed += effectiveRmsCoeff * (instantRms - _rmsSmoothed);
 
-        UpdatePeakHold(peak, buffer.Length);
+        // Smooth peak with attack/release envelope follower (same approach as RMS)
+        float peakCoeff = peak > _peakSmoothed ? _peakAttackCoeff : _peakReleaseCoeff;
+        float effectivePeakCoeff = 1f - MathF.Pow(1f - peakCoeff, buffer.Length);
+        _peakSmoothed += effectivePeakCoeff * (peak - _peakSmoothed);
 
-        Interlocked.Exchange(ref _peakBits, BitConverter.SingleToInt32Bits(_peakHold));
+        Interlocked.Exchange(ref _peakBits, BitConverter.SingleToInt32Bits(_peakSmoothed));
         Interlocked.Exchange(ref _rmsBits, BitConverter.SingleToInt32Bits(_rmsSmoothed));
     }
 
@@ -95,27 +99,5 @@ public sealed class MeterProcessor
     public float GetRmsLevel()
     {
         return BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _rmsBits, 0, 0));
-    }
-
-    private void UpdatePeakHold(float peak, int samples)
-    {
-        if (peak >= _peakHold)
-        {
-            _peakHold = peak;
-            _holdSamplesLeft = _holdSamples;
-            return;
-        }
-
-        if (_holdSamplesLeft > 0)
-        {
-            _holdSamplesLeft -= samples;
-            if (_holdSamplesLeft < 0)
-            {
-                _holdSamplesLeft = 0;
-            }
-            return;
-        }
-
-        _peakHold = MathF.Max(0f, _peakHold - _peakDecayPerSample * samples);
     }
 }
