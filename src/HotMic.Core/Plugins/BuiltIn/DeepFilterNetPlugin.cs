@@ -49,6 +49,8 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private int _diagMaskMeanBits;
     private int _diagMaskMaxBits;
     private int _diagStageFlags;
+    private int _diagInputRmsDbBits;
+    private int _diagProcessorGrDbBits;
     private const float GrSmoothingAttack = 0.3f;
     private const float GrSmoothingRelease = 0.85f;
     private const float SilenceThreshold = 1e-8f;
@@ -121,6 +123,10 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     public bool DiagnosticApplyGainZeros => (Volatile.Read(ref _diagStageFlags) & 0x2) != 0;
 
     public bool DiagnosticApplyDf => (Volatile.Read(ref _diagStageFlags) & 0x4) != 0;
+
+    public float DiagnosticInputRmsDb => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _diagInputRmsDbBits, 0, 0));
+
+    public float DiagnosticProcessorGrDb => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _diagProcessorGrDbBits, 0, 0));
 
     /// <summary>
     /// Gets the current gain reduction in dB (positive value = reduction).
@@ -402,6 +408,8 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         Interlocked.Exchange(ref _diagMaskMeanBits, 0);
         Interlocked.Exchange(ref _diagMaskMaxBits, 0);
         Volatile.Write(ref _diagStageFlags, 0);
+        Interlocked.Exchange(ref _diagInputRmsDbBits, 0);
+        Interlocked.Exchange(ref _diagProcessorGrDbBits, 0);
         ResetLogTicks();
         Interlocked.Exchange(ref _gainReductionDbBits, 0);
     }
@@ -474,9 +482,10 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
                 bool postFilter = Volatile.Read(ref _postFilterEnabled) >= 0.5f;
                 float attenDb = Volatile.Read(ref _attenLimitDb);
+                float inputRmsDb = ComputeRmsDb(_hopBuffer);
                 _processor.ProcessHop(_hopBuffer, _hopOutput, postFilter, attenDb);
                 _outputBuffer.Write(_hopOutput);
-                UpdateDiagnostics();
+                UpdateDiagnostics(inputRmsDb);
                 UpdateStatusMessage();
                 _hopCounter++;
             }
@@ -485,7 +494,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         }
     }
 
-    private void UpdateDiagnostics()
+    private void UpdateDiagnostics(float inputRmsDb)
     {
         if (_processor is null)
         {
@@ -500,12 +509,15 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         bool applyGainZeros = _processor.LastApplyGainZeros;
         bool applyDf = _processor.LastApplyDf;
         int stageFlags = (applyGains ? 0x1 : 0) | (applyGainZeros ? 0x2 : 0) | (applyDf ? 0x4 : 0);
+        float grDb = _processor.LastGainReductionDb;
 
         Interlocked.Exchange(ref _diagLsnrBits, BitConverter.SingleToInt32Bits(lsnr));
         Interlocked.Exchange(ref _diagMaskMinBits, BitConverter.SingleToInt32Bits(maskMin));
         Interlocked.Exchange(ref _diagMaskMeanBits, BitConverter.SingleToInt32Bits(maskMean));
         Interlocked.Exchange(ref _diagMaskMaxBits, BitConverter.SingleToInt32Bits(maskMax));
         Volatile.Write(ref _diagStageFlags, stageFlags);
+        Interlocked.Exchange(ref _diagInputRmsDbBits, BitConverter.SingleToInt32Bits(inputRmsDb));
+        Interlocked.Exchange(ref _diagProcessorGrDbBits, BitConverter.SingleToInt32Bits(grDb));
     }
 
     private void UpdateStatusMessage()
@@ -573,9 +585,12 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         float reduction = _reductionPct;
         float attenDb = Volatile.Read(ref _attenLimitDb);
         float postFilter = Volatile.Read(ref _postFilterEnabled);
+        float inputRmsDb = DiagnosticInputRmsDb;
+        float processorGrDb = DiagnosticProcessorGrDb;
 
         Trace.WriteLine(
-            $"[DFN] dropped={dropped} short={underrun} hops={hops} lsnr={lsnr:0.0} " +
+            $"[DFN] dropped={dropped} short={underrun} hops={hops} in={inputRmsDb:0.0}dB " +
+            $"gr={processorGrDb:0.0}dB lsnr={lsnr:0.0} " +
             $"mask={maskMin:0.00}/{maskMean:0.00}/{maskMax:0.00} " +
             $"stages={gainChar}{zeroChar}{dfChar} reduction={reduction:0.0}% " +
             $"atten={attenDb:0.0}dB post={postFilter:0.0}");
@@ -614,6 +629,25 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         int now = Environment.TickCount;
         _lastStatusTick = unchecked(now - StatusUpdateIntervalMs);
         _lastConsoleTick = unchecked(now - ConsoleLogIntervalMs);
+    }
+
+    private static float ComputeRmsDb(ReadOnlySpan<float> input)
+    {
+        if (input.Length == 0)
+        {
+            return -120f;
+        }
+
+        float sum = 0f;
+        for (int i = 0; i < input.Length; i++)
+        {
+            float sample = input[i];
+            sum += sample * sample;
+        }
+
+        float mean = sum / input.Length;
+        float rms = MathF.Sqrt(mean);
+        return 20f * MathF.Log10(rms + 1e-12f);
     }
 
 }
