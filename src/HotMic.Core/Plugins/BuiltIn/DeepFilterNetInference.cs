@@ -74,10 +74,10 @@ internal sealed class DeepFilterNetInference : IDisposable
         _dfOutputCoefs = RequireName(_dfSession.OutputMetadata, "coefs");
     }
 
-    public EncoderOutput RunEncoder(float[] erbFeatures, float[] specFeatures)
+    public EncoderOutput RunEncoder(float[] erbFeatures, float[] specFeatures, int frames)
     {
-        var erbTensor = new DenseTensor<float>(erbFeatures, new[] { 1, 1, 1, _nbErb });
-        var specTensor = new DenseTensor<float>(specFeatures, new[] { 1, 2, 1, _nbDf });
+        var erbTensor = new DenseTensor<float>(erbFeatures, new[] { 1, 1, frames, _nbErb });
+        var specTensor = new DenseTensor<float>(specFeatures, new[] { 1, 2, frames, _nbDf });
 
         var inputs = new List<NamedOnnxValue>
         {
@@ -111,7 +111,7 @@ internal sealed class DeepFilterNetInference : IDisposable
         using var results = _erbSession.Run(inputs);
 
         var mask = GetTensor(results, _erbOutputMask);
-        CopyTensorTo(gainsOut, mask);
+        CopyTensorTail(gainsOut, mask);
     }
 
     public void FillCoefs(EncoderOutput enc, float[] coefsOut)
@@ -125,7 +125,7 @@ internal sealed class DeepFilterNetInference : IDisposable
         using var results = _dfSession.Run(inputs);
 
         var coefs = GetTensor(results, _dfOutputCoefs);
-        CopyTensorTo(coefsOut, coefs);
+        CopyTensorTail(coefsOut, coefs);
     }
 
     public void Dispose()
@@ -169,29 +169,73 @@ internal sealed class DeepFilterNetInference : IDisposable
     private static float GetScalar(IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results, string name)
     {
         var tensor = GetTensor(results, name);
-        foreach (var value in tensor)
-        {
-            return value;
-        }
-        return 0f;
+        return GetLastValue(tensor);
     }
 
-    private static void CopyTensorTo(float[] destination, Tensor<float> tensor)
+    private static void CopyTensorTail(float[] destination, Tensor<float> tensor)
     {
-        int count = 0;
+        int count = destination.Length;
+        if (count == 0)
+        {
+            return;
+        }
+
+        if (tensor is DenseTensor<float> dense)
+        {
+            var span = dense.Buffer.Span;
+            int available = span.Length;
+            if (available == 0)
+            {
+                Array.Clear(destination, 0, destination.Length);
+                return;
+            }
+
+            int offset = Math.Max(0, available - count);
+            int copyCount = Math.Min(count, available);
+            span.Slice(offset, copyCount).CopyTo(destination);
+            if (copyCount < count)
+            {
+                Array.Clear(destination, copyCount, count - copyCount);
+            }
+            return;
+        }
+
+        int skip = Math.Max(0, tensor.Length - count);
+        int index = 0;
+        int i = 0;
         foreach (var value in tensor)
         {
-            if (count >= destination.Length)
+            if (i++ < skip)
+            {
+                continue;
+            }
+            if (index >= count)
             {
                 break;
             }
-            destination[count++] = value;
+            destination[index++] = value;
         }
 
-        if (count < destination.Length)
+        if (index < count)
         {
-            Array.Clear(destination, count, destination.Length - count);
+            Array.Clear(destination, index, count - index);
         }
+    }
+
+    private static float GetLastValue(Tensor<float> tensor)
+    {
+        if (tensor is DenseTensor<float> dense)
+        {
+            var span = dense.Buffer.Span;
+            return span.Length > 0 ? span[^1] : 0f;
+        }
+
+        float last = 0f;
+        foreach (var value in tensor)
+        {
+            last = value;
+        }
+        return last;
     }
 
     internal sealed class EncoderOutput : IDisposable

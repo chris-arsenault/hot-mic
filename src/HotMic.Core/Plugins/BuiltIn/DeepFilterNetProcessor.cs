@@ -25,6 +25,12 @@ internal sealed class DeepFilterNetProcessor : IDisposable
     private readonly float[] _specOut;
     private readonly float[] _erbFeatures;
     private readonly float[] _specFeatures;
+    private readonly int _featureFrames;
+    private readonly int _specFeatureStride;
+    private readonly float[] _erbFeatureHistory;
+    private readonly float[] _specFeatureHistory;
+    private readonly float[] _erbFeatureWindow;
+    private readonly float[] _specFeatureWindow;
     private readonly float[] _gains;
     private readonly float[] _coefs;
     private readonly float[][] _noisyHistory;
@@ -33,6 +39,8 @@ internal sealed class DeepFilterNetProcessor : IDisposable
     private readonly int _specLength;
     private readonly float _alpha;
     private int _historyIndex = -1;
+    private int _featureIndex;
+    private int _featureCount;
     private int _framesProcessed;
     private int _skipCounter;
     private float _lastLsnrDb;
@@ -61,6 +69,12 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         _specOut = new float[_specLength];
         _erbFeatures = new float[_config.NbErb];
         _specFeatures = new float[_config.NbDf * 2];
+        _featureFrames = Math.Max(1, _config.ConvLookahead + 1);
+        _specFeatureStride = _config.NbDf * 2;
+        _erbFeatureHistory = new float[_featureFrames * _config.NbErb];
+        _specFeatureHistory = new float[_featureFrames * _specFeatureStride];
+        _erbFeatureWindow = new float[_featureFrames * _config.NbErb];
+        _specFeatureWindow = new float[_featureFrames * _specFeatureStride];
         _gains = new float[_config.NbErb];
         _coefs = new float[_config.NbDf * _config.DfOrder * 2];
         _meanNormState = BuildInitState(_config.NbErb, MeanNormMin, MeanNormMax);
@@ -104,6 +118,8 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         _stft.Reset();
         _framesProcessed = 0;
         _historyIndex = -1;
+        _featureIndex = 0;
+        _featureCount = 0;
         _skipCounter = 0;
         _lastLsnrDb = 0f;
         _lastMaskMin = 1f;
@@ -114,6 +130,10 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         _lastApplyDf = false;
         Array.Copy(BuildInitState(_config.NbErb, MeanNormMin, MeanNormMax), _meanNormState, _meanNormState.Length);
         Array.Copy(BuildInitState(_config.NbDf, UnitNormMin, UnitNormMax), _unitNormState, _unitNormState.Length);
+        Array.Clear(_erbFeatureHistory, 0, _erbFeatureHistory.Length);
+        Array.Clear(_specFeatureHistory, 0, _specFeatureHistory.Length);
+        Array.Clear(_erbFeatureWindow, 0, _erbFeatureWindow.Length);
+        Array.Clear(_specFeatureWindow, 0, _specFeatureWindow.Length);
         ClearHistory(_noisyHistory);
         ClearHistory(_enhHistory);
     }
@@ -186,8 +206,18 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         PushHistory(_specBuffer);
 
         ComputeFeatures();
+        PushFeatureHistory();
 
-        using var enc = _inference.RunEncoder(_erbFeatures, _specFeatures);
+        if (_featureCount < _featureFrames)
+        {
+            output.Clear();
+            LastGainReductionDb = 0f;
+            return;
+        }
+
+        BuildFeatureWindow();
+
+        using var enc = _inference.RunEncoder(_erbFeatureWindow, _specFeatureWindow, _featureFrames);
         float lsnr = enc.Lsnr;
         var stages = ApplyStages(lsnr);
         _lastLsnrDb = lsnr;
@@ -232,7 +262,7 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         if (stages.applyDf)
         {
             _inference.FillCoefs(enc, _coefs);
-            ApplyDeepFilter(_specOut, targetIndex);
+            ApplyDeepFilter(_specOut);
         }
 
         if (stages.applyGains && postFilterEnabled)
@@ -338,12 +368,12 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         return idx % _historySize;
     }
 
-    private void ApplyDeepFilter(float[] specOut, int targetIndex)
+    private void ApplyDeepFilter(float[] specOut)
     {
         int dfOrder = _config.DfOrder;
         int nbDf = _config.NbDf;
-        // Match libDF: apply DF over df_order frames ending at the lookahead frame.
-        int historyStart = targetIndex - (dfOrder - 1);
+        // Match libDF: apply DF over the most recent df_order frames.
+        int historyStart = _historyIndex - (dfOrder - 1);
         for (int bin = 0; bin < nbDf; bin++)
         {
             float outRe = 0f;
@@ -400,6 +430,42 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         _lastMaskMin = min;
         _lastMaskMax = max;
         _lastMaskMean = sum / gains.Length;
+    }
+
+    private void PushFeatureHistory()
+    {
+        int erbOffset = _featureIndex * _config.NbErb;
+        Array.Copy(_erbFeatures, 0, _erbFeatureHistory, erbOffset, _config.NbErb);
+
+        int specOffset = _featureIndex * _specFeatureStride;
+        Array.Copy(_specFeatures, 0, _specFeatureHistory, specOffset, _specFeatureStride);
+
+        _featureIndex = (_featureIndex + 1) % _featureFrames;
+        if (_featureCount < _featureFrames)
+        {
+            _featureCount++;
+        }
+    }
+
+    private void BuildFeatureWindow()
+    {
+        int erbStride = _config.NbErb;
+        int specStride = _specFeatureStride;
+        int destFrame = 0;
+        int idx = _featureIndex;
+
+        for (int i = 0; i < _featureFrames; i++)
+        {
+            int srcFrame = idx + i;
+            if (srcFrame >= _featureFrames)
+            {
+                srcFrame -= _featureFrames;
+            }
+
+            Array.Copy(_erbFeatureHistory, srcFrame * erbStride, _erbFeatureWindow, destFrame * erbStride, erbStride);
+            Array.Copy(_specFeatureHistory, srcFrame * specStride, _specFeatureWindow, destFrame * specStride, specStride);
+            destFrame++;
+        }
     }
 
     private static float[] BuildInitState(int size, float min, float max)
