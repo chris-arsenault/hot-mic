@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
+using HotMic.Core.Dsp;
 using HotMic.Core.Plugins;
 using HotMic.Core.Threading;
 using Microsoft.ML.OnnxRuntime;
@@ -11,6 +12,8 @@ namespace HotMic.Core.Plugins.BuiltIn;
 
 public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
 {
+    public const int DryWetIndex = 0;
+
     private const int RequiredSampleRate = 48000;
     private const int HopSize = 480;
     private const int FftSize = 960;
@@ -18,6 +21,7 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
     private const int StartupSkipSamples = FftSize - HopSize;
     private const string ModelFileName = "denoiser_model.onnx";
     private const int StatusUpdateIntervalMs = 500;
+    private const float MixSmoothingMs = 8f;
 
     private readonly object _workerLock = new();
     private InferenceSession? _session;
@@ -26,6 +30,8 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
     private float[] _inputFrame = Array.Empty<float>();
     private float[] _outputFrame = Array.Empty<float>();
     private float[] _processedScratch = Array.Empty<float>();
+    private float[] _dryRing = Array.Empty<float>();
+    private int _dryIndex;
     private float[] _state = Array.Empty<float>();
     private float[] _atten = Array.Empty<float>();
     private DenseTensor<float>? _inputTensor;
@@ -37,6 +43,8 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
     private int _sampleRate;
     private bool _forcedBypass;
     private bool _wasBypassed = true;
+    private float _dryWetPercent = 100f;
+    private LinearSmoother _mixSmoother = new();
     private long _inputDropSamples;
     private long _outputUnderrunSamples;
     private long _startupSkipRemaining;
@@ -47,7 +55,18 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
 
     public SpeechDenoiserPlugin()
     {
-        Parameters = Array.Empty<PluginParameter>();
+        Parameters =
+        [
+            new PluginParameter
+            {
+                Index = DryWetIndex,
+                Name = "Dry/Wet",
+                MinValue = 0f,
+                MaxValue = 100f,
+                DefaultValue = 100f,
+                Unit = "%"
+            }
+        ];
     }
 
     public string Id => "builtin:speechdenoiser";
@@ -105,6 +124,7 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
 
         InitializeBuffers(blockSize);
         ResetState(clearBuffers: true);
+        _mixSmoother.Configure(sampleRate, MixSmoothingMs, _dryWetPercent / 100f);
         StartWorker();
         _wasBypassed = false;
     }
@@ -131,36 +151,78 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
         _frameSignal?.Set();
 
         DrainStartupSkip();
-        if (_startupSkipRemaining > 0)
+
+        int read = 0;
+        if (_startupSkipRemaining <= 0)
         {
-            buffer.Clear();
-            return;
+            read = _outputBuffer.Read(_processedScratch.AsSpan(0, buffer.Length));
+            if (read < buffer.Length)
+            {
+                Interlocked.Add(ref _outputUnderrunSamples, buffer.Length - read);
+                _processedScratch.AsSpan(read, buffer.Length - read).Clear();
+            }
+        }
+        else
+        {
+            _processedScratch.AsSpan(0, buffer.Length).Clear();
         }
 
-        int read = _outputBuffer.Read(_processedScratch.AsSpan(0, buffer.Length));
-        if (read < buffer.Length)
-        {
-            Interlocked.Add(ref _outputUnderrunSamples, buffer.Length - read);
-            _processedScratch.AsSpan(read, buffer.Length - read).Clear();
-        }
+        float mix = _mixSmoother.Current;
+        bool smoothing = _mixSmoother.IsSmoothing;
 
-        _processedScratch.AsSpan(0, buffer.Length).CopyTo(buffer);
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            if (smoothing)
+            {
+                mix = _mixSmoother.Next();
+                smoothing = _mixSmoother.IsSmoothing;
+            }
+
+            float input = buffer[i];
+            float dry = _dryRing[_dryIndex];
+            float wet = i < read ? _processedScratch[i] : 0f;
+            buffer[i] = dry * (1f - mix) + wet * mix;
+
+            _dryRing[_dryIndex] = input;
+            _dryIndex++;
+            if (_dryIndex >= _dryRing.Length)
+            {
+                _dryIndex = 0;
+            }
+        }
     }
 
     public void SetParameter(int index, float value)
     {
-        _ = index;
-        _ = value;
+        if (index == DryWetIndex)
+        {
+            _dryWetPercent = Math.Clamp(value, 0f, 100f);
+            if (_sampleRate > 0)
+            {
+                _mixSmoother.SetTarget(_dryWetPercent / 100f);
+            }
+        }
     }
 
     public byte[] GetState()
     {
-        return Array.Empty<byte>();
+        var bytes = new byte[sizeof(float)];
+        Buffer.BlockCopy(BitConverter.GetBytes(_dryWetPercent), 0, bytes, 0, 4);
+        return bytes;
     }
 
     public void SetState(byte[] state)
     {
-        _ = state;
+        if (state.Length < sizeof(float))
+        {
+            return;
+        }
+
+        _dryWetPercent = BitConverter.ToSingle(state, 0);
+        if (_sampleRate > 0)
+        {
+            _mixSmoother.SetTarget(_dryWetPercent / 100f);
+        }
     }
 
     public void Dispose()
@@ -174,6 +236,8 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
         _inputFrame = new float[HopSize];
         _outputFrame = new float[HopSize];
         _processedScratch = new float[blockSize];
+        _dryRing = new float[Math.Max(1, StartupSkipSamples)];
+        _dryIndex = 0;
         _state = new float[StateSize];
         _atten = new float[1];
         _inputTensor = new DenseTensor<float>(_inputFrame, new[] { HopSize });
@@ -201,6 +265,11 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
         _inputDropSamples = 0;
         _outputUnderrunSamples = 0;
         _lastStatusTick = unchecked(Environment.TickCount - StatusUpdateIntervalMs);
+        _dryIndex = 0;
+        if (_dryRing.Length > 0)
+        {
+            Array.Clear(_dryRing, 0, _dryRing.Length);
+        }
 
         if (clearBuffers)
         {

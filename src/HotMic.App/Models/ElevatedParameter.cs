@@ -55,6 +55,7 @@ public static class ElevatedParameterDefinitions
         ["builtin:fft-noise"] = [new(0, "Reduce", 0f, 100f, 50f, "%"), new(1, "Thresh", -60f, 0f, -40f, "dB")],
         ["builtin:rnnoise"] = [new(0, "Reduce", 0f, 100f, 100f, "%"), new(1, "VAD", 0f, 100f, 0f, "%")],
         ["builtin:deepfilternet"] = [new(0, "Reduce", 0f, 100f, 100f, "%"), new(1, "Atten", 6f, 60f, 40f, "dB")],
+        ["builtin:speechdenoiser"] = [new(0, "Dry/Wet", 0f, 100f, 100f, "%")],
         ["builtin:voice-gate"] = [new(0, "Thresh", 0f, 100f, 50f, "%"), new(2, "Release", 10f, 500f, 150f, "ms")],
         ["builtin:reverb"] = [new(0, "D/W", 0f, 100f, 30f, "%"), new(1, "Decay", 0.1f, 10f, 1.5f, "s")],
     };

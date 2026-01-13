@@ -1416,6 +1416,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Use specialized window for Speech Denoiser
+        if (plugin is SpeechDenoiserPlugin speechDenoiser)
+        {
+            ShowSpeechDenoiserWindow(channelIndex, slotIndex, speechDenoiser);
+            return;
+        }
+
         // Use specialized window for Reverb
         if (plugin is ConvolutionReverbPlugin reverb)
         {
@@ -1587,6 +1594,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void ShowDeepFilterNetWindow(int channelIndex, int slotIndex, DeepFilterNetPlugin plugin)
     {
         var window = new DeepFilterNetWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowSpeechDenoiserWindow(int channelIndex, int slotIndex, SpeechDenoiserPlugin plugin)
+    {
+        var window = new SpeechDenoiserWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
