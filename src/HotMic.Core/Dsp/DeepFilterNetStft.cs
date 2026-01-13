@@ -1,5 +1,6 @@
 using System;
-using HotMic.Core.Dsp.KissFft;
+using MathNet.Numerics;
+using MathNet.Numerics.IntegralTransforms;
 
 namespace HotMic.Core.Dsp;
 
@@ -13,9 +14,7 @@ internal sealed class DeepFilterNetStft
     private readonly float[] _analysisMem;
     private readonly float[] _synthesisMem;
     private readonly float[] _timeBuffer;
-    private readonly KissFFTR _fftForward;
-    private readonly KissFFTR _fftInverse;
-    private readonly kiss_fft_cpx<float>[] _freqBuffer;
+    private readonly Complex32[] _fftBuffer;
 
     public DeepFilterNetStft(int fftSize, int hopSize)
     {
@@ -30,9 +29,7 @@ internal sealed class DeepFilterNetStft
         // Match libDF normalization: apply wnorm in analysis only.
         _wnorm = 1f / (fftSize * fftSize / (2f * hopSize));
 
-        _fftForward = new KissFFTR(fftSize, inverse: false);
-        _fftInverse = new KissFFTR(fftSize, inverse: true);
-        _freqBuffer = new kiss_fft_cpx<float>[_freqSize];
+        _fftBuffer = new Complex32[fftSize];
     }
 
     public int FftSize => _fftSize;
@@ -76,12 +73,17 @@ internal sealed class DeepFilterNetStft
             _analysisMem[analysisSplit + i] = inputHop[i];
         }
 
-        _fftForward.Forward(_timeBuffer, _freqBuffer);
+        for (int i = 0; i < _fftSize; i++)
+        {
+            _fftBuffer[i] = new Complex32(_timeBuffer[i], 0f);
+        }
+
+        Fourier.Forward(_fftBuffer, FourierOptions.NoScaling);
 
         for (int i = 0; i < _freqSize; i++)
         {
-            specInterleaved[i * 2] = _freqBuffer[i].r * _wnorm;
-            specInterleaved[i * 2 + 1] = _freqBuffer[i].i * _wnorm;
+            specInterleaved[i * 2] = _fftBuffer[i].Real * _wnorm;
+            specInterleaved[i * 2 + 1] = _fftBuffer[i].Imaginary * _wnorm;
         }
     }
 
@@ -106,15 +108,24 @@ internal sealed class DeepFilterNetStft
                 im = 0f;
             }
 
-            _freqBuffer[i].r = re;
-            _freqBuffer[i].i = im;
+            _fftBuffer[i] = new Complex32(re, im);
         }
 
-        _fftInverse.Inverse(_freqBuffer, _timeBuffer);
+        int nyquist = _freqSize - 1;
+        _fftBuffer[0] = new Complex32(_fftBuffer[0].Real, 0f);
+        _fftBuffer[nyquist] = new Complex32(_fftBuffer[nyquist].Real, 0f);
+
+        for (int i = 1; i < nyquist; i++)
+        {
+            Complex32 bin = _fftBuffer[i];
+            _fftBuffer[_fftSize - i] = new Complex32(bin.Real, -bin.Imaginary);
+        }
+
+        Fourier.Inverse(_fftBuffer, FourierOptions.NoScaling);
 
         for (int i = 0; i < _fftSize; i++)
         {
-            _timeBuffer[i] *= _window[i];
+            _timeBuffer[i] = _fftBuffer[i].Real * _window[i];
         }
 
         for (int i = 0; i < _hopSize; i++)

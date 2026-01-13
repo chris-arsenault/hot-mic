@@ -151,10 +151,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             _roundTripPrimed = false;
         }
         _mixSmoother.Configure(sampleRate, MixSmoothingMs, _reductionPct / 100f);
-        if (!DeepFilterNetProcessor.RoundTripOnly)
-        {
-            StartWorker();
-        }
+        StartWorker();
         _wasBypassed = false;
     }
 
@@ -173,22 +170,11 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             _wasBypassed = false;
         }
 
-        int read = 0;
+        _inputBuffer.Write(buffer);
+        _frameSignal?.Set();
+
         if (DeepFilterNetProcessor.RoundTripOnly)
         {
-            _inputBuffer.Write(buffer);
-            while (_inputBuffer.AvailableRead >= _hopSize)
-            {
-                int hopRead = _inputBuffer.Read(_hopBuffer);
-                if (hopRead < _hopSize)
-                {
-                    break;
-                }
-
-                _processor.ProcessHop(_hopBuffer, _hopOutput, postFilterEnabled: false, attenLimitDb: _attenLimitDb);
-                _outputBuffer.Write(_hopOutput);
-            }
-
             if (!_roundTripPrimed && _outputBuffer.AvailableRead >= _roundTripMinOutput)
             {
                 _roundTripPrimed = true;
@@ -201,19 +187,17 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 return;
             }
 
-            read = _outputBuffer.Read(buffer);
-            if (read < buffer.Length)
+            int readCount = _outputBuffer.Read(buffer);
+            if (readCount < buffer.Length)
             {
-                buffer.Slice(read).Clear();
+                buffer.Slice(readCount).Clear();
             }
 
             Interlocked.Exchange(ref _gainReductionDbBits, 0);
             return;
         }
 
-        _inputBuffer.Write(buffer);
-        _frameSignal?.Set();
-        read = _outputBuffer.Read(_processedScratch.AsSpan(0, buffer.Length));
+        int read = _outputBuffer.Read(_processedScratch.AsSpan(0, buffer.Length));
 
         float mix = _mixSmoother.Current;
         bool smoothing = _mixSmoother.IsSmoothing;
