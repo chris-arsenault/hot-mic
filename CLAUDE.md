@@ -314,24 +314,20 @@ public class AudioEngine : IDisposable
 
 ---
 
-## Commands
+## Build & Run (Windows only)
 
-```bash
-# Build
-dotnet build
+- This agent runs in WSL and cannot build, run, test, or publish the Windows app here.
+- Ask the user to run the appropriate commands in their Windows environment and share the results.
+- Never claim build/test success unless the user ran the commands and reported the output.
+- If the user cannot run them, mark the change as unverified.
 
-# Run
-dotnet run --project src/HotMic.App
+---
 
-# Test
-dotnet test
+## Git Hygiene
 
-# Test specific
-dotnet test --filter "FullyQualifiedName~CompressorPlugin"
-
-# Publish
-dotnet publish src/HotMic.App -c Release -r win-x64 --self-contained
-```
+- Prefer small, logical commits; avoid noisy debug commits.
+- Push only when changes are coherent and relevant checks pass; otherwise record status and reason in `bd`.
+- Do not push broken builds to shared branches.
 
 ---
 
@@ -375,7 +371,7 @@ dotnet publish src/HotMic.App -c Release -r win-x64 --self-contained
 
 Before considering any feature complete:
 
-- [ ] Builds without warnings
+- [ ] Builds without warnings (verified by a user-run Windows build)
 - [ ] No allocations in audio callback (verify via profiler or code review)
 - [ ] Unit tests for any DSP/logic code
 - [ ] Works with actual audio devices (manual test)
