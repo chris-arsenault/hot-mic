@@ -97,6 +97,8 @@ internal static class DeepFilterNetDsp
 
     public static void BandUnitNorm(float[] specInterleaved, int bins, float[] state, float alpha, float[] outputInterleaved)
     {
+        // Match libDF band_unit_norm_t: output is [re0..reN-1, im0..imN-1].
+        int imagOffset = bins;
         for (int i = 0; i < bins; i++)
         {
             int idx = i * 2;
@@ -105,8 +107,8 @@ internal static class DeepFilterNetDsp
             float mag = MathF.Sqrt(re * re + im * im);
             state[i] = mag * (1f - alpha) + state[i] * alpha;
             float denom = MathF.Sqrt(state[i] + 1e-12f);
-            outputInterleaved[idx] = re / denom;
-            outputInterleaved[idx + 1] = im / denom;
+            outputInterleaved[i] = re / denom;
+            outputInterleaved[imagOffset + i] = im / denom;
         }
     }
 
