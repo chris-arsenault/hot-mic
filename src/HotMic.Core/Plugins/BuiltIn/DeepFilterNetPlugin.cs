@@ -466,9 +466,33 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 float attenDb = Volatile.Read(ref _attenLimitDb);
                 _processor.ProcessHop(_hopBuffer, _hopOutput, postFilter, attenDb);
                 _outputBuffer.Write(_hopOutput);
+                UpdateDiagnostics();
                 UpdateStatusMessage();
             }
         }
+    }
+
+    private void UpdateDiagnostics()
+    {
+        if (_processor is null)
+        {
+            return;
+        }
+
+        float lsnr = _processor.LastLsnrDb;
+        float maskMin = _processor.LastMaskMin;
+        float maskMean = _processor.LastMaskMean;
+        float maskMax = _processor.LastMaskMax;
+        bool applyGains = _processor.LastApplyGains;
+        bool applyGainZeros = _processor.LastApplyGainZeros;
+        bool applyDf = _processor.LastApplyDf;
+        int stageFlags = (applyGains ? 0x1 : 0) | (applyGainZeros ? 0x2 : 0) | (applyDf ? 0x4 : 0);
+
+        Interlocked.Exchange(ref _diagLsnrBits, BitConverter.SingleToInt32Bits(lsnr));
+        Interlocked.Exchange(ref _diagMaskMinBits, BitConverter.SingleToInt32Bits(maskMin));
+        Interlocked.Exchange(ref _diagMaskMeanBits, BitConverter.SingleToInt32Bits(maskMean));
+        Interlocked.Exchange(ref _diagMaskMaxBits, BitConverter.SingleToInt32Bits(maskMax));
+        Volatile.Write(ref _diagStageFlags, stageFlags);
     }
 
     private void UpdateStatusMessage()
@@ -487,20 +511,13 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
         long dropped = Interlocked.Read(ref _inputDropSamples);
         long underrun = Interlocked.Read(ref _outputUnderrunSamples);
-        float lsnr = _processor.LastLsnrDb;
-        float maskMin = _processor.LastMaskMin;
-        float maskMean = _processor.LastMaskMean;
-        float maskMax = _processor.LastMaskMax;
-        bool applyGains = _processor.LastApplyGains;
-        bool applyGainZeros = _processor.LastApplyGainZeros;
-        bool applyDf = _processor.LastApplyDf;
-        int stageFlags = (applyGains ? 0x1 : 0) | (applyGainZeros ? 0x2 : 0) | (applyDf ? 0x4 : 0);
-
-        Interlocked.Exchange(ref _diagLsnrBits, BitConverter.SingleToInt32Bits(lsnr));
-        Interlocked.Exchange(ref _diagMaskMinBits, BitConverter.SingleToInt32Bits(maskMin));
-        Interlocked.Exchange(ref _diagMaskMeanBits, BitConverter.SingleToInt32Bits(maskMean));
-        Interlocked.Exchange(ref _diagMaskMaxBits, BitConverter.SingleToInt32Bits(maskMax));
-        Volatile.Write(ref _diagStageFlags, stageFlags);
+        float lsnr = DiagnosticLsnrDb;
+        float maskMin = DiagnosticMaskMin;
+        float maskMean = DiagnosticMaskMean;
+        float maskMax = DiagnosticMaskMax;
+        bool applyGains = DiagnosticApplyGains;
+        bool applyGainZeros = DiagnosticApplyGainZeros;
+        bool applyDf = DiagnosticApplyDf;
 
         char gainChar = applyGains ? 'G' : '-';
         char zeroChar = applyGainZeros ? 'Z' : '-';
