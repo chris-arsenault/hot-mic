@@ -1320,7 +1320,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             // AI/ML
             new() { Id = "builtin:rnnoise", Name = "RNNoise", IsVst3 = false, Category = PluginCategory.AiMl, Description = "Neural network noise suppression" },
-            new() { Id = "builtin:deepfilternet", Name = "DeepFilterNet", IsVst3 = false, Category = PluginCategory.AiMl, Description = "Deep learning noise reduction" },
             new() { Id = "builtin:speechdenoiser", Name = "Speech Denoiser", IsVst3 = false, Category = PluginCategory.AiMl, Description = "SpeechDenoiser streaming model (DFN3)" },
             new() { Id = "builtin:voice-gate", Name = "Voice Gate", IsVst3 = false, Category = PluginCategory.AiMl, Description = "AI-powered voice activity detection" },
 
@@ -1406,13 +1405,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (plugin is RNNoisePlugin rnnoise)
         {
             ShowRNNoiseWindow(channelIndex, slotIndex, rnnoise);
-            return;
-        }
-
-        // Use specialized window for DeepFilterNet
-        if (plugin is DeepFilterNetPlugin deepFilter)
-        {
-            ShowDeepFilterNetWindow(channelIndex, slotIndex, deepFilter);
             return;
         }
 
@@ -1579,21 +1571,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void ShowRNNoiseWindow(int channelIndex, int slotIndex, RNNoisePlugin plugin)
     {
         var window = new RNNoiseWindow(plugin,
-            (paramIndex, value) =>
-            {
-                string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
-            },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
-        {
-            Owner = System.Windows.Application.Current?.MainWindow
-        };
-        window.Show();
-    }
-
-    private void ShowDeepFilterNetWindow(int channelIndex, int slotIndex, DeepFilterNetPlugin plugin)
-    {
-        var window = new DeepFilterNetWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;

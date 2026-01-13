@@ -88,7 +88,6 @@ public sealed class PluginPresetManager
         _banks = new Dictionary<string, PluginPresetBank>(StringComparer.OrdinalIgnoreCase)
         {
             ["builtin:hpf"] = BuildHpfBank(),
-            ["builtin:deepfilternet"] = BuildDeepFilterNetBank(),
             ["builtin:rnnoise"] = BuildRnNoiseBank(),
             ["builtin:voice-gate"] = BuildVoiceGateBank(),
             ["builtin:deesser"] = BuildDeEsserBank(),
@@ -103,7 +102,7 @@ public sealed class PluginPresetManager
             new ChainPreset(BroadcastChainName,
             [
                 new ChainPresetEntry("builtin:hpf", BroadcastPresetName),
-                new ChainPresetEntry("builtin:deepfilternet", BroadcastPresetName),
+                new ChainPresetEntry("builtin:speechdenoiser", BroadcastPresetName),
                 new ChainPresetEntry("builtin:voice-gate", BroadcastPresetName),
                 new ChainPresetEntry("builtin:deesser", BroadcastPresetName),
                 new ChainPresetEntry("builtin:compressor", BroadcastPresetName),
@@ -123,7 +122,7 @@ public sealed class PluginPresetManager
             new ChainPreset(PodcastChainName,
             [
                 new ChainPresetEntry("builtin:hpf", PodcastPresetName),
-                new ChainPresetEntry("builtin:deepfilternet", PodcastPresetName),
+                new ChainPresetEntry("builtin:speechdenoiser", PodcastPresetName),
                 new ChainPresetEntry("builtin:voice-gate", PodcastPresetName),
                 new ChainPresetEntry("builtin:deesser", PodcastPresetName),
                 new ChainPresetEntry("builtin:compressor", PodcastPresetName),
@@ -134,7 +133,7 @@ public sealed class PluginPresetManager
             new ChainPreset(Sm7bChainName,
             [
                 new ChainPresetEntry("builtin:hpf", BroadcastPresetName),
-                new ChainPresetEntry("builtin:deepfilternet", BroadcastPresetName),
+                new ChainPresetEntry("builtin:speechdenoiser", BroadcastPresetName),
                 new ChainPresetEntry("builtin:voice-gate", BroadcastPresetName),
                 new ChainPresetEntry("builtin:deesser", Sm7bPresetName),
                 new ChainPresetEntry("builtin:compressor", BroadcastPresetName),
@@ -144,7 +143,7 @@ public sealed class PluginPresetManager
             new ChainPreset(Nt1ChainName,
             [
                 new ChainPresetEntry("builtin:hpf", BroadcastPresetName),
-                new ChainPresetEntry("builtin:deepfilternet", BroadcastPresetName),
+                new ChainPresetEntry("builtin:speechdenoiser", BroadcastPresetName),
                 new ChainPresetEntry("builtin:voice-gate", BroadcastPresetName),
                 new ChainPresetEntry("builtin:deesser", Nt1PresetName),
                 new ChainPresetEntry("builtin:compressor", BroadcastPresetName),
@@ -375,21 +374,6 @@ public sealed class PluginPresetManager
             CreatePreset(Nt1PresetName,
                 ("Cutoff", 100f),
                 ("Slope", 18f))
-        ]);
-    }
-
-    private static PluginPresetBank BuildDeepFilterNetBank()
-    {
-        return new PluginPresetBank("builtin:deepfilternet",
-        [
-            CreatePreset(BroadcastPresetName,
-                ("Reduction", 80f),
-                ("Attenuation Limit", 40f),
-                ("Post-Filter", 1f)),
-            CreatePreset(PodcastPresetName,
-                ("Reduction", 100f),
-                ("Attenuation Limit", 40f),
-                ("Post-Filter", 1f))
         ]);
     }
 

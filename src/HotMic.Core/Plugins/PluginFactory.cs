@@ -18,7 +18,6 @@ public static class PluginFactory
             "builtin:fft-noise" => new FFTNoiseRemovalPlugin(),
             "builtin:gain" => new GainPlugin(),
             "builtin:rnnoise" => new RNNoisePlugin(),
-            "builtin:deepfilternet" => new DeepFilterNetPlugin(),
             "builtin:speechdenoiser" => new SpeechDenoiserPlugin(),
             "builtin:voice-gate" => new SileroVoiceGatePlugin(),
             "builtin:reverb" => new ConvolutionReverbPlugin(),

@@ -4,7 +4,7 @@ using SkiaSharp;
 namespace HotMic.App.UI.PluginComponents;
 
 /// <summary>
-/// SpeechDenoiser plugin UI renderer matching the DeepFilterNet style.
+/// SpeechDenoiser plugin UI renderer.
 /// Focuses on streaming status and dry/wet control.
 /// </summary>
 public sealed class SpeechDenoiserRenderer : IDisposable
