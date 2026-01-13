@@ -471,8 +471,9 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 _outputBuffer.Write(_hopOutput);
                 UpdateDiagnostics();
                 UpdateStatusMessage();
-                WriteConsoleDiagnostics();
             }
+
+            WriteConsoleDiagnostics();
         }
     }
 
@@ -536,7 +537,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
     private void WriteConsoleDiagnostics()
     {
-        if (_processor is null || _forcedBypass || IsBypassed)
+        if (_processor is null)
         {
             return;
         }
