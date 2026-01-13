@@ -43,6 +43,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private float _smoothedGrDb;
     private long _inputDropSamples;
     private long _outputUnderrunSamples;
+    private long _hopCounter;
     private int _diagLsnrBits;
     private int _diagMaskMinBits;
     private int _diagMaskMeanBits;
@@ -174,6 +175,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         }
 
         InitializeBuffers(blockSize);
+        ResetLogTicks();
         if (DeepFilterNetProcessor.RoundTripOnly)
         {
             _statusMessage = "DeepFilterNet STFT round-trip mode.";
@@ -394,11 +396,13 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         _smoothedGrDb = 0f;
         _inputDropSamples = 0;
         _outputUnderrunSamples = 0;
+        _hopCounter = 0;
         Interlocked.Exchange(ref _diagLsnrBits, 0);
         Interlocked.Exchange(ref _diagMaskMinBits, 0);
         Interlocked.Exchange(ref _diagMaskMeanBits, 0);
         Interlocked.Exchange(ref _diagMaskMaxBits, 0);
         Volatile.Write(ref _diagStageFlags, 0);
+        ResetLogTicks();
         Interlocked.Exchange(ref _gainReductionDbBits, 0);
     }
 
@@ -474,6 +478,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 _outputBuffer.Write(_hopOutput);
                 UpdateDiagnostics();
                 UpdateStatusMessage();
+                _hopCounter++;
             }
 
             WriteConsoleDiagnostics();
@@ -564,12 +569,13 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         char dfChar = applyDf ? 'D' : '-';
         long dropped = Interlocked.Read(ref _inputDropSamples);
         long underrun = Interlocked.Read(ref _outputUnderrunSamples);
+        long hops = Interlocked.Read(ref _hopCounter);
         float reduction = _reductionPct;
         float attenDb = Volatile.Read(ref _attenLimitDb);
         float postFilter = Volatile.Read(ref _postFilterEnabled);
 
         Trace.WriteLine(
-            $"[DFN] dropped={dropped} short={underrun} lsnr={lsnr:0.0} " +
+            $"[DFN] dropped={dropped} short={underrun} hops={hops} lsnr={lsnr:0.0} " +
             $"mask={maskMin:0.00}/{maskMean:0.00}/{maskMax:0.00} " +
             $"stages={gainChar}{zeroChar}{dfChar} reduction={reduction:0.0}% " +
             $"atten={attenDb:0.0}dB post={postFilter:0.0}");
@@ -601,6 +607,13 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         }
 
         Trace.AutoFlush = true;
+    }
+
+    private void ResetLogTicks()
+    {
+        int now = Environment.TickCount;
+        _lastStatusTick = unchecked(now - StatusUpdateIntervalMs);
+        _lastConsoleTick = unchecked(now - ConsoleLogIntervalMs);
     }
 
 }
