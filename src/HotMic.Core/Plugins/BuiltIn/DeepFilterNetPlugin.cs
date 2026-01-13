@@ -40,6 +40,12 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private string _statusMessage = string.Empty;
     private int _gainReductionDbBits;
     private float _smoothedGrDb;
+    private long _inputDropSamples;
+    private long _outputUnderrunSamples;
+    private long _lastInputDropSamples;
+    private long _lastOutputUnderrunSamples;
+    private int _lastStatusUpdateMs;
+    private bool _statusIsUnderrun;
     private const float GrSmoothingAttack = 0.3f;
     private const float GrSmoothingRelease = 0.85f;
     private const float SilenceThreshold = 1e-8f;
@@ -170,7 +176,11 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             _wasBypassed = false;
         }
 
-        _inputBuffer.Write(buffer);
+        int written = _inputBuffer.Write(buffer);
+        if (written < buffer.Length)
+        {
+            Interlocked.Add(ref _inputDropSamples, buffer.Length - written);
+        }
         _frameSignal?.Set();
 
         if (DeepFilterNetProcessor.RoundTripOnly)
@@ -190,6 +200,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             int readCount = _outputBuffer.Read(buffer);
             if (readCount < buffer.Length)
             {
+                Interlocked.Add(ref _outputUnderrunSamples, buffer.Length - readCount);
                 buffer.Slice(readCount).Clear();
             }
 
@@ -198,6 +209,10 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         }
 
         int read = _outputBuffer.Read(_processedScratch.AsSpan(0, buffer.Length));
+        if (read < buffer.Length)
+        {
+            Interlocked.Add(ref _outputUnderrunSamples, buffer.Length - read);
+        }
 
         float mix = _mixSmoother.Current;
         bool smoothing = _mixSmoother.IsSmoothing;
@@ -351,6 +366,12 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         _roundTripPrimed = false;
         _processor?.Reset();
         _smoothedGrDb = 0f;
+        _inputDropSamples = 0;
+        _outputUnderrunSamples = 0;
+        _lastInputDropSamples = 0;
+        _lastOutputUnderrunSamples = 0;
+        _lastStatusUpdateMs = 0;
+        _statusIsUnderrun = false;
         Interlocked.Exchange(ref _gainReductionDbBits, 0);
     }
 
@@ -410,6 +431,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         while (Volatile.Read(ref _running) == 1)
         {
             _frameSignal.WaitOne(10);
+            UpdateUnderrunStatus();
 
             while (_inputBuffer.AvailableRead >= _hopSize)
             {
@@ -425,6 +447,45 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 _outputBuffer.Write(_hopOutput);
             }
         }
+    }
+
+    private void UpdateUnderrunStatus()
+    {
+        if (_forcedBypass || DeepFilterNetProcessor.RoundTripOnly)
+        {
+            return;
+        }
+
+        int now = Environment.TickCount;
+        if (now - _lastStatusUpdateMs < 1000)
+        {
+            return;
+        }
+
+        _lastStatusUpdateMs = now;
+
+        long dropped = Interlocked.Read(ref _inputDropSamples);
+        long underrun = Interlocked.Read(ref _outputUnderrunSamples);
+        if (dropped == _lastInputDropSamples && underrun == _lastOutputUnderrunSamples)
+        {
+            return;
+        }
+
+        _lastInputDropSamples = dropped;
+        _lastOutputUnderrunSamples = underrun;
+
+        if (dropped == 0 && underrun == 0)
+        {
+            if (_statusIsUnderrun)
+            {
+                _statusMessage = string.Empty;
+                _statusIsUnderrun = false;
+            }
+            return;
+        }
+
+        _statusMessage = $"DeepFilterNet underrun: dropped {dropped} / short {underrun} samples.";
+        _statusIsUnderrun = true;
     }
 
     private static string ResolveModelDirectory()
