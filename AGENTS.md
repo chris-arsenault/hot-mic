@@ -531,22 +531,11 @@ This repo uses a WSL source tree with build outputs redirected to a Windows NTFS
 
 ## Build & Run Commands
 
-```bash
-# Restore dependencies
-dotnet restore
-
-# Build debug
-dotnet build
-
-# Build release
-dotnet build -c Release
-
-# Run application
-dotnet run --project src/HotMic.App
-
-# Publish self-contained
-dotnet publish src/HotMic.App -c Release -r win-x64 --self-contained
-```
+**Agent policy (WSL limitation):**
+- This agent runs in WSL and cannot build, run, or publish the Windows app here.
+- Do not execute build/test/run steps in WSL; ask the user to run them on Windows and share the results.
+- Never claim build/test success unless the user ran the commands and reported the output.
+- If the user cannot run them, mark the change as unverified and proceed with caution.
 
 ---
 
@@ -564,27 +553,27 @@ A feature is complete when:
 
 ## Landing the Plane (Session Completion)
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+**When ending a work session**, leave the repo in a clean, resumable state. Pushing is recommended for coherent, reviewable changes, but not required for exploratory or debugging work.
 
-**MANDATORY WORKFLOW:**
+**RECOMMENDED WORKFLOW:**
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Builds, linters, manual validation notes
+1. **Capture follow-ups** - Create issues or `bd` tasks for real remaining work (skip trivial notes)
+2. **Run quality gates** - Run relevant tests/builds when changes are user-facing or about to be pushed
 3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
+4. **Push when ready** - Only push when changes are coherent and pass relevant checks
+   - If pushing:
+     ```bash
+     git pull --rebase
+     bd sync
+     git push
+     git status  # should show "up to date with origin"
+     ```
+   - If not pushing, record the reason and current branch/status in `bd`
+5. **Clean up (optional)** - Clear stashes/prune branches when leaving the session
+6. **Verify state** - Ensure changes are either pushed or clearly documented for resume
 7. **Hand off** - Provide context for next session
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-Use 'bd' for task tracking
+**Hygiene rules:**
+- Avoid noisy debug commits; consolidate into logical commits before pushing
+- Do not push broken builds to shared branches (main)
+- Use `bd` for task tracking when available
