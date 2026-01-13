@@ -14,7 +14,7 @@ internal sealed class DeepFilterNetProcessor : IDisposable
     private const float MinDbThresh = -10f;
     private const float MaxDbErbThresh = 30f;
     private const float MaxDbDfThresh = 20f;
-    internal static readonly bool RoundTripOnly = true;
+    internal static readonly bool RoundTripOnly = false;
     private readonly DeepFilterNetConfig _config;
     private readonly DeepFilterNetInference _inference;
     private readonly DeepFilterNetStft _stft;
