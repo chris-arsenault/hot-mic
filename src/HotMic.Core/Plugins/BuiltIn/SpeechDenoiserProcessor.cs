@@ -114,7 +114,7 @@ internal sealed class SpeechDenoiserProcessor : IDeepFilterNetProcessor
         // Match SpeechDenoiser reference: atten_lim_db is fixed at 0.
         _atten[0] = 0f;
 
-        using var inputs = new List<NamedOnnxValue>(3)
+        var inputs = new List<NamedOnnxValue>(3)
         {
             NamedOnnxValue.CreateFromTensor(_inputFrameName, _inputTensor),
             NamedOnnxValue.CreateFromTensor(_stateName, _stateTensor),
@@ -204,7 +204,13 @@ internal sealed class SpeechDenoiserProcessor : IDeepFilterNetProcessor
 
     private static int[] ResolveDims(NodeMetadata metadata, int fallbackLength)
     {
-        if (metadata.Dimensions.Count == 0)
+        var dimsList = new List<long>();
+        foreach (var dim in metadata.Dimensions)
+        {
+            dimsList.Add(dim);
+        }
+
+        if (dimsList.Count == 0)
         {
             return new[] { fallbackLength };
         }
@@ -212,10 +218,10 @@ internal sealed class SpeechDenoiserProcessor : IDeepFilterNetProcessor
         int dynamicCount = 0;
         int dynamicIndex = -1;
         long product = 1;
-        var dims = new int[metadata.Dimensions.Count];
-        for (int i = 0; i < metadata.Dimensions.Count; i++)
+        var dims = new int[dimsList.Count];
+        for (int i = 0; i < dimsList.Count; i++)
         {
-            long dim = metadata.Dimensions[i];
+            long dim = dimsList[i];
             if (dim <= 0)
             {
                 dynamicCount++;

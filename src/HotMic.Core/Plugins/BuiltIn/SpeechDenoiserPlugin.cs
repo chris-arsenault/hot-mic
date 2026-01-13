@@ -296,23 +296,15 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
         var inputValue = NamedOnnxValue.CreateFromTensor("input_frame", _inputTensor);
         var stateValue = NamedOnnxValue.CreateFromTensor("states", _stateTensor);
         var attenValue = NamedOnnxValue.CreateFromTensor("atten_lim_db", _attenTensor);
-        try
-        {
-            using var results = _session.Run(new[] { inputValue, stateValue, attenValue });
-            var enhanced = GetTensor(results, "enhanced_audio_frame");
-            var newStates = GetTensor(results, "new_states");
-            var lsnr = GetTensor(results, "lsnr");
 
-            CopyTensorToArray(enhanced, _outputFrame);
-            CopyTensorToArray(newStates, _state);
-            _lastLsnrDb = GetLastValue(lsnr);
-        }
-        finally
-        {
-            inputValue.Dispose();
-            stateValue.Dispose();
-            attenValue.Dispose();
-        }
+        using var results = _session.Run(new[] { inputValue, stateValue, attenValue });
+        var enhanced = GetTensor(results, "enhanced_audio_frame");
+        var newStates = GetTensor(results, "new_states");
+        var lsnr = GetTensor(results, "lsnr");
+
+        CopyTensorToArray(enhanced, _outputFrame);
+        CopyTensorToArray(newStates, _state);
+        _lastLsnrDb = GetLastValue(lsnr);
     }
 
     private void DrainStartupSkip()
