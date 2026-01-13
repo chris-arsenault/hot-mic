@@ -17,7 +17,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
     private LinearSmoother _mixSmoother = new();
     private readonly object _workerLock = new();
-    private DeepFilterNetProcessor? _processor;
+    private IDeepFilterNetProcessor? _processor;
     private LockFreeRingBuffer? _inputBuffer;
     private LockFreeRingBuffer? _outputBuffer;
     private float[] _hopBuffer = Array.Empty<float>();
@@ -56,8 +56,10 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private const float SilenceThreshold = 1e-8f;
     private const int StatusUpdateIntervalMs = 500;
     private const int ConsoleLogIntervalMs = 1000;
+    private const string StreamingModelFileName = "denoiser_model.onnx";
     private int _lastStatusTick;
     private int _lastConsoleTick;
+    private string _backendLabel = "DFN";
     private static int s_traceReady;
 
     public DeepFilterNetPlugin()
@@ -142,6 +144,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         _sampleRate = sampleRate;
         _statusMessage = string.Empty;
         _forcedBypass = false;
+        _backendLabel = "DFN";
         EnsureTraceReady();
 
         StopWorker();
@@ -161,7 +164,17 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             {
                 throw new DirectoryNotFoundException("DeepFilterNet model directory not found.");
             }
-            _processor = new DeepFilterNetProcessor(modelDir);
+            string streamingModelPath = Path.Combine(modelDir, StreamingModelFileName);
+            if (File.Exists(streamingModelPath))
+            {
+                _processor = new SpeechDenoiserProcessor(streamingModelPath);
+                _backendLabel = "SpeechDenoiser";
+            }
+            else
+            {
+                _processor = new DeepFilterNetProcessor(modelDir);
+                _backendLabel = "DFN-EncDec";
+            }
             _hopSize = _processor.HopSize;
             _latencySamples = _processor.LatencySamples;
         }
@@ -548,7 +561,8 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         char zeroChar = applyGainZeros ? 'Z' : '-';
         char dfChar = applyDf ? 'D' : '-';
 
-        string status = $"Buffers: dropped {dropped} / short {underrun} | " +
+        string status = $"Model {_backendLabel} | " +
+                        $"Buffers: dropped {dropped} / short {underrun} | " +
                         $"LSNR {lsnr:0.0}dB | " +
                         $"Mask {maskMin:0.00}/{maskMean:0.00}/{maskMax:0.00} | " +
                         $"Stages {gainChar}{zeroChar}{dfChar}";
@@ -589,7 +603,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         float processorGrDb = DiagnosticProcessorGrDb;
 
         Trace.WriteLine(
-            $"[DFN] dropped={dropped} short={underrun} hops={hops} in={inputRmsDb:0.0}dB " +
+            $"[DFN] model={_backendLabel} dropped={dropped} short={underrun} hops={hops} in={inputRmsDb:0.0}dB " +
             $"gr={processorGrDb:0.0}dB lsnr={lsnr:0.0} " +
             $"mask={maskMin:0.00}/{maskMean:0.00}/{maskMax:0.00} " +
             $"stages={gainChar}{zeroChar}{dfChar} reduction={reduction:0.0}% " +
