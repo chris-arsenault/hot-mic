@@ -1321,6 +1321,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // AI/ML
             new() { Id = "builtin:rnnoise", Name = "RNNoise", IsVst3 = false, Category = PluginCategory.AiMl, Description = "Neural network noise suppression" },
             new() { Id = "builtin:deepfilternet", Name = "DeepFilterNet", IsVst3 = false, Category = PluginCategory.AiMl, Description = "Deep learning noise reduction" },
+            new() { Id = "builtin:speechdenoiser", Name = "Speech Denoiser", IsVst3 = false, Category = PluginCategory.AiMl, Description = "SpeechDenoiser streaming model (DFN3)" },
             new() { Id = "builtin:voice-gate", Name = "Voice Gate", IsVst3 = false, Category = PluginCategory.AiMl, Description = "AI-powered voice activity detection" },
 
             // Effects
