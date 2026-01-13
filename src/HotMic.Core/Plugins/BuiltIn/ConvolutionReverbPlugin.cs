@@ -1,6 +1,6 @@
-using System.Numerics;
 using System.Threading;
 using HotMic.Common.Configuration;
+using HotMic.Core.Dsp;
 using NAudio.Wave;
 
 namespace HotMic.Core.Plugins.BuiltIn;
@@ -25,9 +25,13 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
     private float[] _inputBuffer = Array.Empty<float>();
     private float[] _outputBuffer = Array.Empty<float>();
     private float[] _overlapBuffer = Array.Empty<float>();
-    private Complex[] _fftBuffer = Array.Empty<Complex>();
-    private Complex[] _irFftBuffer = Array.Empty<Complex>();
-    private Complex[] _convBuffer = Array.Empty<Complex>();
+    private FastFft? _fft;
+    private float[] _fftReal = Array.Empty<float>();
+    private float[] _fftImag = Array.Empty<float>();
+    private float[] _irFftReal = Array.Empty<float>();
+    private float[] _irFftImag = Array.Empty<float>();
+    private float[] _convReal = Array.Empty<float>();
+    private float[] _convImag = Array.Empty<float>();
     private float[] _irSamples = Array.Empty<float>();
 
     // Pre-delay buffer
@@ -109,9 +113,13 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
         _inputBuffer = new float[_fftSize];
         _outputBuffer = new float[_fftSize];
         _overlapBuffer = new float[_overlapSize];
-        _fftBuffer = new Complex[_fftSize];
-        _convBuffer = new Complex[_fftSize];
-        _irFftBuffer = new Complex[_fftSize];
+        _fft = new FastFft(_fftSize);
+        _fftReal = new float[_fftSize];
+        _fftImag = new float[_fftSize];
+        _convReal = new float[_fftSize];
+        _convImag = new float[_fftSize];
+        _irFftReal = new float[_fftSize];
+        _irFftImag = new float[_fftSize];
 
         // Pre-delay buffer (max 100ms)
         int maxPreDelaySamples = (int)(0.1f * sampleRate);
@@ -195,26 +203,34 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
         // Zero-pad second half
         Array.Clear(_inputBuffer, _fftHalfSize, _fftHalfSize);
 
-        // Forward FFT
-        for (int i = 0; i < _fftSize; i++)
+        if (_fft is null)
         {
-            _fftBuffer[i] = new Complex(_inputBuffer[i], 0);
+            return;
         }
-        Fft(_fftBuffer, false);
+
+        // Forward FFT
+        Array.Copy(_inputBuffer, _fftReal, _fftSize);
+        Array.Clear(_fftImag, 0, _fftImag.Length);
+        _fft.Forward(_fftReal, _fftImag);
 
         // Multiply with IR in frequency domain
         for (int i = 0; i < _fftSize; i++)
         {
-            _convBuffer[i] = _fftBuffer[i] * _irFftBuffer[i];
+            float aRe = _fftReal[i];
+            float aIm = _fftImag[i];
+            float bRe = _irFftReal[i];
+            float bIm = _irFftImag[i];
+            _convReal[i] = aRe * bRe - aIm * bIm;
+            _convImag[i] = aRe * bIm + aIm * bRe;
         }
 
         // Inverse FFT
-        Fft(_convBuffer, true);
+        _fft.Inverse(_convReal, _convImag);
 
         // Overlap-add
         for (int i = 0; i < _fftSize; i++)
         {
-            float sample = (float)_convBuffer[i].Real * _decay;
+            float sample = _convReal[i] * _decay;
             if (i < _overlapSize)
             {
                 sample += _overlapBuffer[i];
@@ -330,12 +346,16 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
         int copyLength = Math.Min(samples.Length, _fftSize);
         Array.Copy(samples, _irSamples, copyLength);
 
-        // Pre-compute IR FFT
-        for (int i = 0; i < _fftSize; i++)
+        if (_fft is null)
         {
-            _irFftBuffer[i] = new Complex(_irSamples[i], 0);
+            _irLoaded = false;
+            return;
         }
-        Fft(_irFftBuffer, false);
+
+        // Pre-compute IR FFT
+        Array.Copy(_irSamples, _irFftReal, _fftSize);
+        Array.Clear(_irFftImag, 0, _irFftImag.Length);
+        _fft.Forward(_irFftReal, _irFftImag);
 
         _irLoaded = true;
     }
@@ -497,58 +517,6 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
         }
 
         return result;
-    }
-
-    // Cooley-Tukey FFT
-    private static void Fft(Complex[] data, bool inverse)
-    {
-        int n = data.Length;
-        if (n <= 1) return;
-
-        // Bit-reversal permutation
-        for (int i = 1, j = 0; i < n; i++)
-        {
-            int bit = n >> 1;
-            for (; (j & bit) != 0; bit >>= 1)
-            {
-                j ^= bit;
-            }
-            j ^= bit;
-
-            if (i < j)
-            {
-                (data[i], data[j]) = (data[j], data[i]);
-            }
-        }
-
-        // Cooley-Tukey iterative FFT
-        for (int len = 2; len <= n; len <<= 1)
-        {
-            double ang = 2 * Math.PI / len * (inverse ? 1 : -1);
-            Complex wlen = new(Math.Cos(ang), Math.Sin(ang));
-
-            for (int i = 0; i < n; i += len)
-            {
-                Complex w = Complex.One;
-                for (int j = 0; j < len / 2; j++)
-                {
-                    Complex u = data[i + j];
-                    Complex v = data[i + j + len / 2] * w;
-                    data[i + j] = u + v;
-                    data[i + j + len / 2] = u - v;
-                    w *= wlen;
-                }
-            }
-        }
-
-        // Scale for inverse
-        if (inverse)
-        {
-            for (int i = 0; i < n; i++)
-            {
-                data[i] /= n;
-            }
-        }
     }
 
     public float GetAndResetInputLevel()
