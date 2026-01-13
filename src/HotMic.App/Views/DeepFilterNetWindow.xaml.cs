@@ -70,7 +70,7 @@ public partial class DeepFilterNetWindow : Window
         string statusMessage = _plugin.StatusMessage;
         if (string.IsNullOrEmpty(statusMessage))
         {
-            statusMessage = $"Buffers: dropped {_plugin.InputDropSamples} / short {_plugin.OutputUnderrunSamples}";
+            statusMessage = BuildDiagnosticsMessage();
         }
 
         var state = new DeepFilterNetState(
@@ -170,6 +170,22 @@ public partial class DeepFilterNetWindow : Window
 
         _activeKnob = -1;
         SkiaCanvas.ReleaseMouseCapture();
+    }
+
+    private string BuildDiagnosticsMessage()
+    {
+        float lsnr = _plugin.DiagnosticLsnrDb;
+        float maskMin = _plugin.DiagnosticMaskMin;
+        float maskMean = _plugin.DiagnosticMaskMean;
+        float maskMax = _plugin.DiagnosticMaskMax;
+        char gainChar = _plugin.DiagnosticApplyGains ? 'G' : '-';
+        char zeroChar = _plugin.DiagnosticApplyGainZeros ? 'Z' : '-';
+        char dfChar = _plugin.DiagnosticApplyDf ? 'D' : '-';
+
+        return $"Buffers: dropped {_plugin.InputDropSamples} / short {_plugin.OutputUnderrunSamples} | " +
+               $"LSNR {lsnr:0.0}dB | " +
+               $"Mask {maskMin:0.00}/{maskMean:0.00}/{maskMax:0.00} | " +
+               $"Stages {gainChar}{zeroChar}{dfChar}";
     }
 
     private float GetParameterValue(int index)

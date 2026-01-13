@@ -42,6 +42,11 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private float _smoothedGrDb;
     private long _inputDropSamples;
     private long _outputUnderrunSamples;
+    private int _diagLsnrBits;
+    private int _diagMaskMinBits;
+    private int _diagMaskMeanBits;
+    private int _diagMaskMaxBits;
+    private int _diagStageFlags;
     private const float GrSmoothingAttack = 0.3f;
     private const float GrSmoothingRelease = 0.85f;
     private const float SilenceThreshold = 1e-8f;
@@ -97,6 +102,20 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     public long InputDropSamples => Interlocked.Read(ref _inputDropSamples);
 
     public long OutputUnderrunSamples => Interlocked.Read(ref _outputUnderrunSamples);
+
+    public float DiagnosticLsnrDb => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _diagLsnrBits, 0, 0));
+
+    public float DiagnosticMaskMin => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _diagMaskMinBits, 0, 0));
+
+    public float DiagnosticMaskMean => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _diagMaskMeanBits, 0, 0));
+
+    public float DiagnosticMaskMax => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _diagMaskMaxBits, 0, 0));
+
+    public bool DiagnosticApplyGains => (Volatile.Read(ref _diagStageFlags) & 0x1) != 0;
+
+    public bool DiagnosticApplyGainZeros => (Volatile.Read(ref _diagStageFlags) & 0x2) != 0;
+
+    public bool DiagnosticApplyDf => (Volatile.Read(ref _diagStageFlags) & 0x4) != 0;
 
     /// <summary>
     /// Gets the current gain reduction in dB (positive value = reduction).
@@ -370,6 +389,11 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         _smoothedGrDb = 0f;
         _inputDropSamples = 0;
         _outputUnderrunSamples = 0;
+        Interlocked.Exchange(ref _diagLsnrBits, 0);
+        Interlocked.Exchange(ref _diagMaskMinBits, 0);
+        Interlocked.Exchange(ref _diagMaskMeanBits, 0);
+        Interlocked.Exchange(ref _diagMaskMaxBits, 0);
+        Volatile.Write(ref _diagStageFlags, 0);
         Interlocked.Exchange(ref _gainReductionDbBits, 0);
     }
 
@@ -470,6 +494,13 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         bool applyGains = _processor.LastApplyGains;
         bool applyGainZeros = _processor.LastApplyGainZeros;
         bool applyDf = _processor.LastApplyDf;
+        int stageFlags = (applyGains ? 0x1 : 0) | (applyGainZeros ? 0x2 : 0) | (applyDf ? 0x4 : 0);
+
+        Interlocked.Exchange(ref _diagLsnrBits, BitConverter.SingleToInt32Bits(lsnr));
+        Interlocked.Exchange(ref _diagMaskMinBits, BitConverter.SingleToInt32Bits(maskMin));
+        Interlocked.Exchange(ref _diagMaskMeanBits, BitConverter.SingleToInt32Bits(maskMean));
+        Interlocked.Exchange(ref _diagMaskMaxBits, BitConverter.SingleToInt32Bits(maskMax));
+        Volatile.Write(ref _diagStageFlags, stageFlags);
 
         char gainChar = applyGains ? 'G' : '-';
         char zeroChar = applyGainZeros ? 'Z' : '-';
