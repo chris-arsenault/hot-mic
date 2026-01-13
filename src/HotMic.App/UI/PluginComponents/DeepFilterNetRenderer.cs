@@ -269,7 +269,7 @@ public sealed class DeepFilterNetRenderer : IDisposable
 
         // Attenuation limit knob
         _knobCenters[1] = new SKPoint(knobsStartX + KnobSpacing, knobsY);
-        float attenNorm = (state.AttenuationLimitDb - 6f) / (60f - 6f);
+        float attenNorm = state.AttenuationLimitDb / 100f;
         _knob.Render(canvas, _knobCenters[1], KnobRadius, attenNorm,
             "ATTEN LIM", $"{state.AttenuationLimitDb:0}", "dB", state.HoveredKnob == 1);
         _knobRects[1] = _knob.GetHitRect(_knobCenters[1], KnobRadius);

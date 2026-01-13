@@ -193,30 +193,18 @@ internal sealed class DeepFilterNetProcessor : IDisposable
 
         if (attenLimitDb < 100f)
         {
-            float minGain = MathF.Pow(10f, -attenLimitDb / 20f);
-            int halfSpec = _specOut.Length / 2;
-
-            for (int bin = 0; bin < halfSpec; bin++)
+            float limDb = MathF.Abs(attenLimitDb);
+            if (limDb < 0.01f)
             {
-                int idx = bin * 2;
-                float outRe = _specOut[idx];
-                float outIm = _specOut[idx + 1];
-                float inRe = noisyTarget[idx];
-                float inIm = noisyTarget[idx + 1];
-
-                float outMag = MathF.Sqrt(outRe * outRe + outIm * outIm);
-                float inMag = MathF.Sqrt(inRe * inRe + inIm * inIm);
-
-                if (inMag > 1e-10f)
+                Array.Copy(noisyTarget, _specOut, _specOut.Length);
+            }
+            else
+            {
+                float mix = MathF.Pow(10f, -limDb / 20f);
+                float keep = 1f - mix;
+                for (int i = 0; i < _specOut.Length; i++)
                 {
-                    float gain = outMag / inMag;
-                    if (gain < minGain)
-                    {
-                        // Limit gain while preserving original phase
-                        // Output = input * minGain (uses input phase, limited magnitude)
-                        _specOut[idx] = inRe * minGain;
-                        _specOut[idx + 1] = inIm * minGain;
-                    }
+                    _specOut[i] = _specOut[i] * keep + noisyTarget[i] * mix;
                 }
             }
         }

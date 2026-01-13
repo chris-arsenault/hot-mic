@@ -31,8 +31,8 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private AutoResetEvent? _frameSignal;
     private int _running;
     private float _reductionPct = 100f;
-    private float _attenLimitDb = 40f;
-    private float _postFilterEnabled = 1f;
+    private float _attenLimitDb = 100f;
+    private float _postFilterEnabled = 0f;
     private bool _forcedBypass;
     private bool _wasBypassed = true;
     private bool _roundTripPrimed;
@@ -63,9 +63,9 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
             {
                 Index = AttenuationIndex,
                 Name = "Attenuation Limit",
-                MinValue = 6f,
-                MaxValue = 60f,
-                DefaultValue = 40f,
+                MinValue = 0f,
+                MaxValue = 100f,
+                DefaultValue = 100f,
                 Unit = "dB"
             },
             new PluginParameter
@@ -74,7 +74,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 Name = "Post-Filter",
                 MinValue = 0f,
                 MaxValue = 1f,
-                DefaultValue = 1f,
+                DefaultValue = 0f,
                 Unit = ""
             }
         ];
@@ -292,7 +292,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 }
                 break;
             case AttenuationIndex:
-                Volatile.Write(ref _attenLimitDb, Math.Clamp(value, 6f, 60f));
+                Volatile.Write(ref _attenLimitDb, Math.Clamp(value, 0f, 100f));
                 break;
             case PostFilterIndex:
                 Volatile.Write(ref _postFilterEnabled, value >= 0.5f ? 1f : 0f);

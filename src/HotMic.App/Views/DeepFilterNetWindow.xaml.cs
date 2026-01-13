@@ -187,7 +187,7 @@ public partial class DeepFilterNetWindow : Window
         return knobIndex switch
         {
             0 => GetParameterValue(DeepFilterNetPlugin.ReductionIndex) / 100f,
-            1 => (GetParameterValue(DeepFilterNetPlugin.AttenuationIndex) - 6f) / (60f - 6f),
+            1 => GetParameterValue(DeepFilterNetPlugin.AttenuationIndex) / 100f,
             _ => 0f
         };
     }
@@ -197,7 +197,7 @@ public partial class DeepFilterNetWindow : Window
         float value = knobIndex switch
         {
             0 => normalizedValue * 100f,           // Reduction: 0 to 100%
-            1 => 6f + normalizedValue * 54f,       // Attenuation: 6 to 60 dB
+            1 => normalizedValue * 100f,           // Attenuation: 0 to 100 dB
             _ => 0f
         };
 
