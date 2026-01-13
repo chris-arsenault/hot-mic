@@ -51,7 +51,9 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private const float GrSmoothingRelease = 0.85f;
     private const float SilenceThreshold = 1e-8f;
     private const int StatusUpdateIntervalMs = 500;
+    private const int ConsoleLogIntervalMs = 1000;
     private int _lastStatusTick;
+    private int _lastConsoleTick;
 
     public DeepFilterNetPlugin()
     {
@@ -468,6 +470,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 _outputBuffer.Write(_hopOutput);
                 UpdateDiagnostics();
                 UpdateStatusMessage();
+                WriteConsoleDiagnostics();
             }
         }
     }
@@ -528,6 +531,43 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                         $"Mask {maskMin:0.00}/{maskMean:0.00}/{maskMax:0.00} | " +
                         $"Stages {gainChar}{zeroChar}{dfChar}";
         Volatile.Write(ref _statusMessage, status);
+    }
+
+    private void WriteConsoleDiagnostics()
+    {
+        if (_processor is null || _forcedBypass || IsBypassed)
+        {
+            return;
+        }
+
+        int now = Environment.TickCount;
+        if (unchecked(now - _lastConsoleTick) < ConsoleLogIntervalMs)
+        {
+            return;
+        }
+        _lastConsoleTick = now;
+
+        float lsnr = DiagnosticLsnrDb;
+        float maskMin = DiagnosticMaskMin;
+        float maskMean = DiagnosticMaskMean;
+        float maskMax = DiagnosticMaskMax;
+        bool applyGains = DiagnosticApplyGains;
+        bool applyGainZeros = DiagnosticApplyGainZeros;
+        bool applyDf = DiagnosticApplyDf;
+        char gainChar = applyGains ? 'G' : '-';
+        char zeroChar = applyGainZeros ? 'Z' : '-';
+        char dfChar = applyDf ? 'D' : '-';
+        long dropped = Interlocked.Read(ref _inputDropSamples);
+        long underrun = Interlocked.Read(ref _outputUnderrunSamples);
+        float reduction = _reductionPct;
+        float attenDb = Volatile.Read(ref _attenLimitDb);
+        float postFilter = Volatile.Read(ref _postFilterEnabled);
+
+        Console.WriteLine(
+            $"[DFN] dropped={dropped} short={underrun} lsnr={lsnr:0.0} " +
+            $"mask={maskMin:0.00}/{maskMean:0.00}/{maskMax:0.00} " +
+            $"stages={gainChar}{zeroChar}{dfChar} reduction={reduction:0.0}% " +
+            $"atten={attenDb:0.0}dB post={postFilter:0.0}");
     }
 
     private static string ResolveModelDirectory()
