@@ -45,6 +45,8 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
     private const float GrSmoothingAttack = 0.3f;
     private const float GrSmoothingRelease = 0.85f;
     private const float SilenceThreshold = 1e-8f;
+    private const int StatusUpdateIntervalMs = 500;
+    private int _lastStatusTick;
 
     public DeepFilterNetPlugin()
     {
@@ -440,8 +442,44 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
                 float attenDb = Volatile.Read(ref _attenLimitDb);
                 _processor.ProcessHop(_hopBuffer, _hopOutput, postFilter, attenDb);
                 _outputBuffer.Write(_hopOutput);
+                UpdateStatusMessage();
             }
         }
+    }
+
+    private void UpdateStatusMessage()
+    {
+        if (_processor is null || _forcedBypass || IsBypassed || DeepFilterNetProcessor.RoundTripOnly)
+        {
+            return;
+        }
+
+        int now = Environment.TickCount;
+        if (unchecked(now - _lastStatusTick) < StatusUpdateIntervalMs)
+        {
+            return;
+        }
+        _lastStatusTick = now;
+
+        long dropped = Interlocked.Read(ref _inputDropSamples);
+        long underrun = Interlocked.Read(ref _outputUnderrunSamples);
+        float lsnr = _processor.LastLsnrDb;
+        float maskMin = _processor.LastMaskMin;
+        float maskMean = _processor.LastMaskMean;
+        float maskMax = _processor.LastMaskMax;
+        bool applyGains = _processor.LastApplyGains;
+        bool applyGainZeros = _processor.LastApplyGainZeros;
+        bool applyDf = _processor.LastApplyDf;
+
+        char gainChar = applyGains ? 'G' : '-';
+        char zeroChar = applyGainZeros ? 'Z' : '-';
+        char dfChar = applyDf ? 'D' : '-';
+
+        string status = $"Buffers: dropped {dropped} / short {underrun} | " +
+                        $"LSNR {lsnr:0.0}dB | " +
+                        $"Mask {maskMin:0.00}/{maskMean:0.00}/{maskMax:0.00} | " +
+                        $"Stages {gainChar}{zeroChar}{dfChar}";
+        Volatile.Write(ref _statusMessage, status);
     }
 
     private static string ResolveModelDirectory()

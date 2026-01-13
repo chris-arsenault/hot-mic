@@ -35,6 +35,13 @@ internal sealed class DeepFilterNetProcessor : IDisposable
     private int _historyIndex = -1;
     private int _framesProcessed;
     private int _skipCounter;
+    private float _lastLsnrDb;
+    private float _lastMaskMin;
+    private float _lastMaskMean;
+    private float _lastMaskMax;
+    private bool _lastApplyGains;
+    private bool _lastApplyGainZeros;
+    private bool _lastApplyDf;
 
     public DeepFilterNetProcessor(string modelDirectory)
     {
@@ -78,12 +85,33 @@ internal sealed class DeepFilterNetProcessor : IDisposable
     /// </summary>
     public float LastGainReductionDb { get; private set; }
 
+    public float LastLsnrDb => _lastLsnrDb;
+
+    public float LastMaskMin => _lastMaskMin;
+
+    public float LastMaskMean => _lastMaskMean;
+
+    public float LastMaskMax => _lastMaskMax;
+
+    public bool LastApplyGains => _lastApplyGains;
+
+    public bool LastApplyGainZeros => _lastApplyGainZeros;
+
+    public bool LastApplyDf => _lastApplyDf;
+
     public void Reset()
     {
         _stft.Reset();
         _framesProcessed = 0;
         _historyIndex = -1;
         _skipCounter = 0;
+        _lastLsnrDb = 0f;
+        _lastMaskMin = 1f;
+        _lastMaskMean = 1f;
+        _lastMaskMax = 1f;
+        _lastApplyGains = false;
+        _lastApplyGainZeros = false;
+        _lastApplyDf = false;
         Array.Copy(BuildInitState(_config.NbErb, MeanNormMin, MeanNormMax), _meanNormState, _meanNormState.Length);
         Array.Copy(BuildInitState(_config.NbDf, UnitNormMin, UnitNormMax), _unitNormState, _unitNormState.Length);
         ClearHistory(_noisyHistory);
@@ -144,6 +172,13 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         {
             output.Clear();
             LastGainReductionDb = 0f;
+            _lastLsnrDb = -15f;
+            _lastApplyGains = false;
+            _lastApplyGainZeros = true;
+            _lastApplyDf = false;
+            _lastMaskMin = 0f;
+            _lastMaskMean = 0f;
+            _lastMaskMax = 0f;
             return;
         }
 
@@ -155,6 +190,10 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         using var enc = _inference.RunEncoder(_erbFeatures, _specFeatures);
         float lsnr = enc.Lsnr;
         var stages = ApplyStages(lsnr);
+        _lastLsnrDb = lsnr;
+        _lastApplyGains = stages.applyGains;
+        _lastApplyGainZeros = stages.applyGainZeros;
+        _lastApplyDf = stages.applyDf;
 
         if (_framesProcessed <= _config.Lookahead)
         {
@@ -170,12 +209,22 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         if (stages.applyGains)
         {
             _inference.FillGains(enc, _gains);
+            UpdateMaskStats(_gains);
             DeepFilterNetDsp.ApplyInterpBandGain(enhTarget, _gains, _erbBands);
         }
         else if (stages.applyGainZeros)
         {
             Array.Clear(_gains, 0, _gains.Length);
+            _lastMaskMin = 0f;
+            _lastMaskMean = 0f;
+            _lastMaskMax = 0f;
             DeepFilterNetDsp.ApplyInterpBandGain(enhTarget, _gains, _erbBands);
+        }
+        else
+        {
+            _lastMaskMin = 1f;
+            _lastMaskMean = 1f;
+            _lastMaskMax = 1f;
         }
 
         Array.Copy(enhTarget, _specOut, _specOut.Length);
@@ -325,6 +374,32 @@ internal sealed class DeepFilterNetProcessor : IDisposable
             specOut[outIdx] = outRe;
             specOut[outIdx + 1] = outIm;
         }
+    }
+
+    private void UpdateMaskStats(float[] gains)
+    {
+        if (gains.Length == 0)
+        {
+            _lastMaskMin = 0f;
+            _lastMaskMean = 0f;
+            _lastMaskMax = 0f;
+            return;
+        }
+
+        float min = gains[0];
+        float max = gains[0];
+        float sum = 0f;
+        for (int i = 0; i < gains.Length; i++)
+        {
+            float g = gains[i];
+            if (g < min) min = g;
+            if (g > max) max = g;
+            sum += g;
+        }
+
+        _lastMaskMin = min;
+        _lastMaskMax = max;
+        _lastMaskMean = sum / gains.Length;
     }
 
     private static float[] BuildInitState(int size, float min, float max)
