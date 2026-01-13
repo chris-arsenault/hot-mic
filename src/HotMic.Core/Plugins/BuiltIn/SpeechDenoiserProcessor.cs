@@ -110,7 +110,9 @@ internal sealed class SpeechDenoiserProcessor : IDeepFilterNetProcessor
         _ = postFilterEnabled;
 
         input.CopyTo(_inputFrame);
-        _atten[0] = attenLimitDb;
+        _ = attenLimitDb;
+        // Match SpeechDenoiser reference: atten_lim_db is fixed at 0.
+        _atten[0] = 0f;
 
         using var inputs = new List<NamedOnnxValue>(3)
         {

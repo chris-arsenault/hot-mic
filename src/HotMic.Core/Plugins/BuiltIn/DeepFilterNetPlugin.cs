@@ -495,6 +495,11 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
 
                 bool postFilter = Volatile.Read(ref _postFilterEnabled) >= 0.5f;
                 float attenDb = Volatile.Read(ref _attenLimitDb);
+                if (_processor is SpeechDenoiserProcessor)
+                {
+                    postFilter = false;
+                    attenDb = 0f;
+                }
                 float inputRmsDb = ComputeRmsDb(_hopBuffer);
                 _processor.ProcessHop(_hopBuffer, _hopOutput, postFilter, attenDb);
                 _outputBuffer.Write(_hopOutput);
@@ -599,6 +604,11 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         float reduction = _reductionPct;
         float attenDb = Volatile.Read(ref _attenLimitDb);
         float postFilter = Volatile.Read(ref _postFilterEnabled);
+        if (_processor is SpeechDenoiserProcessor)
+        {
+            attenDb = 0f;
+            postFilter = 0f;
+        }
         float inputRmsDb = DiagnosticInputRmsDb;
         float processorGrDb = DiagnosticProcessorGrDb;
 
