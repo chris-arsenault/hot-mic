@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:skia="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         Title="De-Esser"
-        Width="400" Height="300"
+        Width="480" Height="340"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"

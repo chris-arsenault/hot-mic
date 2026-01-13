@@ -337,7 +337,7 @@ public sealed class CompressorRenderer : IDisposable
             "MAKEUP", $"{state.MakeupDb:0.0}", "dB", state.HoveredKnob == 5);
         _knobRects[5] = _knob.GetHitRect(_knobCenters[5], KnobRadius);
 
-        float toggleY = knobsY + KnobRadius + 18f;
+        float toggleY = knobsY + KnobRadius + 34f;
         float toggleHeight = 22f;
         float toggleWidth = 120f;
         float toggleGap = 10f;
