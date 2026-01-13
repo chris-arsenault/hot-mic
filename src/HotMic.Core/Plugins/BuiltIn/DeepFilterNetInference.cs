@@ -200,7 +200,8 @@ internal sealed class DeepFilterNetInference : IDisposable
             return;
         }
 
-        int skip = Math.Max(0, tensor.Length - count);
+        long total = tensor.Length;
+        int skip = total > count ? (int)Math.Min(total - count, int.MaxValue) : 0;
         int index = 0;
         int i = 0;
         foreach (var value in tensor)
