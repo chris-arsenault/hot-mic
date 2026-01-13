@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading;
 using HotMic.Common.Configuration;
 using HotMic.Core.Dsp;
@@ -563,7 +564,7 @@ public sealed class DeepFilterNetPlugin : IPlugin, IQualityConfigurablePlugin, I
         float attenDb = Volatile.Read(ref _attenLimitDb);
         float postFilter = Volatile.Read(ref _postFilterEnabled);
 
-        Console.WriteLine(
+        Debug.WriteLine(
             $"[DFN] dropped={dropped} short={underrun} lsnr={lsnr:0.0} " +
             $"mask={maskMin:0.00}/{maskMean:0.00}/{maskMax:0.00} " +
             $"stages={gainChar}{zeroChar}{dfChar} reduction={reduction:0.0}% " +
