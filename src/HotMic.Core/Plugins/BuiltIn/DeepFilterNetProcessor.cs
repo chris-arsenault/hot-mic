@@ -183,7 +183,7 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         if (stages.applyDf)
         {
             _inference.FillCoefs(enc, _coefs);
-            ApplyDeepFilter(_specOut, targetIndex);
+            ApplyDeepFilter(_specOut);
         }
 
         if (stages.applyGains && postFilterEnabled)
@@ -301,11 +301,12 @@ internal sealed class DeepFilterNetProcessor : IDisposable
         return idx % _historySize;
     }
 
-    private void ApplyDeepFilter(float[] specOut, int targetIndex)
+    private void ApplyDeepFilter(float[] specOut)
     {
         int dfOrder = _config.DfOrder;
         int nbDf = _config.NbDf;
-        int historyStart = targetIndex - (dfOrder - 1);
+        // Match libDF: apply DF over the most recent df_order frames.
+        int historyStart = _historyIndex - (dfOrder - 1);
         for (int bin = 0; bin < nbDf; bin++)
         {
             float outRe = 0f;
