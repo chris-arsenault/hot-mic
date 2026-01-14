@@ -79,12 +79,14 @@ public partial class SignalGeneratorWindow : Window
         var size = new SKSize(e.Info.Width, e.Info.Height);
         float dpiScale = GetDpiScale();
 
+        var masterState = _plugin.GetMasterState();
         var state = new SignalGeneratorState
         {
             IsBypassed = _plugin.IsBypassed,
             PresetName = _presetHelper.CurrentPresetName,
             OutputLevel = _smoothedOutputLevel,
-            MasterGainDb = _plugin.MasterGainDb,
+            MasterGainDb = masterState.GainDb,
+            HeadroomMode = masterState.Headroom,
             HoveredArea = _hoveredArea,
             HoveredSlot = _hoveredSlot
         };
@@ -100,6 +102,17 @@ public partial class SignalGeneratorWindow : Window
                 GainDb = slotState.GainDb,
                 IsMuted = slotState.Muted,
                 IsSolo = slotState.Solo,
+                SweepEnabled = slotState.SweepEnabled,
+                SweepStartHz = slotState.SweepStartHz,
+                SweepEndHz = slotState.SweepEndHz,
+                SweepDurationMs = slotState.SweepDurationMs,
+                PulseWidth = slotState.PulseWidth,
+                ImpulseIntervalMs = slotState.ImpulseIntervalMs,
+                ChirpDurationMs = slotState.ChirpDurationMs,
+                LoopMode = slotState.LoopMode,
+                SampleSpeed = slotState.SampleSpeed,
+                TrimStart = slotState.TrimStart,
+                TrimEnd = slotState.TrimEnd,
                 Level = _smoothedSlotLevels[i]
             };
         }
@@ -150,8 +163,18 @@ public partial class SignalGeneratorWindow : Window
                 e.Handled = true;
                 break;
 
+            // All knob types
             case SignalGeneratorHitArea.SlotGainKnob:
             case SignalGeneratorHitArea.SlotFreqKnob:
+            case SignalGeneratorHitArea.SlotSweepStartKnob:
+            case SignalGeneratorHitArea.SlotSweepEndKnob:
+            case SignalGeneratorHitArea.SlotSweepDurKnob:
+            case SignalGeneratorHitArea.SlotPulseWidthKnob:
+            case SignalGeneratorHitArea.SlotIntervalKnob:
+            case SignalGeneratorHitArea.SlotChirpDurKnob:
+            case SignalGeneratorHitArea.SlotSpeedKnob:
+            case SignalGeneratorHitArea.SlotTrimStartKnob:
+            case SignalGeneratorHitArea.SlotTrimEndKnob:
             case SignalGeneratorHitArea.MasterGainKnob:
                 _activeKnobSlot = hit.SlotIndex;
                 _activeKnobType = hit.Area;
@@ -168,6 +191,21 @@ public partial class SignalGeneratorWindow : Window
 
             case SignalGeneratorHitArea.SlotSoloButton:
                 ToggleSlotSolo(hit.SlotIndex);
+                e.Handled = true;
+                break;
+
+            case SignalGeneratorHitArea.SlotSweepToggle:
+                ToggleSweep(hit.SlotIndex);
+                e.Handled = true;
+                break;
+
+            case SignalGeneratorHitArea.SlotLoopModeDropdown:
+                ShowLoopModeMenu(hit.SlotIndex);
+                e.Handled = true;
+                break;
+
+            case SignalGeneratorHitArea.MasterHeadroomDropdown:
+                ShowHeadroomMenu();
                 e.Handled = true;
                 break;
 
@@ -219,7 +257,7 @@ public partial class SignalGeneratorWindow : Window
         var pos = e.GetPosition(SkiaCanvas);
         var hit = _renderer.HitTest((float)pos.X, (float)pos.Y);
 
-        if (hit.Area is SignalGeneratorHitArea.SlotGainKnob or SignalGeneratorHitArea.SlotFreqKnob or SignalGeneratorHitArea.MasterGainKnob)
+        if (IsKnobArea(hit.Area))
         {
             float current = GetKnobNormalizedValue(hit.Area, hit.SlotIndex);
             float delta = e.Delta > 0 ? 0.02f : -0.02f;
@@ -228,6 +266,20 @@ public partial class SignalGeneratorWindow : Window
             e.Handled = true;
         }
     }
+
+    private static bool IsKnobArea(SignalGeneratorHitArea area) => area is
+        SignalGeneratorHitArea.SlotGainKnob or
+        SignalGeneratorHitArea.SlotFreqKnob or
+        SignalGeneratorHitArea.SlotSweepStartKnob or
+        SignalGeneratorHitArea.SlotSweepEndKnob or
+        SignalGeneratorHitArea.SlotSweepDurKnob or
+        SignalGeneratorHitArea.SlotPulseWidthKnob or
+        SignalGeneratorHitArea.SlotIntervalKnob or
+        SignalGeneratorHitArea.SlotChirpDurKnob or
+        SignalGeneratorHitArea.SlotSpeedKnob or
+        SignalGeneratorHitArea.SlotTrimStartKnob or
+        SignalGeneratorHitArea.SlotTrimEndKnob or
+        SignalGeneratorHitArea.MasterGainKnob;
 
     private void OnDragOver(object sender, System.Windows.DragEventArgs e)
     {
@@ -265,10 +317,21 @@ public partial class SignalGeneratorWindow : Window
 
     private float GetKnobNormalizedValue(SignalGeneratorHitArea area, int slotIndex)
     {
+        var slotState = slotIndex >= 0 ? _plugin.GetSlotState(slotIndex) : default;
+
         return area switch
         {
-            SignalGeneratorHitArea.SlotGainKnob => (GetSlotGainDb(slotIndex) + 60f) / 72f,
-            SignalGeneratorHitArea.SlotFreqKnob => NormalizeFrequency(GetSlotFrequency(slotIndex)),
+            SignalGeneratorHitArea.SlotGainKnob => (slotState.GainDb + 60f) / 72f,
+            SignalGeneratorHitArea.SlotFreqKnob => NormalizeFrequency(slotState.Frequency),
+            SignalGeneratorHitArea.SlotSweepStartKnob => NormalizeFrequency(slotState.SweepStartHz),
+            SignalGeneratorHitArea.SlotSweepEndKnob => NormalizeFrequency(slotState.SweepEndHz),
+            SignalGeneratorHitArea.SlotSweepDurKnob => (slotState.SweepDurationMs - 100f) / (30000f - 100f),
+            SignalGeneratorHitArea.SlotPulseWidthKnob => (slotState.PulseWidth - 0.1f) / 0.8f,
+            SignalGeneratorHitArea.SlotIntervalKnob => (slotState.ImpulseIntervalMs - 10f) / (5000f - 10f),
+            SignalGeneratorHitArea.SlotChirpDurKnob => (slotState.ChirpDurationMs - 50f) / (500f - 50f),
+            SignalGeneratorHitArea.SlotSpeedKnob => (slotState.SampleSpeed - 0.5f) / 1.5f,
+            SignalGeneratorHitArea.SlotTrimStartKnob => slotState.TrimStart,
+            SignalGeneratorHitArea.SlotTrimEndKnob => slotState.TrimEnd,
             SignalGeneratorHitArea.MasterGainKnob => (_plugin.MasterGainDb + 60f) / 72f,
             _ => 0f
         };
@@ -276,45 +339,78 @@ public partial class SignalGeneratorWindow : Window
 
     private void ApplyKnobValue(SignalGeneratorHitArea area, int slotIndex, float normalized)
     {
+        int baseIndex = slotIndex * 20;
+        normalized = Math.Clamp(normalized, 0f, 1f);
+
         switch (area)
         {
             case SignalGeneratorHitArea.SlotGainKnob:
                 float gainDb = -60f + normalized * 72f;
-                int gainIndex = slotIndex * 20 + SignalGeneratorPlugin.GainIndex;
-                _parameterCallback(gainIndex, gainDb);
-                _presetHelper.MarkAsCustom();
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.GainIndex, gainDb);
                 break;
 
             case SignalGeneratorHitArea.SlotFreqKnob:
                 float freq = DenormalizeFrequency(normalized);
-                int freqIndex = slotIndex * 20 + SignalGeneratorPlugin.FrequencyIndex;
-                _parameterCallback(freqIndex, freq);
-                _presetHelper.MarkAsCustom();
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.FrequencyIndex, freq);
+                break;
+
+            case SignalGeneratorHitArea.SlotSweepStartKnob:
+                float startHz = DenormalizeFrequency(normalized);
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.SweepStartHzIndex, startHz);
+                break;
+
+            case SignalGeneratorHitArea.SlotSweepEndKnob:
+                float endHz = DenormalizeFrequency(normalized);
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.SweepEndHzIndex, endHz);
+                break;
+
+            case SignalGeneratorHitArea.SlotSweepDurKnob:
+                float durMs = 100f + normalized * (30000f - 100f);
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.SweepDurationMsIndex, durMs);
+                break;
+
+            case SignalGeneratorHitArea.SlotPulseWidthKnob:
+                float pw = 0.1f + normalized * 0.8f;
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.PulseWidthIndex, pw);
+                break;
+
+            case SignalGeneratorHitArea.SlotIntervalKnob:
+                float interval = 10f + normalized * (5000f - 10f);
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.ImpulseIntervalMsIndex, interval);
+                break;
+
+            case SignalGeneratorHitArea.SlotChirpDurKnob:
+                float chirpDur = 50f + normalized * (500f - 50f);
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.ChirpDurationMsIndex, chirpDur);
+                break;
+
+            case SignalGeneratorHitArea.SlotSpeedKnob:
+                float speed = 0.5f + normalized * 1.5f;
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.SampleSpeedIndex, speed);
+                break;
+
+            case SignalGeneratorHitArea.SlotTrimStartKnob:
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.SampleTrimStartIndex, normalized);
+                break;
+
+            case SignalGeneratorHitArea.SlotTrimEndKnob:
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.SampleTrimEndIndex, normalized);
                 break;
 
             case SignalGeneratorHitArea.MasterGainKnob:
                 float masterDb = -60f + normalized * 72f;
                 _parameterCallback(SignalGeneratorPlugin.MasterGainIndex, masterDb);
-                _presetHelper.MarkAsCustom();
                 break;
+
+            default:
+                return;
         }
-    }
 
-    private float GetSlotGainDb(int slot)
-    {
-        var slotState = _plugin.GetSlotState(slot);
-        return slotState.GainDb;
-    }
-
-    private float GetSlotFrequency(int slot)
-    {
-        var slotState = _plugin.GetSlotState(slot);
-        return slotState.Frequency;
+        _presetHelper.MarkAsCustom();
     }
 
     private static float NormalizeFrequency(float hz)
     {
-        // Log scale: 20Hz to 20kHz
         float logMin = MathF.Log(20f);
         float logMax = MathF.Log(20000f);
         float logHz = MathF.Log(Math.Clamp(hz, 20f, 20000f));
@@ -345,6 +441,46 @@ public partial class SignalGeneratorWindow : Window
         menu.IsOpen = true;
     }
 
+    private void ShowLoopModeMenu(int slotIndex)
+    {
+        var menu = new System.Windows.Controls.ContextMenu();
+        foreach (SampleLoopMode mode in Enum.GetValues<SampleLoopMode>())
+        {
+            var item = new System.Windows.Controls.MenuItem { Header = mode.ToString() };
+            item.Click += (_, _) =>
+            {
+                int loopIndex = slotIndex * 20 + SignalGeneratorPlugin.SampleLoopModeIndex;
+                _parameterCallback(loopIndex, (float)mode);
+                _presetHelper.MarkAsCustom();
+            };
+            menu.Items.Add(item);
+        }
+        menu.IsOpen = true;
+    }
+
+    private void ShowHeadroomMenu()
+    {
+        var menu = new System.Windows.Controls.ContextMenu();
+        foreach (HeadroomMode mode in Enum.GetValues<HeadroomMode>())
+        {
+            string label = mode switch
+            {
+                HeadroomMode.None => "None (raw sum)",
+                HeadroomMode.AutoCompensate => "Auto (-3dB/doubling)",
+                HeadroomMode.Normalize => "Normalize (clip)",
+                _ => mode.ToString()
+            };
+            var item = new System.Windows.Controls.MenuItem { Header = label };
+            item.Click += (_, _) =>
+            {
+                _parameterCallback(SignalGeneratorPlugin.HeadroomModeIndex, (float)mode);
+                _presetHelper.MarkAsCustom();
+            };
+            menu.Items.Add(item);
+        }
+        menu.IsOpen = true;
+    }
+
     private void ToggleSlotMute(int slotIndex)
     {
         var slotState = _plugin.GetSlotState(slotIndex);
@@ -361,10 +497,16 @@ public partial class SignalGeneratorWindow : Window
         _presetHelper.MarkAsCustom();
     }
 
+    private void ToggleSweep(int slotIndex)
+    {
+        var slotState = _plugin.GetSlotState(slotIndex);
+        int sweepIndex = slotIndex * 20 + SignalGeneratorPlugin.SweepEnabledIndex;
+        _parameterCallback(sweepIndex, slotState.SweepEnabled ? 0f : 1f);
+        _presetHelper.MarkAsCustom();
+    }
+
     private void ToggleRecording()
     {
-        // Toggle recording state
-        // This would need additional plugin API to track recording state
         _plugin.SetRecordingEnabled(true);
     }
 
@@ -425,7 +567,6 @@ public partial class SignalGeneratorWindow : Window
     {
         foreach (var (name, value) in parameters)
         {
-            // Find parameter index by name
             var param = _plugin.Parameters.FirstOrDefault(p =>
                 p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
             if (param != null)
@@ -440,7 +581,7 @@ public partial class SignalGeneratorWindow : Window
         var result = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         foreach (var param in _plugin.Parameters)
         {
-            result[param.Name] = param.DefaultValue; // Would need current values
+            result[param.Name] = param.DefaultValue;
         }
         return result;
     }

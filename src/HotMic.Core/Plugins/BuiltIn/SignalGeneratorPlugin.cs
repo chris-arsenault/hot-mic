@@ -667,15 +667,74 @@ public sealed class SignalGeneratorPlugin : IPlugin
     public float MasterGainDb => _masterGainDb;
 
     /// <summary>
+    /// Full slot state for UI rendering.
+    /// </summary>
+    public readonly struct SlotUIState
+    {
+        public readonly GeneratorType Type;
+        public readonly float Frequency;
+        public readonly float GainDb;
+        public readonly bool Muted;
+        public readonly bool Solo;
+        public readonly bool SweepEnabled;
+        public readonly float SweepStartHz;
+        public readonly float SweepEndHz;
+        public readonly float SweepDurationMs;
+        public readonly SweepDirection SweepDirection;
+        public readonly SweepCurve SweepCurve;
+        public readonly float PulseWidth;
+        public readonly float ImpulseIntervalMs;
+        public readonly float ChirpDurationMs;
+        public readonly SampleLoopMode LoopMode;
+        public readonly float SampleSpeed;
+        public readonly float TrimStart;
+        public readonly float TrimEnd;
+
+        public SlotUIState(
+            GeneratorType type, float frequency, float gainDb, bool muted, bool solo,
+            bool sweepEnabled, float sweepStartHz, float sweepEndHz, float sweepDurationMs,
+            SweepDirection sweepDirection, SweepCurve sweepCurve, float pulseWidth,
+            float impulseIntervalMs, float chirpDurationMs, SampleLoopMode loopMode,
+            float sampleSpeed, float trimStart, float trimEnd)
+        {
+            Type = type;
+            Frequency = frequency;
+            GainDb = gainDb;
+            Muted = muted;
+            Solo = solo;
+            SweepEnabled = sweepEnabled;
+            SweepStartHz = sweepStartHz;
+            SweepEndHz = sweepEndHz;
+            SweepDurationMs = sweepDurationMs;
+            SweepDirection = sweepDirection;
+            SweepCurve = sweepCurve;
+            PulseWidth = pulseWidth;
+            ImpulseIntervalMs = impulseIntervalMs;
+            ChirpDurationMs = chirpDurationMs;
+            LoopMode = loopMode;
+            SampleSpeed = sampleSpeed;
+            TrimStart = trimStart;
+            TrimEnd = trimEnd;
+        }
+    }
+
+    /// <summary>
     /// Gets the current state of a slot for UI rendering.
     /// </summary>
-    public (GeneratorType Type, float Frequency, float GainDb, bool Muted, bool Solo) GetSlotState(int slotIndex)
+    public SlotUIState GetSlotState(int slotIndex)
     {
         if (slotIndex < 0 || slotIndex >= SlotCount)
-            return (GeneratorType.Sine, 440f, -12f, false, false);
+            return new SlotUIState(GeneratorType.Sine, 440f, -12f, false, false,
+                false, 80f, 8000f, 5000f, SweepDirection.Up, SweepCurve.Logarithmic, 0.5f,
+                100f, 200f, SampleLoopMode.Loop, 1f, 0f, 1f);
 
         ref var s = ref _slots[slotIndex];
-        return (s.Type, s.Frequency, s.GainDb, s.Muted, s.Solo);
+        return new SlotUIState(
+            s.Type, s.Frequency, s.GainDb, s.Muted, s.Solo,
+            s.SweepEnabled, s.SweepStartHz, s.SweepEndHz, s.SweepDurationMs,
+            s.SweepDirection, s.SweepCurve, s.PulseWidth,
+            s.ImpulseIntervalMs, s.ChirpDurationMs, s.SampleLoopMode,
+            s.SampleSpeed, s.SampleTrimStart, s.SampleTrimEnd);
     }
 
     /// <summary>

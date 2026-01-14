@@ -4,18 +4,19 @@ using SkiaSharp;
 namespace HotMic.App.UI.PluginComponents;
 
 /// <summary>
-/// Renderer for the Signal Generator plugin UI with 3 slots, master section, and sample controls.
+/// Renderer for the Signal Generator plugin UI with 3 vertical slot rows.
 /// </summary>
 public sealed class SignalGeneratorRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
-    private const float Padding = 8f;
-    private const float SlotHeight = 120f;
-    private const float SlotWidth = 130f;
-    private const float MasterWidth = 80f;
-    private const float CornerRadius = 10f;
-    private const float KnobRadius = 22f;
-    private const float SmallKnobRadius = 16f;
+    private const float SlotRowHeight = 56f;
+    private const float MasterRowHeight = 44f;
+    private const float Padding = 6f;
+    private const float CornerRadius = 8f;
+    private const float KnobRadius = 16f;
+    private const float SmallKnobRadius = 14f;
+    private const float TinyKnobRadius = 12f;
+    private const float ButtonHeight = 18f;
 
     private readonly PluginComponentTheme _theme;
     private readonly PluginPresetBar _presetBar;
@@ -38,14 +39,13 @@ public sealed class SignalGeneratorRenderer : IDisposable
     private readonly SKPaint _knobTrackPaint;
     private readonly SKPaint _knobArcPaint;
     private readonly SKPaint _knobPointerPaint;
-    private readonly SKPaint _typeSelectorPaint;
-    private readonly SKPaint _recordPaint;
-    private readonly SKPaint _recordActivePaint;
+    private readonly SKPaint _dropdownPaint;
+    private readonly SKPaint _toggleOffPaint;
+    private readonly SKPaint _toggleOnPaint;
 
-    private readonly LevelMeter[] _slotMeters;
     private readonly LevelMeter _masterMeter;
 
-    // Hit test regions
+    // Hit test regions - per slot
     private SKRect _titleBarRect;
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
@@ -55,7 +55,19 @@ public sealed class SignalGeneratorRenderer : IDisposable
     private readonly SKPoint[] _slotFreqKnobCenters = new SKPoint[3];
     private readonly SKRect[] _slotMuteRects = new SKRect[3];
     private readonly SKRect[] _slotSoloRects = new SKRect[3];
+    private readonly SKRect[] _slotSweepToggleRects = new SKRect[3];
+    private readonly SKPoint[] _slotSweepStartKnobCenters = new SKPoint[3];
+    private readonly SKPoint[] _slotSweepEndKnobCenters = new SKPoint[3];
+    private readonly SKPoint[] _slotSweepDurKnobCenters = new SKPoint[3];
+    private readonly SKPoint[] _slotPulseWidthKnobCenters = new SKPoint[3];
+    private readonly SKPoint[] _slotIntervalKnobCenters = new SKPoint[3];
+    private readonly SKPoint[] _slotChirpDurKnobCenters = new SKPoint[3];
+    private readonly SKRect[] _slotLoopModeRects = new SKRect[3];
+    private readonly SKPoint[] _slotSpeedKnobCenters = new SKPoint[3];
+    private readonly SKPoint[] _slotTrimStartKnobCenters = new SKPoint[3];
+    private readonly SKPoint[] _slotTrimEndKnobCenters = new SKPoint[3];
     private SKPoint _masterGainKnobCenter;
+    private SKRect _masterHeadroomRect;
     private SKRect _recordButtonRect;
 
     public SignalGeneratorRenderer(PluginComponentTheme? theme = null)
@@ -66,11 +78,11 @@ public sealed class SignalGeneratorRenderer : IDisposable
         _backgroundPaint = new SKPaint { Color = _theme.PanelBackground, IsAntialias = true, Style = SKPaintStyle.Fill };
         _titleBarPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
         _borderPaint = new SKPaint { Color = _theme.PanelBorder, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f };
-        _titlePaint = new SKPaint { Color = _theme.TextPrimary, IsAntialias = true, TextSize = 14f, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold) };
-        _closeButtonPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, TextSize = 18f, TextAlign = SKTextAlign.Center };
+        _titlePaint = new SKPaint { Color = _theme.TextPrimary, IsAntialias = true, TextSize = 13f, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold) };
+        _closeButtonPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, TextSize = 16f, TextAlign = SKTextAlign.Center };
         _slotBackgroundPaint = new SKPaint { Color = _theme.MeterBackground, IsAntialias = true, Style = SKPaintStyle.Fill };
-        _labelPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, TextSize = 10f, TextAlign = SKTextAlign.Center, Typeface = SKTypeface.FromFamilyName("Segoe UI") };
-        _valuePaint = new SKPaint { Color = _theme.TextPrimary, IsAntialias = true, TextSize = 11f, TextAlign = SKTextAlign.Center, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold) };
+        _labelPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Center, Typeface = SKTypeface.FromFamilyName("Segoe UI") };
+        _valuePaint = new SKPaint { Color = _theme.TextPrimary, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Center, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold) };
         _mutePaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
         _mutedPaint = new SKPaint { Color = new SKColor(0xFF, 0x50, 0x50), IsAntialias = true, Style = SKPaintStyle.Fill };
         _soloPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
@@ -78,18 +90,13 @@ public sealed class SignalGeneratorRenderer : IDisposable
         _bypassPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
         _bypassActivePaint = new SKPaint { Color = new SKColor(0xFF, 0x50, 0x50), IsAntialias = true, Style = SKPaintStyle.Fill };
         _knobBackgroundPaint = new SKPaint { Color = _theme.KnobBackground, IsAntialias = true, Style = SKPaintStyle.Fill };
-        _knobTrackPaint = new SKPaint { Color = _theme.KnobTrack, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 4f, StrokeCap = SKStrokeCap.Round };
-        _knobArcPaint = new SKPaint { Color = _theme.KnobArc, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 4f, StrokeCap = SKStrokeCap.Round };
-        _knobPointerPaint = new SKPaint { Color = _theme.KnobPointer, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2f, StrokeCap = SKStrokeCap.Round };
-        _typeSelectorPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
-        _recordPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
-        _recordActivePaint = new SKPaint { Color = new SKColor(0xFF, 0x30, 0x30), IsAntialias = true, Style = SKPaintStyle.Fill };
+        _knobTrackPaint = new SKPaint { Color = _theme.KnobTrack, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 3f, StrokeCap = SKStrokeCap.Round };
+        _knobArcPaint = new SKPaint { Color = _theme.KnobArc, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 3f, StrokeCap = SKStrokeCap.Round };
+        _knobPointerPaint = new SKPaint { Color = _theme.KnobPointer, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f, StrokeCap = SKStrokeCap.Round };
+        _dropdownPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
+        _toggleOffPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
+        _toggleOnPaint = new SKPaint { Color = new SKColor(0x40, 0xA0, 0x40), IsAntialias = true, Style = SKPaintStyle.Fill };
 
-        _slotMeters = new LevelMeter[3];
-        for (int i = 0; i < 3; i++)
-        {
-            _slotMeters[i] = new LevelMeter();
-        }
         _masterMeter = new LevelMeter();
     }
 
@@ -108,30 +115,18 @@ public sealed class SignalGeneratorRenderer : IDisposable
         // Title bar
         RenderTitleBar(canvas, size, state);
 
-        // Content area
+        // Slot rows (stacked vertically)
         float contentTop = TitleBarHeight + Padding;
-        float contentHeight = size.Height - TitleBarHeight - Padding * 2;
-
-        // Slots section (3 slots in a row)
-        float slotsWidth = SlotWidth * 3 + Padding * 2;
-        float slotStartX = Padding;
-
         for (int i = 0; i < 3; i++)
         {
-            float slotX = slotStartX + i * (SlotWidth + Padding);
-            float slotY = contentTop;
-            _slotRects[i] = new SKRect(slotX, slotY, slotX + SlotWidth, slotY + SlotHeight);
-            RenderSlot(canvas, i, _slotRects[i], state.Slots[i], state.HoveredSlot == i, state.HoveredArea);
+            float rowY = contentTop + i * (SlotRowHeight + Padding);
+            _slotRects[i] = new SKRect(Padding, rowY, size.Width - Padding, rowY + SlotRowHeight);
+            RenderSlotRow(canvas, i, _slotRects[i], state.Slots[i], state.HoveredSlot == i, state.HoveredArea);
         }
 
-        // Master section (right side)
-        float masterX = size.Width - MasterWidth - Padding;
-        float masterY = contentTop;
-        RenderMasterSection(canvas, masterX, masterY, MasterWidth, SlotHeight, state);
-
-        // Record and sample load section (below slots)
-        float controlsY = contentTop + SlotHeight + Padding;
-        RenderControlsSection(canvas, slotStartX, controlsY, slotsWidth, 36f, state);
+        // Master row at bottom
+        float masterY = contentTop + 3 * (SlotRowHeight + Padding);
+        RenderMasterRow(canvas, Padding, masterY, size.Width - Padding * 2, MasterRowHeight, state);
 
         // Outer border
         canvas.DrawRoundRect(roundRect, _borderPaint);
@@ -153,20 +148,20 @@ public sealed class SignalGeneratorRenderer : IDisposable
         canvas.DrawLine(0, TitleBarHeight, size.Width, TitleBarHeight, _borderPaint);
 
         // Title
-        canvas.DrawText("Signal Generator", Padding, TitleBarHeight / 2f + 5, _titlePaint);
+        canvas.DrawText("Signal Generator", Padding + 2, TitleBarHeight / 2f + 4, _titlePaint);
 
         // Preset bar
-        float presetBarX = 130f;
+        float presetBarX = 115f;
         float presetBarY = (TitleBarHeight - PluginPresetBar.TotalHeight) / 2f;
         _presetBar.Render(canvas, presetBarX, presetBarY, state.PresetName);
 
         // Bypass button
-        float bypassWidth = 60f;
+        float bypassWidth = 50f;
         _bypassButtonRect = new SKRect(
-            size.Width - Padding - 30 - bypassWidth - 8,
-            (TitleBarHeight - 24) / 2,
-            size.Width - Padding - 30 - 8,
-            (TitleBarHeight + 24) / 2);
+            size.Width - Padding - 24 - bypassWidth - 6,
+            (TitleBarHeight - 20) / 2,
+            size.Width - Padding - 24 - 6,
+            (TitleBarHeight + 20) / 2);
         var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
@@ -175,188 +170,318 @@ public sealed class SignalGeneratorRenderer : IDisposable
         {
             Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
             IsAntialias = true,
-            TextSize = 10f,
+            TextSize = 9f,
             TextAlign = SKTextAlign.Center,
             Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
         };
-        canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
+        canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 3, bypassTextPaint);
 
         // Close button
-        _closeButtonRect = new SKRect(size.Width - Padding - 24, (TitleBarHeight - 24) / 2,
-            size.Width - Padding, (TitleBarHeight + 24) / 2);
-        canvas.DrawText("\u00D7", _closeButtonRect.MidX, _closeButtonRect.MidY + 6, _closeButtonPaint);
+        _closeButtonRect = new SKRect(size.Width - Padding - 20, (TitleBarHeight - 20) / 2,
+            size.Width - Padding, (TitleBarHeight + 20) / 2);
+        canvas.DrawText("\u00D7", _closeButtonRect.MidX, _closeButtonRect.MidY + 5, _closeButtonPaint);
     }
 
-    private void RenderSlot(SKCanvas canvas, int slotIndex, SKRect rect, SlotRenderState slot, bool isHovered, SignalGeneratorHitArea hoveredArea)
+    private void RenderSlotRow(SKCanvas canvas, int slotIndex, SKRect rect, SlotRenderState slot, bool isHovered, SignalGeneratorHitArea hoveredArea)
     {
-        // Slot background
-        var slotRound = new SKRoundRect(rect, 6f);
+        // Row background
+        var slotRound = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(slotRound, _slotBackgroundPaint);
 
-        // Slot label at top
-        canvas.DrawText($"SLOT {slotIndex + 1}", rect.MidX, rect.Top + 12, _labelPaint);
+        float x = rect.Left + 6;
+        float centerY = rect.MidY;
 
-        // Type selector below label
-        float headerY = rect.Top + 18;
-        _slotTypeSelectorRects[slotIndex] = new SKRect(rect.Left + 6, headerY, rect.Right - 6, headerY + 20);
-        var typeRound = new SKRoundRect(_slotTypeSelectorRects[slotIndex], 4f);
-        canvas.DrawRoundRect(typeRound, _typeSelectorPaint);
+        // Slot label
+        using var slotLabelPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, TextSize = 10f, TextAlign = SKTextAlign.Left, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold) };
+        canvas.DrawText($"S{slotIndex + 1}", x, centerY + 3, slotLabelPaint);
+        x += 18;
+
+        // Type dropdown
+        float typeWidth = 70f;
+        _slotTypeSelectorRects[slotIndex] = new SKRect(x, centerY - 10, x + typeWidth, centerY + 10);
+        var typeRound = new SKRoundRect(_slotTypeSelectorRects[slotIndex], 3f);
+        canvas.DrawRoundRect(typeRound, _dropdownPaint);
         canvas.DrawRoundRect(typeRound, _borderPaint);
 
         string typeLabel = slot.Type.ToString();
-        if (typeLabel.Length > 10) typeLabel = typeLabel[..10];
-        canvas.DrawText(typeLabel, _slotTypeSelectorRects[slotIndex].MidX, _slotTypeSelectorRects[slotIndex].MidY + 4, _valuePaint);
+        if (typeLabel.Length > 9) typeLabel = typeLabel[..9];
+        canvas.DrawText(typeLabel, _slotTypeSelectorRects[slotIndex].MidX - 4, centerY + 3, _valuePaint);
 
-        // Draw dropdown arrow
+        // Dropdown arrow
         float arrowX = _slotTypeSelectorRects[slotIndex].Right - 10;
-        float arrowY = _slotTypeSelectorRects[slotIndex].MidY;
         using var arrowPath = new SKPath();
-        arrowPath.MoveTo(arrowX - 3, arrowY - 2);
-        arrowPath.LineTo(arrowX, arrowY + 2);
-        arrowPath.LineTo(arrowX + 3, arrowY - 2);
+        arrowPath.MoveTo(arrowX - 3, centerY - 2);
+        arrowPath.LineTo(arrowX, centerY + 2);
+        arrowPath.LineTo(arrowX + 3, centerY - 2);
         using var arrowPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f };
         canvas.DrawPath(arrowPath, arrowPaint);
 
-        // Knobs - position depends on whether we show frequency
-        float knobY = rect.Top + 62;
+        x += typeWidth + 6;
+
+        // Render type-specific controls
+        x = RenderTypeSpecificControls(canvas, slotIndex, slot, x, rect, centerY, isHovered, hoveredArea);
+
+        // Gain knob (always shown, positioned after type-specific controls)
+        float gainX = rect.Right - 80;
+        _slotGainKnobCenters[slotIndex] = new SKPoint(gainX, centerY);
         float gainNormalized = (slot.GainDb + 60f) / 72f;
         bool gainHovered = isHovered && hoveredArea == SignalGeneratorHitArea.SlotGainKnob;
+        DrawTinyKnob(canvas, _slotGainKnobCenters[slotIndex], gainNormalized, gainHovered);
+        canvas.DrawText("GAIN", gainX, centerY + TinyKnobRadius + 8, _labelPaint);
 
-        // Only show frequency knob for oscillator types (Sine, Square, Saw, Triangle)
-        bool showFreq = (int)slot.Type <= 3;
+        // Mute/Solo buttons at right edge
+        float buttonX = rect.Right - 42;
+        float buttonWidth = 18f;
 
-        if (showFreq)
-        {
-            // Two knobs: gain left, freq right
-            float gainKnobX = rect.Left + 32;
-            float freqKnobX = rect.Right - 32;
-
-            _slotGainKnobCenters[slotIndex] = new SKPoint(gainKnobX, knobY);
-            DrawSmallKnob(canvas, _slotGainKnobCenters[slotIndex], gainNormalized, gainHovered);
-            canvas.DrawText("GAIN", gainKnobX, knobY + SmallKnobRadius + 10, _labelPaint);
-
-            _slotFreqKnobCenters[slotIndex] = new SKPoint(freqKnobX, knobY);
-            float freqNormalized = NormalizeFrequency(slot.Frequency);
-            bool freqHovered = isHovered && hoveredArea == SignalGeneratorHitArea.SlotFreqKnob;
-            DrawSmallKnob(canvas, _slotFreqKnobCenters[slotIndex], freqNormalized, freqHovered);
-            canvas.DrawText("FREQ", freqKnobX, knobY + SmallKnobRadius + 10, _labelPaint);
-        }
-        else
-        {
-            // Single centered gain knob
-            _slotGainKnobCenters[slotIndex] = new SKPoint(rect.MidX, knobY);
-            _slotFreqKnobCenters[slotIndex] = new SKPoint(-100, -100); // Off-screen
-            DrawSmallKnob(canvas, _slotGainKnobCenters[slotIndex], gainNormalized, gainHovered);
-            canvas.DrawText("GAIN", rect.MidX, knobY + SmallKnobRadius + 10, _labelPaint);
-        }
-
-        // Mute/Solo buttons at bottom
-        float buttonY = rect.Bottom - 24;
-        float buttonWidth = 24f;
-        float buttonHeight = 16f;
-        float muteX = rect.Left + 16;
-        float soloX = rect.Right - 16 - buttonWidth;
-
-        _slotMuteRects[slotIndex] = new SKRect(muteX, buttonY, muteX + buttonWidth, buttonY + buttonHeight);
+        _slotMuteRects[slotIndex] = new SKRect(buttonX, centerY - 8, buttonX + buttonWidth, centerY + 8);
         var muteRound = new SKRoundRect(_slotMuteRects[slotIndex], 3f);
         canvas.DrawRoundRect(muteRound, slot.IsMuted ? _mutedPaint : _mutePaint);
         canvas.DrawRoundRect(muteRound, _borderPaint);
-        using var muteTextPaint = new SKPaint { Color = slot.IsMuted ? _theme.TextPrimary : _theme.TextSecondary, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Center };
+        using var muteTextPaint = new SKPaint { Color = slot.IsMuted ? _theme.TextPrimary : _theme.TextSecondary, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Center, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold) };
         canvas.DrawText("M", _slotMuteRects[slotIndex].MidX, _slotMuteRects[slotIndex].MidY + 3, muteTextPaint);
 
-        _slotSoloRects[slotIndex] = new SKRect(soloX, buttonY, soloX + buttonWidth, buttonY + buttonHeight);
+        buttonX += buttonWidth + 3;
+        _slotSoloRects[slotIndex] = new SKRect(buttonX, centerY - 8, buttonX + buttonWidth, centerY + 8);
         var soloRound = new SKRoundRect(_slotSoloRects[slotIndex], 3f);
         canvas.DrawRoundRect(soloRound, slot.IsSolo ? _soloedPaint : _soloPaint);
         canvas.DrawRoundRect(soloRound, _borderPaint);
-        using var soloTextPaint = new SKPaint { Color = slot.IsSolo ? _theme.PanelBackground : _theme.TextSecondary, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Center };
+        using var soloTextPaint = new SKPaint { Color = slot.IsSolo ? _theme.PanelBackground : _theme.TextSecondary, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Center, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold) };
         canvas.DrawText("S", _slotSoloRects[slotIndex].MidX, _slotSoloRects[slotIndex].MidY + 3, soloTextPaint);
     }
 
-    private void RenderMasterSection(SKCanvas canvas, float x, float y, float width, float height, SignalGeneratorState state)
+    private float RenderTypeSpecificControls(SKCanvas canvas, int slotIndex, SlotRenderState slot, float x, SKRect rect, float centerY, bool isHovered, SignalGeneratorHitArea hoveredArea)
+    {
+        // Reset off-screen positions for unused controls
+        _slotFreqKnobCenters[slotIndex] = new SKPoint(-100, -100);
+        _slotSweepToggleRects[slotIndex] = SKRect.Empty;
+        _slotSweepStartKnobCenters[slotIndex] = new SKPoint(-100, -100);
+        _slotSweepEndKnobCenters[slotIndex] = new SKPoint(-100, -100);
+        _slotSweepDurKnobCenters[slotIndex] = new SKPoint(-100, -100);
+        _slotPulseWidthKnobCenters[slotIndex] = new SKPoint(-100, -100);
+        _slotIntervalKnobCenters[slotIndex] = new SKPoint(-100, -100);
+        _slotChirpDurKnobCenters[slotIndex] = new SKPoint(-100, -100);
+        _slotLoopModeRects[slotIndex] = SKRect.Empty;
+        _slotSpeedKnobCenters[slotIndex] = new SKPoint(-100, -100);
+        _slotTrimStartKnobCenters[slotIndex] = new SKPoint(-100, -100);
+        _slotTrimEndKnobCenters[slotIndex] = new SKPoint(-100, -100);
+
+        switch (slot.Type)
+        {
+            case GeneratorType.Sine:
+            case GeneratorType.Square:
+            case GeneratorType.Saw:
+            case GeneratorType.Triangle:
+                x = RenderOscillatorControls(canvas, slotIndex, slot, x, centerY, isHovered, hoveredArea);
+                break;
+
+            case GeneratorType.WhiteNoise:
+            case GeneratorType.PinkNoise:
+            case GeneratorType.BrownNoise:
+            case GeneratorType.BlueNoise:
+                // Noise has no extra controls
+                break;
+
+            case GeneratorType.Impulse:
+                x = RenderImpulseControls(canvas, slotIndex, slot, x, centerY, isHovered, hoveredArea);
+                break;
+
+            case GeneratorType.Chirp:
+                x = RenderChirpControls(canvas, slotIndex, slot, x, centerY, isHovered, hoveredArea);
+                break;
+
+            case GeneratorType.Sample:
+                x = RenderSampleControls(canvas, slotIndex, slot, x, centerY, isHovered, hoveredArea);
+                break;
+        }
+
+        return x;
+    }
+
+    private float RenderOscillatorControls(SKCanvas canvas, int slotIndex, SlotRenderState slot, float x, float centerY, bool isHovered, SignalGeneratorHitArea hoveredArea)
+    {
+        // Frequency knob
+        _slotFreqKnobCenters[slotIndex] = new SKPoint(x + TinyKnobRadius, centerY);
+        float freqNormalized = NormalizeFrequency(slot.Frequency);
+        bool freqHovered = isHovered && hoveredArea == SignalGeneratorHitArea.SlotFreqKnob;
+        DrawTinyKnob(canvas, _slotFreqKnobCenters[slotIndex], freqNormalized, freqHovered);
+        canvas.DrawText("FREQ", x + TinyKnobRadius, centerY + TinyKnobRadius + 8, _labelPaint);
+        x += TinyKnobRadius * 2 + 8;
+
+        // Sweep toggle
+        float toggleWidth = 36f;
+        _slotSweepToggleRects[slotIndex] = new SKRect(x, centerY - 8, x + toggleWidth, centerY + 8);
+        var toggleRound = new SKRoundRect(_slotSweepToggleRects[slotIndex], 3f);
+        canvas.DrawRoundRect(toggleRound, slot.SweepEnabled ? _toggleOnPaint : _toggleOffPaint);
+        canvas.DrawRoundRect(toggleRound, _borderPaint);
+        using var sweepTextPaint = new SKPaint { Color = slot.SweepEnabled ? _theme.TextPrimary : _theme.TextSecondary, IsAntialias = true, TextSize = 8f, TextAlign = SKTextAlign.Center };
+        canvas.DrawText("SWEEP", _slotSweepToggleRects[slotIndex].MidX, centerY + 3, sweepTextPaint);
+        x += toggleWidth + 4;
+
+        // Sweep controls (only if sweep enabled)
+        if (slot.SweepEnabled)
+        {
+            // Start Hz
+            _slotSweepStartKnobCenters[slotIndex] = new SKPoint(x + TinyKnobRadius, centerY);
+            float startNorm = NormalizeFrequency(slot.SweepStartHz);
+            DrawTinyKnob(canvas, _slotSweepStartKnobCenters[slotIndex], startNorm, isHovered && hoveredArea == SignalGeneratorHitArea.SlotSweepStartKnob);
+            canvas.DrawText("START", x + TinyKnobRadius, centerY + TinyKnobRadius + 8, _labelPaint);
+            x += TinyKnobRadius * 2 + 4;
+
+            // End Hz
+            _slotSweepEndKnobCenters[slotIndex] = new SKPoint(x + TinyKnobRadius, centerY);
+            float endNorm = NormalizeFrequency(slot.SweepEndHz);
+            DrawTinyKnob(canvas, _slotSweepEndKnobCenters[slotIndex], endNorm, isHovered && hoveredArea == SignalGeneratorHitArea.SlotSweepEndKnob);
+            canvas.DrawText("END", x + TinyKnobRadius, centerY + TinyKnobRadius + 8, _labelPaint);
+            x += TinyKnobRadius * 2 + 4;
+
+            // Duration
+            _slotSweepDurKnobCenters[slotIndex] = new SKPoint(x + TinyKnobRadius, centerY);
+            float durNorm = (slot.SweepDurationMs - 100f) / (30000f - 100f);
+            DrawTinyKnob(canvas, _slotSweepDurKnobCenters[slotIndex], durNorm, isHovered && hoveredArea == SignalGeneratorHitArea.SlotSweepDurKnob);
+            canvas.DrawText("DUR", x + TinyKnobRadius, centerY + TinyKnobRadius + 8, _labelPaint);
+            x += TinyKnobRadius * 2 + 4;
+        }
+
+        // Pulse width for square wave
+        if (slot.Type == GeneratorType.Square)
+        {
+            _slotPulseWidthKnobCenters[slotIndex] = new SKPoint(x + TinyKnobRadius, centerY);
+            float pwNorm = (slot.PulseWidth - 0.1f) / 0.8f;
+            DrawTinyKnob(canvas, _slotPulseWidthKnobCenters[slotIndex], pwNorm, isHovered && hoveredArea == SignalGeneratorHitArea.SlotPulseWidthKnob);
+            canvas.DrawText("PW", x + TinyKnobRadius, centerY + TinyKnobRadius + 8, _labelPaint);
+            x += TinyKnobRadius * 2 + 4;
+        }
+
+        return x;
+    }
+
+    private float RenderImpulseControls(SKCanvas canvas, int slotIndex, SlotRenderState slot, float x, float centerY, bool isHovered, SignalGeneratorHitArea hoveredArea)
+    {
+        // Interval knob
+        _slotIntervalKnobCenters[slotIndex] = new SKPoint(x + TinyKnobRadius, centerY);
+        float intervalNorm = (slot.ImpulseIntervalMs - 10f) / (5000f - 10f);
+        DrawTinyKnob(canvas, _slotIntervalKnobCenters[slotIndex], intervalNorm, isHovered && hoveredArea == SignalGeneratorHitArea.SlotIntervalKnob);
+        canvas.DrawText("INT", x + TinyKnobRadius, centerY + TinyKnobRadius + 8, _labelPaint);
+        x += TinyKnobRadius * 2 + 8;
+
+        return x;
+    }
+
+    private float RenderChirpControls(SKCanvas canvas, int slotIndex, SlotRenderState slot, float x, float centerY, bool isHovered, SignalGeneratorHitArea hoveredArea)
+    {
+        // Duration knob
+        _slotChirpDurKnobCenters[slotIndex] = new SKPoint(x + TinyKnobRadius, centerY);
+        float durNorm = (slot.ChirpDurationMs - 50f) / (500f - 50f);
+        DrawTinyKnob(canvas, _slotChirpDurKnobCenters[slotIndex], durNorm, isHovered && hoveredArea == SignalGeneratorHitArea.SlotChirpDurKnob);
+        canvas.DrawText("DUR", x + TinyKnobRadius, centerY + TinyKnobRadius + 8, _labelPaint);
+        x += TinyKnobRadius * 2 + 8;
+
+        return x;
+    }
+
+    private float RenderSampleControls(SKCanvas canvas, int slotIndex, SlotRenderState slot, float x, float centerY, bool isHovered, SignalGeneratorHitArea hoveredArea)
+    {
+        // Loop mode dropdown
+        float loopWidth = 50f;
+        _slotLoopModeRects[slotIndex] = new SKRect(x, centerY - 8, x + loopWidth, centerY + 8);
+        var loopRound = new SKRoundRect(_slotLoopModeRects[slotIndex], 3f);
+        canvas.DrawRoundRect(loopRound, _dropdownPaint);
+        canvas.DrawRoundRect(loopRound, _borderPaint);
+        string loopLabel = slot.LoopMode switch
+        {
+            SampleLoopMode.Loop => "Loop",
+            SampleLoopMode.OneShot => "1-Shot",
+            SampleLoopMode.PingPong => "P-Pong",
+            _ => "Loop"
+        };
+        canvas.DrawText(loopLabel, _slotLoopModeRects[slotIndex].MidX, centerY + 3, _valuePaint);
+        x += loopWidth + 6;
+
+        // Speed knob
+        _slotSpeedKnobCenters[slotIndex] = new SKPoint(x + TinyKnobRadius, centerY);
+        float speedNorm = (slot.SampleSpeed - 0.5f) / 1.5f;
+        DrawTinyKnob(canvas, _slotSpeedKnobCenters[slotIndex], speedNorm, isHovered && hoveredArea == SignalGeneratorHitArea.SlotSpeedKnob);
+        canvas.DrawText("SPD", x + TinyKnobRadius, centerY + TinyKnobRadius + 8, _labelPaint);
+        x += TinyKnobRadius * 2 + 4;
+
+        // Trim start
+        _slotTrimStartKnobCenters[slotIndex] = new SKPoint(x + TinyKnobRadius, centerY);
+        DrawTinyKnob(canvas, _slotTrimStartKnobCenters[slotIndex], slot.TrimStart, isHovered && hoveredArea == SignalGeneratorHitArea.SlotTrimStartKnob);
+        canvas.DrawText("IN", x + TinyKnobRadius, centerY + TinyKnobRadius + 8, _labelPaint);
+        x += TinyKnobRadius * 2 + 4;
+
+        // Trim end
+        _slotTrimEndKnobCenters[slotIndex] = new SKPoint(x + TinyKnobRadius, centerY);
+        DrawTinyKnob(canvas, _slotTrimEndKnobCenters[slotIndex], slot.TrimEnd, isHovered && hoveredArea == SignalGeneratorHitArea.SlotTrimEndKnob);
+        canvas.DrawText("OUT", x + TinyKnobRadius, centerY + TinyKnobRadius + 8, _labelPaint);
+        x += TinyKnobRadius * 2 + 4;
+
+        return x;
+    }
+
+    private void RenderMasterRow(SKCanvas canvas, float x, float y, float width, float height, SignalGeneratorState state)
     {
         var rect = new SKRect(x, y, x + width, y + height);
-        var masterRound = new SKRoundRect(rect, 6f);
+        var masterRound = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(masterRound, _slotBackgroundPaint);
 
-        // Master label
-        canvas.DrawText("MASTER", rect.MidX - 6, y + 14, _labelPaint);
+        float centerY = rect.MidY;
+        float px = rect.Left + 8;
 
-        // Master gain knob (slightly left to make room for meter)
-        _masterGainKnobCenter = new SKPoint(rect.Left + 32, y + 55);
+        // Master label
+        using var masterLabelPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, TextSize = 10f, TextAlign = SKTextAlign.Left, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold) };
+        canvas.DrawText("MASTER", px, centerY + 3, masterLabelPaint);
+        px += 52;
+
+        // Master gain knob
+        _masterGainKnobCenter = new SKPoint(px + SmallKnobRadius, centerY);
         float gainNormalized = (state.MasterGainDb + 60f) / 72f;
         bool masterHovered = state.HoveredArea == SignalGeneratorHitArea.MasterGainKnob;
         DrawSmallKnob(canvas, _masterGainKnobCenter, gainNormalized, masterHovered);
-
-        // Value display
         string sign = state.MasterGainDb > 0.05f ? "+" : "";
-        canvas.DrawText($"{sign}{state.MasterGainDb:0.0}", rect.Left + 32, y + 55 + SmallKnobRadius + 10, _valuePaint);
+        canvas.DrawText($"{sign}{state.MasterGainDb:0.0}dB", px + SmallKnobRadius, centerY + SmallKnobRadius + 9, _labelPaint);
+        px += SmallKnobRadius * 2 + 12;
 
         // Output meter
-        var meterRect = new SKRect(rect.Right - 16, y + 20, rect.Right - 6, y + height - 10);
+        var meterRect = new SKRect(px, y + 6, px + 8, y + height - 6);
         _masterMeter.Update(state.OutputLevel);
         _masterMeter.Render(canvas, meterRect, MeterOrientation.Vertical);
-    }
+        px += 16;
 
-    private void RenderControlsSection(SKCanvas canvas, float x, float y, float width, float height, SignalGeneratorState state)
-    {
+        // Headroom dropdown
+        float hrWidth = 65f;
+        _masterHeadroomRect = new SKRect(px, centerY - 9, px + hrWidth, centerY + 9);
+        var hrRound = new SKRoundRect(_masterHeadroomRect, 3f);
+        canvas.DrawRoundRect(hrRound, _dropdownPaint);
+        canvas.DrawRoundRect(hrRound, _borderPaint);
+        string hrLabel = state.HeadroomMode switch
+        {
+            HeadroomMode.None => "None",
+            HeadroomMode.AutoCompensate => "Auto",
+            HeadroomMode.Normalize => "Normalize",
+            _ => "Auto"
+        };
+        canvas.DrawText(hrLabel, _masterHeadroomRect.MidX, centerY + 3, _valuePaint);
+        px += hrWidth + 10;
+
         // Record button
-        float buttonWidth = 70f;
-        float buttonHeight = 24f;
-        _recordButtonRect = new SKRect(x, y + (height - buttonHeight) / 2, x + buttonWidth, y + (height + buttonHeight) / 2);
-
+        float recWidth = 48f;
+        _recordButtonRect = new SKRect(px, centerY - 10, px + recWidth, centerY + 10);
         var recordRound = new SKRoundRect(_recordButtonRect, 4f);
-        canvas.DrawRoundRect(recordRound, _recordPaint);
+        canvas.DrawRoundRect(recordRound, _dropdownPaint);
         canvas.DrawRoundRect(recordRound, _borderPaint);
 
-        // Record circle icon
-        float circleX = _recordButtonRect.Left + 14;
-        float circleY = _recordButtonRect.MidY;
+        // Record circle
         using var circlePaint = new SKPaint { Color = new SKColor(0xFF, 0x30, 0x30), IsAntialias = true, Style = SKPaintStyle.Fill };
-        canvas.DrawCircle(circleX, circleY, 4f, circlePaint);
+        canvas.DrawCircle(px + 12, centerY, 4f, circlePaint);
 
-        using var recordTextPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, TextSize = 10f, TextAlign = SKTextAlign.Left };
-        canvas.DrawText("REC", circleX + 10, _recordButtonRect.MidY + 3, recordTextPaint);
+        using var recTextPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Left };
+        canvas.DrawText("REC", px + 20, centerY + 3, recTextPaint);
+        px += recWidth + 10;
 
         // Hint text
         using var hintPaint = new SKPaint { Color = _theme.TextMuted, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Left };
-        canvas.DrawText("Drop WAV onto slot to load sample", x + buttonWidth + 12, y + height / 2 + 3, hintPaint);
-    }
-
-    private void DrawKnob(SKCanvas canvas, SKPoint center, float normalized, bool isHovered)
-    {
-        const float startAngle = 135f;
-        const float sweepAngle = 270f;
-        float arcRadius = KnobRadius * 0.8f;
-
-        // Background
-        canvas.DrawCircle(center, KnobRadius, _knobBackgroundPaint);
-
-        // Track
-        using var trackPath = new SKPath();
-        trackPath.AddArc(new SKRect(center.X - arcRadius, center.Y - arcRadius, center.X + arcRadius, center.Y + arcRadius), startAngle, sweepAngle);
-        canvas.DrawPath(trackPath, _knobTrackPaint);
-
-        // Value arc
-        float valueSweep = sweepAngle * normalized;
-        if (valueSweep > 0.5f)
-        {
-            using var arcPath = new SKPath();
-            arcPath.AddArc(new SKRect(center.X - arcRadius, center.Y - arcRadius, center.X + arcRadius, center.Y + arcRadius), startAngle, valueSweep);
-            canvas.DrawPath(arcPath, _knobArcPaint);
-        }
-
-        // Pointer
-        float pointerAngle = startAngle + sweepAngle * normalized;
-        float pointerRad = pointerAngle * MathF.PI / 180f;
-        float pointerEnd = arcRadius - 4f;
-        canvas.DrawLine(center.X, center.Y, center.X + pointerEnd * MathF.Cos(pointerRad), center.Y + pointerEnd * MathF.Sin(pointerRad), _knobPointerPaint);
-
-        // Hover highlight
-        if (isHovered)
-        {
-            using var hoverPaint = new SKPaint { Color = _theme.KnobArc.WithAlpha(40), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2f };
-            canvas.DrawCircle(center, KnobRadius + 3, hoverPaint);
-        }
+        canvas.DrawText("Drop WAV onto slot", px, centerY + 3, hintPaint);
     }
 
     private void DrawSmallKnob(SKCanvas canvas, SKPoint center, float normalized, bool isHovered)
@@ -365,40 +490,67 @@ public sealed class SignalGeneratorRenderer : IDisposable
         const float sweepAngle = 270f;
         float arcRadius = SmallKnobRadius * 0.75f;
 
-        // Background
         canvas.DrawCircle(center, SmallKnobRadius, _knobBackgroundPaint);
 
-        // Track
-        _knobTrackPaint.StrokeWidth = 3f;
         using var trackPath = new SKPath();
         trackPath.AddArc(new SKRect(center.X - arcRadius, center.Y - arcRadius, center.X + arcRadius, center.Y + arcRadius), startAngle, sweepAngle);
         canvas.DrawPath(trackPath, _knobTrackPaint);
-        _knobTrackPaint.StrokeWidth = 4f;
 
-        // Value arc
-        float valueSweep = sweepAngle * normalized;
+        float valueSweep = sweepAngle * Math.Clamp(normalized, 0f, 1f);
         if (valueSweep > 0.5f)
         {
-            _knobArcPaint.StrokeWidth = 3f;
             using var arcPath = new SKPath();
             arcPath.AddArc(new SKRect(center.X - arcRadius, center.Y - arcRadius, center.X + arcRadius, center.Y + arcRadius), startAngle, valueSweep);
             canvas.DrawPath(arcPath, _knobArcPaint);
-            _knobArcPaint.StrokeWidth = 4f;
         }
 
-        // Pointer
-        float pointerAngle = startAngle + sweepAngle * normalized;
+        float pointerAngle = startAngle + sweepAngle * Math.Clamp(normalized, 0f, 1f);
         float pointerRad = pointerAngle * MathF.PI / 180f;
         float pointerEnd = arcRadius - 2f;
-        _knobPointerPaint.StrokeWidth = 1.5f;
         canvas.DrawLine(center.X, center.Y, center.X + pointerEnd * MathF.Cos(pointerRad), center.Y + pointerEnd * MathF.Sin(pointerRad), _knobPointerPaint);
-        _knobPointerPaint.StrokeWidth = 2f;
 
-        // Hover highlight
         if (isHovered)
         {
             using var hoverPaint = new SKPaint { Color = _theme.KnobArc.WithAlpha(40), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f };
             canvas.DrawCircle(center, SmallKnobRadius + 2, hoverPaint);
+        }
+    }
+
+    private void DrawTinyKnob(SKCanvas canvas, SKPoint center, float normalized, bool isHovered)
+    {
+        const float startAngle = 135f;
+        const float sweepAngle = 270f;
+        float arcRadius = TinyKnobRadius * 0.7f;
+
+        canvas.DrawCircle(center, TinyKnobRadius, _knobBackgroundPaint);
+
+        _knobTrackPaint.StrokeWidth = 2.5f;
+        using var trackPath = new SKPath();
+        trackPath.AddArc(new SKRect(center.X - arcRadius, center.Y - arcRadius, center.X + arcRadius, center.Y + arcRadius), startAngle, sweepAngle);
+        canvas.DrawPath(trackPath, _knobTrackPaint);
+        _knobTrackPaint.StrokeWidth = 3f;
+
+        float valueSweep = sweepAngle * Math.Clamp(normalized, 0f, 1f);
+        if (valueSweep > 0.5f)
+        {
+            _knobArcPaint.StrokeWidth = 2.5f;
+            using var arcPath = new SKPath();
+            arcPath.AddArc(new SKRect(center.X - arcRadius, center.Y - arcRadius, center.X + arcRadius, center.Y + arcRadius), startAngle, valueSweep);
+            canvas.DrawPath(arcPath, _knobArcPaint);
+            _knobArcPaint.StrokeWidth = 3f;
+        }
+
+        float pointerAngle = startAngle + sweepAngle * Math.Clamp(normalized, 0f, 1f);
+        float pointerRad = pointerAngle * MathF.PI / 180f;
+        float pointerEnd = arcRadius - 1f;
+        _knobPointerPaint.StrokeWidth = 1.2f;
+        canvas.DrawLine(center.X, center.Y, center.X + pointerEnd * MathF.Cos(pointerRad), center.Y + pointerEnd * MathF.Sin(pointerRad), _knobPointerPaint);
+        _knobPointerPaint.StrokeWidth = 1.5f;
+
+        if (isHovered)
+        {
+            using var hoverPaint = new SKPaint { Color = _theme.KnobArc.WithAlpha(40), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.2f };
+            canvas.DrawCircle(center, TinyKnobRadius + 1.5f, hoverPaint);
         }
     }
 
@@ -427,10 +579,11 @@ public sealed class SignalGeneratorRenderer : IDisposable
         if (_recordButtonRect.Contains(x, y))
             return new SignalGeneratorHitTest(SignalGeneratorHitArea.RecordButton, -1);
 
+        if (_masterHeadroomRect.Contains(x, y))
+            return new SignalGeneratorHitTest(SignalGeneratorHitArea.MasterHeadroomDropdown, -1);
+
         // Check master gain knob
-        float mdx = x - _masterGainKnobCenter.X;
-        float mdy = y - _masterGainKnobCenter.Y;
-        if (mdx * mdx + mdy * mdy <= KnobRadius * KnobRadius * 1.5f)
+        if (IsOverKnob(x, y, _masterGainKnobCenter, SmallKnobRadius))
             return new SignalGeneratorHitTest(SignalGeneratorHitArea.MasterGainKnob, -1);
 
         // Check slots
@@ -445,15 +598,44 @@ public sealed class SignalGeneratorRenderer : IDisposable
             if (_slotSoloRects[i].Contains(x, y))
                 return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotSoloButton, i);
 
-            float gdx = x - _slotGainKnobCenters[i].X;
-            float gdy = y - _slotGainKnobCenters[i].Y;
-            if (gdx * gdx + gdy * gdy <= SmallKnobRadius * SmallKnobRadius * 1.5f)
+            if (IsOverKnob(x, y, _slotGainKnobCenters[i], TinyKnobRadius))
                 return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotGainKnob, i);
 
-            float fdx = x - _slotFreqKnobCenters[i].X;
-            float fdy = y - _slotFreqKnobCenters[i].Y;
-            if (fdx * fdx + fdy * fdy <= SmallKnobRadius * SmallKnobRadius * 1.5f)
+            if (IsOverKnob(x, y, _slotFreqKnobCenters[i], TinyKnobRadius))
                 return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotFreqKnob, i);
+
+            if (_slotSweepToggleRects[i].Contains(x, y))
+                return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotSweepToggle, i);
+
+            if (IsOverKnob(x, y, _slotSweepStartKnobCenters[i], TinyKnobRadius))
+                return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotSweepStartKnob, i);
+
+            if (IsOverKnob(x, y, _slotSweepEndKnobCenters[i], TinyKnobRadius))
+                return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotSweepEndKnob, i);
+
+            if (IsOverKnob(x, y, _slotSweepDurKnobCenters[i], TinyKnobRadius))
+                return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotSweepDurKnob, i);
+
+            if (IsOverKnob(x, y, _slotPulseWidthKnobCenters[i], TinyKnobRadius))
+                return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotPulseWidthKnob, i);
+
+            if (IsOverKnob(x, y, _slotIntervalKnobCenters[i], TinyKnobRadius))
+                return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotIntervalKnob, i);
+
+            if (IsOverKnob(x, y, _slotChirpDurKnobCenters[i], TinyKnobRadius))
+                return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotChirpDurKnob, i);
+
+            if (_slotLoopModeRects[i].Contains(x, y))
+                return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotLoopModeDropdown, i);
+
+            if (IsOverKnob(x, y, _slotSpeedKnobCenters[i], TinyKnobRadius))
+                return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotSpeedKnob, i);
+
+            if (IsOverKnob(x, y, _slotTrimStartKnobCenters[i], TinyKnobRadius))
+                return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotTrimStartKnob, i);
+
+            if (IsOverKnob(x, y, _slotTrimEndKnobCenters[i], TinyKnobRadius))
+                return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotTrimEndKnob, i);
 
             if (_slotRects[i].Contains(x, y))
                 return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotArea, i);
@@ -465,15 +647,22 @@ public sealed class SignalGeneratorRenderer : IDisposable
         return new SignalGeneratorHitTest(SignalGeneratorHitArea.None, -1);
     }
 
+    private static bool IsOverKnob(float x, float y, SKPoint center, float radius)
+    {
+        if (center.X < 0) return false;
+        float dx = x - center.X;
+        float dy = y - center.Y;
+        return dx * dx + dy * dy <= radius * radius * 1.5f;
+    }
+
     public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
 
-    public static SKSize GetPreferredSize() => new(510, 230);
+    public static SKSize GetPreferredSize() => new(580, 280);
 
     public void Dispose()
     {
         _presetBar.Dispose();
         _masterMeter.Dispose();
-        foreach (var meter in _slotMeters) meter.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -492,9 +681,9 @@ public sealed class SignalGeneratorRenderer : IDisposable
         _knobTrackPaint.Dispose();
         _knobArcPaint.Dispose();
         _knobPointerPaint.Dispose();
-        _typeSelectorPaint.Dispose();
-        _recordPaint.Dispose();
-        _recordActivePaint.Dispose();
+        _dropdownPaint.Dispose();
+        _toggleOffPaint.Dispose();
+        _toggleOnPaint.Dispose();
     }
 }
 
@@ -507,6 +696,7 @@ public class SignalGeneratorState
     public string PresetName { get; set; } = "Custom";
     public float OutputLevel { get; set; }
     public float MasterGainDb { get; set; }
+    public HeadroomMode HeadroomMode { get; set; }
     public SignalGeneratorHitArea HoveredArea { get; set; }
     public int HoveredSlot { get; set; } = -1;
     public SlotRenderState[] Slots { get; } = new SlotRenderState[3];
@@ -519,6 +709,17 @@ public struct SlotRenderState
     public float GainDb;
     public bool IsMuted;
     public bool IsSolo;
+    public bool SweepEnabled;
+    public float SweepStartHz;
+    public float SweepEndHz;
+    public float SweepDurationMs;
+    public float PulseWidth;
+    public float ImpulseIntervalMs;
+    public float ChirpDurationMs;
+    public SampleLoopMode LoopMode;
+    public float SampleSpeed;
+    public float TrimStart;
+    public float TrimEnd;
     public float Level;
 }
 
@@ -536,7 +737,19 @@ public enum SignalGeneratorHitArea
     SlotFreqKnob,
     SlotMuteButton,
     SlotSoloButton,
+    SlotSweepToggle,
+    SlotSweepStartKnob,
+    SlotSweepEndKnob,
+    SlotSweepDurKnob,
+    SlotPulseWidthKnob,
+    SlotIntervalKnob,
+    SlotChirpDurKnob,
+    SlotLoopModeDropdown,
+    SlotSpeedKnob,
+    SlotTrimStartKnob,
+    SlotTrimEndKnob,
     MasterGainKnob,
+    MasterHeadroomDropdown,
     RecordButton,
     LoadSampleButton
 }
