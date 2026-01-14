@@ -29,10 +29,30 @@ public sealed class VocalSpectrographPlugin : IPlugin
     public const int HighPassCutoffIndex = 16;
     public const int LpcOrderIndex = 17;
     public const int ReassignModeIndex = 18;
+    public const int ReassignThresholdIndex = 19;
+    public const int ReassignSpreadIndex = 20;
+    public const int ClarityModeIndex = 21;
+    public const int ClarityNoiseIndex = 22;
+    public const int ClarityHarmonicIndex = 23;
+    public const int ClaritySmoothingIndex = 24;
+    public const int PitchAlgorithmIndex = 25;
+    public const int AxisModeIndex = 26;
+    public const int VoiceRangeIndex = 27;
+    public const int ShowRangeIndex = 28;
+    public const int ShowGuidesIndex = 29;
+    public const int ShowWaveformIndex = 30;
+    public const int ShowSpectrumIndex = 31;
+    public const int ShowPitchMeterIndex = 32;
+    public const int ShowVowelSpaceIndex = 33;
+    public const int SmoothingModeIndex = 34;
+    public const int BrightnessIndex = 35;
+    public const int GammaIndex = 36;
+    public const int ContrastIndex = 37;
+    public const int ColorLevelsIndex = 38;
 
     private const float DefaultMinFrequency = 80f;
     private const float DefaultMaxFrequency = 8000f;
-    private const float DefaultMinDb = -80f;
+    private const float DefaultMinDb = -70f;
     private const float DefaultMaxDb = 0f;
     private const float DefaultTimeWindow = 5f;
     private const float DcCutoffHz = 10f;
@@ -40,21 +60,35 @@ public sealed class VocalSpectrographPlugin : IPlugin
     private const float DefaultPreEmphasis = 0.97f;
     private const int CaptureBufferSize = 262144;
     private const int MaxFormants = 5;
-    private const int MaxHarmonics = 20;
-    private const float NoiseEstimateFast = 0.2f;
-    private const float NoiseEstimateSlow = 0.01f;
-    private const float NoiseSubtractionAlpha = 0.85f;
-    private const float NoiseSubtractionFloor = 0.08f;
-    private const float DisplayFloorDb = -96f;
-    private const int HpssKernelSize = 5;
-    private const float TemporalSmoothingFactor = 0.6f;
+    private const int MaxHarmonics = 24;
+    private const int NoiseHistoryLength = 64;
+    private const float NoisePercentile = 0.1f;
+    private const float NoiseGateMultiplier = 2.0f;
+    private const float NoiseAdaptFast = 0.2f;
+    private const float NoiseAdaptSlow = 0.02f;
+    private const float NoiseOverSubtractionMin = 1.2f;
+    private const float NoiseOverSubtractionMax = 2.2f;
+    private const float NoiseFloorMin = 0.01f;
+    private const float NoiseFloorMax = 0.02f;
+    private const int HpssTimeKernel = 17;
+    private const int HpssFreqKernel = 17;
+    private const float HpssMaskPower = 2.0f;
+    private const float TemporalSmoothingFactor = 0.3f;
     private const float HarmonicBoost = 1.35f;
-    private const float HarmonicAttenuation = 0.7f;
+    private const float HarmonicAttenuation = 0.25f;
     private const float HarmonicConfidenceThreshold = 0.35f;
-    private const float HarmonicToleranceFactor = 0.06f;
-    private const float ReassignMinDb = -85f;
-    private const int MaxReassignBinShift = 6;
-    private const int MaxReassignFrameShift = 4;
+    private const float HarmonicToleranceCents = 50f;
+    private const float ReassignMinDb = -60f;
+    private const float MaxReassignBinShift = 0.5f;
+    private const float MaxReassignFrameShift = 0.5f;
+    private const float DefaultBrightness = 1.0f;
+    private const float DefaultGamma = 0.8f;
+    private const float DefaultContrast = 1.2f;
+    private const int BilateralTimeRadius = 2;
+    private const int BilateralFreqRadius = 2;
+    private const float BilateralSigmaSpatial = 1.5f;
+    private const float BilateralSigmaIntensityDb = 8f;
+    private static readonly int[] ColorLevelOptions = { 16, 24, 32, 48, 64 };
 
     private static readonly int[] FftSizes = { 1024, 2048, 4096, 8192 };
     private static readonly float[] OverlapOptions = { 0.5f, 0.75f, 0.875f };
@@ -108,13 +142,27 @@ public sealed class VocalSpectrographPlugin : IPlugin
     private float[] _displaySmoothed = Array.Empty<float>();
     private float[] _displayGain = Array.Empty<float>();
     private float[] _noiseEstimate = Array.Empty<float>();
+    private float[] _noiseHistory = Array.Empty<float>();
+    private int _noiseHistoryIndex;
+    private int _noiseHistoryCount;
+    private float[] _noiseScratch = Array.Empty<float>();
     private float[] _hpssHistory = Array.Empty<float>();
     private int _hpssHistoryIndex;
-    private float[] _medianScratch = Array.Empty<float>();
+    private int _hpssHistoryCount;
+    private float[] _hpssTimeScratch = Array.Empty<float>();
+    private float[] _hpssFreqScratch = Array.Empty<float>();
+    private float[] _smoothingHistory = Array.Empty<float>();
+    private int _smoothingHistoryIndex;
+    private int _smoothingHistoryCount;
+    private float[] _bilateralTimeWeights = Array.Empty<float>();
+    private float[] _bilateralFreqWeights = Array.Empty<float>();
     private float[] _harmonicMask = Array.Empty<float>();
     private bool _harmonicMaskActive;
     private int[] _fftBinToDisplay = Array.Empty<int>();
     private float[] _fftBinDisplayPos = Array.Empty<float>();
+    private float[] _displayBinFrequencies = Array.Empty<float>();
+    private float _displayFreqSum;
+    private float _displayFreqSumSq;
     private float _fftNormalization = 1f;
     private float _binResolution;
     private float _scaledMin;
@@ -128,8 +176,18 @@ public sealed class VocalSpectrographPlugin : IPlugin
     private float[] _formantBandwidths = Array.Empty<float>();
     private byte[] _voicingStates = Array.Empty<byte>();
     private float[] _harmonicFrequencies = Array.Empty<float>();
+    private float[] _waveformMin = Array.Empty<float>();
+    private float[] _waveformMax = Array.Empty<float>();
+    private float[] _hnrTrack = Array.Empty<float>();
+    private float[] _cppTrack = Array.Empty<float>();
+    private float[] _spectralCentroid = Array.Empty<float>();
+    private float[] _spectralSlope = Array.Empty<float>();
+    private float[] _spectralFlux = Array.Empty<float>();
+    private float[] _fluxPrevious = Array.Empty<float>();
 
-    private YinPitchDetector? _pitchDetector;
+    private YinPitchDetector? _yinPitchDetector;
+    private AutocorrelationPitchDetector? _autocorrPitchDetector;
+    private CepstralPitchDetector? _cepstralPitchDetector;
     private LpcAnalyzer? _lpcAnalyzer;
     private FormantTracker? _formantTracker;
     private float[] _lpcCoefficients = Array.Empty<float>();
@@ -157,6 +215,26 @@ public sealed class VocalSpectrographPlugin : IPlugin
     private float _requestedHighPassCutoff = DefaultHighPassHz;
     private int _requestedLpcOrder = 12;
     private int _requestedReassignMode;
+    private float _requestedReassignThreshold = ReassignMinDb;
+    private float _requestedReassignSpread = 1f;
+    private int _requestedClarityMode = (int)ClarityProcessingMode.Full;
+    private float _requestedClarityNoise = 1f;
+    private float _requestedClarityHarmonic = 1f;
+    private float _requestedClaritySmoothing = TemporalSmoothingFactor;
+    private int _requestedPitchAlgorithm = (int)PitchDetectorType.Yin;
+    private int _requestedAxisMode = (int)SpectrogramAxisMode.Hz;
+    private int _requestedVoiceRange = (int)VocalRangeType.Tenor;
+    private int _requestedShowRange = 1;
+    private int _requestedShowGuides = 1;
+    private int _requestedShowWaveform = 1;
+    private int _requestedShowSpectrum = 1;
+    private int _requestedShowPitchMeter = 1;
+    private int _requestedShowVowelSpace = 1;
+    private int _requestedSmoothingMode = (int)SpectrogramSmoothingMode.Ema;
+    private float _requestedBrightness = DefaultBrightness;
+    private float _requestedGamma = DefaultGamma;
+    private float _requestedContrast = DefaultContrast;
+    private int _requestedColorLevels = 32;
     private SpectrogramReassignMode _activeReassignMode;
 
     public VocalSpectrographPlugin()
@@ -244,7 +322,7 @@ public sealed class VocalSpectrographPlugin : IPlugin
                 Index = TimeWindowIndex,
                 Name = "Time Window",
                 MinValue = 1f,
-                MaxValue = 30f,
+                MaxValue = 60f,
                 DefaultValue = DefaultTimeWindow,
                 Unit = "s"
             },
@@ -339,6 +417,199 @@ public sealed class VocalSpectrographPlugin : IPlugin
                 DefaultValue = 0f,
                 Unit = "",
                 FormatValue = value => ((SpectrogramReassignMode)Math.Clamp((int)MathF.Round(value), 0, 3)).ToString()
+            },
+            new PluginParameter
+            {
+                Index = ReassignThresholdIndex,
+                Name = "Reassign Threshold",
+                MinValue = -120f,
+                MaxValue = -20f,
+                DefaultValue = ReassignMinDb,
+                Unit = "dB"
+            },
+            new PluginParameter
+            {
+                Index = ReassignSpreadIndex,
+                Name = "Reassign Spread",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 1f,
+                Unit = "%",
+                FormatValue = value => $"{Math.Clamp(value, 0f, 1f) * 100f:0}%"
+            },
+            new PluginParameter
+            {
+                Index = ClarityModeIndex,
+                Name = "Clarity Mode",
+                MinValue = 0f,
+                MaxValue = 3f,
+                DefaultValue = (float)ClarityProcessingMode.Full,
+                Unit = "",
+                FormatValue = value => ((ClarityProcessingMode)Math.Clamp((int)MathF.Round(value), 0, 3)).ToString()
+            },
+            new PluginParameter
+            {
+                Index = ClarityNoiseIndex,
+                Name = "Clarity Noise",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 1f,
+                Unit = "%",
+                FormatValue = value => $"{Math.Clamp(value, 0f, 1f) * 100f:0}%"
+            },
+            new PluginParameter
+            {
+                Index = ClarityHarmonicIndex,
+                Name = "Clarity Harmonic",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 1f,
+                Unit = "%",
+                FormatValue = value => $"{Math.Clamp(value, 0f, 1f) * 100f:0}%"
+            },
+            new PluginParameter
+            {
+                Index = ClaritySmoothingIndex,
+                Name = "Clarity Smoothing",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = TemporalSmoothingFactor,
+                Unit = "%",
+                FormatValue = value => $"{Math.Clamp(value, 0f, 1f) * 100f:0}%"
+            },
+            new PluginParameter
+            {
+                Index = PitchAlgorithmIndex,
+                Name = "Pitch Algorithm",
+                MinValue = 0f,
+                MaxValue = 2f,
+                DefaultValue = (float)PitchDetectorType.Yin,
+                Unit = "",
+                FormatValue = value => ((PitchDetectorType)Math.Clamp((int)MathF.Round(value), 0, 2)).ToString()
+            },
+            new PluginParameter
+            {
+                Index = AxisModeIndex,
+                Name = "Axis Mode",
+                MinValue = 0f,
+                MaxValue = 2f,
+                DefaultValue = (float)SpectrogramAxisMode.Hz,
+                Unit = "",
+                FormatValue = value => ((SpectrogramAxisMode)Math.Clamp((int)MathF.Round(value), 0, 2)).ToString()
+            },
+            new PluginParameter
+            {
+                Index = VoiceRangeIndex,
+                Name = "Voice Range",
+                MinValue = 0f,
+                MaxValue = 5f,
+                DefaultValue = (float)VocalRangeType.Tenor,
+                Unit = "",
+                FormatValue = value => ((VocalRangeType)Math.Clamp((int)MathF.Round(value), 0, 5)).ToString()
+            },
+            new PluginParameter
+            {
+                Index = ShowRangeIndex,
+                Name = "Range Overlay",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 1f,
+                Unit = ""
+            },
+            new PluginParameter
+            {
+                Index = ShowGuidesIndex,
+                Name = "Guides",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 1f,
+                Unit = ""
+            },
+            new PluginParameter
+            {
+                Index = ShowWaveformIndex,
+                Name = "Waveform View",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 1f,
+                Unit = ""
+            },
+            new PluginParameter
+            {
+                Index = ShowSpectrumIndex,
+                Name = "Spectrum View",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 1f,
+                Unit = ""
+            },
+            new PluginParameter
+            {
+                Index = ShowPitchMeterIndex,
+                Name = "Pitch Meter",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 1f,
+                Unit = ""
+            },
+            new PluginParameter
+            {
+                Index = ShowVowelSpaceIndex,
+                Name = "Vowel View",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 1f,
+                Unit = ""
+            },
+            new PluginParameter
+            {
+                Index = SmoothingModeIndex,
+                Name = "Smoothing Mode",
+                MinValue = 0f,
+                MaxValue = 2f,
+                DefaultValue = (float)SpectrogramSmoothingMode.Ema,
+                Unit = "",
+                FormatValue = value => ((SpectrogramSmoothingMode)Math.Clamp((int)MathF.Round(value), 0, 2)).ToString()
+            },
+            new PluginParameter
+            {
+                Index = BrightnessIndex,
+                Name = "Brightness",
+                MinValue = 0.5f,
+                MaxValue = 2f,
+                DefaultValue = DefaultBrightness,
+                Unit = "x",
+                FormatValue = value => $"{Math.Clamp(value, 0.5f, 2f):0.00}"
+            },
+            new PluginParameter
+            {
+                Index = GammaIndex,
+                Name = "Gamma",
+                MinValue = 0.6f,
+                MaxValue = 1.2f,
+                DefaultValue = DefaultGamma,
+                Unit = "",
+                FormatValue = value => $"{Math.Clamp(value, 0.6f, 1.2f):0.00}"
+            },
+            new PluginParameter
+            {
+                Index = ContrastIndex,
+                Name = "Contrast",
+                MinValue = 0.8f,
+                MaxValue = 1.5f,
+                DefaultValue = DefaultContrast,
+                Unit = "x",
+                FormatValue = value => $"{Math.Clamp(value, 0.8f, 1.5f):0.00}"
+            },
+            new PluginParameter
+            {
+                Index = ColorLevelsIndex,
+                Name = "Color Levels",
+                MinValue = ColorLevelOptions[0],
+                MaxValue = ColorLevelOptions[^1],
+                DefaultValue = 32f,
+                Unit = "",
+                FormatValue = value => FormatDiscrete(value, ColorLevelOptions, "")
             }
         ];
     }
@@ -379,6 +650,51 @@ public sealed class VocalSpectrographPlugin : IPlugin
 
     public SpectrogramReassignMode ReassignMode =>
         (SpectrogramReassignMode)Math.Clamp(Volatile.Read(ref _requestedReassignMode), 0, 3);
+
+    public float ReassignThresholdDb => Volatile.Read(ref _requestedReassignThreshold);
+
+    public float ReassignSpread => Volatile.Read(ref _requestedReassignSpread);
+
+    public ClarityProcessingMode ClarityMode =>
+        (ClarityProcessingMode)Math.Clamp(Volatile.Read(ref _requestedClarityMode), 0, 3);
+
+    public float ClarityNoise => Volatile.Read(ref _requestedClarityNoise);
+
+    public float ClarityHarmonic => Volatile.Read(ref _requestedClarityHarmonic);
+
+    public float ClaritySmoothing => Volatile.Read(ref _requestedClaritySmoothing);
+
+    public PitchDetectorType PitchAlgorithm =>
+        (PitchDetectorType)Math.Clamp(Volatile.Read(ref _requestedPitchAlgorithm), 0, 2);
+
+    public SpectrogramAxisMode AxisMode =>
+        (SpectrogramAxisMode)Math.Clamp(Volatile.Read(ref _requestedAxisMode), 0, 2);
+
+    public VocalRangeType VoiceRange =>
+        (VocalRangeType)Math.Clamp(Volatile.Read(ref _requestedVoiceRange), 0, 5);
+
+    public bool ShowRange => Volatile.Read(ref _requestedShowRange) != 0;
+
+    public bool ShowGuides => Volatile.Read(ref _requestedShowGuides) != 0;
+
+    public bool ShowWaveform => Volatile.Read(ref _requestedShowWaveform) != 0;
+
+    public bool ShowSpectrum => Volatile.Read(ref _requestedShowSpectrum) != 0;
+
+    public bool ShowPitchMeter => Volatile.Read(ref _requestedShowPitchMeter) != 0;
+
+    public bool ShowVowelSpace => Volatile.Read(ref _requestedShowVowelSpace) != 0;
+
+    public SpectrogramSmoothingMode SmoothingMode =>
+        (SpectrogramSmoothingMode)Math.Clamp(Volatile.Read(ref _requestedSmoothingMode), 0, 2);
+
+    public float Brightness => Volatile.Read(ref _requestedBrightness);
+
+    public float Gamma => Volatile.Read(ref _requestedGamma);
+
+    public float Contrast => Volatile.Read(ref _requestedContrast);
+
+    public int ColorLevels => SelectDiscrete(Volatile.Read(ref _requestedColorLevels), ColorLevelOptions);
 
     public float MinFrequency => Volatile.Read(ref _requestedMinFrequency);
 
@@ -503,12 +819,72 @@ public sealed class VocalSpectrographPlugin : IPlugin
             case ReassignModeIndex:
                 Interlocked.Exchange(ref _requestedReassignMode, Math.Clamp((int)MathF.Round(value), 0, 3));
                 break;
+            case ReassignThresholdIndex:
+                Interlocked.Exchange(ref _requestedReassignThreshold, Math.Clamp(value, -120f, -20f));
+                break;
+            case ReassignSpreadIndex:
+                Interlocked.Exchange(ref _requestedReassignSpread, Math.Clamp(value, 0f, 1f));
+                break;
+            case ClarityModeIndex:
+                Interlocked.Exchange(ref _requestedClarityMode, Math.Clamp((int)MathF.Round(value), 0, 3));
+                break;
+            case ClarityNoiseIndex:
+                Interlocked.Exchange(ref _requestedClarityNoise, Math.Clamp(value, 0f, 1f));
+                break;
+            case ClarityHarmonicIndex:
+                Interlocked.Exchange(ref _requestedClarityHarmonic, Math.Clamp(value, 0f, 1f));
+                break;
+            case ClaritySmoothingIndex:
+                Interlocked.Exchange(ref _requestedClaritySmoothing, Math.Clamp(value, 0f, 1f));
+                break;
+            case PitchAlgorithmIndex:
+                Interlocked.Exchange(ref _requestedPitchAlgorithm, Math.Clamp((int)MathF.Round(value), 0, 2));
+                break;
+            case AxisModeIndex:
+                Interlocked.Exchange(ref _requestedAxisMode, Math.Clamp((int)MathF.Round(value), 0, 2));
+                break;
+            case VoiceRangeIndex:
+                Interlocked.Exchange(ref _requestedVoiceRange, Math.Clamp((int)MathF.Round(value), 0, 5));
+                break;
+            case ShowRangeIndex:
+                Interlocked.Exchange(ref _requestedShowRange, value >= 0.5f ? 1 : 0);
+                break;
+            case ShowGuidesIndex:
+                Interlocked.Exchange(ref _requestedShowGuides, value >= 0.5f ? 1 : 0);
+                break;
+            case ShowWaveformIndex:
+                Interlocked.Exchange(ref _requestedShowWaveform, value >= 0.5f ? 1 : 0);
+                break;
+            case ShowSpectrumIndex:
+                Interlocked.Exchange(ref _requestedShowSpectrum, value >= 0.5f ? 1 : 0);
+                break;
+            case ShowPitchMeterIndex:
+                Interlocked.Exchange(ref _requestedShowPitchMeter, value >= 0.5f ? 1 : 0);
+                break;
+            case ShowVowelSpaceIndex:
+                Interlocked.Exchange(ref _requestedShowVowelSpace, value >= 0.5f ? 1 : 0);
+                break;
+            case SmoothingModeIndex:
+                Interlocked.Exchange(ref _requestedSmoothingMode, Math.Clamp((int)MathF.Round(value), 0, 2));
+                break;
+            case BrightnessIndex:
+                Interlocked.Exchange(ref _requestedBrightness, Math.Clamp(value, 0.5f, 2f));
+                break;
+            case GammaIndex:
+                Interlocked.Exchange(ref _requestedGamma, Math.Clamp(value, 0.6f, 1.2f));
+                break;
+            case ContrastIndex:
+                Interlocked.Exchange(ref _requestedContrast, Math.Clamp(value, 0.8f, 1.5f));
+                break;
+            case ColorLevelsIndex:
+                Interlocked.Exchange(ref _requestedColorLevels, SelectDiscrete(value, ColorLevelOptions));
+                break;
         }
     }
 
     public byte[] GetState()
     {
-        var bytes = new byte[sizeof(float) * 19];
+        var bytes = new byte[sizeof(float) * 39];
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedFftSize), 0, bytes, 0, 4);
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedWindow), 0, bytes, 4, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(OverlapOptions[_requestedOverlapIndex]), 0, bytes, 8, 4);
@@ -528,6 +904,26 @@ public sealed class VocalSpectrographPlugin : IPlugin
         Buffer.BlockCopy(BitConverter.GetBytes(_requestedHighPassCutoff), 0, bytes, 64, 4);
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedLpcOrder), 0, bytes, 68, 4);
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedReassignMode), 0, bytes, 72, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedReassignThreshold), 0, bytes, 76, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedReassignSpread), 0, bytes, 80, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedClarityMode), 0, bytes, 84, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedClarityNoise), 0, bytes, 88, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedClarityHarmonic), 0, bytes, 92, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedClaritySmoothing), 0, bytes, 96, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedPitchAlgorithm), 0, bytes, 100, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedAxisMode), 0, bytes, 104, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedVoiceRange), 0, bytes, 108, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowRange), 0, bytes, 112, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowGuides), 0, bytes, 116, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowWaveform), 0, bytes, 120, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowSpectrum), 0, bytes, 124, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowPitchMeter), 0, bytes, 128, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowVowelSpace), 0, bytes, 132, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedSmoothingMode), 0, bytes, 136, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedBrightness), 0, bytes, 140, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedGamma), 0, bytes, 144, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedContrast), 0, bytes, 148, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedColorLevels), 0, bytes, 152, 4);
         return bytes;
     }
 
@@ -557,6 +953,34 @@ public sealed class VocalSpectrographPlugin : IPlugin
         SetParameter(HighPassCutoffIndex, BitConverter.ToSingle(state, 64));
         SetParameter(LpcOrderIndex, BitConverter.ToSingle(state, 68));
         SetParameter(ReassignModeIndex, BitConverter.ToSingle(state, 72));
+
+        if (state.Length >= sizeof(float) * 25)
+        {
+            SetParameter(ReassignThresholdIndex, BitConverter.ToSingle(state, 76));
+            SetParameter(ReassignSpreadIndex, BitConverter.ToSingle(state, 80));
+            SetParameter(ClarityModeIndex, BitConverter.ToSingle(state, 84));
+            SetParameter(ClarityNoiseIndex, BitConverter.ToSingle(state, 88));
+            SetParameter(ClarityHarmonicIndex, BitConverter.ToSingle(state, 92));
+            SetParameter(ClaritySmoothingIndex, BitConverter.ToSingle(state, 96));
+        }
+
+        if (state.Length >= sizeof(float) * 39)
+        {
+            SetParameter(PitchAlgorithmIndex, BitConverter.ToSingle(state, 100));
+            SetParameter(AxisModeIndex, BitConverter.ToSingle(state, 104));
+            SetParameter(VoiceRangeIndex, BitConverter.ToSingle(state, 108));
+            SetParameter(ShowRangeIndex, BitConverter.ToSingle(state, 112));
+            SetParameter(ShowGuidesIndex, BitConverter.ToSingle(state, 116));
+            SetParameter(ShowWaveformIndex, BitConverter.ToSingle(state, 120));
+            SetParameter(ShowSpectrumIndex, BitConverter.ToSingle(state, 124));
+            SetParameter(ShowPitchMeterIndex, BitConverter.ToSingle(state, 128));
+            SetParameter(ShowVowelSpaceIndex, BitConverter.ToSingle(state, 132));
+            SetParameter(SmoothingModeIndex, BitConverter.ToSingle(state, 136));
+            SetParameter(BrightnessIndex, BitConverter.ToSingle(state, 140));
+            SetParameter(GammaIndex, BitConverter.ToSingle(state, 144));
+            SetParameter(ContrastIndex, BitConverter.ToSingle(state, 148));
+            SetParameter(ColorLevelsIndex, BitConverter.ToSingle(state, 152));
+        }
     }
 
     public void Dispose()
@@ -599,7 +1023,14 @@ public sealed class VocalSpectrographPlugin : IPlugin
         float[] formantFrequencies,
         float[] formantBandwidths,
         byte[] voicingStates,
-        float[] harmonicFrequencies)
+        float[] harmonicFrequencies,
+        float[] waveformMin,
+        float[] waveformMax,
+        float[] hnrTrack,
+        float[] cppTrack,
+        float[] spectralCentroid,
+        float[] spectralSlope,
+        float[] spectralFlux)
     {
         var spectrogramBuffer = _spectrogramBuffer;
         var pitchTrackBuffer = _pitchTrack;
@@ -608,6 +1039,13 @@ public sealed class VocalSpectrographPlugin : IPlugin
         var formantBandwidthBuffer = _formantBandwidths;
         var voicingBuffer = _voicingStates;
         var harmonicBuffer = _harmonicFrequencies;
+        var waveformMinBuffer = _waveformMin;
+        var waveformMaxBuffer = _waveformMax;
+        var hnrBuffer = _hnrTrack;
+        var cppBuffer = _cppTrack;
+        var centroidBuffer = _spectralCentroid;
+        var slopeBuffer = _spectralSlope;
+        var fluxBuffer = _spectralFlux;
 
         int frames = Volatile.Read(ref _activeFrameCapacity);
         int bins = Volatile.Read(ref _activeDisplayBins);
@@ -626,7 +1064,14 @@ public sealed class VocalSpectrographPlugin : IPlugin
             || formantFrequencyBuffer.Length != formantLength
             || formantBandwidthBuffer.Length != formantLength
             || voicingBuffer.Length != frames
-            || harmonicBuffer.Length != harmonicLength)
+            || harmonicBuffer.Length != harmonicLength
+            || waveformMinBuffer.Length != frames
+            || waveformMaxBuffer.Length != frames
+            || hnrBuffer.Length != frames
+            || cppBuffer.Length != frames
+            || centroidBuffer.Length != frames
+            || slopeBuffer.Length != frames
+            || fluxBuffer.Length != frames)
         {
             return false;
         }
@@ -637,7 +1082,14 @@ public sealed class VocalSpectrographPlugin : IPlugin
             || formantFrequencies.Length < formantLength
             || formantBandwidths.Length < formantLength
             || voicingStates.Length < frames
-            || harmonicFrequencies.Length < harmonicLength)
+            || harmonicFrequencies.Length < harmonicLength
+            || waveformMin.Length < frames
+            || waveformMax.Length < frames
+            || hnrTrack.Length < frames
+            || cppTrack.Length < frames
+            || spectralCentroid.Length < frames
+            || spectralSlope.Length < frames
+            || spectralFlux.Length < frames)
         {
             return false;
         }
@@ -662,6 +1114,13 @@ public sealed class VocalSpectrographPlugin : IPlugin
                 Array.Clear(formantBandwidths, 0, formantLength);
                 Array.Clear(voicingStates, 0, frames);
                 Array.Clear(harmonicFrequencies, 0, harmonicLength);
+                Array.Clear(waveformMin, 0, frames);
+                Array.Clear(waveformMax, 0, frames);
+                Array.Clear(hnrTrack, 0, frames);
+                Array.Clear(cppTrack, 0, frames);
+                Array.Clear(spectralCentroid, 0, frames);
+                Array.Clear(spectralSlope, 0, frames);
+                Array.Clear(spectralFlux, 0, frames);
             }
             else
             {
@@ -676,6 +1135,13 @@ public sealed class VocalSpectrographPlugin : IPlugin
                 CopyRing(formantBandwidthBuffer, formantBandwidths, availableFrames, MaxFormants, startIndex, padFrames);
                 CopyRing(voicingBuffer, voicingStates, availableFrames, startIndex, padFrames);
                 CopyRing(harmonicBuffer, harmonicFrequencies, availableFrames, MaxHarmonics, startIndex, padFrames);
+                CopyRing(waveformMinBuffer, waveformMin, availableFrames, 1, startIndex, padFrames);
+                CopyRing(waveformMaxBuffer, waveformMax, availableFrames, 1, startIndex, padFrames);
+                CopyRing(hnrBuffer, hnrTrack, availableFrames, 1, startIndex, padFrames);
+                CopyRing(cppBuffer, cppTrack, availableFrames, 1, startIndex, padFrames);
+                CopyRing(centroidBuffer, spectralCentroid, availableFrames, 1, startIndex, padFrames);
+                CopyRing(slopeBuffer, spectralSlope, availableFrames, 1, startIndex, padFrames);
+                CopyRing(fluxBuffer, spectralFlux, availableFrames, 1, startIndex, padFrames);
             }
 
             int versionEnd = Volatile.Read(ref _dataVersion);
@@ -724,8 +1190,11 @@ public sealed class VocalSpectrographPlugin : IPlugin
     private void AnalysisLoop(CancellationToken token)
     {
         int pitchFrameCounter = 0;
+        int cppFrameCounter = 0;
         float lastPitch = 0f;
         float lastConfidence = 0f;
+        float lastCpp = 0f;
+        float lastHnr = 0f;
 
         while (!token.IsCancellationRequested)
         {
@@ -758,6 +1227,8 @@ public sealed class VocalSpectrographPlugin : IPlugin
             bool preEmphasis = Volatile.Read(ref _requestedPreEmphasis) != 0;
             bool hpfEnabled = Volatile.Read(ref _requestedHighPassEnabled) != 0;
 
+            float waveformMin = float.MaxValue;
+            float waveformMax = float.MinValue;
             for (int i = 0; i < shift; i++)
             {
                 float sample = _hopBuffer[i];
@@ -767,6 +1238,14 @@ public sealed class VocalSpectrographPlugin : IPlugin
 
                 _analysisBufferRaw[tail + i] = filtered;
                 _analysisBufferProcessed[tail + i] = emphasized;
+                if (filtered < waveformMin)
+                {
+                    waveformMin = filtered;
+                }
+                if (filtered > waveformMax)
+                {
+                    waveformMax = filtered;
+                }
             }
 
             bool reassignEnabled = _activeReassignMode != SpectrogramReassignMode.Off;
@@ -810,16 +1289,39 @@ public sealed class VocalSpectrographPlugin : IPlugin
 
             _mapper.MapMax(_fftMagnitudes, _spectrumScratch);
 
-            // Pitch detection (raw buffer) at a reduced rate for performance.
+            // Pitch + CPP detection (raw buffer) at a reduced rate for performance.
+            var pitchAlgorithm = (PitchDetectorType)Math.Clamp(Volatile.Read(ref _requestedPitchAlgorithm), 0, 2);
             pitchFrameCounter++;
             if (pitchFrameCounter >= 2)
             {
                 pitchFrameCounter = 0;
-                if (_pitchDetector is not null)
+                if (pitchAlgorithm == PitchDetectorType.Yin && _yinPitchDetector is not null)
                 {
-                    var pitch = _pitchDetector.Detect(_analysisBufferRaw);
+                    var pitch = _yinPitchDetector.Detect(_analysisBufferRaw);
                     lastPitch = pitch.FrequencyHz ?? 0f;
                     lastConfidence = pitch.Confidence;
+                }
+                else if (pitchAlgorithm == PitchDetectorType.Autocorrelation && _autocorrPitchDetector is not null)
+                {
+                    var pitch = _autocorrPitchDetector.Detect(_analysisBufferRaw);
+                    lastPitch = pitch.FrequencyHz ?? 0f;
+                    lastConfidence = pitch.Confidence;
+                }
+            }
+
+            cppFrameCounter++;
+            if (cppFrameCounter >= 2)
+            {
+                cppFrameCounter = 0;
+                if (_cepstralPitchDetector is not null)
+                {
+                    var pitch = _cepstralPitchDetector.Detect(_analysisBufferRaw);
+                    lastCpp = _cepstralPitchDetector.LastCpp;
+                    if (pitchAlgorithm == PitchDetectorType.Cepstral)
+                    {
+                        lastPitch = pitch.FrequencyHz ?? 0f;
+                        lastConfidence = pitch.Confidence;
+                    }
                 }
             }
 
@@ -845,16 +1347,65 @@ public sealed class VocalSpectrographPlugin : IPlugin
                 harmonicCount = HarmonicPeakDetector.Detect(_fftMagnitudes, _sampleRate, _activeFftSize, lastPitch, _harmonicScratch);
             }
 
-            Array.Copy(_spectrumScratch, _displayWork, _activeDisplayBins);
-            ApplyNoiseReduction(_displayWork);
-            ApplyHpss(_displayWork, _displayProcessed);
-            UpdateHarmonicMask(lastPitch, lastConfidence, voicing);
-            ApplyHarmonicComb(_displayProcessed);
-            ApplyTemporalSmoothing(_displayProcessed, _displaySmoothed);
+            var clarityMode = (ClarityProcessingMode)Math.Clamp(Volatile.Read(ref _requestedClarityMode), 0, 3);
+            float clarityNoise = Volatile.Read(ref _requestedClarityNoise);
+            float clarityHarmonic = Volatile.Read(ref _requestedClarityHarmonic);
+            float claritySmoothing = Volatile.Read(ref _requestedClaritySmoothing);
+            var smoothingMode = (SpectrogramSmoothingMode)Math.Clamp(Volatile.Read(ref _requestedSmoothingMode), 0, 2);
+            bool clarityEnabled = clarityMode != ClarityProcessingMode.None;
+            bool useNoise = clarityMode is ClarityProcessingMode.Noise or ClarityProcessingMode.Full;
+            bool useHarmonic = clarityMode is ClarityProcessingMode.Harmonic or ClarityProcessingMode.Full;
+            lastHnr = 0f;
+
+            if (!clarityEnabled)
+            {
+                Array.Copy(_spectrumScratch, _displaySmoothed, _activeDisplayBins);
+                Array.Copy(_spectrumScratch, _displayProcessed, _activeDisplayBins);
+            }
+            else
+            {
+                Array.Copy(_spectrumScratch, _displayWork, _activeDisplayBins);
+                if (useNoise && clarityNoise > 0f)
+                {
+                    ApplyNoiseReduction(_displayWork, clarityNoise, voicing);
+                }
+
+                if (useHarmonic && clarityHarmonic > 0f)
+                {
+                    ApplyHpss(_displayWork, _displayProcessed, clarityHarmonic);
+                    UpdateHarmonicMask(lastPitch, lastConfidence, voicing);
+                    lastHnr = ApplyHarmonicComb(_displayProcessed, clarityHarmonic);
+                }
+                else
+                {
+                    Array.Copy(_displayWork, _displayProcessed, _activeDisplayBins);
+                    if (_harmonicMaskActive)
+                    {
+                        Array.Clear(_harmonicMask, 0, _harmonicMask.Length);
+                        _harmonicMaskActive = false;
+                    }
+                }
+
+                if (claritySmoothing > 0f && smoothingMode != SpectrogramSmoothingMode.Off)
+                {
+                    if (smoothingMode == SpectrogramSmoothingMode.Bilateral)
+                    {
+                        ApplyBilateralSmoothing(_displayProcessed, _displaySmoothed, claritySmoothing);
+                    }
+                    else
+                    {
+                        ApplyTemporalSmoothing(_displayProcessed, _displaySmoothed, claritySmoothing);
+                    }
+                }
+                else
+                {
+                    Array.Copy(_displayProcessed, _displaySmoothed, _activeDisplayBins);
+                }
+            }
 
             float minDb = Volatile.Read(ref _requestedMinDb);
             float maxDb = Volatile.Read(ref _requestedMaxDb);
-            float floorDb = MathF.Max(minDb, DisplayFloorDb);
+            float floorDb = Math.Min(minDb, maxDb - 1f);
             float range = MathF.Max(1f, maxDb - floorDb);
 
             long frameId = _frameCounter;
@@ -867,8 +1418,11 @@ public sealed class VocalSpectrographPlugin : IPlugin
                 Array.Clear(_spectrogramBuffer, specOffset, _activeDisplayBins);
                 BuildDisplayGain();
 
-                float reassignThresholdDb = MathF.Max(ReassignMinDb, floorDb);
+                float reassignThresholdDb = MathF.Max(Volatile.Read(ref _requestedReassignThreshold), floorDb);
                 float reassignThresholdLinear = DspUtils.DbToLinear(reassignThresholdDb);
+                float reassignSpread = Math.Clamp(Volatile.Read(ref _requestedReassignSpread), 0f, 1f);
+                float maxTimeShift = MaxReassignFrameShift * reassignSpread;
+                float maxBinShift = MaxReassignBinShift * reassignSpread;
                 float invHop = 1f / MathF.Max(1f, _activeHopSize);
                 float freqBinScale = _activeFftSize / (MathF.PI * 2f);
                 long oldestFrameId = Math.Max(0, frameId - _activeFrameCapacity + 1);
@@ -905,7 +1459,7 @@ public sealed class VocalSpectrographPlugin : IPlugin
                         float imTime = _fftTimeImag[bin];
                         // STFT reassignment time shift from the time-weighted window.
                         float timeShiftSamples = (reTime * re + imTime * im) / denom;
-                        timeShiftFrames = Math.Clamp(timeShiftSamples * invHop, -MaxReassignFrameShift, MaxReassignFrameShift);
+                        timeShiftFrames = Math.Clamp(timeShiftSamples * invHop, -maxTimeShift, maxTimeShift);
                     }
 
                     float freqShiftBins = 0f;
@@ -915,7 +1469,7 @@ public sealed class VocalSpectrographPlugin : IPlugin
                         float imDeriv = _fftDerivImag[bin];
                         // STFT reassignment frequency shift from the window derivative FFT.
                         float imag = (imDeriv * re - reDeriv * im) / denom;
-                        freqShiftBins = Math.Clamp(imag * freqBinScale, -MaxReassignBinShift, MaxReassignBinShift);
+                        freqShiftBins = Math.Clamp(imag * freqBinScale, -maxBinShift, maxBinShift);
                     }
 
                     float targetFrame = frameId + timeShiftFrames - _reassignLatencyFrames;
@@ -1012,6 +1566,15 @@ public sealed class VocalSpectrographPlugin : IPlugin
                 }
             }
 
+            ComputeSpectralFeatures(_displaySmoothed, out float centroid, out float slope, out float flux);
+            _waveformMin[frameIndex] = waveformMin == float.MaxValue ? 0f : waveformMin;
+            _waveformMax[frameIndex] = waveformMax == float.MinValue ? 0f : waveformMax;
+            _hnrTrack[frameIndex] = lastHnr;
+            _cppTrack[frameIndex] = lastCpp;
+            _spectralCentroid[frameIndex] = centroid;
+            _spectralSlope[frameIndex] = slope;
+            _spectralFlux[frameIndex] = flux;
+
             _pitchTrack[frameIndex] = Volatile.Read(ref _requestedShowPitch) != 0 ? lastPitch : 0f;
             _pitchConfidence[frameIndex] = lastConfidence;
             _voicingStates[frameIndex] = Volatile.Read(ref _requestedShowVoicing) != 0 ? (byte)voicing : (byte)VoicingState.Silence;
@@ -1099,12 +1662,24 @@ public sealed class VocalSpectrographPlugin : IPlugin
             _displaySmoothed = new float[_activeDisplayBins];
             _displayGain = new float[_activeDisplayBins];
             _noiseEstimate = new float[_activeDisplayBins];
-            _hpssHistory = new float[_activeDisplayBins * HpssKernelSize];
+            _noiseHistory = new float[_activeDisplayBins * NoiseHistoryLength];
+            _noiseHistoryIndex = 0;
+            _noiseHistoryCount = 0;
+            _noiseScratch = new float[NoiseHistoryLength];
+            _hpssHistory = new float[_activeDisplayBins * HpssTimeKernel];
             _hpssHistoryIndex = 0;
-            _medianScratch = new float[HpssKernelSize];
+            _hpssHistoryCount = 0;
+            _hpssTimeScratch = new float[HpssTimeKernel];
+            _hpssFreqScratch = new float[HpssFreqKernel];
+            _smoothingHistory = new float[_activeDisplayBins * (BilateralTimeRadius + 1)];
+            _smoothingHistoryIndex = 0;
+            _smoothingHistoryCount = 0;
+            _bilateralTimeWeights = new float[BilateralTimeRadius + 1];
+            _bilateralFreqWeights = new float[BilateralFreqRadius * 2 + 1];
             _harmonicMask = new float[_activeDisplayBins];
             _fftBinToDisplay = new int[_activeFftSize / 2];
             _fftBinDisplayPos = new float[_activeFftSize / 2];
+            _displayBinFrequencies = new float[_activeDisplayBins];
             _fftNormalization = 2f / MathF.Max(1f, _activeFftSize);
             _binResolution = _sampleRate / (float)_activeFftSize;
 
@@ -1115,6 +1690,14 @@ public sealed class VocalSpectrographPlugin : IPlugin
             _formantBandwidths = new float[_activeFrameCapacity * MaxFormants];
             _voicingStates = new byte[_activeFrameCapacity];
             _harmonicFrequencies = new float[_activeFrameCapacity * MaxHarmonics];
+            _waveformMin = new float[_activeFrameCapacity];
+            _waveformMax = new float[_activeFrameCapacity];
+            _hnrTrack = new float[_activeFrameCapacity];
+            _cppTrack = new float[_activeFrameCapacity];
+            _spectralCentroid = new float[_activeFrameCapacity];
+            _spectralSlope = new float[_activeFrameCapacity];
+            _spectralFlux = new float[_activeFrameCapacity];
+            _fluxPrevious = new float[_activeDisplayBins];
             resetBuffers = true;
         }
 
@@ -1141,7 +1724,7 @@ public sealed class VocalSpectrographPlugin : IPlugin
         {
             _activeReassignMode = reassignMode;
             _reassignLatencyFrames = _activeReassignMode.HasFlag(SpectrogramReassignMode.Time)
-                ? MaxReassignFrameShift
+                ? (int)MathF.Ceiling(MaxReassignFrameShift)
                 : 0;
             resetBuffers = true;
         }
@@ -1161,8 +1744,14 @@ public sealed class VocalSpectrographPlugin : IPlugin
 
         if (sizeChanged || lpcChanged)
         {
-            _pitchDetector ??= new YinPitchDetector(_sampleRate, _activeFftSize, 60f, 1200f, 0.15f);
-            _pitchDetector.Configure(_sampleRate, _activeFftSize, 60f, 1200f, 0.15f);
+            _yinPitchDetector ??= new YinPitchDetector(_sampleRate, _activeFftSize, 60f, 1200f, 0.15f);
+            _yinPitchDetector.Configure(_sampleRate, _activeFftSize, 60f, 1200f, 0.15f);
+
+            _autocorrPitchDetector ??= new AutocorrelationPitchDetector(_sampleRate, _activeFftSize, 60f, 1200f, 0.3f);
+            _autocorrPitchDetector.Configure(_sampleRate, _activeFftSize, 60f, 1200f, 0.3f);
+
+            _cepstralPitchDetector ??= new CepstralPitchDetector(_sampleRate, _activeFftSize, 60f, 1200f, 2f);
+            _cepstralPitchDetector.Configure(_sampleRate, _activeFftSize, 60f, 1200f, 2f);
 
             if (_lpcAnalyzer is null)
             {
@@ -1185,6 +1774,11 @@ public sealed class VocalSpectrographPlugin : IPlugin
             _lpcCoefficients = new float[lpcOrder + 1];
         }
 
+        if (sizeChanged)
+        {
+            UpdateBilateralWeights();
+        }
+
         if (resetBuffers)
         {
             ClearVisualizationBuffers();
@@ -1202,15 +1796,30 @@ public sealed class VocalSpectrographPlugin : IPlugin
         Array.Clear(_formantBandwidths, 0, _formantBandwidths.Length);
         Array.Clear(_voicingStates, 0, _voicingStates.Length);
         Array.Clear(_harmonicFrequencies, 0, _harmonicFrequencies.Length);
+        Array.Clear(_waveformMin, 0, _waveformMin.Length);
+        Array.Clear(_waveformMax, 0, _waveformMax.Length);
+        Array.Clear(_hnrTrack, 0, _hnrTrack.Length);
+        Array.Clear(_cppTrack, 0, _cppTrack.Length);
+        Array.Clear(_spectralCentroid, 0, _spectralCentroid.Length);
+        Array.Clear(_spectralSlope, 0, _spectralSlope.Length);
+        Array.Clear(_spectralFlux, 0, _spectralFlux.Length);
         Array.Clear(_noiseEstimate, 0, _noiseEstimate.Length);
+        Array.Clear(_noiseHistory, 0, _noiseHistory.Length);
         Array.Clear(_displayWork, 0, _displayWork.Length);
         Array.Clear(_displayProcessed, 0, _displayProcessed.Length);
         Array.Clear(_displaySmoothed, 0, _displaySmoothed.Length);
         Array.Clear(_displayGain, 0, _displayGain.Length);
         Array.Clear(_hpssHistory, 0, _hpssHistory.Length);
+        Array.Clear(_smoothingHistory, 0, _smoothingHistory.Length);
         Array.Clear(_harmonicMask, 0, _harmonicMask.Length);
+        Array.Clear(_fluxPrevious, 0, _fluxPrevious.Length);
         _harmonicMaskActive = false;
         _hpssHistoryIndex = 0;
+        _hpssHistoryCount = 0;
+        _noiseHistoryIndex = 0;
+        _noiseHistoryCount = 0;
+        _smoothingHistoryIndex = 0;
+        _smoothingHistoryCount = 0;
 
         Volatile.Write(ref _frameCounter, 0);
         Volatile.Write(ref _latestFrameId, -1);
@@ -1301,24 +1910,104 @@ public sealed class VocalSpectrographPlugin : IPlugin
             _fftBinDisplayPos[bin] = pos;
             _fftBinToDisplay[bin] = (int)MathF.Round(pos);
         }
+
+        var centers = _mapper.CenterFrequencies;
+        if (_displayBinFrequencies.Length != centers.Length)
+        {
+            _displayBinFrequencies = new float[centers.Length];
+        }
+
+        float sum = 0f;
+        float sumSq = 0f;
+        for (int i = 0; i < centers.Length; i++)
+        {
+            float freq = centers[i];
+            _displayBinFrequencies[i] = freq;
+            sum += freq;
+            sumSq += freq * freq;
+        }
+
+        _displayFreqSum = sum;
+        _displayFreqSumSq = sumSq;
     }
 
-    private void ApplyNoiseReduction(float[] magnitudes)
+    private void ApplyNoiseReduction(float[] magnitudes, float amount, VoicingState voicing)
     {
-        for (int i = 0; i < magnitudes.Length; i++)
+        int bins = magnitudes.Length;
+        if (bins == 0)
+        {
+            return;
+        }
+
+        int historyOffset = _noiseHistoryIndex * bins;
+        for (int i = 0; i < bins; i++)
         {
             float value = magnitudes[i];
-            float estimate = _noiseEstimate[i];
-            float coeff = value > estimate ? NoiseEstimateFast : NoiseEstimateSlow;
-            estimate += (value - estimate) * coeff;
-            _noiseEstimate[i] = estimate;
-            float reduced = value - estimate * NoiseSubtractionAlpha;
-            float floor = value * NoiseSubtractionFloor;
-            magnitudes[i] = MathF.Max(reduced, floor);
+            _noiseHistory[historyOffset + i] = value * value;
+        }
+
+        _noiseHistoryIndex = (_noiseHistoryIndex + 1) % NoiseHistoryLength;
+        if (_noiseHistoryCount < NoiseHistoryLength)
+        {
+            _noiseHistoryCount++;
+        }
+
+        UpdateNoiseEstimate(voicing, bins);
+
+        float alpha = NoiseOverSubtractionMin + (NoiseOverSubtractionMax - NoiseOverSubtractionMin) * amount;
+        float beta = NoiseFloorMax + (NoiseFloorMin - NoiseFloorMax) * amount;
+
+        for (int i = 0; i < bins; i++)
+        {
+            float value = magnitudes[i];
+            float power = value * value;
+            float noisePower = _noiseEstimate[i];
+            float threshold = noisePower * NoiseGateMultiplier;
+
+            float cleanPower = power - alpha * noisePower;
+            float floor = beta * power;
+            if (cleanPower < floor)
+            {
+                cleanPower = floor;
+            }
+
+            if (power < threshold && threshold > 1e-12f)
+            {
+                cleanPower *= power / threshold;
+            }
+
+            float processed = MathF.Sqrt(MathF.Max(cleanPower, 0f));
+            magnitudes[i] = value + (processed - value) * amount;
         }
     }
 
-    private void ApplyHpss(float[] input, float[] output)
+    private void UpdateNoiseEstimate(VoicingState voicing, int bins)
+    {
+        int count = _noiseHistoryCount;
+        if (count <= 0 || bins <= 0)
+        {
+            return;
+        }
+
+        int percentileIndex = Math.Clamp((int)MathF.Floor((count - 1) * NoisePercentile), 0, count - 1);
+        float rate = voicing == VoicingState.Silence ? NoiseAdaptFast : NoiseAdaptSlow;
+
+        for (int bin = 0; bin < bins; bin++)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                _noiseScratch[i] = _noiseHistory[i * bins + bin];
+            }
+
+            Array.Sort(_noiseScratch, 0, count);
+            float target = _noiseScratch[percentileIndex];
+            float estimate = _noiseEstimate[bin];
+            estimate += (target - estimate) * rate;
+            _noiseEstimate[bin] = estimate;
+        }
+    }
+
+    private void ApplyHpss(float[] input, float[] output, float amount)
     {
         int bins = input.Length;
         if (bins == 0)
@@ -1326,30 +2015,46 @@ public sealed class VocalSpectrographPlugin : IPlugin
             return;
         }
 
+        if (amount <= 0f)
+        {
+            Array.Copy(input, output, bins);
+            return;
+        }
+
         int historyOffset = _hpssHistoryIndex * bins;
         Array.Copy(input, 0, _hpssHistory, historyOffset, bins);
-        _hpssHistoryIndex = (_hpssHistoryIndex + 1) % HpssKernelSize;
+        _hpssHistoryIndex = (_hpssHistoryIndex + 1) % HpssTimeKernel;
+        if (_hpssHistoryCount < HpssTimeKernel)
+        {
+            _hpssHistoryCount++;
+        }
 
-        int halfKernel = HpssKernelSize / 2;
+        int timeCount = _hpssHistoryCount;
+        int halfFreq = HpssFreqKernel / 2;
+        bool maskPowIsTwo = MathF.Abs(HpssMaskPower - 2f) < 1e-3f;
+
         for (int bin = 0; bin < bins; bin++)
         {
-            for (int k = 0; k < HpssKernelSize; k++)
+            for (int k = 0; k < timeCount; k++)
             {
-                _medianScratch[k] = _hpssHistory[k * bins + bin];
+                int index = (_hpssHistoryIndex - 1 - k + HpssTimeKernel) % HpssTimeKernel;
+                _hpssTimeScratch[k] = _hpssHistory[index * bins + bin];
             }
-            float harmonic = Median(_medianScratch, HpssKernelSize);
+            float harmonic = Median(_hpssTimeScratch, timeCount);
 
-            int start = Math.Max(0, bin - halfKernel);
-            int end = Math.Min(bins - 1, bin + halfKernel);
+            int start = Math.Max(0, bin - halfFreq);
+            int end = Math.Min(bins - 1, bin + halfFreq);
             int count = end - start + 1;
             for (int i = 0; i < count; i++)
             {
-                _medianScratch[i] = input[start + i];
+                _hpssFreqScratch[i] = input[start + i];
             }
-            float percussive = Median(_medianScratch, count);
+            float percussive = Median(_hpssFreqScratch, count);
 
-            float harmonicWeight = harmonic / (harmonic + percussive + 1e-8f);
-            float gain = HarmonicAttenuation + (HarmonicBoost - HarmonicAttenuation) * harmonicWeight;
+            float hPow = maskPowIsTwo ? harmonic * harmonic : MathF.Pow(harmonic, HpssMaskPower);
+            float pPow = maskPowIsTwo ? percussive * percussive : MathF.Pow(percussive, HpssMaskPower);
+            float mask = hPow / (hPow + pPow + 1e-12f);
+            float gain = (1f - amount) + mask * amount;
             output[bin] = input[bin] * gain;
         }
     }
@@ -1373,6 +2078,7 @@ public sealed class VocalSpectrographPlugin : IPlugin
         float maxFrequency = _activeMaxFrequency;
         float minFrequency = _activeMinFrequency;
 
+        float ratio = MathF.Pow(2f, HarmonicToleranceCents / 1200f);
         for (int harmonic = 1; harmonic <= MaxHarmonics; harmonic++)
         {
             float frequency = pitchHz * harmonic;
@@ -1381,9 +2087,8 @@ public sealed class VocalSpectrographPlugin : IPlugin
                 break;
             }
 
-            float tolerance = MathF.Max(30f, frequency * HarmonicToleranceFactor);
-            float startFreq = MathF.Max(minFrequency, frequency - tolerance);
-            float endFreq = MathF.Min(maxFrequency, frequency + tolerance);
+            float startFreq = MathF.Max(minFrequency, frequency / ratio);
+            float endFreq = MathF.Min(maxFrequency, frequency * ratio);
             float centerPos = GetDisplayPositionFromHz(frequency);
             float startPos = GetDisplayPositionFromHz(startFreq);
             float endPos = GetDisplayPositionFromHz(endFreq);
@@ -1404,29 +2109,165 @@ public sealed class VocalSpectrographPlugin : IPlugin
         }
     }
 
-    private void ApplyHarmonicComb(float[] magnitudes)
+    private float ApplyHarmonicComb(float[] magnitudes, float amount)
     {
-        if (!_harmonicMaskActive)
+        if (!_harmonicMaskActive || magnitudes.Length == 0)
         {
-            return;
+            return 0f;
         }
+
+        float harmonicEnergy = 0f;
+        float noiseEnergy = 0f;
 
         for (int i = 0; i < magnitudes.Length; i++)
         {
             float mask = _harmonicMask[i];
-            float gain = HarmonicAttenuation + (HarmonicBoost - HarmonicAttenuation) * mask;
-            magnitudes[i] *= gain;
+            float value = magnitudes[i];
+            float power = value * value;
+            harmonicEnergy += power * mask;
+            noiseEnergy += power * (1f - mask);
+
+            float targetGain = HarmonicAttenuation + (HarmonicBoost - HarmonicAttenuation) * mask;
+            float gain = 1f + (targetGain - 1f) * amount;
+            magnitudes[i] = value * gain;
         }
+
+        return 10f * MathF.Log10((harmonicEnergy + 1e-9f) / (noiseEnergy + 1e-9f));
     }
 
-    private void ApplyTemporalSmoothing(float[] input, float[] output)
+    private void ApplyTemporalSmoothing(float[] input, float[] output, float amount)
     {
-        float blend = 1f - TemporalSmoothingFactor;
+        float blend = 1f - amount;
         for (int i = 0; i < input.Length; i++)
         {
             float current = output[i];
             output[i] = current + (input[i] - current) * blend;
         }
+    }
+
+    private void ApplyBilateralSmoothing(float[] input, float[] output, float amount)
+    {
+        int bins = input.Length;
+        if (bins == 0)
+        {
+            return;
+        }
+
+        int historyLength = BilateralTimeRadius + 1;
+        int writeIndex = _smoothingHistoryIndex;
+        Array.Copy(input, 0, _smoothingHistory, writeIndex * bins, bins);
+        _smoothingHistoryIndex = (writeIndex + 1) % historyLength;
+        if (_smoothingHistoryCount < historyLength)
+        {
+            _smoothingHistoryCount++;
+        }
+
+        int currentIndex = writeIndex;
+        int available = _smoothingHistoryCount;
+        float intensityCoeff = -0.5f / (BilateralSigmaIntensityDb * BilateralSigmaIntensityDb);
+
+        for (int bin = 0; bin < bins; bin++)
+        {
+            float center = input[bin];
+            float centerDb = DspUtils.LinearToDb(center);
+            float sum = 0f;
+            float sumW = 0f;
+
+            int timeCount = Math.Min(available, BilateralTimeRadius + 1);
+            for (int dt = 0; dt < timeCount; dt++)
+            {
+                int frameIndex = (currentIndex - dt + historyLength) % historyLength;
+                float timeWeight = _bilateralTimeWeights[dt];
+                int baseOffset = frameIndex * bins;
+
+                for (int df = -BilateralFreqRadius; df <= BilateralFreqRadius; df++)
+                {
+                    int freqIndex = bin + df;
+                    if (freqIndex < 0 || freqIndex >= bins)
+                    {
+                        continue;
+                    }
+
+                    float neighbor = _smoothingHistory[baseOffset + freqIndex];
+                    float neighborDb = DspUtils.LinearToDb(neighbor);
+                    float deltaDb = neighborDb - centerDb;
+                    float intensityWeight = MathF.Exp(deltaDb * deltaDb * intensityCoeff);
+                    float weight = timeWeight * _bilateralFreqWeights[df + BilateralFreqRadius] * intensityWeight;
+                    sum += neighbor * weight;
+                    sumW += weight;
+                }
+            }
+
+            float filtered = sumW > 1e-6f ? sum / sumW : center;
+            output[bin] = center + (filtered - center) * amount;
+        }
+    }
+
+    private void UpdateBilateralWeights()
+    {
+        if (_bilateralTimeWeights.Length != BilateralTimeRadius + 1)
+        {
+            _bilateralTimeWeights = new float[BilateralTimeRadius + 1];
+        }
+
+        if (_bilateralFreqWeights.Length != BilateralFreqRadius * 2 + 1)
+        {
+            _bilateralFreqWeights = new float[BilateralFreqRadius * 2 + 1];
+        }
+
+        float spatialCoeff = -0.5f / (BilateralSigmaSpatial * BilateralSigmaSpatial);
+        for (int dt = 0; dt <= BilateralTimeRadius; dt++)
+        {
+            float dist = dt;
+            _bilateralTimeWeights[dt] = MathF.Exp(dist * dist * spatialCoeff);
+        }
+
+        for (int df = -BilateralFreqRadius; df <= BilateralFreqRadius; df++)
+        {
+            float dist = df;
+            _bilateralFreqWeights[df + BilateralFreqRadius] = MathF.Exp(dist * dist * spatialCoeff);
+        }
+    }
+
+    private void ComputeSpectralFeatures(float[] magnitudes, out float centroid, out float slope, out float flux)
+    {
+        int bins = Math.Min(magnitudes.Length, _displayBinFrequencies.Length);
+        if (bins == 0)
+        {
+            centroid = 0f;
+            slope = 0f;
+            flux = 0f;
+            return;
+        }
+
+        float sumMag = 0f;
+        float sumWeighted = 0f;
+        float sumDb = 0f;
+        float sumFreqDb = 0f;
+        float fluxSum = 0f;
+
+        for (int i = 0; i < bins; i++)
+        {
+            float mag = magnitudes[i];
+            float freq = _displayBinFrequencies[i];
+            sumMag += mag;
+            sumWeighted += mag * freq;
+
+            float db = DspUtils.LinearToDb(mag);
+            sumDb += db;
+            sumFreqDb += db * freq;
+
+            float diff = mag - _fluxPrevious[i];
+            fluxSum += diff * diff;
+            _fluxPrevious[i] = mag;
+        }
+
+        centroid = sumMag > 1e-6f ? sumWeighted / sumMag : 0f;
+        float denom = bins * _displayFreqSumSq - _displayFreqSum * _displayFreqSum;
+        slope = MathF.Abs(denom) > 1e-6f
+            ? (bins * sumFreqDb - _displayFreqSum * sumDb) / denom * 1000f
+            : 0f;
+        flux = fluxSum / bins;
     }
 
     private void BuildDisplayGain()
