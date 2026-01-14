@@ -59,20 +59,20 @@ public sealed class BiquadFilter
 
     private void SetCoefficients(FilterType type, float sampleRate, float freq, float gainDb, float q)
     {
-        float clampedFreq = Math.Clamp(freq, 10f, sampleRate * 0.45f);
-        float clampedQ = MathF.Max(0.1f, q);
-        float a = MathF.Pow(10f, gainDb / 40f);
-        float omega = 2f * MathF.PI * clampedFreq / sampleRate;
-        float sin = MathF.Sin(omega);
-        float cos = MathF.Cos(omega);
-        float alpha = sin / (2f * clampedQ);
+        double clampedFreq = Math.Clamp((double)freq, 10.0, sampleRate * 0.45);
+        double clampedQ = Math.Max(0.1, q);
+        double a = Math.Pow(10.0, gainDb / 40.0);
+        double omega = 2.0 * Math.PI * clampedFreq / sampleRate;
+        double sin = Math.Sin(omega);
+        double cos = Math.Cos(omega);
+        double alpha = sin / (2.0 * clampedQ);
 
-        float b0;
-        float b1;
-        float b2;
-        float a0;
-        float a1;
-        float a2;
+        double b0;
+        double b1;
+        double b2;
+        double a0;
+        double a1;
+        double a2;
 
         switch (type)
         {
@@ -108,8 +108,8 @@ public sealed class BiquadFilter
             }
             case FilterType.LowShelf:
             {
-                float sqrtA = MathF.Sqrt(a);
-                float twoSqrtAAlpha = 2f * sqrtA * alpha;
+                double sqrtA = Math.Sqrt(a);
+                double twoSqrtAAlpha = 2.0 * sqrtA * alpha;
                 b0 = a * ((a + 1f) - (a - 1f) * cos + twoSqrtAAlpha);
                 b1 = 2f * a * ((a - 1f) - (a + 1f) * cos);
                 b2 = a * ((a + 1f) - (a - 1f) * cos - twoSqrtAAlpha);
@@ -120,8 +120,8 @@ public sealed class BiquadFilter
             }
             case FilterType.HighShelf:
             {
-                float sqrtA = MathF.Sqrt(a);
-                float twoSqrtAAlpha = 2f * sqrtA * alpha;
+                double sqrtA = Math.Sqrt(a);
+                double twoSqrtAAlpha = 2.0 * sqrtA * alpha;
                 b0 = a * ((a + 1f) + (a - 1f) * cos + twoSqrtAAlpha);
                 b1 = -2f * a * ((a - 1f) + (a + 1f) * cos);
                 b2 = a * ((a + 1f) + (a - 1f) * cos - twoSqrtAAlpha);
@@ -142,12 +142,12 @@ public sealed class BiquadFilter
             }
         }
 
-        float invA0 = 1f / a0;
-        _b0 = b0 * invA0;
-        _b1 = b1 * invA0;
-        _b2 = b2 * invA0;
-        _a1 = a1 * invA0;
-        _a2 = a2 * invA0;
+        double invA0 = 1.0 / a0;
+        _b0 = (float)(b0 * invA0);
+        _b1 = (float)(b1 * invA0);
+        _b2 = (float)(b2 * invA0);
+        _a1 = (float)(a1 * invA0);
+        _a2 = (float)(a2 * invA0);
     }
 
     private enum FilterType

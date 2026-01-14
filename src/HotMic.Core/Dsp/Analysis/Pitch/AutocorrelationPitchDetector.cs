@@ -12,7 +12,7 @@ public sealed class AutocorrelationPitchDetector
     private float _confidenceThreshold;
 
     private float[] _autocorr = Array.Empty<float>();
-    private float[] _energyPrefix = Array.Empty<float>();
+    private double[] _energyPrefix = Array.Empty<double>();
 
     public AutocorrelationPitchDetector(int sampleRate, int frameSize, float minFrequency, float maxFrequency, float confidenceThreshold = 0.3f)
     {
@@ -41,7 +41,7 @@ public sealed class AutocorrelationPitchDetector
 
         if (_energyPrefix.Length < _frameSize + 1)
         {
-            _energyPrefix = new float[_frameSize + 1];
+            _energyPrefix = new double[_frameSize + 1];
         }
     }
 
@@ -56,30 +56,30 @@ public sealed class AutocorrelationPitchDetector
         }
 
         int size = _frameSize;
-        _energyPrefix[0] = 0f;
+        _energyPrefix[0] = 0.0;
         for (int i = 0; i < size; i++)
         {
-            float sample = frame[i];
+            double sample = frame[i];
             _energyPrefix[i + 1] = _energyPrefix[i] + sample * sample;
         }
 
-        float bestCorr = 0f;
+        double bestCorr = 0.0;
         int bestLag = -1;
 
         for (int lag = _minLag; lag <= _maxLag; lag++)
         {
             int limit = size - lag;
-            float sum = 0f;
+            double sum = 0.0;
             for (int i = 0; i < limit; i++)
             {
-                sum += frame[i] * frame[i + lag];
+                sum += (double)frame[i] * frame[i + lag];
             }
 
-            float energy0 = _energyPrefix[limit];
-            float energyLag = _energyPrefix[size] - _energyPrefix[lag];
-            float denom = MathF.Sqrt(energy0 * energyLag + 1e-12f);
-            float corr = denom > 0f ? sum / denom : 0f;
-            _autocorr[lag] = corr;
+            double energy0 = _energyPrefix[limit];
+            double energyLag = _energyPrefix[size] - _energyPrefix[lag];
+            double denom = Math.Sqrt(energy0 * energyLag + 1e-12);
+            double corr = denom > 0.0 ? sum / denom : 0.0;
+            _autocorr[lag] = (float)corr;
 
             if (corr > bestCorr)
             {
@@ -90,7 +90,7 @@ public sealed class AutocorrelationPitchDetector
 
         if (bestLag <= 0 || bestCorr < _confidenceThreshold)
         {
-            return new PitchResult(null, Math.Clamp(bestCorr, 0f, 1f), false);
+            return new PitchResult(null, Math.Clamp((float)bestCorr, 0f, 1f), false);
         }
 
         float refinedLag = bestLag;
@@ -107,7 +107,7 @@ public sealed class AutocorrelationPitchDetector
         }
 
         float frequency = _sampleRate / refinedLag;
-        float confidence = Math.Clamp(bestCorr, 0f, 1f);
+        float confidence = Math.Clamp((float)bestCorr, 0f, 1f);
         return new PitchResult(frequency, confidence, true);
     }
 }

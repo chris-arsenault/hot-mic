@@ -37,6 +37,22 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
     private float[] _gainBuffer = Array.Empty<float>();
     private FastFft? _fft;
 
+    private Thread? _displayThread;
+    private CancellationTokenSource? _displayCts;
+
+    private readonly float[][] _displayInputReal = { Array.Empty<float>(), Array.Empty<float>() };
+    private readonly float[][] _displayInputImag = { Array.Empty<float>(), Array.Empty<float>() };
+    private readonly float[][] _displayOutputReal = { Array.Empty<float>(), Array.Empty<float>() };
+    private readonly float[][] _displayOutputImag = { Array.Empty<float>(), Array.Empty<float>() };
+    private readonly float[][] _displayNoisePsd = { Array.Empty<float>(), Array.Empty<float>() };
+    private int _displaySnapshotIndex;
+    private int _displaySnapshotPending;
+    private int _displaySnapshotTarget = -1;
+    private int[] _displayBinStart = Array.Empty<int>();
+    private int[] _displayBinEnd = Array.Empty<int>();
+    private float _displayNormFactor;
+    private int _noiseProfileDirty;
+
     // Spectrum data for UI visualization (double-buffered).
     private readonly float[][] _inputSpectrumBuffers = { new float[DisplayBins], new float[DisplayBins] };
     private readonly float[][] _outputSpectrumBuffers = { new float[DisplayBins], new float[DisplayBins] };
@@ -100,7 +116,9 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
     public void Initialize(int sampleRate, int blockSize)
     {
         _sampleRate = sampleRate;
+        UpdateDisplayMapping();
         ResetState(preserveReduction: true);
+        EnsureDisplayThread();
     }
 
     public void ApplyQuality(AudioQualityProfile profile)
@@ -182,6 +200,15 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
 
     public void Dispose()
     {
+        if (_displayThread is not null)
+        {
+            _displayCts?.Cancel();
+            _displayThread.Join(500);
+        }
+
+        _displayThread = null;
+        _displayCts?.Dispose();
+        _displayCts = null;
     }
 
     private void ProcessFrame()
@@ -206,7 +233,7 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
         }
 
         _fft.Forward(_fftReal, _fftImag);
-        UpdateDisplaySpectrum(_inputSpectrumBuffers, _inputPeakBuffers, _fftReal, _fftImag);
+        BeginDisplaySnapshot();
 
         if (_learning)
         {
@@ -260,7 +287,7 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
             _fftImag[i] *= gain;
         }
 
-        UpdateDisplaySpectrum(_outputSpectrumBuffers, _outputPeakBuffers, _fftReal, _fftImag);
+        EndDisplaySnapshot();
 
         for (int i = 1; i < bins - 1; i++)
         {
@@ -280,8 +307,130 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
             }
             _outputRing[index] += _fftReal[i] * _synthesisWindow[i] / _windowSum;
         }
+    }
 
-        PublishDisplayBuffers();
+    private void EnsureDisplayThread()
+    {
+        if (_displayThread is not null)
+        {
+            return;
+        }
+
+        _displayCts = new CancellationTokenSource();
+        _displayThread = new Thread(() => DisplayLoop(_displayCts.Token))
+        {
+            IsBackground = true,
+            Name = "HotMic-FFTNoiseDisplay"
+        };
+        _displayThread.Start();
+    }
+
+    private void DisplayLoop(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            if (Volatile.Read(ref _displaySnapshotPending) == 0)
+            {
+                Thread.Sleep(1);
+                continue;
+            }
+
+            int snapshotIndex = Volatile.Read(ref _displaySnapshotIndex);
+            Volatile.Write(ref _displaySnapshotPending, 0);
+
+            if (_displayInputReal[snapshotIndex].Length == 0)
+            {
+                Thread.Sleep(1);
+                continue;
+            }
+
+            UpdateDisplaySpectrum(_inputSpectrumBuffers, _inputPeakBuffers,
+                _displayInputReal[snapshotIndex], _displayInputImag[snapshotIndex]);
+            UpdateDisplaySpectrum(_outputSpectrumBuffers, _outputPeakBuffers,
+                _displayOutputReal[snapshotIndex], _displayOutputImag[snapshotIndex]);
+
+            if (Interlocked.Exchange(ref _noiseProfileDirty, 0) == 1)
+            {
+                UpdateNoiseProfileDisplay(_displayNoisePsd[snapshotIndex]);
+            }
+
+            PublishDisplayBuffers();
+        }
+    }
+
+    private void BeginDisplaySnapshot()
+    {
+        _displaySnapshotTarget = -1;
+        if (_displayInputReal[0].Length == 0)
+        {
+            return;
+        }
+
+        int current = Volatile.Read(ref _displaySnapshotIndex);
+        int target = current == 0 ? 1 : 0;
+        int bins = _displayInputReal[target].Length;
+        if (bins == 0 || _fftReal.Length < bins)
+        {
+            return;
+        }
+
+        Array.Copy(_fftReal, _displayInputReal[target], bins);
+        Array.Copy(_fftImag, _displayInputImag[target], bins);
+        _displaySnapshotTarget = target;
+    }
+
+    private void EndDisplaySnapshot()
+    {
+        int target = _displaySnapshotTarget;
+        if (target < 0)
+        {
+            return;
+        }
+
+        int bins = _displayOutputReal[target].Length;
+        if (bins == 0 || _fftReal.Length < bins)
+        {
+            _displaySnapshotTarget = -1;
+            return;
+        }
+
+        Array.Copy(_fftReal, _displayOutputReal[target], bins);
+        Array.Copy(_fftImag, _displayOutputImag[target], bins);
+        if (_noisePsd.Length >= bins)
+        {
+            Array.Copy(_noisePsd, _displayNoisePsd[target], bins);
+        }
+
+        Volatile.Write(ref _displaySnapshotIndex, target);
+        Volatile.Write(ref _displaySnapshotPending, 1);
+        _displaySnapshotTarget = -1;
+    }
+
+    private void UpdateDisplayMapping()
+    {
+        if (_displayBinStart.Length != DisplayBins || _fftSize <= 0)
+        {
+            return;
+        }
+
+        int fftBins = _fftSize / 2 + 1;
+        float minFreq = 20f;
+        float maxFreq = _sampleRate > 0 ? _sampleRate / 2f : 20000f;
+        float binWidth = _sampleRate > 0 ? _sampleRate / (float)_fftSize : maxFreq / Math.Max(1, fftBins - 1);
+        float ratio = maxFreq / minFreq;
+
+        for (int displayBin = 0; displayBin < DisplayBins; displayBin++)
+        {
+            float t0 = displayBin / (float)DisplayBins;
+            float t1 = (displayBin + 1) / (float)DisplayBins;
+            float freq0 = minFreq * MathF.Pow(ratio, t0);
+            float freq1 = minFreq * MathF.Pow(ratio, t1);
+
+            int bin0 = Math.Clamp((int)(freq0 / binWidth), 0, fftBins - 1);
+            int bin1 = Math.Clamp((int)(freq1 / binWidth), bin0 + 1, fftBins);
+            _displayBinStart[displayBin] = bin0;
+            _displayBinEnd[displayBin] = bin1;
+        }
     }
 
     private void ConfigureQuality(int fftSize, int hopSize, int noiseFrames)
@@ -304,6 +453,19 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
         _prevSnr = new float[bins];
         _prevGain = new float[bins];
         _gainBuffer = new float[bins];
+        _displayInputReal[0] = new float[bins];
+        _displayInputReal[1] = new float[bins];
+        _displayInputImag[0] = new float[bins];
+        _displayInputImag[1] = new float[bins];
+        _displayOutputReal[0] = new float[bins];
+        _displayOutputReal[1] = new float[bins];
+        _displayOutputImag[0] = new float[bins];
+        _displayOutputImag[1] = new float[bins];
+        _displayNoisePsd[0] = new float[bins];
+        _displayNoisePsd[1] = new float[bins];
+        _displayBinStart = new int[DisplayBins];
+        _displayBinEnd = new int[DisplayBins];
+        _displayNormFactor = 2f / _fftSize;
 
         for (int i = 0; i < _fftSize; i++)
         {
@@ -314,6 +476,7 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
         _fft = new FastFft(_fftSize);
         _windowSum = CalculateWindowSum();
 
+        UpdateDisplayMapping();
         ResetState(preserveReduction: true);
     }
 
@@ -324,6 +487,10 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
         _learning = false;
         _noiseFrames = 0;
         _displayIndex = 0;
+        _displaySnapshotIndex = 0;
+        _displaySnapshotPending = 0;
+        _displaySnapshotTarget = -1;
+        Interlocked.Exchange(ref _noiseProfileDirty, 1);
         Volatile.Write(ref _hasProfileFlag, 0);
 
         if (!preserveReduction)
@@ -348,6 +515,7 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
         _learning = true;
         _noiseFrames = 0;
         Volatile.Write(ref _hasProfileFlag, 0);
+        Interlocked.Exchange(ref _noiseProfileDirty, 1);
         Array.Clear(_noisePsd, 0, _noisePsd.Length);
         Array.Fill(_prevSnr, 0f);
         Array.Fill(_prevGain, 1f);
@@ -383,7 +551,7 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
             _noisePsd[i] *= inv;
         }
 
-        UpdateNoiseProfileDisplay();
+        Interlocked.Exchange(ref _noiseProfileDirty, 1);
         _learning = false;
         Volatile.Write(ref _hasProfileFlag, 1);
     }
@@ -427,35 +595,24 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
         float[] spectrum = spectrumBuffers[target];
         float[] peaks = peakBuffers[target];
 
-        int fftBins = _fftSize / 2 + 1;
-        float minFreq = 20f;
-        float maxFreq = _sampleRate > 0 ? _sampleRate / 2f : 20000f;
-        float normalizationFactor = 2f / _fftSize;
-
         for (int displayBin = 0; displayBin < DisplayBins; displayBin++)
         {
-            float t0 = displayBin / (float)DisplayBins;
-            float t1 = (displayBin + 1) / (float)DisplayBins;
-            float freq0 = minFreq * MathF.Pow(maxFreq / minFreq, t0);
-            float freq1 = minFreq * MathF.Pow(maxFreq / minFreq, t1);
+            int bin0 = _displayBinStart[displayBin];
+            int bin1 = _displayBinEnd[displayBin];
 
-            int bin0 = (int)(freq0 * fftBins / maxFreq);
-            int bin1 = (int)(freq1 * fftBins / maxFreq);
-            bin0 = Math.Clamp(bin0, 0, fftBins - 1);
-            bin1 = Math.Clamp(bin1, bin0 + 1, fftBins);
-
-            float sumSq = 0f;
+            double sumSq = 0.0;
             int count = 0;
-            for (int i = bin0; i < bin1 && i < fftBins; i++)
+            int maxBin = Math.Min(bin1, fftReal.Length);
+            for (int i = bin0; i < maxBin; i++)
             {
                 float real = fftReal[i];
                 float imag = fftImag[i];
-                float mag = MathF.Sqrt(real * real + imag * imag);
+                double mag = Math.Sqrt(real * real + imag * imag);
                 sumSq += mag * mag;
                 count++;
             }
 
-            float magnitude = count > 0 ? MathF.Sqrt(sumSq / count) * normalizationFactor : 0f;
+            float magnitude = count > 0 ? (float)(Math.Sqrt(sumSq / count) * _displayNormFactor) : 0f;
             spectrum[displayBin] = MathF.Max(spectrum[displayBin] * SpectrumDecay, magnitude);
 
             if (magnitude > peaks[displayBin])
@@ -469,39 +626,28 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
         }
     }
 
-    private void UpdateNoiseProfileDisplay()
+    private void UpdateNoiseProfileDisplay(float[] noisePsd)
     {
         int current = Volatile.Read(ref _displayIndex);
         int target = current == 0 ? 1 : 0;
         float[] profile = _noiseSpectrumBuffers[target];
 
-        int fftBins = _fftSize / 2 + 1;
-        float minFreq = 20f;
-        float maxFreq = _sampleRate > 0 ? _sampleRate / 2f : 20000f;
-        float normalizationFactor = 2f / _fftSize;
-
         for (int displayBin = 0; displayBin < DisplayBins; displayBin++)
         {
-            float t0 = displayBin / (float)DisplayBins;
-            float t1 = (displayBin + 1) / (float)DisplayBins;
-            float freq0 = minFreq * MathF.Pow(maxFreq / minFreq, t0);
-            float freq1 = minFreq * MathF.Pow(maxFreq / minFreq, t1);
+            int bin0 = _displayBinStart[displayBin];
+            int bin1 = _displayBinEnd[displayBin];
 
-            int bin0 = (int)(freq0 * fftBins / maxFreq);
-            int bin1 = (int)(freq1 * fftBins / maxFreq);
-            bin0 = Math.Clamp(bin0, 0, fftBins - 1);
-            bin1 = Math.Clamp(bin1, bin0 + 1, fftBins);
-
-            float sumSq = 0f;
+            double sumSq = 0.0;
             int count = 0;
-            for (int i = bin0; i < bin1 && i < _noisePsd.Length; i++)
+            int maxBin = Math.Min(bin1, noisePsd.Length);
+            for (int i = bin0; i < maxBin; i++)
             {
-                float mag = MathF.Sqrt(_noisePsd[i]);
+                double mag = Math.Sqrt(noisePsd[i]);
                 sumSq += mag * mag;
                 count++;
             }
 
-            profile[displayBin] = count > 0 ? MathF.Sqrt(sumSq / count) * normalizationFactor : 0f;
+            profile[displayBin] = count > 0 ? (float)(Math.Sqrt(sumSq / count) * _displayNormFactor) : 0f;
         }
     }
 

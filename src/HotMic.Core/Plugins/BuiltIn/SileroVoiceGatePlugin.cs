@@ -30,7 +30,7 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider
     private int _frameSamples48k;
     private Thread? _workerThread;
     private AutoResetEvent? _frameSignal;
-    private volatile int _running;
+    private int _running;
     private SileroVadInference? _inference;
 
     private float _threshold = 0.5f;
@@ -301,7 +301,7 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider
             }
 
             _frameSignal = new AutoResetEvent(false);
-            _running = 1;
+            Interlocked.Exchange(ref _running, 1);
             _workerThread = new Thread(WorkerLoop)
             {
                 IsBackground = true,

@@ -53,7 +53,7 @@ public sealed class FrequencyAnalyzerPlugin : IPlugin
     private float[] _hopBuffer = Array.Empty<float>();
     private float[] _displayScratch = Array.Empty<float>();
 
-    private volatile int _analysisActive;
+    private int _analysisActive;
     private int _requestedFftSize = 2048;
     private int _requestedDisplayBins = 128;
     private int _requestedScale = (int)FrequencyScale.Mel;

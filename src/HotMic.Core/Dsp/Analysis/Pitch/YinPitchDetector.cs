@@ -65,23 +65,23 @@ public sealed class YinPitchDetector
 
         for (int tau = 1; tau <= maxTau; tau++)
         {
-            float sum = 0f;
+            double sum = 0.0;
             int limit = size - tau;
             for (int i = 0; i < limit; i++)
             {
                 float delta = frame[i] - frame[i + tau];
                 sum += delta * delta;
             }
-            _difference[tau] = sum;
+            _difference[tau] = (float)sum;
         }
 
         // Cumulative mean normalized difference (CMND)
-        float runningSum = 0f;
+        double runningSum = 0.0;
         _cmnd[0] = 1f;
         for (int tau = 1; tau <= maxTau; tau++)
         {
             runningSum += _difference[tau];
-            _cmnd[tau] = runningSum > 1e-12f ? (_difference[tau] * tau / runningSum) : 1f;
+            _cmnd[tau] = runningSum > 1e-12 ? (float)(_difference[tau] * tau / runningSum) : 1f;
         }
 
         // Absolute threshold

@@ -7,8 +7,8 @@ public sealed class SpectralFeatureExtractor
 {
     private float[] _frequencies = Array.Empty<float>();
     private float[] _fluxPrevious = Array.Empty<float>();
-    private float _freqSum;
-    private float _freqSumSq;
+    private double _freqSum;
+    private double _freqSumSq;
 
     /// <summary>
     /// Ensure internal buffers are sized for the provided bin count.
@@ -44,8 +44,8 @@ public sealed class SpectralFeatureExtractor
             _frequencies = new float[frequencies.Length];
         }
 
-        float sum = 0f;
-        float sumSq = 0f;
+        double sum = 0.0;
+        double sumSq = 0.0;
         for (int i = 0; i < frequencies.Length; i++)
         {
             float freq = frequencies[i];
@@ -72,11 +72,11 @@ public sealed class SpectralFeatureExtractor
             return;
         }
 
-        float sumMag = 0f;
-        float sumWeighted = 0f;
-        float sumDb = 0f;
-        float sumFreqDb = 0f;
-        float fluxSum = 0f;
+        double sumMag = 0.0;
+        double sumWeighted = 0.0;
+        double sumDb = 0.0;
+        double sumFreqDb = 0.0;
+        double fluxSum = 0.0;
 
         for (int i = 0; i < bins; i++)
         {
@@ -95,11 +95,11 @@ public sealed class SpectralFeatureExtractor
         }
 
         // Centroid in Hz, slope via linear regression in dB/Hz (scaled to dB/kHz), flux as mean-square change.
-        centroid = sumMag > 1e-6f ? sumWeighted / sumMag : 0f;
-        float denom = bins * _freqSumSq - _freqSum * _freqSum;
-        slope = MathF.Abs(denom) > 1e-6f
-            ? (bins * sumFreqDb - _freqSum * sumDb) / denom * 1000f
+        centroid = sumMag > 1e-6 ? (float)(sumWeighted / sumMag) : 0f;
+        double denom = bins * _freqSumSq - _freqSum * _freqSum;
+        slope = Math.Abs(denom) > 1e-6
+            ? (float)((bins * sumFreqDb - _freqSum * sumDb) / denom * 1000.0)
             : 0f;
-        flux = fluxSum / bins;
+        flux = (float)(fluxSum / bins);
     }
 }

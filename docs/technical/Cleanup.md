@@ -16,17 +16,18 @@ Reduce spectral noise and emphasize harmonic structure for vocal analysis.
 - Full: noise reduction + HPSS + harmonic comb.
 
 ## Noise Reduction
-- Adaptive noise floor using a history of power spectra.
-- History length: 64 frames.
-- Percentile: 10th percentile per bin.
+- Adaptive noise floor using a streaming P^2 quantile estimator on power spectra.
+- Bootstrap: 5 frames to seed the estimator.
+- Percentile: 10th percentile per bin (approximate).
 - Gate threshold: noise * 2.0.
 - Over-subtraction alpha: 1.2..2.2 (scaled by amount).
 - Spectral floor beta: 0.01..0.02 (scaled by amount).
 - Adapt rates: 0.2 (silence), 0.02 (voiced).
 
 ## HPSS (Median Filtering)
-- Time kernel: 17 frames.
-- Frequency kernel: 17 bins.
+- Time kernel: 17 frames (2x downsampled for processing).
+- Frequency kernel: 17 bins (2x downsampled for processing).
+- Mask computed on downsampled spectrum and upsampled to full bins.
 - Soft mask with power 2.0.
 - Output = input * mix(mask, amount).
 
@@ -56,6 +57,7 @@ Reduce spectral noise and emphasize harmonic structure for vocal analysis.
 ## Real-time Considerations
 - All buffers are preallocated on configuration changes.
 - HPSS median filtering is the most CPU-intensive stage.
+- Bilateral smoothing reuses precomputed log magnitudes.
 
 Implementation refs: (src/HotMic.Core/Dsp/Spectrogram/SpectrogramNoiseReducer.cs,
  src/HotMic.Core/Dsp/Spectrogram/SpectrogramHpssProcessor.cs,

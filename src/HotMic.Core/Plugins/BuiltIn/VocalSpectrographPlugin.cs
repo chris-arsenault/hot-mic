@@ -166,7 +166,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private float[] _formantBwScratch = new float[MaxFormants];
     private float[] _harmonicScratch = new float[MaxHarmonics];
 
-    private volatile int _analysisActive;
+    private int _analysisActive;
     private int _requestedFftSize = 2048;
     private int _requestedWindow = (int)WindowFunction.Hann;
     private int _requestedOverlapIndex = 1;

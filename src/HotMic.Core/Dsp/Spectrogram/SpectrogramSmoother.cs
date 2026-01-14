@@ -17,6 +17,7 @@ public sealed class SpectrogramSmoother
     private readonly float _sigmaIntensityDb;
 
     private float[] _history = Array.Empty<float>();
+    private float[] _logHistory = Array.Empty<float>();
     private int _historyIndex;
     private int _historyCount;
     private float[] _timeWeights = Array.Empty<float>();
@@ -50,8 +51,13 @@ public sealed class SpectrogramSmoother
         if (_history.Length != required)
         {
             _history = new float[required];
+            _logHistory = new float[required];
             _historyIndex = 0;
             _historyCount = 0;
+        }
+        else if (_logHistory.Length != required)
+        {
+            _logHistory = new float[required];
         }
 
         if (_timeWeights.Length != historyLength || _freqWeights.Length != _freqRadius * 2 + 1)
@@ -68,6 +74,7 @@ public sealed class SpectrogramSmoother
     public void Reset()
     {
         Array.Clear(_history, 0, _history.Length);
+        Array.Clear(_logHistory, 0, _logHistory.Length);
         _historyIndex = 0;
         _historyCount = 0;
     }
@@ -98,7 +105,12 @@ public sealed class SpectrogramSmoother
 
         int historyLength = _timeRadius + 1;
         int writeIndex = _historyIndex;
-        Array.Copy(input, 0, _history, writeIndex * bins, bins);
+        int baseOffset = writeIndex * bins;
+        Array.Copy(input, 0, _history, baseOffset, bins);
+        for (int i = 0; i < bins; i++)
+        {
+            _logHistory[baseOffset + i] = DspUtils.LinearToDb(input[i]);
+        }
         _historyIndex = (writeIndex + 1) % historyLength;
         if (_historyCount < historyLength)
         {
@@ -121,7 +133,7 @@ public sealed class SpectrogramSmoother
             {
                 int frameIndex = (currentIndex - dt + historyLength) % historyLength;
                 float timeWeight = _timeWeights[dt];
-                int baseOffset = frameIndex * bins;
+                int frameOffset = frameIndex * bins;
 
                 for (int df = -_freqRadius; df <= _freqRadius; df++)
                 {
@@ -131,8 +143,8 @@ public sealed class SpectrogramSmoother
                         continue;
                     }
 
-                    float neighbor = _history[baseOffset + freqIndex];
-                    float neighborDb = DspUtils.LinearToDb(neighbor);
+                    float neighbor = _history[frameOffset + freqIndex];
+                    float neighborDb = _logHistory[frameOffset + freqIndex];
                     float deltaDb = neighborDb - centerDb;
                     // Bilateral weighting in dB keeps edges between loud/quiet regions intact.
                     float intensityWeight = MathF.Exp(deltaDb * deltaDb * intensityCoeff);

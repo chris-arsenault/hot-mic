@@ -428,9 +428,9 @@ public sealed partial class VocalSpectrographPlugin
                         continue;
                     }
 
-                    float re = _fftReal[bin];
-                    float im = _fftImag[bin];
-                    float denom = re * re + im * im + 1e-12f;
+                    double re = _fftReal[bin];
+                    double im = _fftImag[bin];
+                    double denom = re * re + im * im + 1e-12;
 
                     float timeShiftFrames = 0f;
                     if (_activeReassignMode.HasFlag(SpectrogramReassignMode.Time))
@@ -438,8 +438,9 @@ public sealed partial class VocalSpectrographPlugin
                         float reTime = _fftTimeReal[bin];
                         float imTime = _fftTimeImag[bin];
                         // STFT reassignment time shift from the time-weighted window.
-                        float timeShiftSamples = (reTime * re + imTime * im) / denom;
-                        timeShiftFrames = Math.Clamp(timeShiftSamples * invHop, -maxTimeShift, maxTimeShift);
+                        double timeShiftSamples = ((double)reTime * re + (double)imTime * im) / denom;
+                        double timeShiftScaled = timeShiftSamples * invHop;
+                        timeShiftFrames = (float)Math.Clamp(timeShiftScaled, -maxTimeShift, maxTimeShift);
                     }
 
                     float freqShiftBins = 0f;
@@ -448,8 +449,9 @@ public sealed partial class VocalSpectrographPlugin
                         float reDeriv = _fftDerivReal[bin];
                         float imDeriv = _fftDerivImag[bin];
                         // STFT reassignment frequency shift from the window derivative FFT.
-                        float imag = (imDeriv * re - reDeriv * im) / denom;
-                        freqShiftBins = Math.Clamp(imag * freqBinScale, -maxBinShift, maxBinShift);
+                        double imag = ((double)imDeriv * re - (double)reDeriv * im) / denom;
+                        double freqShift = imag * freqBinScale;
+                        freqShiftBins = (float)Math.Clamp(freqShift, -maxBinShift, maxBinShift);
                     }
 
                     float targetFrame = frameId + timeShiftFrames - _reassignLatencyFrames;

@@ -86,13 +86,13 @@ public sealed class CepstralPitchDetector
         _fft?.Inverse(_real, _imag);
 
         int bestLag = -1;
-        float bestValue = float.MinValue;
-        float sum = 0f;
+        double bestValue = double.MinValue;
+        double sum = 0.0;
         int count = 0;
 
         for (int lag = _minLag; lag <= _maxLag; lag++)
         {
-            float value = _real[lag];
+            double value = _real[lag];
             sum += value;
             count++;
             if (value > bestValue)
@@ -102,8 +102,8 @@ public sealed class CepstralPitchDetector
             }
         }
 
-        float mean = count > 0 ? sum / count : 0f;
-        float cppDb = (bestValue - mean) * 20f;
+        double mean = count > 0 ? sum / count : 0.0;
+        float cppDb = (float)((bestValue - mean) * 20.0);
         LastCpp = cppDb;
 
         if (bestLag <= 0 || cppDb < _confidenceFloor)

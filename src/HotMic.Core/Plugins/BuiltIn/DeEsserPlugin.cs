@@ -33,18 +33,7 @@ public sealed class DeEsserPlugin : IPlugin
     private int _sibilanceLevelBits;
     private int _gainReductionBits;
 
-    // FFT spectrum analysis (for UI visualization)
-    private FastFft? _fft;
-    private readonly float[] _fftReal = new float[FftSize];
-    private readonly float[] _fftImag = new float[FftSize];
-    private readonly float[] _fftWindow = new float[FftSize];
-    private readonly float[] _inputRing = new float[FftSize];
-    private int _inputIndex;
-    private int _sampleCounter;
-
-    // Double-buffered spectrum for UI (thread-safe)
-    private readonly float[][] _spectrumBuffers = { new float[SpectrumBins], new float[SpectrumBins] };
-    private int _displayIndex;
+    private SpectrumDisplayWorker? _spectrumWorker;
 
     private readonly BiquadFilter _bandPass = new();
     private readonly EnvelopeFollower _detector = new();
@@ -82,16 +71,8 @@ public sealed class DeEsserPlugin : IPlugin
     {
         _sampleRate = sampleRate;
         _gain = 1f;
-        _fft = new FastFft(FftSize);
-
-        // Hann window for FFT
-        for (int i = 0; i < FftSize; i++)
-        {
-            _fftWindow[i] = 0.5f - 0.5f * MathF.Cos(2f * MathF.PI * i / (FftSize - 1));
-        }
-
-        _inputIndex = 0;
-        _sampleCounter = 0;
+        _spectrumWorker?.Dispose();
+        _spectrumWorker = new SpectrumDisplayWorker(sampleRate, FftSize, SpectrumBins, 1000f, 16000f, SpectrumDecay, FftSize / 2);
         UpdateFilters();
     }
 
@@ -101,6 +82,8 @@ public sealed class DeEsserPlugin : IPlugin
         {
             return;
         }
+
+        _spectrumWorker?.Write(buffer);
 
         float gain = _gain;
         float attackCoeff = _gainAttackCoeff;
@@ -116,18 +99,6 @@ public sealed class DeEsserPlugin : IPlugin
         {
             float input = buffer[i];
             inputPeak = MathF.Max(inputPeak, MathF.Abs(input));
-
-            // Accumulate samples for spectrum analysis
-            _inputRing[_inputIndex] = input;
-            _inputIndex = (_inputIndex + 1) % FftSize;
-            _sampleCounter++;
-
-            // Perform FFT periodically
-            if (_sampleCounter >= FftSize / 2)
-            {
-                _sampleCounter = 0;
-                UpdateSpectrum();
-            }
 
             float band = _bandPass.Process(input);
             float env = _detector.Process(band);
@@ -247,63 +218,18 @@ public sealed class DeEsserPlugin : IPlugin
     /// </summary>
     public void GetSpectrum(float[] spectrum)
     {
-        if (spectrum.Length < SpectrumBins) return;
-        int index = Volatile.Read(ref _displayIndex);
-        Array.Copy(_spectrumBuffers[index], spectrum, SpectrumBins);
+        if (spectrum.Length < SpectrumBins)
+        {
+            return;
+        }
+
+        _spectrumWorker?.GetSpectrum(spectrum);
     }
 
     public void Dispose()
     {
-    }
-
-    private void UpdateSpectrum()
-    {
-        if (_fft is null || _sampleRate <= 0) return;
-
-        // Copy input ring buffer with windowing
-        int start = _inputIndex;
-        for (int i = 0; i < FftSize; i++)
-        {
-            int idx = (start + i) % FftSize;
-            _fftReal[i] = _inputRing[idx] * _fftWindow[i];
-            _fftImag[i] = 0f;
-        }
-
-        _fft.Forward(_fftReal, _fftImag);
-
-        // Map FFT bins to display bins (log scale, 1kHz to 16kHz for sibilance range)
-        int current = Volatile.Read(ref _displayIndex);
-        int target = current == 0 ? 1 : 0;
-        float[] spectrum = _spectrumBuffers[target];
-
-        float minFreq = 1000f;
-        float maxFreq = 16000f;
-        int fftBins = FftSize / 2;
-        float binWidth = (float)_sampleRate / FftSize;
-        float normFactor = 2f / FftSize;
-
-        for (int displayBin = 0; displayBin < SpectrumBins; displayBin++)
-        {
-            float t0 = displayBin / (float)SpectrumBins;
-            float t1 = (displayBin + 1) / (float)SpectrumBins;
-            float freq0 = minFreq * MathF.Pow(maxFreq / minFreq, t0);
-            float freq1 = minFreq * MathF.Pow(maxFreq / minFreq, t1);
-
-            int bin0 = Math.Clamp((int)(freq0 / binWidth), 0, fftBins - 1);
-            int bin1 = Math.Clamp((int)(freq1 / binWidth), bin0 + 1, fftBins);
-
-            float maxMag = 0f;
-            for (int i = bin0; i < bin1; i++)
-            {
-                float mag = MathF.Sqrt(_fftReal[i] * _fftReal[i] + _fftImag[i] * _fftImag[i]) * normFactor;
-                maxMag = MathF.Max(maxMag, mag);
-            }
-
-            // Apply decay for smooth animation
-            spectrum[displayBin] = MathF.Max(spectrum[displayBin] * SpectrumDecay, maxMag);
-        }
-
-        Volatile.Write(ref _displayIndex, target);
+        _spectrumWorker?.Dispose();
+        _spectrumWorker = null;
     }
 
     private void UpdateFilters()

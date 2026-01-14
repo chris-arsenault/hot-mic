@@ -108,6 +108,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private int _lastFrameCount = -1;
     private int _lastDisplayBins = -1;
     private int[] _pixelBuffer = Array.Empty<int>();
+    // Ring offset for leftmost column to avoid per-frame buffer shifts.
+    private int _bitmapRingStart;
     private int[] _rowOffsets = Array.Empty<int>();
     private int[] _colorLut = Array.Empty<int>();
     private byte[] _colorIndexLut = Array.Empty<byte>();
@@ -517,10 +519,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         canvas.DrawRoundRect(new SKRoundRect(spectrumRect, 6f), _panelPaint);
 
         UpdateSpectrogramBitmap(state);
-        if (_spectrogramBitmap is not null)
-        {
-            canvas.DrawBitmap(_spectrogramBitmap, spectrumRect, _bitmapPaint);
-        }
+        DrawSpectrogramBitmap(canvas, spectrumRect);
 
         if (state.ShowRange)
         {
@@ -1022,6 +1021,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
             _spectrogramBitmap = new SKBitmap(state.FrameCount, state.DisplayBins, SKColorType.Bgra8888, SKAlphaType.Premul);
             _bitmapWidth = state.FrameCount;
             _bitmapHeight = state.DisplayBins;
+            _bitmapRingStart = 0;
             _lastDataVersion = -1;
             _lastLatestFrameId = -1;
             _lastAvailableFrames = -1;
@@ -1038,7 +1038,6 @@ public sealed class VocalSpectrographRenderer : IDisposable
         }
 
         int width = _bitmapWidth;
-        int height = _bitmapHeight;
         int bins = state.DisplayBins;
         if (state.Spectrogram.Length < width * bins)
         {
@@ -1063,6 +1062,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
                 Array.Clear(_pixelBuffer, 0, _pixelBuffer.Length);
             }
 
+            _bitmapRingStart = 0;
             var emptyPtr = _spectrogramBitmap!.GetPixels();
             if (emptyPtr != IntPtr.Zero)
             {
@@ -1102,12 +1102,14 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
         if (fullRebuild)
         {
+            _bitmapRingStart = 0;
             RenderFullSpectrogram(state, width, bins);
         }
         else
         {
-            ShiftSpectrogramLeft((int)deltaFrames, width, height);
-            UpdateSpectrogramColumns(state, width, bins, (int)deltaFrames);
+            int delta = (int)deltaFrames;
+            _bitmapRingStart = (_bitmapRingStart + delta) % width;
+            UpdateSpectrogramColumns(state, width, bins, delta, _bitmapRingStart);
         }
 
         var pixelsPtr = _spectrogramBitmap!.GetPixels();
@@ -1129,38 +1131,49 @@ public sealed class VocalSpectrographRenderer : IDisposable
         _lastDisplayBins = state.DisplayBins;
     }
 
+    private void DrawSpectrogramBitmap(SKCanvas canvas, SKRect destRect)
+    {
+        if (_spectrogramBitmap is null || _bitmapWidth <= 0 || _bitmapHeight <= 0)
+        {
+            return;
+        }
+
+        if (_bitmapRingStart <= 0 || _bitmapRingStart >= _bitmapWidth)
+        {
+            canvas.DrawBitmap(_spectrogramBitmap, destRect, _bitmapPaint);
+            return;
+        }
+
+        float totalWidth = destRect.Width;
+        float leftWidth = totalWidth * (_bitmapWidth - _bitmapRingStart) / _bitmapWidth;
+
+        var srcLeft = new SKRect(_bitmapRingStart, 0, _bitmapWidth, _bitmapHeight);
+        var dstLeft = new SKRect(destRect.Left, destRect.Top, destRect.Left + leftWidth, destRect.Bottom);
+        canvas.DrawBitmap(_spectrogramBitmap, srcLeft, dstLeft, _bitmapPaint);
+
+        var srcRight = new SKRect(0, 0, _bitmapRingStart, _bitmapHeight);
+        var dstRight = new SKRect(destRect.Left + leftWidth, destRect.Top, destRect.Right, destRect.Bottom);
+        canvas.DrawBitmap(_spectrogramBitmap, srcRight, dstRight, _bitmapPaint);
+    }
+
     private void RenderFullSpectrogram(VocalSpectrographState state, int width, int bins)
     {
         int totalFrames = width;
         for (int frame = 0; frame < totalFrames; frame++)
         {
             int frameOffset = frame * bins;
+            int column = (frame + _bitmapRingStart) % width;
             for (int bin = 0; bin < bins; bin++)
             {
                 float value = state.Spectrogram![frameOffset + bin];
                 int colorIndex = value <= 0f ? 0 : value >= 1f ? 255 : (int)(value * 255f);
                 int mappedIndex = _colorIndexLut[colorIndex];
-                _pixelBuffer[_rowOffsets[bin] + frame] = _colorLut[mappedIndex];
+                _pixelBuffer[_rowOffsets[bin] + column] = _colorLut[mappedIndex];
             }
         }
     }
 
-    private void ShiftSpectrogramLeft(int deltaFrames, int width, int height)
-    {
-        if (deltaFrames <= 0 || deltaFrames >= width)
-        {
-            return;
-        }
-
-        int tail = width - deltaFrames;
-        for (int row = 0; row < height; row++)
-        {
-            int rowStart = row * width;
-            Array.Copy(_pixelBuffer, rowStart + deltaFrames, _pixelBuffer, rowStart, tail);
-        }
-    }
-
-    private void UpdateSpectrogramColumns(VocalSpectrographState state, int width, int bins, int deltaFrames)
+    private void UpdateSpectrogramColumns(VocalSpectrographState state, int width, int bins, int deltaFrames, int ringStart)
     {
         if (deltaFrames <= 0)
         {
@@ -1171,12 +1184,13 @@ public sealed class VocalSpectrographRenderer : IDisposable
         for (int frame = startColumn; frame < width; frame++)
         {
             int frameOffset = frame * bins;
+            int column = (ringStart + frame) % width;
             for (int bin = 0; bin < bins; bin++)
             {
                 float value = state.Spectrogram![frameOffset + bin];
                 int colorIndex = value <= 0f ? 0 : value >= 1f ? 255 : (int)(value * 255f);
                 int mappedIndex = _colorIndexLut[colorIndex];
-                _pixelBuffer[_rowOffsets[bin] + frame] = _colorLut[mappedIndex];
+                _pixelBuffer[_rowOffsets[bin] + column] = _colorLut[mappedIndex];
             }
         }
     }

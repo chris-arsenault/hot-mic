@@ -109,8 +109,8 @@ public sealed class HarmonicCombEnhancer
             return 0f;
         }
 
-        float harmonicEnergy = 0f;
-        float noiseEnergy = 0f;
+        double harmonicEnergy = 0.0;
+        double noiseEnergy = 0.0;
 
         for (int i = 0; i < magnitudes.Length; i++)
         {
@@ -125,7 +125,7 @@ public sealed class HarmonicCombEnhancer
             magnitudes[i] = value * gain;
         }
 
-        return 10f * MathF.Log10((harmonicEnergy + 1e-9f) / (noiseEnergy + 1e-9f));
+        return (float)(10.0 * Math.Log10((harmonicEnergy + 1e-9) / (noiseEnergy + 1e-9)));
     }
 
     private static float GetDisplayPosition(

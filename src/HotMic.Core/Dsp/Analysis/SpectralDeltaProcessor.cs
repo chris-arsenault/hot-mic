@@ -1,3 +1,5 @@
+using System.Threading;
+
 namespace HotMic.Core.Dsp.Analysis;
 
 /// <summary>
@@ -20,7 +22,7 @@ public enum DeltaDisplayMode
 
 /// <summary>
 /// Computes spectral delta (frequency-domain difference) before and after plugin processing.
-/// Zero allocations in the audio thread - all buffers pre-allocated at construction.
+/// Audio thread only captures time-domain snapshots; FFT runs on the UI/analysis thread.
 /// </summary>
 public sealed class SpectralDeltaProcessor
 {
@@ -34,12 +36,16 @@ public sealed class SpectralDeltaProcessor
     private readonly FastFft _fft;
     private readonly int _sampleRate;
 
-    // FFT buffers (pre-allocated)
+    // FFT buffers (pre-allocated, used off the audio thread)
     private readonly float[] _preReal;
     private readonly float[] _preImag;
     private readonly float[] _postReal;
     private readonly float[] _postImag;
     private readonly float[] _window;
+
+    // Snapshot buffers for time-domain capture (audio thread)
+    private readonly float[][] _preFrames;
+    private readonly float[][] _postFrames;
 
     // Sample counter for update timing
     private int _sampleAccumulator;
@@ -55,8 +61,10 @@ public sealed class SpectralDeltaProcessor
     private readonly int[] _bandEndBin;
 
     private DeltaDisplayMode _displayMode;
-    private volatile bool _hasUpdate;
     private bool _captureThisBlock;
+    private int _captureIndex;
+    private int _readyIndex;
+    private int _pendingUpdate;
 
     /// <summary>
     /// The computed band deltas in dB. Positive = boost, negative = cut.
@@ -67,11 +75,7 @@ public sealed class SpectralDeltaProcessor
     /// <summary>
     /// Whether new delta data is available since last read.
     /// </summary>
-    public bool HasUpdate
-    {
-        get => _hasUpdate;
-        set => _hasUpdate = value;
-    }
+    public bool HasUpdate => Volatile.Read(ref _pendingUpdate) != 0;
 
     /// <summary>
     /// Current display mode (affects frequency band mapping).
@@ -102,6 +106,8 @@ public sealed class SpectralDeltaProcessor
         _postReal = new float[FftSize];
         _postImag = new float[FftSize];
         _window = new float[FftSize];
+        _preFrames = [new float[FftSize], new float[FftSize]];
+        _postFrames = [new float[FftSize], new float[FftSize]];
 
         _preMagnitudes = new float[NumBands];
         _postMagnitudes = new float[NumBands];
@@ -131,8 +137,9 @@ public sealed class SpectralDeltaProcessor
         // Check if it's time to capture a new snapshot
         if (_sampleAccumulator >= UpdateIntervalSamples)
         {
-            // Capture pre-plugin FFT from current buffer
-            CaptureSpectrum(buffer, _preReal, _preImag, _preMagnitudes);
+            int target = _captureIndex == 0 ? 1 : 0;
+            CopyFrame(buffer, _preFrames[target]);
+            _captureIndex = target;
             _captureThisBlock = true;
         }
     }
@@ -145,14 +152,29 @@ public sealed class SpectralDeltaProcessor
     {
         if (_captureThisBlock)
         {
-            // Capture post-plugin FFT from the same buffer (now modified by plugin)
-            CaptureSpectrum(buffer, _postReal, _postImag, _postMagnitudes);
-            ComputeDelta();
-
+            CopyFrame(buffer, _postFrames[_captureIndex]);
+            Volatile.Write(ref _readyIndex, _captureIndex);
             _captureThisBlock = false;
             _sampleAccumulator = 0;
-            _hasUpdate = true;
+            Interlocked.Exchange(ref _pendingUpdate, 1);
         }
+    }
+
+    /// <summary>
+    /// Compute a new delta snapshot on a non-audio thread (returns true if updated).
+    /// </summary>
+    public bool TryUpdate()
+    {
+        if (Interlocked.Exchange(ref _pendingUpdate, 0) == 0)
+        {
+            return false;
+        }
+
+        int index = Volatile.Read(ref _readyIndex);
+        ComputeSpectrum(_preFrames[index], _preReal, _preImag, _preMagnitudes);
+        ComputeSpectrum(_postFrames[index], _postReal, _postImag, _postMagnitudes);
+        ComputeDelta();
+        return true;
     }
 
     /// <summary>
@@ -162,7 +184,9 @@ public sealed class SpectralDeltaProcessor
     {
         _sampleAccumulator = 0;
         _captureThisBlock = false;
-        _hasUpdate = false;
+        _captureIndex = 0;
+        _readyIndex = 0;
+        Interlocked.Exchange(ref _pendingUpdate, 0);
 
         Array.Clear(_preMagnitudes);
         Array.Clear(_postMagnitudes);
@@ -170,13 +194,13 @@ public sealed class SpectralDeltaProcessor
         Array.Clear(_bandDeltas);
     }
 
-    private void CaptureSpectrum(ReadOnlySpan<float> buffer, float[] real, float[] imag, float[] magnitudes)
+    private void ComputeSpectrum(ReadOnlySpan<float> frame, float[] real, float[] imag, float[] magnitudes)
     {
         // Copy buffer to FFT arrays with windowing
-        int copyLen = Math.Min(buffer.Length, FftSize);
+        int copyLen = Math.Min(frame.Length, FftSize);
         for (int i = 0; i < copyLen; i++)
         {
-            real[i] = buffer[i] * _window[i];
+            real[i] = frame[i] * _window[i];
             imag[i] = 0f;
         }
         // Zero-pad if buffer is smaller than FFT size
@@ -188,6 +212,20 @@ public sealed class SpectralDeltaProcessor
 
         _fft.Forward(real, imag);
         ComputeBandMagnitudes(real, imag, magnitudes);
+    }
+
+    private static void CopyFrame(ReadOnlySpan<float> source, float[] destination)
+    {
+        int copyLen = Math.Min(source.Length, destination.Length);
+        for (int i = 0; i < copyLen; i++)
+        {
+            destination[i] = source[i];
+        }
+
+        if (copyLen < destination.Length)
+        {
+            Array.Clear(destination, copyLen, destination.Length - copyLen);
+        }
     }
 
     private void ComputeDelta()
@@ -217,17 +255,17 @@ public sealed class SpectralDeltaProcessor
             int startBin = _bandStartBin[band];
             int endBin = _bandEndBin[band];
 
-            float sumMag = 0f;
+            double sumMag = 0.0;
             int count = 0;
 
             for (int bin = startBin; bin <= endBin && bin < FftSize / 2; bin++)
             {
-                float mag = MathF.Sqrt(real[bin] * real[bin] + imag[bin] * imag[bin]);
+                double mag = Math.Sqrt(real[bin] * real[bin] + imag[bin] * imag[bin]);
                 sumMag += mag;
                 count++;
             }
 
-            magnitudes[band] = count > 0 ? sumMag / count : 0f;
+            magnitudes[band] = count > 0 ? (float)(sumMag / count) : 0f;
         }
     }
 

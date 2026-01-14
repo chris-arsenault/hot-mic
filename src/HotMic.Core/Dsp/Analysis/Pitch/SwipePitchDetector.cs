@@ -85,8 +85,8 @@ public sealed class SwipePitchDetector
                 continue;
             }
 
-            float sum = 0f;
-            float sumW = 0f;
+            double sum = 0.0;
+            double sumW = 0.0;
             for (int h = 1; h <= harmonicLimit; h++)
             {
                 float freq = f0 * h;
@@ -101,7 +101,7 @@ public sealed class SwipePitchDetector
                 sumW += weight;
             }
 
-            float score = sumW > 0f ? sum / sumW : 0f;
+            float score = sumW > 0.0 ? (float)(sum / sumW) : 0f;
             if (score > bestScore)
             {
                 secondScore = bestScore;
