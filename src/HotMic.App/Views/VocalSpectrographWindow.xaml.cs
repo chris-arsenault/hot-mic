@@ -1,5 +1,7 @@
 using System;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -8,6 +10,7 @@ using HotMic.Core.Dsp;
 using HotMic.Core.Plugins.BuiltIn;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
+using WpfToolTip = System.Windows.Controls.ToolTip;
 
 namespace HotMic.App.Views;
 
@@ -23,6 +26,12 @@ public partial class VocalSpectrographWindow : Window
     private float _dragStartY;
     private float _dragStartValue;
     private int _hoveredKnob = -1;
+    private bool _isPaused;
+    private long _latestFrameId = -1;
+    private int _availableFrames;
+    private long? _referenceFrameId;
+    private WpfToolTip? _spectrogramToolTip;
+    private string _currentTooltip = string.Empty;
 
     private int _lastDataVersion = -1;
     private float[] _spectrogram = Array.Empty<float>();
@@ -55,6 +64,10 @@ public partial class VocalSpectrographWindow : Window
         FrequencyScale.Erb,
         FrequencyScale.Bark
     };
+    private static readonly string[] NoteNames =
+    {
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+    };
 
     private static readonly (int paramIndex, float min, float max)[] KnobParams =
     {
@@ -77,6 +90,16 @@ public partial class VocalSpectrographWindow : Window
         Width = preferredSize.Width;
         Height = preferredSize.Height;
 
+        _spectrogramToolTip = new WpfToolTip
+        {
+            Placement = PlacementMode.Relative,
+            PlacementTarget = SkiaCanvas,
+            StaysOpen = true
+        };
+        ToolTipService.SetInitialShowDelay(SkiaCanvas, 0);
+        ToolTipService.SetShowDuration(SkiaCanvas, int.MaxValue);
+        SkiaCanvas.ToolTip = _spectrogramToolTip;
+
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += OnRenderTick;
         Loaded += (_, _) =>
@@ -96,14 +119,21 @@ public partial class VocalSpectrographWindow : Window
     {
         EnsureBuffers();
 
-        int dataVersion = _plugin.DataVersion;
-        if (dataVersion != _lastDataVersion)
+        if (!_isPaused)
         {
-            if (_plugin.CopySpectrogramData(_spectrogram, _pitchTrack, _pitchConfidence,
-                    _formantFrequencies, _formantBandwidths, _voicingStates, _harmonicFrequencies))
+            int dataVersion = _plugin.DataVersion;
+            if (dataVersion != _lastDataVersion)
             {
-                _lastDataVersion = dataVersion;
+                if (_plugin.CopySpectrogramData(_spectrogram, _pitchTrack, _pitchConfidence,
+                        _formantFrequencies, _formantBandwidths, _voicingStates, _harmonicFrequencies))
+                {
+                    _lastDataVersion = dataVersion;
+                }
             }
+
+            _latestFrameId = _plugin.LatestFrameId;
+            _availableFrames = _plugin.AvailableFrames;
+            CullReferenceLine();
         }
 
         SkiaCanvas.InvalidateVisual();
@@ -171,7 +201,9 @@ public partial class VocalSpectrographWindow : Window
             DisplayBins: _bufferBins,
             FrameCount: _bufferFrameCount,
             ColorMap: _plugin.ColorMap,
+            ReassignMode: _plugin.ReassignMode,
             IsBypassed: _plugin.IsBypassed,
+            IsPaused: _isPaused,
             ShowPitch: _plugin.ShowPitch,
             ShowFormants: _plugin.ShowFormants,
             ShowHarmonics: _plugin.ShowHarmonics,
@@ -179,6 +211,9 @@ public partial class VocalSpectrographWindow : Window
             PreEmphasisEnabled: _plugin.PreEmphasisEnabled,
             HighPassEnabled: _plugin.HighPassEnabled,
             HighPassCutoff: _plugin.HighPassCutoff,
+            LatestFrameId: _latestFrameId,
+            AvailableFrames: _availableFrames,
+            ReferenceFrameId: _referenceFrameId,
             HoveredKnob: _hoveredKnob,
             DataVersion: _lastDataVersion,
             Spectrogram: _spectrogram,
@@ -240,6 +275,14 @@ public partial class VocalSpectrographWindow : Window
                 CycleColorMap();
                 e.Handled = true;
                 break;
+            case SpectrographHitArea.ReassignButton:
+                CycleReassignMode();
+                e.Handled = true;
+                break;
+            case SpectrographHitArea.PauseButton:
+                TogglePause();
+                e.Handled = true;
+                break;
             case SpectrographHitArea.PitchToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowPitchIndex, _plugin.ShowPitch);
                 e.Handled = true;
@@ -264,6 +307,12 @@ public partial class VocalSpectrographWindow : Window
                 ToggleParameter(VocalSpectrographPlugin.HighPassEnabledIndex, _plugin.HighPassEnabled);
                 e.Handled = true;
                 break;
+            case SpectrographHitArea.Spectrogram:
+                if (TrySetReferenceLine(x))
+                {
+                    e.Handled = true;
+                }
+                break;
             case SpectrographHitArea.Knob:
                 _activeKnob = hit.KnobIndex;
                 _dragStartY = y;
@@ -285,13 +334,28 @@ public partial class VocalSpectrographWindow : Window
             float deltaY = _dragStartY - y;
             float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.004f);
             ApplyKnobValue(_activeKnob, newNormalized);
+            SetTooltip(null);
             e.Handled = true;
         }
         else
         {
             var hit = _renderer.HitTest(x, y);
             _hoveredKnob = hit.Area == SpectrographHitArea.Knob ? hit.KnobIndex : -1;
+            if (hit.Area == SpectrographHitArea.Spectrogram)
+            {
+                UpdateSpectrogramTooltip(x, y);
+            }
+            else
+            {
+                SetTooltip(null);
+            }
         }
+    }
+
+    private void SkiaCanvas_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        _hoveredKnob = -1;
+        SetTooltip(null);
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
@@ -383,6 +447,171 @@ public partial class VocalSpectrographWindow : Window
         int count = Enum.GetValues<SpectrogramColorMap>().Length;
         int next = (current + 1) % count;
         _parameterCallback(VocalSpectrographPlugin.ColorMapIndex, next);
+    }
+
+    private void CycleReassignMode()
+    {
+        SpectrogramReassignMode next = _plugin.ReassignMode switch
+        {
+            SpectrogramReassignMode.Off => SpectrogramReassignMode.Frequency,
+            SpectrogramReassignMode.Frequency => SpectrogramReassignMode.Time,
+            SpectrogramReassignMode.Time => SpectrogramReassignMode.TimeFrequency,
+            _ => SpectrogramReassignMode.Off
+        };
+        _parameterCallback(VocalSpectrographPlugin.ReassignModeIndex, (float)next);
+    }
+
+    private void TogglePause()
+    {
+        _isPaused = !_isPaused;
+        if (!_isPaused)
+        {
+            _plugin.SetVisualizationActive(true);
+            ClearLocalBuffers();
+        }
+        else
+        {
+            SetTooltip(null);
+        }
+    }
+
+    private void ClearLocalBuffers()
+    {
+        Array.Clear(_spectrogram, 0, _spectrogram.Length);
+        Array.Clear(_pitchTrack, 0, _pitchTrack.Length);
+        Array.Clear(_pitchConfidence, 0, _pitchConfidence.Length);
+        Array.Clear(_formantFrequencies, 0, _formantFrequencies.Length);
+        Array.Clear(_formantBandwidths, 0, _formantBandwidths.Length);
+        Array.Clear(_voicingStates, 0, _voicingStates.Length);
+        Array.Clear(_harmonicFrequencies, 0, _harmonicFrequencies.Length);
+        _lastDataVersion = -1;
+        _latestFrameId = -1;
+        _availableFrames = 0;
+        _referenceFrameId = null;
+    }
+
+    private bool TrySetReferenceLine(float x)
+    {
+        if (_availableFrames <= 0 || _latestFrameId < 0)
+        {
+            return false;
+        }
+
+        if (!_renderer.TryGetSpectrogramRect(out var rect))
+        {
+            return false;
+        }
+
+        float t = Math.Clamp((x - rect.Left) / rect.Width, 0f, 1f);
+        int columnIndex = (int)MathF.Round(t * Math.Max(1, _bufferFrameCount - 1));
+        int padFrames = Math.Max(0, _bufferFrameCount - _availableFrames);
+        int visibleIndex = columnIndex - padFrames;
+        if (visibleIndex < 0 || visibleIndex >= _availableFrames)
+        {
+            return false;
+        }
+
+        long oldestFrameId = _latestFrameId - _availableFrames + 1;
+        _referenceFrameId = oldestFrameId + visibleIndex;
+        return true;
+    }
+
+    private void CullReferenceLine()
+    {
+        if (_referenceFrameId is null || _availableFrames <= 0 || _latestFrameId < 0)
+        {
+            return;
+        }
+
+        long oldestFrameId = _latestFrameId - _availableFrames + 1;
+        if (_referenceFrameId.Value < oldestFrameId)
+        {
+            _referenceFrameId = null;
+        }
+    }
+
+    private void UpdateSpectrogramTooltip(float x, float y)
+    {
+        if (_spectrogramToolTip is null)
+        {
+            return;
+        }
+
+        if (!_renderer.TryGetSpectrogramRect(out var rect) || !rect.Contains(x, y))
+        {
+            SetTooltip(null);
+            return;
+        }
+
+        float frequency = GetFrequencyAtPosition(y, rect);
+        string note = GetNearestNoteName(frequency);
+        string text = $"{FormatFrequency(frequency)} ({note})";
+        if (!string.Equals(_currentTooltip, text, StringComparison.Ordinal))
+        {
+            _currentTooltip = text;
+            _spectrogramToolTip.Content = text;
+        }
+
+        _spectrogramToolTip.HorizontalOffset = x + 12f;
+        _spectrogramToolTip.VerticalOffset = y + 12f;
+        _spectrogramToolTip.IsOpen = true;
+    }
+
+    private void SetTooltip(string? text)
+    {
+        if (_spectrogramToolTip is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            _spectrogramToolTip.IsOpen = false;
+            _currentTooltip = string.Empty;
+            return;
+        }
+
+        if (!string.Equals(_currentTooltip, text, StringComparison.Ordinal))
+        {
+            _currentTooltip = text;
+            _spectrogramToolTip.Content = text;
+        }
+    }
+
+    private float GetFrequencyAtPosition(float y, SkiaSharp.SKRect rect)
+    {
+        float norm = Math.Clamp((rect.Bottom - y) / rect.Height, 0f, 1f);
+        float minHz = _plugin.MinFrequency;
+        float maxHz = _plugin.MaxFrequency;
+        float scaledMin = FrequencyScaleUtils.ToScale(_plugin.Scale, minHz);
+        float scaledMax = FrequencyScaleUtils.ToScale(_plugin.Scale, maxHz);
+        float range = scaledMax - scaledMin;
+        if (MathF.Abs(range) < 1e-6f)
+        {
+            return minHz;
+        }
+
+        float scaled = scaledMin + range * norm;
+        return FrequencyScaleUtils.FromScale(_plugin.Scale, scaled);
+    }
+
+    private static string FormatFrequency(float frequency)
+    {
+        return frequency >= 1000f ? $"{frequency / 1000f:0.#} kHz" : $"{frequency:0} Hz";
+    }
+
+    private static string GetNearestNoteName(float frequency)
+    {
+        if (frequency <= 0f || float.IsNaN(frequency) || float.IsInfinity(frequency))
+        {
+            return "--";
+        }
+
+        float note = 69f + 12f * MathF.Log2(frequency / 440f);
+        int midi = Math.Clamp((int)MathF.Round(note), 0, 127);
+        int octave = midi / 12 - 1;
+        string name = NoteNames[midi % 12];
+        return $"{name}{octave}";
     }
 
     private float GetDpiScale()

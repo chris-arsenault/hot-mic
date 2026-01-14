@@ -14,6 +14,7 @@
                     PaintSurface="SkiaCanvas_PaintSurface"
                     MouseDown="SkiaCanvas_MouseDown"
                     MouseMove="SkiaCanvas_MouseMove"
-                    MouseUp="SkiaCanvas_MouseUp" />
+                    MouseUp="SkiaCanvas_MouseUp"
+                    MouseLeave="SkiaCanvas_MouseLeave" />
   </Grid>
 </Window>

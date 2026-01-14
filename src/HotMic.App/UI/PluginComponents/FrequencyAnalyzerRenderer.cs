@@ -30,6 +30,10 @@ public sealed class FrequencyAnalyzerRenderer : IDisposable
     private readonly SKPaint _buttonPaint;
     private readonly SKPaint _buttonActivePaint;
     private readonly SKPaint _buttonTextPaint;
+    private readonly SKPath _spectrumPath = new();
+    private readonly SKPath _spectrumFillPath = new();
+    private float[] _spectrumXPositions = Array.Empty<float>();
+    private float _lastSpectrumWidth;
 
     private readonly SKPoint[] _knobCenters = new SKPoint[4];
     private SKRect _titleBarRect;
@@ -257,28 +261,31 @@ public sealed class FrequencyAnalyzerRenderer : IDisposable
             return;
         }
 
-        using var path = new SKPath();
-        float step = rect.Width / (bins - 1);
+        EnsureSpectrumPositions(rect, bins);
+        _spectrumPath.Rewind();
+        _spectrumFillPath.Rewind();
+
         for (int i = 0; i < bins; i++)
         {
-            float x = rect.Left + i * step;
+            float x = _spectrumXPositions[i];
             float y = rect.Bottom - rect.Height * state.Spectrum[i];
             if (i == 0)
             {
-                path.MoveTo(x, y);
+                _spectrumPath.MoveTo(x, y);
+                _spectrumFillPath.MoveTo(x, y);
             }
             else
             {
-                path.LineTo(x, y);
+                _spectrumPath.LineTo(x, y);
+                _spectrumFillPath.LineTo(x, y);
             }
         }
 
-        using var fillPath = new SKPath(path);
-        fillPath.LineTo(rect.Right, rect.Bottom);
-        fillPath.LineTo(rect.Left, rect.Bottom);
-        fillPath.Close();
-        canvas.DrawPath(fillPath, _spectrumFillPaint);
-        canvas.DrawPath(path, _spectrumPaint);
+        _spectrumFillPath.LineTo(rect.Right, rect.Bottom);
+        _spectrumFillPath.LineTo(rect.Left, rect.Bottom);
+        _spectrumFillPath.Close();
+        canvas.DrawPath(_spectrumFillPath, _spectrumFillPaint);
+        canvas.DrawPath(_spectrumPath, _spectrumPaint);
     }
 
     private void DrawFrequencyLabels(SKCanvas canvas, SKRect rect, FrequencyAnalyzerState state)
@@ -332,8 +339,25 @@ public sealed class FrequencyAnalyzerRenderer : IDisposable
         return MathF.Sqrt(dx * dx + dy * dy);
     }
 
+    private void EnsureSpectrumPositions(SKRect rect, int bins)
+    {
+        if (_spectrumXPositions.Length != bins || _lastSpectrumWidth != rect.Width)
+        {
+            _spectrumXPositions = new float[bins];
+            float step = rect.Width / Math.Max(1, bins - 1);
+            for (int i = 0; i < bins; i++)
+            {
+                _spectrumXPositions[i] = rect.Left + i * step;
+            }
+
+            _lastSpectrumWidth = rect.Width;
+        }
+    }
+
     public void Dispose()
     {
+        _spectrumPath.Dispose();
+        _spectrumFillPath.Dispose();
         _knob.Dispose();
         _backgroundPaint.Dispose();
         _panelPaint.Dispose();
