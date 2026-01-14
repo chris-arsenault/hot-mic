@@ -14,6 +14,14 @@ This document provides structured guidance for AI coding agents working on the H
 
 ---
 
+## Technical Specifications
+
+All DSP/analysis/visualization specs live in `docs/technical/`. Do not duplicate spec details in this file; reference the relevant technical doc and update it when behavior changes.
+
+Index: `docs/technical/README.md`
+
+---
+
 ## Architecture Rules
 
 ### Strict Separation of Concerns
@@ -292,88 +300,7 @@ public class MeterControl : SkiaControl
 - **Do not change DSP algorithms to match UI behavior.** If the UI does not reflect audible behavior, fix the UI scaling/meters/labels first.
 - **Do change DSP algorithms when there are real bugs,** but validate changes against reference implementations or standard formulas for that DSP class.
 - **Document the reference** with a concise inline comment near the relevant code so intent and expected behavior are clear.
-
-### Compressor Implementation Outline
-
-```csharp
-public class CompressorPlugin : IPlugin
-{
-    // Parameters
-    private float _thresholdDb = -20f;
-    private float _ratio = 4f;
-    private float _attackMs = 10f;
-    private float _releaseMs = 100f;
-    private float _makeupDb = 0f;
-    
-    // Computed coefficients (update when params change)
-    private float _thresholdLinear;
-    private float _attackCoeff;
-    private float _releaseCoeff;
-    private float _makeupLinear;
-    
-    // State
-    private float _envelope = 0f;
-    
-    public void Process(Span<float> buffer)
-    {
-        for (int i = 0; i < buffer.Length; i++)
-        {
-            float input = buffer[i];
-            float inputAbs = MathF.Abs(input);
-            
-            // Envelope follower
-            float coeff = inputAbs > _envelope ? _attackCoeff : _releaseCoeff;
-            _envelope = _envelope + coeff * (inputAbs - _envelope);
-            
-            // Gain computation (log domain)
-            float gainDb = 0f;
-            if (_envelope > _thresholdLinear)
-            {
-                float overDb = 20f * MathF.Log10(_envelope / _thresholdLinear);
-                gainDb = overDb * (1f - 1f / _ratio);
-            }
-            
-            // Apply gain
-            float gainLinear = MathF.Pow(10f, -gainDb / 20f) * _makeupLinear;
-            buffer[i] = input * gainLinear;
-        }
-    }
-}
-```
-
-### FFT Noise Removal Outline
-
-```csharp
-public class FFTNoiseRemovalPlugin : IPlugin
-{
-    private const int FFTSize = 2048;
-    private const int HopSize = FFTSize / 2;  // 50% overlap
-    
-    private float[] _inputBuffer;      // Circular buffer
-    private float[] _outputBuffer;     // Overlap-add buffer
-    private float[] _fftReal;
-    private float[] _fftImag;
-    private float[] _window;           // Hann window
-    private float[] _noiseProfile;     // Learned noise magnitude spectrum
-    private bool _learning = false;
-    
-    public void LearnNoiseProfile()
-    {
-        _learning = true;
-        // Accumulate frames, average magnitude spectrum
-    }
-    
-    public void Process(Span<float> buffer)
-    {
-        // Overlap-add STFT processing
-        // 1. Window input
-        // 2. FFT
-        // 3. Spectral subtraction: mag = max(mag - noiseProfile * reduction, floor)
-        // 4. IFFT
-        // 5. Overlap-add to output
-    }
-}
-```
+- **Keep spec docs in sync** whenever DSP algorithms change (update `docs/technical` references to match behavior).
 
 ---
 
@@ -450,7 +377,8 @@ HotMic/
 │   └── HotMic.Dsp.Tests/
 │
 └── docs/
-    ├── REQUIREMENTS.md
+    ├── technical/
+    │   └── README.md
     ├── AGENTS.md
     └── CLAUDE.md
 ```
@@ -543,7 +471,7 @@ This repo uses a WSL source tree with build outputs redirected to a Windows NTFS
 
 A feature is complete when:
 
-- [ ] Implementation matches requirements in REQUIREMENTS.md
+- [ ] Implementation matches documented requirements in `README.md` and `docs/technical/README.md`
 - [ ] No memory allocations in audio callback path (verify with profiler)
 - [ ] UI remains responsive during audio processing
 - [ ] No audio glitches under normal operation

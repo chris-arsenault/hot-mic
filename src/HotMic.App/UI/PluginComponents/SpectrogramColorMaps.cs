@@ -2,6 +2,9 @@ using SkiaSharp;
 
 namespace HotMic.App.UI.PluginComponents;
 
+/// <summary>
+/// Available spectrogram color palettes for vocal analysis.
+/// </summary>
 public enum SpectrogramColorMap
 {
     Vocal = 0,
@@ -43,6 +46,7 @@ public static class SpectrogramColorMaps
 
     private static SKColor[] BuildVocal()
     {
+        // Vocal gradient per docs/technical/Spectrogram-Rendering.md##Color Maps: black -> purple -> blue -> cyan -> yellow -> white.
         SKColor[] stops =
         {
             new(0x00, 0x00, 0x00),
@@ -133,6 +137,7 @@ public static class SpectrogramColorMaps
 
     private static SKColor[] BuildBlue()
     {
+        // Blue-on-black theme requested for v1 readability on dark backgrounds.
         SKColor[] stops =
         {
             new(0x00, 0x00, 0x00),

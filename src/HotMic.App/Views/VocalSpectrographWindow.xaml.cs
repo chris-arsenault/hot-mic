@@ -281,6 +281,8 @@ public partial class VocalSpectrographWindow : Window
             Gamma: _plugin.Gamma,
             Contrast: _plugin.Contrast,
             ColorLevels: _plugin.ColorLevels,
+            NormalizationMode: _plugin.NormalizationMode,
+            DynamicRangeMode: _plugin.DynamicRangeMode,
             IsBypassed: _plugin.IsBypassed,
             IsPaused: _isPaused,
             ShowPitch: _plugin.ShowPitch,
@@ -430,6 +432,14 @@ public partial class VocalSpectrographWindow : Window
                 break;
             case SpectrographHitArea.VoiceRangeButton:
                 CycleVoiceRange();
+                e.Handled = true;
+                break;
+            case SpectrographHitArea.NormalizationButton:
+                CycleNormalizationMode();
+                e.Handled = true;
+                break;
+            case SpectrographHitArea.DynamicRangeButton:
+                CycleDynamicRangeMode();
                 e.Handled = true;
                 break;
             case SpectrographHitArea.WaveformToggle:
@@ -636,8 +646,10 @@ public partial class VocalSpectrographWindow : Window
     {
         PitchDetectorType next = _plugin.PitchAlgorithm switch
         {
-            PitchDetectorType.Yin => PitchDetectorType.Autocorrelation,
+            PitchDetectorType.Yin => PitchDetectorType.Pyin,
+            PitchDetectorType.Pyin => PitchDetectorType.Autocorrelation,
             PitchDetectorType.Autocorrelation => PitchDetectorType.Cepstral,
+            PitchDetectorType.Cepstral => PitchDetectorType.Swipe,
             _ => PitchDetectorType.Yin
         };
         _parameterCallback(VocalSpectrographPlugin.PitchAlgorithmIndex, (float)next);
@@ -680,6 +692,33 @@ public partial class VocalSpectrographWindow : Window
             _ => SpectrogramSmoothingMode.Off
         };
         _parameterCallback(VocalSpectrographPlugin.SmoothingModeIndex, (float)next);
+        _presetHelper.MarkAsCustom();
+    }
+
+    private void CycleNormalizationMode()
+    {
+        SpectrogramNormalizationMode next = _plugin.NormalizationMode switch
+        {
+            SpectrogramNormalizationMode.None => SpectrogramNormalizationMode.Peak,
+            SpectrogramNormalizationMode.Peak => SpectrogramNormalizationMode.Rms,
+            SpectrogramNormalizationMode.Rms => SpectrogramNormalizationMode.AWeighted,
+            _ => SpectrogramNormalizationMode.None
+        };
+        _parameterCallback(VocalSpectrographPlugin.NormalizationModeIndex, (float)next);
+        _presetHelper.MarkAsCustom();
+    }
+
+    private void CycleDynamicRangeMode()
+    {
+        SpectrogramDynamicRangeMode next = _plugin.DynamicRangeMode switch
+        {
+            SpectrogramDynamicRangeMode.Custom => SpectrogramDynamicRangeMode.VoiceOptimized,
+            SpectrogramDynamicRangeMode.VoiceOptimized => SpectrogramDynamicRangeMode.Full,
+            SpectrogramDynamicRangeMode.Full => SpectrogramDynamicRangeMode.Compressed,
+            SpectrogramDynamicRangeMode.Compressed => SpectrogramDynamicRangeMode.NoiseFloor,
+            _ => SpectrogramDynamicRangeMode.Custom
+        };
+        _parameterCallback(VocalSpectrographPlugin.DynamicRangeModeIndex, (float)next);
         _presetHelper.MarkAsCustom();
     }
 
@@ -889,6 +928,8 @@ public partial class VocalSpectrographWindow : Window
                 "Gamma" => VocalSpectrographPlugin.GammaIndex,
                 "Contrast" => VocalSpectrographPlugin.ContrastIndex,
                 "Color Levels" => VocalSpectrographPlugin.ColorLevelsIndex,
+                "Normalization" => VocalSpectrographPlugin.NormalizationModeIndex,
+                "Dynamic Range" => VocalSpectrographPlugin.DynamicRangeModeIndex,
                 _ => -1
             };
 
@@ -941,7 +982,9 @@ public partial class VocalSpectrographWindow : Window
             ["Brightness"] = _plugin.Brightness,
             ["Gamma"] = _plugin.Gamma,
             ["Contrast"] = _plugin.Contrast,
-            ["Color Levels"] = _plugin.ColorLevels
+            ["Color Levels"] = _plugin.ColorLevels,
+            ["Normalization"] = (float)_plugin.NormalizationMode,
+            ["Dynamic Range"] = (float)_plugin.DynamicRangeMode
         };
     }
 

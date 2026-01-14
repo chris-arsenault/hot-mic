@@ -585,7 +585,7 @@ public sealed class PluginPresetManager
             ["Scale"] = (float)FrequencyScale.Mel,
             ["Min Freq"] = 80f,
             ["Max Freq"] = 8000f,
-            ["Min dB"] = -70f,
+            ["Min dB"] = -80f,
             ["Max dB"] = 0f,
             ["Time Window"] = 5f,
             ["Color Map"] = 6f,
@@ -617,7 +617,9 @@ public sealed class PluginPresetManager
             ["Brightness"] = 1f,
             ["Gamma"] = 0.8f,
             ["Contrast"] = 1.2f,
-            ["Color Levels"] = 32f
+            ["Color Levels"] = 32f,
+            ["Normalization"] = (float)SpectrogramNormalizationMode.None,
+            ["Dynamic Range"] = (float)SpectrogramDynamicRangeMode.Custom
         };
 
         PluginPreset CreateVocalPreset(string name, params (string parameter, float value)[] overrides)
@@ -767,7 +769,36 @@ public sealed class PluginPresetManager
                 ("Waveform View", 0f),
                 ("Spectrum View", 0f),
                 ("Pitch Meter", 0f),
-                ("Vowel View", 0f))
+                ("Vowel View", 0f)),
+            CreateVocalPreset("Maximum Clarity",
+                ("Min dB", -65f),
+                ("Clarity Mode", (float)ClarityProcessingMode.Full),
+                ("Clarity Noise", 1f),
+                ("Clarity Harmonic", 1f),
+                ("Clarity Smoothing", 0.35f),
+                ("Smoothing Mode", (float)SpectrogramSmoothingMode.Bilateral),
+                ("Gamma", 0.75f)),
+            CreateVocalPreset("Balanced"),
+            CreateVocalPreset("Low Latency",
+                ("FFT Size", 1024f),
+                ("Overlap", 0.5f),
+                ("Min dB", -60f),
+                ("Clarity Mode", (float)ClarityProcessingMode.Noise),
+                ("Clarity Noise", 0.5f),
+                ("Clarity Harmonic", 0f),
+                ("Clarity Smoothing", 0.2f),
+                ("Smoothing Mode", (float)SpectrogramSmoothingMode.Ema),
+                ("Gamma", 0.85f)),
+            CreateVocalPreset("Analysis Mode",
+                ("Min dB", -80f),
+                ("Clarity Mode", (float)ClarityProcessingMode.None),
+                ("Clarity Noise", 0f),
+                ("Clarity Harmonic", 0f),
+                ("Clarity Smoothing", 0f),
+                ("Smoothing Mode", (float)SpectrogramSmoothingMode.Off),
+                ("Gamma", 1f),
+                ("Contrast", 1f),
+                ("Brightness", 1f))
         ]);
     }
 

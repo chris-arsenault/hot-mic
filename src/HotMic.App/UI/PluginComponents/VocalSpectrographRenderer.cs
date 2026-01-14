@@ -52,6 +52,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private readonly SKPaint _silencePaint;
     private readonly SKPaint _waveformPaint;
     private readonly SKPaint _waveformFillPaint;
+    private readonly SKPaint _waveformEnvelopePaint;
+    private readonly SKPaint _waveformZeroPaint;
     private readonly SKPaint _spectrumPaint;
     private readonly SKPaint _spectrumPeakPaint;
     private readonly SKPaint _rangeBandPaint;
@@ -84,6 +86,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private SKRect _rangeToggleRect;
     private SKRect _guidesToggleRect;
     private SKRect _voiceRangeRect;
+    private SKRect _normalizationRect;
+    private SKRect _dynamicRangeRect;
     private SKRect _waveformToggleRect;
     private SKRect _spectrumToggleRect;
     private SKRect _pitchMeterToggleRect;
@@ -199,6 +203,20 @@ public sealed class VocalSpectrographRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
+        _waveformEnvelopePaint = new SKPaint
+        {
+            Color = _theme.TextPrimary.WithAlpha(140),
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 1.2f
+        };
+        _waveformZeroPaint = new SKPaint
+        {
+            Color = _theme.TextSecondary.WithAlpha(180),
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 1f
+        };
         _spectrumPaint = new SKPaint
         {
             Color = _theme.AccentSecondary,
@@ -309,6 +327,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
         if (_rangeToggleRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.RangeToggle, -1);
         if (_guidesToggleRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.GuidesToggle, -1);
         if (_voiceRangeRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.VoiceRangeButton, -1);
+        if (_normalizationRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.NormalizationButton, -1);
+        if (_dynamicRangeRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.DynamicRangeButton, -1);
         if (_waveformToggleRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.WaveformToggle, -1);
         if (_spectrumToggleRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.SpectrumToggle, -1);
         if (_pitchMeterToggleRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.PitchMeterToggle, -1);
@@ -443,6 +463,16 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
         _voiceRangeRect = new SKRect(toggleX, row2Y, toggleX + toggleWidth, row2Y + toggleHeight);
         DrawPillButton(canvas, _voiceRangeRect, FormatVoiceRangeLabel(state.VoiceRange), state.ShowRange);
+        toggleX = _voiceRangeRect.Right + 6f;
+
+        _normalizationRect = new SKRect(toggleX, row2Y, toggleX + toggleWidth, row2Y + toggleHeight);
+        DrawPillButton(canvas, _normalizationRect, FormatNormalizationLabel(state.NormalizationMode),
+            state.NormalizationMode != SpectrogramNormalizationMode.None);
+        toggleX = _normalizationRect.Right + 6f;
+
+        _dynamicRangeRect = new SKRect(toggleX, row2Y, toggleX + toggleWidth, row2Y + toggleHeight);
+        DrawPillButton(canvas, _dynamicRangeRect, FormatDynamicRangeLabel(state.DynamicRangeMode),
+            state.DynamicRangeMode != SpectrogramDynamicRangeMode.Custom);
 
         float row3Y = row2Y + toggleHeight + 6f;
         float viewWidth = 78f;
@@ -534,6 +564,9 @@ public sealed class VocalSpectrographRenderer : IDisposable
         float xStep = rect.Width / Math.Max(1, state.FrameCount - 1);
         float center = rect.MidY;
         float half = rect.Height * 0.45f;
+        using var envelopeTop = new SKPath();
+        using var envelopeBottom = new SKPath();
+        bool envelopeStarted = false;
 
         for (int frame = 0; frame < frames; frame += step)
         {
@@ -543,6 +576,32 @@ public sealed class VocalSpectrographRenderer : IDisposable
             float y1 = center - max * half;
             float y2 = center - min * half;
             canvas.DrawLine(x, y1, x, y2, _waveformPaint);
+
+            float envelope = MathF.Max(MathF.Abs(min), MathF.Abs(max));
+            float yEnvTop = center - envelope * half;
+            float yEnvBottom = center + envelope * half;
+            if (!envelopeStarted)
+            {
+                envelopeTop.MoveTo(x, yEnvTop);
+                envelopeBottom.MoveTo(x, yEnvBottom);
+                envelopeStarted = true;
+            }
+            else
+            {
+                envelopeTop.LineTo(x, yEnvTop);
+                envelopeBottom.LineTo(x, yEnvBottom);
+            }
+
+            if (min < 0f && max > 0f)
+            {
+                canvas.DrawLine(x, center - 3f, x, center + 3f, _waveformZeroPaint);
+            }
+        }
+
+        if (envelopeStarted)
+        {
+            canvas.DrawPath(envelopeTop, _waveformEnvelopePaint);
+            canvas.DrawPath(envelopeBottom, _waveformEnvelopePaint);
         }
     }
 
@@ -1580,6 +1639,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
         {
             PitchDetectorType.Autocorrelation => "P:ACF",
             PitchDetectorType.Cepstral => "P:CEP",
+            PitchDetectorType.Pyin => "P:pYIN",
+            PitchDetectorType.Swipe => "P:SWP",
             _ => "P:YIN"
         };
     }
@@ -1601,6 +1662,29 @@ public sealed class VocalSpectrographRenderer : IDisposable
             SpectrogramSmoothingMode.Ema => "SM:EMA",
             SpectrogramSmoothingMode.Bilateral => "SM:BIL",
             _ => "SM:Off"
+        };
+    }
+
+    private static string FormatNormalizationLabel(SpectrogramNormalizationMode mode)
+    {
+        return mode switch
+        {
+            SpectrogramNormalizationMode.Peak => "N:Peak",
+            SpectrogramNormalizationMode.Rms => "N:RMS",
+            SpectrogramNormalizationMode.AWeighted => "N:A",
+            _ => "N:Off"
+        };
+    }
+
+    private static string FormatDynamicRangeLabel(SpectrogramDynamicRangeMode mode)
+    {
+        return mode switch
+        {
+            SpectrogramDynamicRangeMode.Full => "DR:Full",
+            SpectrogramDynamicRangeMode.VoiceOptimized => "DR:Vox",
+            SpectrogramDynamicRangeMode.Compressed => "DR:Cmp",
+            SpectrogramDynamicRangeMode.NoiseFloor => "DR:Auto",
+            _ => "DR:Man"
         };
     }
 
@@ -1688,6 +1772,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
         _silencePaint.Dispose();
         _waveformPaint.Dispose();
         _waveformFillPaint.Dispose();
+        _waveformEnvelopePaint.Dispose();
+        _waveformZeroPaint.Dispose();
         _spectrumPaint.Dispose();
         _spectrumPeakPaint.Dispose();
         _rangeBandPaint.Dispose();
@@ -1726,6 +1812,8 @@ public enum SpectrographHitArea
     RangeToggle,
     GuidesToggle,
     VoiceRangeButton,
+    NormalizationButton,
+    DynamicRangeButton,
     WaveformToggle,
     SpectrumToggle,
     PitchMeterToggle,
@@ -1770,6 +1858,8 @@ public record struct VocalSpectrographState(
     float Gamma,
     float Contrast,
     int ColorLevels,
+    SpectrogramNormalizationMode NormalizationMode,
+    SpectrogramDynamicRangeMode DynamicRangeMode,
     bool IsBypassed,
     bool IsPaused,
     bool ShowPitch,
