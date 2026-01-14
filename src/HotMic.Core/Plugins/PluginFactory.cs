@@ -23,6 +23,7 @@ public static class PluginFactory
             "builtin:speechdenoiser" => new SpeechDenoiserPlugin(),
             "builtin:voice-gate" => new SileroVoiceGatePlugin(),
             "builtin:reverb" => new ConvolutionReverbPlugin(),
+            "builtin:signal-generator" => new SignalGeneratorPlugin(),
             _ => null
         };
     }

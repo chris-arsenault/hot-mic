@@ -24,3 +24,4 @@ are intentionally omitted.
 - `docs/technical/Realtime-Pipeline.md` - ring buffer flow and snapshot synchronization.
 - `docs/technical/Vocal-Reference.md` - vocal ranges and reference bands.
 - `docs/technical/Presets.md` - preset definitions and intent.
+- `docs/technical/SignalGenerator.md` - test signal generator plugin.

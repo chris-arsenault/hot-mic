@@ -1092,10 +1092,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 delta.DisplayMode = slot.DeltaDisplayMode;
             }
 
-            if (delta.HasUpdate)
+            if (delta.TryUpdate())
             {
                 slot.SpectralDelta = delta.BandDeltas;
-                delta.HasUpdate = false;
             }
         }
 
@@ -1346,6 +1345,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // Analysis
             new() { Id = "builtin:freq-analyzer", Name = "Frequency Analyzer", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Real-time spectrum view with tunable bins" },
             new() { Id = "builtin:vocal-spectrograph", Name = "Vocal Spectrograph", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Vocal-focused spectrogram with overlays" },
+            new() { Id = "builtin:signal-generator", Name = "Signal Generator", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Test tones, noise, and sample playback" },
 
             // AI/ML
             new() { Id = "builtin:rnnoise", Name = "RNNoise", IsVst3 = false, Category = PluginCategory.AiMl, Description = "Neural network noise suppression" },
@@ -1399,6 +1399,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (plugin is CompressorPlugin compressor)
         {
             ShowCompressorWindow(channelIndex, slotIndex, compressor);
+            return;
+        }
+
+        // Use specialized window for signal generator
+        if (plugin is SignalGeneratorPlugin signalGen)
+        {
+            ShowSignalGeneratorWindow(channelIndex, slotIndex, signalGen);
             return;
         }
 
@@ -1541,6 +1548,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowSignalGeneratorWindow(int channelIndex, int slotIndex, SignalGeneratorPlugin plugin)
+    {
+        var window = new SignalGeneratorWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters.FirstOrDefault(p => p.Index == paramIndex)?.Name ?? "";
                 ApplyPluginParameter(channelIndex, slotIndex, paramIndex, paramName, value);
             },
             bypassed => SetPluginBypass(channelIndex, slotIndex, bypassed))
