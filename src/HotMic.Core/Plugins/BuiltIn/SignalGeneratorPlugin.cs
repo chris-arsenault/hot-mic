@@ -663,7 +663,28 @@ public sealed class SignalGeneratorPlugin : IPlugin
     // Exposed for channel strip UI
     public float Slot0GainDb => _slots[0].GainDb;
     public float Slot1GainDb => _slots[1].GainDb;
+    public float Slot2GainDb => _slots[2].GainDb;
     public float MasterGainDb => _masterGainDb;
+
+    /// <summary>
+    /// Gets the current state of a slot for UI rendering.
+    /// </summary>
+    public (GeneratorType Type, float Frequency, float GainDb, bool Muted, bool Solo) GetSlotState(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= SlotCount)
+            return (GeneratorType.Sine, 440f, -12f, false, false);
+
+        ref var s = ref _slots[slotIndex];
+        return (s.Type, s.Frequency, s.GainDb, s.Muted, s.Solo);
+    }
+
+    /// <summary>
+    /// Gets master section state for UI rendering.
+    /// </summary>
+    public (float GainDb, bool Muted, HeadroomMode Headroom) GetMasterState()
+    {
+        return (_masterGainDb, _masterMuted, _headroomMode);
+    }
 
     #endregion
 

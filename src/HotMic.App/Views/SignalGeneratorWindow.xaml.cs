@@ -89,46 +89,22 @@ public partial class SignalGeneratorWindow : Window
             HoveredSlot = _hoveredSlot
         };
 
-        // Build slot states
+        // Build slot states from plugin
         for (int i = 0; i < 3; i++)
         {
-            int baseIndex = i * 20;
+            var slotState = _plugin.GetSlotState(i);
             state.Slots[i] = new SlotRenderState
             {
-                Type = (GeneratorType)(int)GetParamValue(baseIndex + SignalGeneratorPlugin.TypeIndex),
-                Frequency = GetParamValue(baseIndex + SignalGeneratorPlugin.FrequencyIndex),
-                GainDb = GetParamValue(baseIndex + SignalGeneratorPlugin.GainIndex),
-                IsMuted = GetParamValue(baseIndex + SignalGeneratorPlugin.MuteIndex) >= 0.5f,
-                IsSolo = GetParamValue(baseIndex + SignalGeneratorPlugin.SoloIndex) >= 0.5f,
+                Type = slotState.Type,
+                Frequency = slotState.Frequency,
+                GainDb = slotState.GainDb,
+                IsMuted = slotState.Muted,
+                IsSolo = slotState.Solo,
                 Level = _smoothedSlotLevels[i]
             };
         }
 
         _renderer.Render(canvas, size, dpiScale, state);
-    }
-
-    private float GetParamValue(int index)
-    {
-        // Get parameter value from plugin
-        foreach (var param in _plugin.Parameters)
-        {
-            if (param.Index == index)
-            {
-                // We need to read the current value - for now use the default
-                // In a real implementation, we'd have a way to read current values
-                break;
-            }
-        }
-        // Return defaults based on parameter type
-        return index switch
-        {
-            var i when i % 20 == SignalGeneratorPlugin.TypeIndex => 0f,
-            var i when i % 20 == SignalGeneratorPlugin.FrequencyIndex => 440f,
-            var i when i % 20 == SignalGeneratorPlugin.GainIndex => _plugin.Parameters.FirstOrDefault(p => p.Index == index)?.DefaultValue ?? -12f,
-            var i when i % 20 == SignalGeneratorPlugin.MuteIndex => 0f,
-            var i when i % 20 == SignalGeneratorPlugin.SoloIndex => 0f,
-            _ => 0f
-        };
     }
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
@@ -324,14 +300,17 @@ public partial class SignalGeneratorWindow : Window
         }
     }
 
-    private float GetSlotGainDb(int slot) => slot switch
+    private float GetSlotGainDb(int slot)
     {
-        0 => _plugin.Slot0GainDb,
-        1 => _plugin.Slot1GainDb,
-        _ => -12f
-    };
+        var slotState = _plugin.GetSlotState(slot);
+        return slotState.GainDb;
+    }
 
-    private float GetSlotFrequency(int slot) => 440f; // Default, would need plugin API
+    private float GetSlotFrequency(int slot)
+    {
+        var slotState = _plugin.GetSlotState(slot);
+        return slotState.Frequency;
+    }
 
     private static float NormalizeFrequency(float hz)
     {
@@ -368,17 +347,17 @@ public partial class SignalGeneratorWindow : Window
 
     private void ToggleSlotMute(int slotIndex)
     {
+        var slotState = _plugin.GetSlotState(slotIndex);
         int muteIndex = slotIndex * 20 + SignalGeneratorPlugin.MuteIndex;
-        float currentMute = GetParamValue(muteIndex);
-        _parameterCallback(muteIndex, currentMute >= 0.5f ? 0f : 1f);
+        _parameterCallback(muteIndex, slotState.Muted ? 0f : 1f);
         _presetHelper.MarkAsCustom();
     }
 
     private void ToggleSlotSolo(int slotIndex)
     {
+        var slotState = _plugin.GetSlotState(slotIndex);
         int soloIndex = slotIndex * 20 + SignalGeneratorPlugin.SoloIndex;
-        float currentSolo = GetParamValue(soloIndex);
-        _parameterCallback(soloIndex, currentSolo >= 0.5f ? 0f : 1f);
+        _parameterCallback(soloIndex, slotState.Solo ? 0f : 1f);
         _presetHelper.MarkAsCustom();
     }
 

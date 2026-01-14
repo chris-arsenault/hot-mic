@@ -9,13 +9,13 @@ namespace HotMic.App.UI.PluginComponents;
 public sealed class SignalGeneratorRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
-    private const float Padding = 12f;
-    private const float SlotHeight = 100f;
-    private const float SlotWidth = 150f;
-    private const float MasterWidth = 100f;
+    private const float Padding = 8f;
+    private const float SlotHeight = 120f;
+    private const float SlotWidth = 130f;
+    private const float MasterWidth = 80f;
     private const float CornerRadius = 10f;
-    private const float KnobRadius = 24f;
-    private const float SmallKnobRadius = 18f;
+    private const float KnobRadius = 22f;
+    private const float SmallKnobRadius = 16f;
 
     private readonly PluginComponentTheme _theme;
     private readonly PluginPresetBar _presetBar;
@@ -131,7 +131,7 @@ public sealed class SignalGeneratorRenderer : IDisposable
 
         // Record and sample load section (below slots)
         float controlsY = contentTop + SlotHeight + Padding;
-        RenderControlsSection(canvas, slotStartX, controlsY, slotsWidth, 60f, state);
+        RenderControlsSection(canvas, slotStartX, controlsY, slotsWidth, 36f, state);
 
         // Outer border
         canvas.DrawRoundRect(roundRect, _borderPaint);
@@ -193,9 +193,12 @@ public sealed class SignalGeneratorRenderer : IDisposable
         var slotRound = new SKRoundRect(rect, 6f);
         canvas.DrawRoundRect(slotRound, _slotBackgroundPaint);
 
-        // Slot header with type selector
-        float headerY = rect.Top + 8;
-        _slotTypeSelectorRects[slotIndex] = new SKRect(rect.Left + 8, headerY, rect.Right - 8, headerY + 20);
+        // Slot label at top
+        canvas.DrawText($"SLOT {slotIndex + 1}", rect.MidX, rect.Top + 12, _labelPaint);
+
+        // Type selector below label
+        float headerY = rect.Top + 18;
+        _slotTypeSelectorRects[slotIndex] = new SKRect(rect.Left + 6, headerY, rect.Right - 6, headerY + 20);
         var typeRound = new SKRoundRect(_slotTypeSelectorRects[slotIndex], 4f);
         canvas.DrawRoundRect(typeRound, _typeSelectorPaint);
         canvas.DrawRoundRect(typeRound, _borderPaint);
@@ -205,42 +208,54 @@ public sealed class SignalGeneratorRenderer : IDisposable
         canvas.DrawText(typeLabel, _slotTypeSelectorRects[slotIndex].MidX, _slotTypeSelectorRects[slotIndex].MidY + 4, _valuePaint);
 
         // Draw dropdown arrow
-        float arrowX = _slotTypeSelectorRects[slotIndex].Right - 12;
+        float arrowX = _slotTypeSelectorRects[slotIndex].Right - 10;
         float arrowY = _slotTypeSelectorRects[slotIndex].MidY;
         using var arrowPath = new SKPath();
-        arrowPath.MoveTo(arrowX - 4, arrowY - 2);
+        arrowPath.MoveTo(arrowX - 3, arrowY - 2);
         arrowPath.LineTo(arrowX, arrowY + 2);
-        arrowPath.LineTo(arrowX + 4, arrowY - 2);
+        arrowPath.LineTo(arrowX + 3, arrowY - 2);
         using var arrowPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f };
         canvas.DrawPath(arrowPath, arrowPaint);
 
-        // Gain knob (left) and Frequency knob (right) - only show freq for oscillators
-        float knobY = rect.Top + 52;
-        float gainKnobX = rect.Left + 35;
-        float freqKnobX = rect.Right - 35;
-
-        _slotGainKnobCenters[slotIndex] = new SKPoint(gainKnobX, knobY);
+        // Knobs - position depends on whether we show frequency
+        float knobY = rect.Top + 62;
         float gainNormalized = (slot.GainDb + 60f) / 72f;
         bool gainHovered = isHovered && hoveredArea == SignalGeneratorHitArea.SlotGainKnob;
-        DrawSmallKnob(canvas, _slotGainKnobCenters[slotIndex], gainNormalized, gainHovered);
-        canvas.DrawText("GAIN", gainKnobX, knobY + SmallKnobRadius + 12, _labelPaint);
 
-        // Only show frequency knob for oscillator types
-        if ((int)slot.Type <= 3)
+        // Only show frequency knob for oscillator types (Sine, Square, Saw, Triangle)
+        bool showFreq = (int)slot.Type <= 3;
+
+        if (showFreq)
         {
+            // Two knobs: gain left, freq right
+            float gainKnobX = rect.Left + 32;
+            float freqKnobX = rect.Right - 32;
+
+            _slotGainKnobCenters[slotIndex] = new SKPoint(gainKnobX, knobY);
+            DrawSmallKnob(canvas, _slotGainKnobCenters[slotIndex], gainNormalized, gainHovered);
+            canvas.DrawText("GAIN", gainKnobX, knobY + SmallKnobRadius + 10, _labelPaint);
+
             _slotFreqKnobCenters[slotIndex] = new SKPoint(freqKnobX, knobY);
             float freqNormalized = NormalizeFrequency(slot.Frequency);
             bool freqHovered = isHovered && hoveredArea == SignalGeneratorHitArea.SlotFreqKnob;
             DrawSmallKnob(canvas, _slotFreqKnobCenters[slotIndex], freqNormalized, freqHovered);
-            canvas.DrawText("FREQ", freqKnobX, knobY + SmallKnobRadius + 12, _labelPaint);
+            canvas.DrawText("FREQ", freqKnobX, knobY + SmallKnobRadius + 10, _labelPaint);
+        }
+        else
+        {
+            // Single centered gain knob
+            _slotGainKnobCenters[slotIndex] = new SKPoint(rect.MidX, knobY);
+            _slotFreqKnobCenters[slotIndex] = new SKPoint(-100, -100); // Off-screen
+            DrawSmallKnob(canvas, _slotGainKnobCenters[slotIndex], gainNormalized, gainHovered);
+            canvas.DrawText("GAIN", rect.MidX, knobY + SmallKnobRadius + 10, _labelPaint);
         }
 
         // Mute/Solo buttons at bottom
-        float buttonY = rect.Bottom - 22;
-        float buttonWidth = 28f;
+        float buttonY = rect.Bottom - 24;
+        float buttonWidth = 24f;
         float buttonHeight = 16f;
-        float muteX = rect.Left + 20;
-        float soloX = rect.Right - 20 - buttonWidth;
+        float muteX = rect.Left + 16;
+        float soloX = rect.Right - 16 - buttonWidth;
 
         _slotMuteRects[slotIndex] = new SKRect(muteX, buttonY, muteX + buttonWidth, buttonY + buttonHeight);
         var muteRound = new SKRoundRect(_slotMuteRects[slotIndex], 3f);
@@ -255,9 +270,6 @@ public sealed class SignalGeneratorRenderer : IDisposable
         canvas.DrawRoundRect(soloRound, _borderPaint);
         using var soloTextPaint = new SKPaint { Color = slot.IsSolo ? _theme.PanelBackground : _theme.TextSecondary, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Center };
         canvas.DrawText("S", _slotSoloRects[slotIndex].MidX, _slotSoloRects[slotIndex].MidY + 3, soloTextPaint);
-
-        // Slot label
-        canvas.DrawText($"SLOT {slotIndex + 1}", rect.MidX, rect.Bottom - 5, _labelPaint);
     }
 
     private void RenderMasterSection(SKCanvas canvas, float x, float y, float width, float height, SignalGeneratorState state)
@@ -267,20 +279,20 @@ public sealed class SignalGeneratorRenderer : IDisposable
         canvas.DrawRoundRect(masterRound, _slotBackgroundPaint);
 
         // Master label
-        canvas.DrawText("MASTER", rect.MidX, y + 16, _labelPaint);
+        canvas.DrawText("MASTER", rect.MidX - 6, y + 14, _labelPaint);
 
-        // Master gain knob
-        _masterGainKnobCenter = new SKPoint(rect.MidX, y + 50);
+        // Master gain knob (slightly left to make room for meter)
+        _masterGainKnobCenter = new SKPoint(rect.Left + 32, y + 55);
         float gainNormalized = (state.MasterGainDb + 60f) / 72f;
         bool masterHovered = state.HoveredArea == SignalGeneratorHitArea.MasterGainKnob;
-        DrawKnob(canvas, _masterGainKnobCenter, gainNormalized, masterHovered);
+        DrawSmallKnob(canvas, _masterGainKnobCenter, gainNormalized, masterHovered);
 
         // Value display
         string sign = state.MasterGainDb > 0.05f ? "+" : "";
-        canvas.DrawText($"{sign}{state.MasterGainDb:0.0} dB", rect.MidX, y + 85, _valuePaint);
+        canvas.DrawText($"{sign}{state.MasterGainDb:0.0}", rect.Left + 32, y + 55 + SmallKnobRadius + 10, _valuePaint);
 
         // Output meter
-        var meterRect = new SKRect(rect.Right - 20, y + 20, rect.Right - 8, y + height - 8);
+        var meterRect = new SKRect(rect.Right - 16, y + 20, rect.Right - 6, y + height - 10);
         _masterMeter.Update(state.OutputLevel);
         _masterMeter.Render(canvas, meterRect, MeterOrientation.Vertical);
     }
@@ -288,8 +300,8 @@ public sealed class SignalGeneratorRenderer : IDisposable
     private void RenderControlsSection(SKCanvas canvas, float x, float y, float width, float height, SignalGeneratorState state)
     {
         // Record button
-        float buttonWidth = 80f;
-        float buttonHeight = 28f;
+        float buttonWidth = 70f;
+        float buttonHeight = 24f;
         _recordButtonRect = new SKRect(x, y + (height - buttonHeight) / 2, x + buttonWidth, y + (height + buttonHeight) / 2);
 
         var recordRound = new SKRoundRect(_recordButtonRect, 4f);
@@ -297,17 +309,17 @@ public sealed class SignalGeneratorRenderer : IDisposable
         canvas.DrawRoundRect(recordRound, _borderPaint);
 
         // Record circle icon
-        float circleX = _recordButtonRect.Left + 16;
+        float circleX = _recordButtonRect.Left + 14;
         float circleY = _recordButtonRect.MidY;
         using var circlePaint = new SKPaint { Color = new SKColor(0xFF, 0x30, 0x30), IsAntialias = true, Style = SKPaintStyle.Fill };
-        canvas.DrawCircle(circleX, circleY, 5f, circlePaint);
+        canvas.DrawCircle(circleX, circleY, 4f, circlePaint);
 
-        using var recordTextPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, TextSize = 11f, TextAlign = SKTextAlign.Left };
-        canvas.DrawText("RECORD", circleX + 12, _recordButtonRect.MidY + 4, recordTextPaint);
+        using var recordTextPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, TextSize = 10f, TextAlign = SKTextAlign.Left };
+        canvas.DrawText("REC", circleX + 10, _recordButtonRect.MidY + 3, recordTextPaint);
 
         // Hint text
-        using var hintPaint = new SKPaint { Color = _theme.TextMuted, IsAntialias = true, TextSize = 10f, TextAlign = SKTextAlign.Left };
-        canvas.DrawText("Drag WAV file onto slot to load sample", x + buttonWidth + 20, y + height / 2 + 4, hintPaint);
+        using var hintPaint = new SKPaint { Color = _theme.TextMuted, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Left };
+        canvas.DrawText("Drop WAV onto slot to load sample", x + buttonWidth + 12, y + height / 2 + 3, hintPaint);
     }
 
     private void DrawKnob(SKCanvas canvas, SKPoint center, float normalized, bool isHovered)
@@ -455,7 +467,7 @@ public sealed class SignalGeneratorRenderer : IDisposable
 
     public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
 
-    public static SKSize GetPreferredSize() => new(520, 220);
+    public static SKSize GetPreferredSize() => new(510, 230);
 
     public void Dispose()
     {
