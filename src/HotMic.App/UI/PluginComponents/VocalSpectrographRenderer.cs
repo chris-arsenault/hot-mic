@@ -1,6 +1,9 @@
-using HotMic.Core.Dsp;
-using SkiaSharp;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using HotMic.Core.Dsp;
+using HotMic.Core.Plugins.BuiltIn;
+using SkiaSharp;
 
 namespace HotMic.App.UI.PluginComponents;
 
@@ -9,21 +12,95 @@ namespace HotMic.App.UI.PluginComponents;
 /// </summary>
 public sealed class VocalSpectrographRenderer : IDisposable
 {
+    // Layout constants - reorganized UI (1440x960)
     private const float CornerRadius = 10f;
-    private const float Padding = 14f;
-    private const float TitleBarHeight = 36f;
-    private const float ControlBarHeight = 86f;
-    private const float KnobRadius = 24f;
+    private const float Padding = 16f;
+    private const float TitleBarHeight = 40f;
+    private const float KnobRadius = 20f;
     private const float AxisWidth = 50f;
     private const float ColorBarWidth = 22f;
     private const float TimeAxisHeight = 22f;
     private const float WaveformHeight = 80f;
-    private const float AuxViewHeight = 110f;
-    private const float KnobAreaHeight = 160f;
     private const float VoicingLaneHeight = 8f;
+
+    // New layout structure
+    private const float SidebarWidth = 220f;
+    private const float ControlPanelHeight = 240f;
+    private const float PanelHeaderHeight = 24f;
+    private const float PanelSpacing = 10f;
+    private const float PanelCornerRadius = 8f;
+
+    // Panel widths (5 panels)
+    private const float FrequencyPanelWidth = 240f;
+    private const float AnalysisPanelWidth = 300f;
+    private const float ClarityPanelWidth = 220f;
+    private const float DisplayPanelWidth = 300f;
+    // ViewOptionsPanelWidth is calculated as remaining space
 
     private readonly PluginComponentTheme _theme;
     private readonly PluginPresetBar _presetBar;
+    private readonly TooltipManager _tooltip;
+    private readonly SkiaTextPaint _panelHeaderPaint;
+
+    // Tooltip content for all controls
+    private static readonly Dictionary<string, (string Title, string Description)> TooltipData = new()
+    {
+        // Frequency Range Panel
+        ["MinFreq"] = ("Min Frequency", "Lower frequency bound (20-2000 Hz). Voice fundamentals: 80-300 Hz"),
+        ["MaxFreq"] = ("Max Frequency", "Upper frequency bound (2000-12000 Hz). Harmonics extend to 8-12 kHz"),
+        ["HPF"] = ("High-Pass Filter", "Removes low-frequency rumble below the cutoff frequency"),
+        ["HpfCutoff"] = ("HPF Cutoff", "High-pass filter cutoff frequency (20-120 Hz)"),
+        ["Time"] = ("Time Window", "Visible time span (1-60 seconds)"),
+        ["Scale"] = ("Frequency Scale", "Lin=linear, Log=logarithmic, Mel/Erb/Bark=perceptual scales"),
+        ["Axis"] = ("Axis Labels", "Display Hz, musical notes, or both on the frequency axis"),
+
+        // Analysis Engine Panel
+        ["Transform"] = ("Transform Type", "FFT=standard, ZoomFFT=high resolution, CQT=logarithmic bins"),
+        ["FftSize"] = ("FFT Size", "Larger = better frequency resolution but more latency"),
+        ["Window"] = ("Window Function", "Hann=general purpose, BlackmanHarris=low sidelobes"),
+        ["Overlap"] = ("Overlap", "Higher overlap = smoother time resolution, more CPU usage"),
+        ["Reassign"] = ("Reassignment", "Sharpens blurry spectral energy by correcting bin positions"),
+        ["ReassignThresh"] = ("Reassign Threshold", "Minimum level (dB) for reassignment processing"),
+        ["ReassignSpread"] = ("Reassign Spread", "How far energy can be redistributed (0-100%)"),
+        ["PreEmphasis"] = ("Pre-Emphasis", "Boosts high frequencies to compensate for voice rolloff"),
+        ["Smoothing"] = ("Smoothing Mode", "EMA=temporal smoothing, Bilateral=edge-preserving"),
+
+        // Clarity Processing Panel
+        ["Clarity"] = ("Clarity Mode", "None=off, Noise=suppress broadband, Harmonic=enhance pitch"),
+        ["ClarityNoise"] = ("Noise Reduction", "Amount of broadband noise floor suppression (0-100%)"),
+        ["ClarityHarmonic"] = ("Harmonic Boost", "Emphasis on pitched/harmonic content (0-100%)"),
+        ["ClaritySmooth"] = ("Clarity Smoothing", "Temporal smoothing of clarity processing (0-100%)"),
+        ["Normalization"] = ("Normalization", "None/Peak/RMS/A-weighted level normalization"),
+        ["DynamicRange"] = ("Dynamic Range", "Preset dB ranges for different use cases"),
+
+        // Display Tuning Panel
+        ["MinDb"] = ("Min dB", "Floor level for color mapping. Increase to hide noise"),
+        ["MaxDb"] = ("Max dB", "Ceiling level. Decrease to see quiet signal details"),
+        ["Brightness"] = ("Brightness", "Overall display intensity multiplier (0.5-2x)"),
+        ["Gamma"] = ("Gamma", "Nonlinear mapping. Lower values reveal quiet details"),
+        ["Contrast"] = ("Contrast", "Difference between quiet and loud regions (0.8-1.5x)"),
+        ["Levels"] = ("Color Levels", "Quantization steps (16-64). More = smoother gradients"),
+        ["ColorMap"] = ("Color Map", "Color palette for magnitude visualization"),
+
+        // View Options Panel - Overlays
+        ["PitchOverlay"] = ("Pitch Track", "Yellow line showing detected fundamental frequency (F0)"),
+        ["FormantOverlay"] = ("Formants", "Colored lines showing F1/F2/F3 vocal resonances"),
+        ["HarmonicOverlay"] = ("Harmonics", "Dots marking detected harmonic peaks"),
+        ["VoicingOverlay"] = ("Voicing", "Lane showing voiced/unvoiced/silence segments"),
+        ["RangeOverlay"] = ("Vocal Range", "Band showing the selected voice range boundaries"),
+        ["GuidesOverlay"] = ("Frequency Guides", "Reference lines at semitone intervals"),
+
+        // View Options Panel - Views
+        ["WaveformView"] = ("Waveform", "Time-domain amplitude envelope display"),
+        ["SpectrumView"] = ("Spectrum Slice", "Real-time frequency magnitude at current position"),
+        ["PitchMeterView"] = ("Pitch Meter", "Current detected pitch with note name indicator"),
+        ["VowelView"] = ("Vowel Space", "F1 vs F2 plot for vowel identification"),
+
+        // Other buttons
+        ["VoiceRange"] = ("Voice Range", "Select Bass/Baritone/Tenor/Alto/MezzoSoprano/Soprano"),
+        ["PitchAlgo"] = ("Pitch Algorithm", "YIN=fast, PYIN=probabilistic, SWIPE=robust, Cepstral=spectral"),
+        ["Pause"] = ("Pause/Run", "Pause or resume the spectrograph visualization"),
+    };
 
     // KnobWidgets for all 15 knobs
     public KnobWidget MinFreqKnob { get; }
@@ -45,16 +122,23 @@ public sealed class VocalSpectrographRenderer : IDisposable
     /// <summary>All knob widgets for iteration.</summary>
     public IReadOnlyList<KnobWidget> AllKnobs => _allKnobs;
 
+    /// <summary>Tooltip manager for hover text.</summary>
+    public TooltipManager Tooltip => _tooltip;
+
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _panelPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _textPaint;
-    private readonly SKPaint _mutedTextPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _textPaint;
+    private readonly SkiaTextPaint _mutedTextPaint;
+    private readonly SkiaTextPaint _dropAlertPaint;
+    private readonly SkiaTextPaint _profilingTextPaint;
+    private readonly SKPaint _profilingDotPaint;
+    private readonly SKPaint _profilingPanelPaint;
     private readonly SKPaint _gridPaint;
     private readonly SKPaint _buttonPaint;
     private readonly SKPaint _buttonActivePaint;
-    private readonly SKPaint _buttonTextPaint;
+    private readonly SkiaTextPaint _buttonTextPaint;
     private readonly SKPaint _referencePaint;
     private readonly SKPaint _bitmapPaint;
     private readonly SKPaint _pitchPaint;
@@ -77,10 +161,11 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private readonly SKPaint _spectrumPeakPaint;
     private readonly SKPaint _rangeBandPaint;
     private readonly SKPaint _guidePaint;
-    private readonly SKPaint _metricPaint;
+    private readonly SkiaTextPaint _metricPaint;
     private readonly SKPaint _vowelTrailPaint;
-    private readonly SKPaint _iconPaint;
+    private readonly SkiaTextPaint _iconPaint;
     private readonly SKPaint _axisImagePaint;
+    private readonly SKSamplingOptions _axisSampling;
     private readonly SKPaint _colorBarPaint;
     private SKShader? _colorBarShader;
     private SKRect _colorBarRectCache;
@@ -99,11 +184,16 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private readonly SKPath _vowelTrailPath = new();
     private readonly int[] _peakBins = new int[3];
     private readonly float[] _peakValues = new float[3];
+    private long _lastSpectrogramTicks;
+    private long _lastBitmapTicks;
+    private long _lastOverlayTicks;
+    private static readonly double TicksToMicroseconds = 1_000_000.0 / Stopwatch.Frequency;
 
     private SKRect _titleBarRect;
     private SKRect _closeRect;
     private SKRect _bypassRect;
     private SKRect _fftRect;
+    private SKRect _transformRect;
     private SKRect _windowRect;
     private SKRect _overlapRect;
     private SKRect _scaleRect;
@@ -130,6 +220,14 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private SKRect _pitchMeterToggleRect;
     private SKRect _vowelToggleRect;
     private SKRect _spectrogramRect;
+
+    // New layout rects for reorganized UI
+    private SKRect _sidebarRect;
+    private SKRect _frequencyPanelRect;
+    private SKRect _analysisPanelRect;
+    private SKRect _clarityPanelRect;
+    private SKRect _displayPanelRect;
+    private SKRect _viewOptionsPanelRect;
 
     private SKBitmap? _spectrogramBitmap;
     private int _bitmapWidth;
@@ -170,9 +268,11 @@ public sealed class VocalSpectrographRenderer : IDisposable
     {
         _theme = theme ?? PluginComponentTheme.Default;
         _presetBar = new PluginPresetBar(_theme);
+        _tooltip = new TooltipManager(_theme);
+        _panelHeaderPaint = new SkiaTextPaint(_theme.TextMuted, 11f, SKFontStyle.Bold);
 
         // Initialize all KnobWidgets
-        var knobStyle = KnobStyle.Compact;
+        var knobStyle = KnobStyle.Compact with { ShowLabels = true };
         MinFreqKnob = new KnobWidget(KnobRadius, 20f, 2000f, "MIN FREQ", "Hz", knobStyle, _theme) { IsLogarithmic = true, ValueFormat = "0" };
         MaxFreqKnob = new KnobWidget(KnobRadius, 2000f, 12000f, "MAX FREQ", "Hz", knobStyle, _theme) { IsLogarithmic = true, ValueFormat = "0" };
         MinDbKnob = new KnobWidget(KnobRadius, -120f, -20f, "MIN dB", "dB", knobStyle, _theme) { ValueFormat = "0" };
@@ -195,27 +295,13 @@ public sealed class VocalSpectrographRenderer : IDisposable
         _backgroundPaint = new SKPaint { Color = _theme.PanelBackground, IsAntialias = true, Style = SKPaintStyle.Fill };
         _panelPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
         _borderPaint = new SKPaint { Color = _theme.PanelBorder, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f };
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-        _textPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 11f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-        _mutedTextPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 10f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _textPaint = new SkiaTextPaint(_theme.TextSecondary, 11f, SKFontStyle.Normal);
+        _mutedTextPaint = new SkiaTextPaint(_theme.TextMuted, 10f, SKFontStyle.Normal);
+        _dropAlertPaint = new SkiaTextPaint(_theme.ThresholdLine, 10f, SKFontStyle.Bold);
+        _profilingTextPaint = new SkiaTextPaint(_theme.ThresholdLine, 10f, SKFontStyle.Bold);
+        _profilingDotPaint = new SKPaint { Color = _theme.ThresholdLine, IsAntialias = true, Style = SKPaintStyle.Fill };
+        _profilingPanelPaint = new SKPaint { Color = _theme.PanelBackground.WithAlpha(200), IsAntialias = true, Style = SKPaintStyle.Fill };
         _gridPaint = new SKPaint
         {
             Color = _theme.PanelBorder.WithAlpha(50),
@@ -225,14 +311,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         };
         _buttonPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
         _buttonActivePaint = new SKPaint { Color = _theme.KnobArc.WithAlpha(120), IsAntialias = true, Style = SKPaintStyle.Fill };
-        _buttonTextPaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        _buttonTextPaint = new SkiaTextPaint(_theme.TextPrimary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         _referencePaint = new SKPaint
         {
             Color = _theme.TextPrimary.WithAlpha(180),
@@ -240,11 +319,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1.5f
         };
-        _bitmapPaint = new SKPaint
-        {
-            FilterQuality = SKFilterQuality.None,
-            IsAntialias = false
-        };
+        _bitmapPaint = new SKPaint { IsAntialias = false };
         _pitchPaint = new SKPaint { Color = new SKColor(0x00, 0xFF, 0x88), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2f };
         _pitchLowPaint = new SKPaint
         {
@@ -317,13 +392,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f
         };
-        _metricPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _metricPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal);
         _vowelTrailPaint = new SKPaint
         {
             Color = _theme.AccentSecondary.WithAlpha(160),
@@ -331,18 +400,9 @@ public sealed class VocalSpectrographRenderer : IDisposable
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1.2f
         };
-        _iconPaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 12f,
-            TextAlign = SKTextAlign.Center
-        };
-        _axisImagePaint = new SKPaint
-        {
-            IsAntialias = false,
-            FilterQuality = SKFilterQuality.None
-        };
+        _iconPaint = new SkiaTextPaint(_theme.TextPrimary, 12f, SKFontStyle.Normal, SKTextAlign.Center);
+        _axisSampling = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
+        _axisImagePaint = new SKPaint { IsAntialias = false };
         _colorBarPaint = new SKPaint
         {
             IsAntialias = true
@@ -350,10 +410,12 @@ public sealed class VocalSpectrographRenderer : IDisposable
         _colorBarRectCache = SKRect.Empty;
     }
 
-    public static SKSize GetPreferredSize() => new(920, 820);
+    public static SKSize GetPreferredSize() => new(1440, 960);
 
     public void Render(SKCanvas canvas, SKSize size, float dpiScale, VocalSpectrographState state)
     {
+        long renderStartTicks = Stopwatch.GetTimestamp();
+
         canvas.Clear(_theme.PanelBackground);
         canvas.Save();
         canvas.Scale(dpiScale);
@@ -363,12 +425,494 @@ public sealed class VocalSpectrographRenderer : IDisposable
         canvas.DrawRoundRect(new SKRoundRect(outerRect, CornerRadius), _backgroundPaint);
         canvas.DrawRoundRect(new SKRoundRect(outerRect, CornerRadius), _borderPaint);
 
+        // New reorganized layout
         DrawTitleBar(canvas, size, state);
-        DrawControlBar(canvas, size, state);
-        DrawSpectrogram(canvas, size, dpiScale, state);
-        DrawKnobs(canvas, size, state);
+        DrawMainContent(canvas, size, dpiScale, state);
+        DrawControlPanels(canvas, size, state);
+        _tooltip.Render(canvas, size);
+
+        long renderTicks = Stopwatch.GetTimestamp() - renderStartTicks;
+        if (state.IsProfiling)
+        {
+            DrawPerformanceOverlay(canvas, renderTicks, state);
+        }
 
         canvas.Restore();
+    }
+
+    private void DrawMainContent(SKCanvas canvas, SKSize size, float dpiScale, VocalSpectrographState state)
+    {
+        bool profiling = state.IsProfiling;
+        long spectrogramStartTicks = profiling ? Stopwatch.GetTimestamp() : 0;
+
+        // Calculate sidebar rect (right side)
+        bool showSidebar = state.ShowSpectrum || state.ShowPitchMeter || state.ShowVowelSpace;
+        float sidebarActualWidth = showSidebar ? SidebarWidth : 0f;
+        float mainRight = size.Width - Padding - sidebarActualWidth - (showSidebar ? PanelSpacing : 0f);
+
+        if (showSidebar)
+        {
+            _sidebarRect = new SKRect(
+                mainRight + PanelSpacing,
+                TitleBarHeight + Padding,
+                size.Width - Padding,
+                size.Height - Padding - ControlPanelHeight - PanelSpacing);
+            DrawSidebar(canvas, _sidebarRect, state);
+        }
+
+        // Calculate spectrogram area
+        float top = TitleBarHeight + Padding;
+        float waveformHeight = state.ShowWaveform ? WaveformHeight : 0f;
+        float bottom = size.Height - Padding - ControlPanelHeight - PanelSpacing;
+
+        if (waveformHeight > 0f)
+        {
+            // Waveform at bottom of main content area
+            var waveformRect = new SKRect(Padding + AxisWidth, bottom - waveformHeight, mainRight - ColorBarWidth, bottom);
+            DrawWaveform(canvas, waveformRect, state);
+            bottom = waveformRect.Top - Padding;
+        }
+
+        var spectrumRect = new SKRect(Padding + AxisWidth, top, mainRight - ColorBarWidth, bottom);
+        var axisRect = new SKRect(Padding, top, Padding + AxisWidth, bottom);
+        var colorRect = new SKRect(spectrumRect.Right + 6f, top, spectrumRect.Right + 6f + ColorBarWidth, bottom);
+        _spectrogramRect = spectrumRect;
+
+        canvas.DrawRoundRect(new SKRoundRect(spectrumRect, 6f), _panelPaint);
+
+        if (profiling)
+        {
+            long bitmapStartTicks = Stopwatch.GetTimestamp();
+            UpdateSpectrogramBitmap(state);
+            _lastBitmapTicks = Stopwatch.GetTimestamp() - bitmapStartTicks;
+        }
+        else
+        {
+            UpdateSpectrogramBitmap(state);
+        }
+        DrawSpectrogramBitmap(canvas, spectrumRect);
+        EnsureAxisLayer(size, dpiScale, state, spectrumRect, axisRect, colorRect);
+        DrawAxisLayer(canvas);
+
+        if (state.ShowRange)
+        {
+            DrawVocalRangeBand(canvas, spectrumRect, state);
+        }
+        if (state.ShowGuides)
+        {
+            DrawFrequencyGuides(canvas, spectrumRect, state);
+        }
+        if (profiling)
+        {
+            long overlayStartTicks = Stopwatch.GetTimestamp();
+            DrawOverlays(canvas, spectrumRect, state);
+            _lastOverlayTicks = Stopwatch.GetTimestamp() - overlayStartTicks;
+        }
+        else
+        {
+            DrawOverlays(canvas, spectrumRect, state);
+        }
+        DrawReferenceLine(canvas, spectrumRect, state);
+
+        if (profiling)
+        {
+            _lastSpectrogramTicks = Stopwatch.GetTimestamp() - spectrogramStartTicks;
+        }
+        else if (_lastSpectrogramTicks != 0 || _lastBitmapTicks != 0 || _lastOverlayTicks != 0)
+        {
+            _lastSpectrogramTicks = 0;
+            _lastBitmapTicks = 0;
+            _lastOverlayTicks = 0;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void DrawPerformanceOverlay(SKCanvas canvas, long renderTicks, VocalSpectrographState state)
+    {
+        var analysis = state.AnalysisTiming;
+        var ui = state.UiTiming;
+
+        int renderUs = ToMicroseconds(renderTicks);
+        int spectrogramUs = ToMicroseconds(_lastSpectrogramTicks);
+        int bitmapUs = ToMicroseconds(_lastBitmapTicks);
+        int overlayUs = ToMicroseconds(_lastOverlayTicks);
+
+        string header = "TIMINGS (us)";
+        string line1 = $"ANL avg frame {analysis.FrameUs} pre {analysis.PreprocessUs} xform {analysis.TransformUs} norm {analysis.NormalizationUs}";
+        string line2 = $"ANL avg pitch {analysis.PitchUs} clarity {analysis.ClarityUs} reas {analysis.ReassignUs} feat {analysis.FeaturesUs} wb {analysis.WritebackUs}";
+        string line3 = $"UI tick {ui.TickUs} copy {ui.CopyUs} map {ui.MapUs}";
+        string line4 = $"UI draw {renderUs} spec {spectrogramUs} bmp {bitmapUs} ovl {overlayUs}";
+
+        float padding = 6f;
+        float headerHeight = _profilingTextPaint.Font.Size + 4f;
+        float lineHeight = _metricPaint.Font.Size + 4f;
+
+        float width = _profilingTextPaint.MeasureText(header);
+        width = MathF.Max(width, _metricPaint.MeasureText(line1));
+        width = MathF.Max(width, _metricPaint.MeasureText(line2));
+        width = MathF.Max(width, _metricPaint.MeasureText(line3));
+        width = MathF.Max(width, _metricPaint.MeasureText(line4));
+
+        float height = padding * 2f + headerHeight + lineHeight * 4f;
+        float panelX = _spectrogramRect.Left + 8f;
+        float panelY = _spectrogramRect.Top + 8f;
+        var panelRect = new SKRect(panelX, panelY, panelX + width + padding * 2f, panelY + height);
+
+        canvas.DrawRoundRect(new SKRoundRect(panelRect, 6f), _profilingPanelPaint);
+
+        float textX = panelRect.Left + padding;
+        float textY = panelRect.Top + padding + headerHeight - 4f;
+        canvas.DrawText(header, textX, textY, _profilingTextPaint);
+
+        textY += lineHeight;
+        canvas.DrawText(line1, textX, textY, _metricPaint);
+        textY += lineHeight;
+        canvas.DrawText(line2, textX, textY, _metricPaint);
+        textY += lineHeight;
+        canvas.DrawText(line3, textX, textY, _metricPaint);
+        textY += lineHeight;
+        canvas.DrawText(line4, textX, textY, _metricPaint);
+    }
+
+    private static int ToMicroseconds(long ticks)
+    {
+        if (ticks <= 0)
+        {
+            return 0;
+        }
+
+        double us = ticks * TicksToMicroseconds;
+        if (us >= int.MaxValue)
+        {
+            return int.MaxValue;
+        }
+
+        return (int)Math.Round(us);
+    }
+
+    private void DrawSidebar(SKCanvas canvas, SKRect rect, VocalSpectrographState state)
+    {
+        float y = rect.Top;
+        float viewHeight = 140f;
+        float vowelSize = 180f;
+        int frameIndex = GetSliceFrameIndex(state);
+
+        if (state.ShowSpectrum)
+        {
+            var panel = new SKRect(rect.Left, y, rect.Right, y + viewHeight);
+            DrawSpectrumSlice(canvas, panel, state, frameIndex);
+            y = panel.Bottom + PanelSpacing;
+        }
+
+        if (state.ShowVowelSpace)
+        {
+            // Center the vowel space horizontally
+            float vowelX = rect.MidX - vowelSize / 2f;
+            var panel = new SKRect(vowelX, y, vowelX + vowelSize, y + vowelSize);
+            DrawVowelSpace(canvas, panel, state, frameIndex);
+            y = panel.Bottom + PanelSpacing;
+        }
+
+        if (state.ShowPitchMeter)
+        {
+            float remainingHeight = Math.Max(viewHeight, rect.Bottom - y);
+            var panel = new SKRect(rect.Left, y, rect.Right, y + remainingHeight);
+            DrawPitchMeter(canvas, panel, state, frameIndex);
+        }
+    }
+
+    private void DrawControlPanels(SKCanvas canvas, SKSize size, VocalSpectrographState state)
+    {
+        float panelTop = size.Height - Padding - ControlPanelHeight;
+        float x = Padding;
+        float buttonHeight = 22f;
+        float toggleHeight = 20f;
+        float buttonSpacing = 4f;
+
+        // Panel 1: Frequency Range
+        _frequencyPanelRect = new SKRect(x, panelTop, x + FrequencyPanelWidth, size.Height - Padding);
+        DrawPanelBackground(canvas, _frequencyPanelRect, "FREQUENCY");
+        DrawFrequencyPanelContents(canvas, _frequencyPanelRect, state, buttonHeight, toggleHeight, buttonSpacing);
+        x = _frequencyPanelRect.Right + PanelSpacing;
+
+        // Panel 2: Analysis Engine
+        _analysisPanelRect = new SKRect(x, panelTop, x + AnalysisPanelWidth, size.Height - Padding);
+        DrawPanelBackground(canvas, _analysisPanelRect, "ANALYSIS");
+        DrawAnalysisPanelContents(canvas, _analysisPanelRect, state, buttonHeight, toggleHeight, buttonSpacing);
+        x = _analysisPanelRect.Right + PanelSpacing;
+
+        // Panel 3: Clarity Processing
+        _clarityPanelRect = new SKRect(x, panelTop, x + ClarityPanelWidth, size.Height - Padding);
+        DrawPanelBackground(canvas, _clarityPanelRect, "CLARITY");
+        DrawClarityPanelContents(canvas, _clarityPanelRect, state, buttonHeight, buttonSpacing);
+        x = _clarityPanelRect.Right + PanelSpacing;
+
+        // Panel 4: Display Tuning
+        _displayPanelRect = new SKRect(x, panelTop, x + DisplayPanelWidth, size.Height - Padding);
+        DrawPanelBackground(canvas, _displayPanelRect, "DISPLAY");
+        DrawDisplayPanelContents(canvas, _displayPanelRect, state, buttonHeight, buttonSpacing);
+        x = _displayPanelRect.Right + PanelSpacing;
+
+        // Panel 5: View Options (remaining width)
+        float viewPanelWidth = size.Width - Padding - x;
+        _viewOptionsPanelRect = new SKRect(x, panelTop, size.Width - Padding, size.Height - Padding);
+        DrawPanelBackground(canvas, _viewOptionsPanelRect, "VIEW");
+        DrawViewOptionsPanelContents(canvas, _viewOptionsPanelRect, state, toggleHeight, buttonSpacing);
+    }
+
+    private void DrawPanelBackground(SKCanvas canvas, SKRect rect, string header)
+    {
+        canvas.DrawRoundRect(new SKRoundRect(rect, PanelCornerRadius), _panelPaint);
+        canvas.DrawText(header, rect.Left + 10f, rect.Top + 16f, _panelHeaderPaint);
+    }
+
+    private void DrawFrequencyPanelContents(SKCanvas canvas, SKRect rect, VocalSpectrographState state,
+        float buttonHeight, float toggleHeight, float buttonSpacing)
+    {
+        // Knobs: MinFreq, MaxFreq, HPF, Time (2x2 grid)
+        float knobY1 = rect.Top + PanelHeaderHeight + 35f;
+        float knobY2 = knobY1 + 70f;
+        float knobSpacingX = rect.Width / 3f;
+
+        MinFreqKnob.Value = state.MinFrequency;
+        MinFreqKnob.Center = new SKPoint(rect.Left + knobSpacingX, knobY1);
+        MinFreqKnob.Render(canvas);
+
+        MaxFreqKnob.Value = state.MaxFrequency;
+        MaxFreqKnob.Center = new SKPoint(rect.Left + knobSpacingX * 2, knobY1);
+        MaxFreqKnob.Render(canvas);
+
+        HpfKnob.Value = state.HighPassCutoff;
+        HpfKnob.Center = new SKPoint(rect.Left + knobSpacingX, knobY2);
+        HpfKnob.Render(canvas);
+
+        TimeKnob.Value = state.TimeWindowSeconds;
+        TimeKnob.Center = new SKPoint(rect.Left + knobSpacingX * 2, knobY2);
+        TimeKnob.Render(canvas);
+
+        // Buttons row
+        float buttonY = rect.Bottom - 32f;
+        float buttonWidth = 58f;
+        float bx = rect.Left + 8f;
+
+        _hpfToggleRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + toggleHeight);
+        DrawPillButton(canvas, _hpfToggleRect, "HPF", state.HighPassEnabled);
+        bx = _hpfToggleRect.Right + buttonSpacing;
+
+        _scaleRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + buttonHeight);
+        DrawPillButton(canvas, _scaleRect, state.Scale.ToString(), false);
+        bx = _scaleRect.Right + buttonSpacing;
+
+        _axisModeRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + buttonHeight);
+        DrawPillButton(canvas, _axisModeRect, FormatAxisLabel(state.AxisMode), false);
+    }
+
+    private void DrawAnalysisPanelContents(SKCanvas canvas, SKRect rect, VocalSpectrographState state,
+        float buttonHeight, float toggleHeight, float buttonSpacing)
+    {
+        // Knobs: Reassign Threshold, Reassign Spread
+        float knobY = rect.Top + PanelHeaderHeight + 35f;
+        float knobSpacingX = rect.Width / 3f;
+
+        ReassignThresholdKnob.Value = state.ReassignThresholdDb;
+        ReassignThresholdKnob.Center = new SKPoint(rect.Left + knobSpacingX, knobY);
+        ReassignThresholdKnob.Render(canvas);
+
+        ReassignSpreadKnob.Value = state.ReassignSpread * 100f;
+        ReassignSpreadKnob.Center = new SKPoint(rect.Left + knobSpacingX * 2, knobY);
+        ReassignSpreadKnob.Render(canvas);
+
+        // Buttons row 1
+        float buttonY1 = rect.Top + PanelHeaderHeight + 75f;
+        float buttonWidth = 54f;
+        float bx = rect.Left + 6f;
+
+        _transformRect = new SKRect(bx, buttonY1, bx + buttonWidth, buttonY1 + buttonHeight);
+        DrawPillButton(canvas, _transformRect, FormatTransformLabel(state.TransformType),
+            state.TransformType != SpectrogramTransformType.Fft);
+        bx = _transformRect.Right + buttonSpacing;
+
+        _fftRect = new SKRect(bx, buttonY1, bx + buttonWidth, buttonY1 + buttonHeight);
+        DrawPillButton(canvas, _fftRect, $"FFT {state.FftSize}", false);
+        bx = _fftRect.Right + buttonSpacing;
+
+        _windowRect = new SKRect(bx, buttonY1, bx + buttonWidth + 8f, buttonY1 + buttonHeight);
+        DrawPillButton(canvas, _windowRect, state.WindowFunction.ToString(), false);
+        bx = _windowRect.Right + buttonSpacing;
+
+        _overlapRect = new SKRect(bx, buttonY1, bx + buttonWidth, buttonY1 + buttonHeight);
+        DrawPillButton(canvas, _overlapRect, $"{state.Overlap * 100f:0}%", false);
+
+        // Buttons row 2
+        float buttonY2 = buttonY1 + buttonHeight + buttonSpacing;
+        bx = rect.Left + 6f;
+
+        _reassignRect = new SKRect(bx, buttonY2, bx + buttonWidth + 10f, buttonY2 + buttonHeight);
+        DrawPillButton(canvas, _reassignRect, FormatReassignLabel(state.ReassignMode),
+            state.ReassignMode != SpectrogramReassignMode.Off);
+        bx = _reassignRect.Right + buttonSpacing;
+
+        _smoothingModeRect = new SKRect(bx, buttonY2, bx + buttonWidth + 10f, buttonY2 + buttonHeight);
+        DrawPillButton(canvas, _smoothingModeRect, FormatSmoothingLabel(state.SmoothingMode),
+            state.SmoothingMode != SpectrogramSmoothingMode.Off);
+        bx = _smoothingModeRect.Right + buttonSpacing;
+
+        _preEmphasisToggleRect = new SKRect(bx, buttonY2, bx + buttonWidth, buttonY2 + toggleHeight);
+        DrawPillButton(canvas, _preEmphasisToggleRect, "Emph", state.PreEmphasisEnabled);
+    }
+
+    private void DrawClarityPanelContents(SKCanvas canvas, SKRect rect, VocalSpectrographState state,
+        float buttonHeight, float buttonSpacing)
+    {
+        // Knobs: Noise, Harmonic, Smoothing
+        float knobY = rect.Top + PanelHeaderHeight + 35f;
+        float knobSpacingX = rect.Width / 4f;
+
+        ClarityNoiseKnob.Value = state.ClarityNoise * 100f;
+        ClarityNoiseKnob.Center = new SKPoint(rect.Left + knobSpacingX, knobY);
+        ClarityNoiseKnob.Render(canvas);
+
+        ClarityHarmonicKnob.Value = state.ClarityHarmonic * 100f;
+        ClarityHarmonicKnob.Center = new SKPoint(rect.Left + knobSpacingX * 2, knobY);
+        ClarityHarmonicKnob.Render(canvas);
+
+        ClaritySmoothingKnob.Value = state.ClaritySmoothing * 100f;
+        ClaritySmoothingKnob.Center = new SKPoint(rect.Left + knobSpacingX * 3, knobY);
+        ClaritySmoothingKnob.Render(canvas);
+
+        // Buttons row
+        float buttonY = rect.Bottom - 32f;
+        float buttonWidth = 60f;
+        float bx = rect.Left + 6f;
+
+        _clarityRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + buttonHeight);
+        DrawPillButton(canvas, _clarityRect, FormatClarityLabel(state.ClarityMode),
+            state.ClarityMode != ClarityProcessingMode.None);
+        bx = _clarityRect.Right + buttonSpacing;
+
+        _normalizationRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + buttonHeight);
+        DrawPillButton(canvas, _normalizationRect, FormatNormalizationLabel(state.NormalizationMode),
+            state.NormalizationMode != SpectrogramNormalizationMode.None);
+        bx = _normalizationRect.Right + buttonSpacing;
+
+        _dynamicRangeRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + buttonHeight);
+        DrawPillButton(canvas, _dynamicRangeRect, FormatDynamicRangeLabel(state.DynamicRangeMode),
+            state.DynamicRangeMode != SpectrogramDynamicRangeMode.Custom);
+    }
+
+    private void DrawDisplayPanelContents(SKCanvas canvas, SKRect rect, VocalSpectrographState state,
+        float buttonHeight, float buttonSpacing)
+    {
+        // Knobs: MinDb, MaxDb, Brightness, Gamma, Contrast, Levels (2 rows of 3)
+        float knobY1 = rect.Top + PanelHeaderHeight + 35f;
+        float knobY2 = knobY1 + 70f;
+        float knobSpacingX = rect.Width / 4f;
+
+        MinDbKnob.Value = state.MinDb;
+        MinDbKnob.Center = new SKPoint(rect.Left + knobSpacingX, knobY1);
+        MinDbKnob.Render(canvas);
+
+        MaxDbKnob.Value = state.MaxDb;
+        MaxDbKnob.Center = new SKPoint(rect.Left + knobSpacingX * 2, knobY1);
+        MaxDbKnob.Render(canvas);
+
+        BrightnessKnob.Value = state.Brightness;
+        BrightnessKnob.Center = new SKPoint(rect.Left + knobSpacingX * 3, knobY1);
+        BrightnessKnob.Render(canvas);
+
+        GammaKnob.Value = state.Gamma;
+        GammaKnob.Center = new SKPoint(rect.Left + knobSpacingX, knobY2);
+        GammaKnob.Render(canvas);
+
+        ContrastKnob.Value = state.Contrast;
+        ContrastKnob.Center = new SKPoint(rect.Left + knobSpacingX * 2, knobY2);
+        ContrastKnob.Render(canvas);
+
+        LevelsKnob.Value = state.ColorLevels;
+        LevelsKnob.Center = new SKPoint(rect.Left + knobSpacingX * 3, knobY2);
+        LevelsKnob.Render(canvas);
+
+        // Color map button
+        float buttonY = rect.Bottom - 32f;
+        float bx = rect.Left + 6f;
+        float buttonWidth = 70f;
+
+        _colorRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + buttonHeight);
+        DrawPillButton(canvas, _colorRect, ((SpectrogramColorMap)state.ColorMap).ToString(), false);
+    }
+
+    private void DrawViewOptionsPanelContents(SKCanvas canvas, SKRect rect, VocalSpectrographState state,
+        float toggleHeight, float buttonSpacing)
+    {
+        float toggleWidth = 60f;
+        float buttonHeight = 22f;
+        float subHeaderY = rect.Top + PanelHeaderHeight + 4f;
+
+        // Sub-section: OVERLAYS
+        canvas.DrawText("Overlays", rect.Left + 10f, subHeaderY + 10f, _mutedTextPaint);
+        float row1Y = subHeaderY + 16f;
+        float tx = rect.Left + 8f;
+
+        _pitchToggleRect = new SKRect(tx, row1Y, tx + toggleWidth, row1Y + toggleHeight);
+        DrawPillButton(canvas, _pitchToggleRect, "Pitch", state.ShowPitch);
+        tx = _pitchToggleRect.Right + buttonSpacing;
+
+        _formantToggleRect = new SKRect(tx, row1Y, tx + toggleWidth, row1Y + toggleHeight);
+        DrawPillButton(canvas, _formantToggleRect, "Formant", state.ShowFormants);
+        tx = _formantToggleRect.Right + buttonSpacing;
+
+        _harmonicToggleRect = new SKRect(tx, row1Y, tx + toggleWidth, row1Y + toggleHeight);
+        DrawPillButton(canvas, _harmonicToggleRect, "Harm", state.ShowHarmonics);
+        tx = _harmonicToggleRect.Right + buttonSpacing;
+
+        _voicingToggleRect = new SKRect(tx, row1Y, tx + toggleWidth, row1Y + toggleHeight);
+        DrawPillButton(canvas, _voicingToggleRect, "Voice", state.ShowVoicing);
+        tx = _voicingToggleRect.Right + buttonSpacing;
+
+        _rangeToggleRect = new SKRect(tx, row1Y, tx + toggleWidth, row1Y + toggleHeight);
+        DrawPillButton(canvas, _rangeToggleRect, "Range", state.ShowRange);
+        tx = _rangeToggleRect.Right + buttonSpacing;
+
+        _guidesToggleRect = new SKRect(tx, row1Y, tx + toggleWidth, row1Y + toggleHeight);
+        DrawPillButton(canvas, _guidesToggleRect, "Guides", state.ShowGuides);
+
+        // Sub-section: DISPLAYS
+        float displaysHeaderY = row1Y + toggleHeight + 8f;
+        canvas.DrawText("Displays", rect.Left + 10f, displaysHeaderY + 10f, _mutedTextPaint);
+        float row2Y = displaysHeaderY + 16f;
+        tx = rect.Left + 8f;
+
+        _waveformToggleRect = new SKRect(tx, row2Y, tx + toggleWidth, row2Y + toggleHeight);
+        DrawPillButton(canvas, _waveformToggleRect, "Wave", state.ShowWaveform);
+        tx = _waveformToggleRect.Right + buttonSpacing;
+
+        _spectrumToggleRect = new SKRect(tx, row2Y, tx + toggleWidth, row2Y + toggleHeight);
+        DrawPillButton(canvas, _spectrumToggleRect, "Slice", state.ShowSpectrum);
+        tx = _spectrumToggleRect.Right + buttonSpacing;
+
+        _pitchMeterToggleRect = new SKRect(tx, row2Y, tx + toggleWidth, row2Y + toggleHeight);
+        DrawPillButton(canvas, _pitchMeterToggleRect, "Meter", state.ShowPitchMeter);
+        tx = _pitchMeterToggleRect.Right + buttonSpacing;
+
+        _vowelToggleRect = new SKRect(tx, row2Y, tx + toggleWidth, row2Y + toggleHeight);
+        DrawPillButton(canvas, _vowelToggleRect, "Vowel", state.ShowVowelSpace);
+
+        // Sub-section: SETTINGS
+        float settingsHeaderY = row2Y + toggleHeight + 8f;
+        canvas.DrawText("Settings", rect.Left + 10f, settingsHeaderY + 10f, _mutedTextPaint);
+        float row3Y = settingsHeaderY + 16f;
+        tx = rect.Left + 8f;
+
+        _voiceRangeRect = new SKRect(tx, row3Y, tx + 70f, row3Y + buttonHeight);
+        DrawPillButton(canvas, _voiceRangeRect, FormatVoiceRangeLabel(state.VoiceRange), state.ShowRange);
+        tx = _voiceRangeRect.Right + buttonSpacing;
+
+        _pitchAlgoRect = new SKRect(tx, row3Y, tx + 70f, row3Y + buttonHeight);
+        DrawPillButton(canvas, _pitchAlgoRect, FormatPitchLabel(state.PitchAlgorithm), false);
+        tx = _pitchAlgoRect.Right + buttonSpacing;
+
+        _pauseRect = new SKRect(tx, row3Y, tx + 60f, row3Y + buttonHeight);
+        DrawPillButton(canvas, _pauseRect, state.IsPaused ? "PAUSE" : "RUN", state.IsPaused);
     }
 
     public VocalSpectrographHitTest HitTest(float x, float y)
@@ -399,6 +943,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         }
 
         if (_fftRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.FftButton, -1);
+        if (_transformRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.TransformButton, -1);
         if (_windowRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.WindowButton, -1);
         if (_overlapRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.OverlapButton, -1);
         if (_scaleRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.ScaleButton, -1);
@@ -437,6 +982,76 @@ public sealed class VocalSpectrographRenderer : IDisposable
         return new VocalSpectrographHitTest(SpectrographHitArea.None, -1);
     }
 
+    /// <summary>
+    /// Returns the tooltip control ID for the element at the given position.
+    /// </summary>
+    public string? GetControlIdAt(float x, float y)
+    {
+        // Check buttons and toggles
+        if (_fftRect.Contains(x, y)) return "FftSize";
+        if (_transformRect.Contains(x, y)) return "Transform";
+        if (_windowRect.Contains(x, y)) return "Window";
+        if (_overlapRect.Contains(x, y)) return "Overlap";
+        if (_scaleRect.Contains(x, y)) return "Scale";
+        if (_colorRect.Contains(x, y)) return "ColorMap";
+        if (_reassignRect.Contains(x, y)) return "Reassign";
+        if (_clarityRect.Contains(x, y)) return "Clarity";
+        if (_pitchAlgoRect.Contains(x, y)) return "PitchAlgo";
+        if (_axisModeRect.Contains(x, y)) return "Axis";
+        if (_smoothingModeRect.Contains(x, y)) return "Smoothing";
+        if (_pauseRect.Contains(x, y)) return "Pause";
+        if (_pitchToggleRect.Contains(x, y)) return "PitchOverlay";
+        if (_formantToggleRect.Contains(x, y)) return "FormantOverlay";
+        if (_harmonicToggleRect.Contains(x, y)) return "HarmonicOverlay";
+        if (_voicingToggleRect.Contains(x, y)) return "VoicingOverlay";
+        if (_preEmphasisToggleRect.Contains(x, y)) return "PreEmphasis";
+        if (_hpfToggleRect.Contains(x, y)) return "HPF";
+        if (_rangeToggleRect.Contains(x, y)) return "RangeOverlay";
+        if (_guidesToggleRect.Contains(x, y)) return "GuidesOverlay";
+        if (_voiceRangeRect.Contains(x, y)) return "VoiceRange";
+        if (_normalizationRect.Contains(x, y)) return "Normalization";
+        if (_dynamicRangeRect.Contains(x, y)) return "DynamicRange";
+        if (_waveformToggleRect.Contains(x, y)) return "WaveformView";
+        if (_spectrumToggleRect.Contains(x, y)) return "SpectrumView";
+        if (_pitchMeterToggleRect.Contains(x, y)) return "PitchMeterView";
+        if (_vowelToggleRect.Contains(x, y)) return "VowelView";
+
+        // Check knobs
+        if (MinFreqKnob.HitTest(x, y)) return "MinFreq";
+        if (MaxFreqKnob.HitTest(x, y)) return "MaxFreq";
+        if (MinDbKnob.HitTest(x, y)) return "MinDb";
+        if (MaxDbKnob.HitTest(x, y)) return "MaxDb";
+        if (TimeKnob.HitTest(x, y)) return "Time";
+        if (HpfKnob.HitTest(x, y)) return "HpfCutoff";
+        if (ReassignThresholdKnob.HitTest(x, y)) return "ReassignThresh";
+        if (ReassignSpreadKnob.HitTest(x, y)) return "ReassignSpread";
+        if (ClarityNoiseKnob.HitTest(x, y)) return "ClarityNoise";
+        if (ClarityHarmonicKnob.HitTest(x, y)) return "ClarityHarmonic";
+        if (ClaritySmoothingKnob.HitTest(x, y)) return "ClaritySmooth";
+        if (BrightnessKnob.HitTest(x, y)) return "Brightness";
+        if (GammaKnob.HitTest(x, y)) return "Gamma";
+        if (ContrastKnob.HitTest(x, y)) return "Contrast";
+        if (LevelsKnob.HitTest(x, y)) return "Levels";
+
+        return null;
+    }
+
+    /// <summary>
+    /// Updates tooltip hover state based on mouse position.
+    /// </summary>
+    public void UpdateTooltipHover(float x, float y)
+    {
+        var controlId = GetControlIdAt(x, y);
+        if (controlId != null && TooltipData.TryGetValue(controlId, out var info))
+        {
+            _tooltip.StartHover(controlId, info.Title, info.Description, new SKPoint(x, y));
+        }
+        else
+        {
+            _tooltip.EndHover();
+        }
+    }
+
     private void DrawTitleBar(SKCanvas canvas, SKSize size, VocalSpectrographState state)
     {
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
@@ -456,177 +1071,27 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
         _bypassRect = new SKRect(right - 48f, TitleBarHeight / 2f - 9f, right, TitleBarHeight / 2f + 9f);
         DrawPillButton(canvas, _bypassRect, state.IsBypassed ? "BYP" : "ON", state.IsBypassed);
-    }
 
-    private void DrawControlBar(SKCanvas canvas, SKSize size, VocalSpectrographState state)
-    {
-        float top = TitleBarHeight + Padding;
-        var controlRect = new SKRect(Padding, top, size.Width - Padding, top + ControlBarHeight);
-        canvas.DrawRoundRect(new SKRoundRect(controlRect, 6f), _panelPaint);
+        string backendLabel = state.UsingGpu ? "GPU" : "CPU";
+        float backendWidth = _mutedTextPaint.MeasureText(backendLabel);
+        float backendX = _bypassRect.Left - 8f - backendWidth;
+        canvas.DrawText(backendLabel, backendX, TitleBarHeight / 2f + 5f, _mutedTextPaint);
 
-        float buttonWidth = 70f;
-        float buttonHeight = 22f;
-        float row1Y = controlRect.Top + 6f;
-        float x = controlRect.Left + 8f;
+        string dropLabel = $"DROP {state.DroppedHops}";
+        var dropPaint = state.DroppedHops > 0 ? _dropAlertPaint : _mutedTextPaint;
+        float dropWidth = dropPaint.MeasureText(dropLabel);
+        float dropX = backendX - 12f - dropWidth;
+        canvas.DrawText(dropLabel, dropX, TitleBarHeight / 2f + 5f, dropPaint);
 
-        _fftRect = new SKRect(x, row1Y, x + buttonWidth, row1Y + buttonHeight);
-        DrawPillButton(canvas, _fftRect, $"FFT {state.FftSize}", false);
-        x = _fftRect.Right + 6f;
-
-        _windowRect = new SKRect(x, row1Y, x + buttonWidth, row1Y + buttonHeight);
-        DrawPillButton(canvas, _windowRect, state.WindowFunction.ToString(), false);
-        x = _windowRect.Right + 6f;
-
-        _overlapRect = new SKRect(x, row1Y, x + buttonWidth, row1Y + buttonHeight);
-        DrawPillButton(canvas, _overlapRect, $"{state.Overlap * 100f:0.#}%", false);
-        x = _overlapRect.Right + 6f;
-
-        _scaleRect = new SKRect(x, row1Y, x + buttonWidth, row1Y + buttonHeight);
-        DrawPillButton(canvas, _scaleRect, state.Scale.ToString(), false);
-        x = _scaleRect.Right + 6f;
-
-        _axisModeRect = new SKRect(x, row1Y, x + buttonWidth, row1Y + buttonHeight);
-        DrawPillButton(canvas, _axisModeRect, FormatAxisLabel(state.AxisMode), false);
-        x = _axisModeRect.Right + 6f;
-
-        _colorRect = new SKRect(x, row1Y, x + buttonWidth, row1Y + buttonHeight);
-        DrawPillButton(canvas, _colorRect, ((SpectrogramColorMap)state.ColorMap).ToString(), false);
-        x = _colorRect.Right + 6f;
-
-        _reassignRect = new SKRect(x, row1Y, x + buttonWidth, row1Y + buttonHeight);
-        DrawPillButton(canvas, _reassignRect, FormatReassignLabel(state.ReassignMode),
-            state.ReassignMode != SpectrogramReassignMode.Off);
-        x = _reassignRect.Right + 6f;
-
-        _clarityRect = new SKRect(x, row1Y, x + buttonWidth, row1Y + buttonHeight);
-        DrawPillButton(canvas, _clarityRect, FormatClarityLabel(state.ClarityMode),
-            state.ClarityMode != ClarityProcessingMode.None);
-        x = _clarityRect.Right + 6f;
-
-        _pitchAlgoRect = new SKRect(x, row1Y, x + buttonWidth, row1Y + buttonHeight);
-        DrawPillButton(canvas, _pitchAlgoRect, FormatPitchLabel(state.PitchAlgorithm), false);
-        x = _pitchAlgoRect.Right + 6f;
-
-        _smoothingModeRect = new SKRect(x, row1Y, x + buttonWidth, row1Y + buttonHeight);
-        DrawPillButton(canvas, _smoothingModeRect, FormatSmoothingLabel(state.SmoothingMode),
-            state.SmoothingMode != SpectrogramSmoothingMode.Off);
-        x = _smoothingModeRect.Right + 6f;
-
-        _pauseRect = new SKRect(x, row1Y, x + buttonWidth, row1Y + buttonHeight);
-        DrawPillButton(canvas, _pauseRect, state.IsPaused ? "PAUSE" : "RUN", state.IsPaused);
-
-        float toggleWidth = 66f;
-        float toggleHeight = 20f;
-        float row2Y = row1Y + buttonHeight + 8f;
-        float toggleX = controlRect.Left + 8f;
-
-        _pitchToggleRect = new SKRect(toggleX, row2Y, toggleX + toggleWidth, row2Y + toggleHeight);
-        DrawPillButton(canvas, _pitchToggleRect, "Pitch", state.ShowPitch);
-        toggleX = _pitchToggleRect.Right + 6f;
-
-        _formantToggleRect = new SKRect(toggleX, row2Y, toggleX + toggleWidth, row2Y + toggleHeight);
-        DrawPillButton(canvas, _formantToggleRect, "Formant", state.ShowFormants);
-        toggleX = _formantToggleRect.Right + 6f;
-
-        _harmonicToggleRect = new SKRect(toggleX, row2Y, toggleX + toggleWidth, row2Y + toggleHeight);
-        DrawPillButton(canvas, _harmonicToggleRect, "Harm", state.ShowHarmonics);
-        toggleX = _harmonicToggleRect.Right + 6f;
-
-        _voicingToggleRect = new SKRect(toggleX, row2Y, toggleX + toggleWidth, row2Y + toggleHeight);
-        DrawPillButton(canvas, _voicingToggleRect, "Voice", state.ShowVoicing);
-        toggleX = _voicingToggleRect.Right + 6f;
-
-        _preEmphasisToggleRect = new SKRect(toggleX, row2Y, toggleX + toggleWidth, row2Y + toggleHeight);
-        DrawPillButton(canvas, _preEmphasisToggleRect, "Emph", state.PreEmphasisEnabled);
-        toggleX = _preEmphasisToggleRect.Right + 6f;
-
-        _hpfToggleRect = new SKRect(toggleX, row2Y, toggleX + toggleWidth, row2Y + toggleHeight);
-        DrawPillButton(canvas, _hpfToggleRect, "HPF", state.HighPassEnabled);
-        toggleX = _hpfToggleRect.Right + 6f;
-
-        _rangeToggleRect = new SKRect(toggleX, row2Y, toggleX + toggleWidth, row2Y + toggleHeight);
-        DrawPillButton(canvas, _rangeToggleRect, "Range", state.ShowRange);
-        toggleX = _rangeToggleRect.Right + 6f;
-
-        _guidesToggleRect = new SKRect(toggleX, row2Y, toggleX + toggleWidth, row2Y + toggleHeight);
-        DrawPillButton(canvas, _guidesToggleRect, "Guides", state.ShowGuides);
-        toggleX = _guidesToggleRect.Right + 6f;
-
-        _voiceRangeRect = new SKRect(toggleX, row2Y, toggleX + toggleWidth, row2Y + toggleHeight);
-        DrawPillButton(canvas, _voiceRangeRect, FormatVoiceRangeLabel(state.VoiceRange), state.ShowRange);
-        toggleX = _voiceRangeRect.Right + 6f;
-
-        _normalizationRect = new SKRect(toggleX, row2Y, toggleX + toggleWidth, row2Y + toggleHeight);
-        DrawPillButton(canvas, _normalizationRect, FormatNormalizationLabel(state.NormalizationMode),
-            state.NormalizationMode != SpectrogramNormalizationMode.None);
-        toggleX = _normalizationRect.Right + 6f;
-
-        _dynamicRangeRect = new SKRect(toggleX, row2Y, toggleX + toggleWidth, row2Y + toggleHeight);
-        DrawPillButton(canvas, _dynamicRangeRect, FormatDynamicRangeLabel(state.DynamicRangeMode),
-            state.DynamicRangeMode != SpectrogramDynamicRangeMode.Custom);
-
-        float row3Y = row2Y + toggleHeight + 6f;
-        float viewWidth = 78f;
-        float viewX = controlRect.Left + 8f;
-
-        _waveformToggleRect = new SKRect(viewX, row3Y, viewX + viewWidth, row3Y + toggleHeight);
-        DrawPillButton(canvas, _waveformToggleRect, "Wave", state.ShowWaveform);
-        viewX = _waveformToggleRect.Right + 6f;
-
-        _spectrumToggleRect = new SKRect(viewX, row3Y, viewX + viewWidth, row3Y + toggleHeight);
-        DrawPillButton(canvas, _spectrumToggleRect, "Slice", state.ShowSpectrum);
-        viewX = _spectrumToggleRect.Right + 6f;
-
-        _pitchMeterToggleRect = new SKRect(viewX, row3Y, viewX + viewWidth, row3Y + toggleHeight);
-        DrawPillButton(canvas, _pitchMeterToggleRect, "Meter", state.ShowPitchMeter);
-        viewX = _pitchMeterToggleRect.Right + 6f;
-
-        _vowelToggleRect = new SKRect(viewX, row3Y, viewX + viewWidth, row3Y + toggleHeight);
-        DrawPillButton(canvas, _vowelToggleRect, "Vowel", state.ShowVowelSpace);
-    }
-
-    private void DrawSpectrogram(SKCanvas canvas, SKSize size, float dpiScale, VocalSpectrographState state)
-    {
-        float top = TitleBarHeight + Padding + ControlBarHeight + Padding;
-        float waveformHeight = state.ShowWaveform ? WaveformHeight : 0f;
-        if (waveformHeight > 0f)
+        if (state.IsProfiling)
         {
-            var waveformRect = new SKRect(Padding + AxisWidth, top, size.Width - Padding - ColorBarWidth, top + waveformHeight);
-            DrawWaveform(canvas, waveformRect, state);
-            top = waveformRect.Bottom + Padding;
-        }
-
-        bool showAuxViews = state.ShowSpectrum || state.ShowPitchMeter || state.ShowVowelSpace;
-        float auxHeight = showAuxViews ? AuxViewHeight : 0f;
-        float bottom = size.Height - Padding - KnobAreaHeight - (showAuxViews ? Padding + auxHeight : 0f);
-
-        var spectrumRect = new SKRect(Padding + AxisWidth, top, size.Width - Padding - ColorBarWidth, bottom);
-        var axisRect = new SKRect(Padding, top, Padding + AxisWidth, bottom);
-        var colorRect = new SKRect(spectrumRect.Right + 6f, top, spectrumRect.Right + 6f + ColorBarWidth, bottom);
-        _spectrogramRect = spectrumRect;
-
-        canvas.DrawRoundRect(new SKRoundRect(spectrumRect, 6f), _panelPaint);
-
-        UpdateSpectrogramBitmap(state);
-        DrawSpectrogramBitmap(canvas, spectrumRect);
-        EnsureAxisLayer(size, dpiScale, state, spectrumRect, axisRect, colorRect);
-        DrawAxisLayer(canvas);
-
-        if (state.ShowRange)
-        {
-            DrawVocalRangeBand(canvas, spectrumRect, state);
-        }
-        if (state.ShowGuides)
-        {
-            DrawFrequencyGuides(canvas, spectrumRect, state);
-        }
-        DrawOverlays(canvas, spectrumRect, state);
-        DrawReferenceLine(canvas, spectrumRect, state);
-
-        if (showAuxViews)
-        {
-            var auxRect = new SKRect(Padding, spectrumRect.Bottom + Padding, size.Width - Padding, spectrumRect.Bottom + Padding + auxHeight);
-            DrawAuxViews(canvas, auxRect, state);
+            const string profilingLabel = "PROF";
+            float profilingWidth = _profilingTextPaint.MeasureText(profilingLabel);
+            float profilingX = dropX - 12f - profilingWidth;
+            float dotX = profilingX - 8f;
+            float dotY = TitleBarHeight / 2f + 1f;
+            canvas.DrawCircle(dotX, dotY, 3f, _profilingDotPaint);
+            canvas.DrawText(profilingLabel, profilingX, TitleBarHeight / 2f + 5f, _profilingTextPaint);
         }
     }
 
@@ -691,7 +1156,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
             return;
         }
 
-        canvas.DrawImage(_axisImage, _axisDrawRect, _axisImagePaint);
+        canvas.DrawImage(_axisImage, _axisDrawRect, _axisSampling, _axisImagePaint);
     }
 
     private void InvalidateAxisCache()
@@ -796,44 +1261,6 @@ public sealed class VocalSpectrographRenderer : IDisposable
             float norm = FrequencyScaleUtils.Normalize(state.Scale, freq, state.MinFrequency, state.MaxFrequency);
             float y = rect.Bottom - norm * rect.Height;
             canvas.DrawLine(rect.Left, y, rect.Right, y, _guidePaint);
-        }
-    }
-
-    private void DrawAuxViews(SKCanvas canvas, SKRect rect, VocalSpectrographState state)
-    {
-        int panelCount = 0;
-        if (state.ShowSpectrum) panelCount++;
-        if (state.ShowPitchMeter) panelCount++;
-        if (state.ShowVowelSpace) panelCount++;
-
-        if (panelCount == 0)
-        {
-            return;
-        }
-
-        float gap = 10f;
-        float panelWidth = (rect.Width - gap * (panelCount - 1)) / panelCount;
-        float x = rect.Left;
-        int frameIndex = GetSliceFrameIndex(state);
-
-        if (state.ShowSpectrum)
-        {
-            var panel = new SKRect(x, rect.Top, x + panelWidth, rect.Bottom);
-            DrawSpectrumSlice(canvas, panel, state, frameIndex);
-            x = panel.Right + gap;
-        }
-
-        if (state.ShowPitchMeter)
-        {
-            var panel = new SKRect(x, rect.Top, x + panelWidth, rect.Bottom);
-            DrawPitchMeter(canvas, panel, state, frameIndex);
-            x = panel.Right + gap;
-        }
-
-        if (state.ShowVowelSpace)
-        {
-            var panel = new SKRect(x, rect.Top, x + panelWidth, rect.Bottom);
-            DrawVowelSpace(canvas, panel, state, frameIndex);
         }
     }
 
@@ -1098,79 +1525,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         return values[frameIndex];
     }
 
-    private void DrawKnobs(SKCanvas canvas, SKSize size, VocalSpectrographState state)
-    {
-        float knobsTop = size.Height - Padding - KnobAreaHeight;
-        int total = _allKnobs.Length;
-        int columns = 6;
-        float rowSpacing = 46f;
-        int rows = (total + columns - 1) / columns;
-
-        // Calculate knob positions
-        for (int row = 0; row < rows; row++)
-        {
-            int rowStart = row * columns;
-            int rowCount = Math.Min(columns, total - rowStart);
-            float knobSpacing = (size.Width - Padding * 2f) / (rowCount + 1);
-            float y = knobsTop + KnobRadius + row * rowSpacing;
-            for (int col = 0; col < rowCount; col++)
-            {
-                int index = rowStart + col;
-                _allKnobs[index].Center = new SKPoint(Padding + knobSpacing * (col + 1), y);
-            }
-        }
-
-        // Update knob values from state and render
-        MinFreqKnob.Value = state.MinFrequency;
-        MinFreqKnob.Render(canvas);
-
-        MaxFreqKnob.Value = state.MaxFrequency;
-        MaxFreqKnob.Render(canvas);
-
-        MinDbKnob.Value = state.MinDb;
-        MinDbKnob.Render(canvas);
-
-        MaxDbKnob.Value = state.MaxDb;
-        MaxDbKnob.Render(canvas);
-
-        TimeKnob.Value = state.TimeWindowSeconds;
-        TimeKnob.Render(canvas);
-
-        HpfKnob.Value = state.HighPassCutoff;
-        HpfKnob.Render(canvas);
-
-        ReassignThresholdKnob.Value = state.ReassignThresholdDb;
-        ReassignThresholdKnob.Render(canvas);
-
-        // ReassignSpread comes in as 0-1, but knob expects 0-100 (%)
-        ReassignSpreadKnob.Value = state.ReassignSpread * 100f;
-        ReassignSpreadKnob.Render(canvas);
-
-        // ClarityNoise comes in as 0-1, but knob expects 0-100 (%)
-        ClarityNoiseKnob.Value = state.ClarityNoise * 100f;
-        ClarityNoiseKnob.Render(canvas);
-
-        // ClarityHarmonic comes in as 0-1, but knob expects 0-100 (%)
-        ClarityHarmonicKnob.Value = state.ClarityHarmonic * 100f;
-        ClarityHarmonicKnob.Render(canvas);
-
-        // ClaritySmoothing comes in as 0-1, but knob expects 0-100 (%)
-        ClaritySmoothingKnob.Value = state.ClaritySmoothing * 100f;
-        ClaritySmoothingKnob.Render(canvas);
-
-        BrightnessKnob.Value = state.Brightness;
-        BrightnessKnob.Render(canvas);
-
-        GammaKnob.Value = state.Gamma;
-        GammaKnob.Render(canvas);
-
-        ContrastKnob.Value = state.Contrast;
-        ContrastKnob.Render(canvas);
-
-        LevelsKnob.Value = state.ColorLevels;
-        LevelsKnob.Render(canvas);
-    }
-
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void UpdateSpectrogramBitmap(VocalSpectrographState state)
     {
         if (state.Spectrogram is null || state.FrameCount <= 0 || state.DisplayBins <= 0)
@@ -1320,6 +1675,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         canvas.DrawBitmap(_spectrogramBitmap, srcRight, dstRight, _bitmapPaint);
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void RenderFullSpectrogram(VocalSpectrographState state, int width, int bins)
     {
         int totalFrames = width;
@@ -1337,6 +1693,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         }
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void UpdateSpectrogramColumns(VocalSpectrographState state, int width, int bins, int deltaFrames, int ringStart)
     {
         if (deltaFrames <= 0)
@@ -1468,6 +1825,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         canvas.DrawText($"{state.TimeWindowSeconds:0.0}s", rect.Right - 24f, bottom + 12f, _mutedTextPaint);
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void DrawOverlays(SKCanvas canvas, SKRect rect, VocalSpectrographState state)
     {
         if (state.PitchTrack is { Length: > 0 } && state.ShowPitch)
@@ -1822,6 +2180,16 @@ public sealed class VocalSpectrographRenderer : IDisposable
         };
     }
 
+    private static string FormatTransformLabel(SpectrogramTransformType transform)
+    {
+        return transform switch
+        {
+            SpectrogramTransformType.ZoomFft => "XF:Zoom",
+            SpectrogramTransformType.Cqt => "XF:CQT",
+            _ => "XF:FFT"
+        };
+    }
+
     private static string FormatPitchLabel(PitchDetectorType algorithm)
     {
         return algorithm switch
@@ -1946,12 +2314,18 @@ public sealed class VocalSpectrographRenderer : IDisposable
             knob.Dispose();
         }
         _presetBar.Dispose();
+        _tooltip.Dispose();
+        _panelHeaderPaint.Dispose();
         _backgroundPaint.Dispose();
         _panelPaint.Dispose();
         _borderPaint.Dispose();
         _titlePaint.Dispose();
         _textPaint.Dispose();
         _mutedTextPaint.Dispose();
+        _dropAlertPaint.Dispose();
+        _profilingTextPaint.Dispose();
+        _profilingDotPaint.Dispose();
+        _profilingPanelPaint.Dispose();
         _gridPaint.Dispose();
         _buttonPaint.Dispose();
         _buttonActivePaint.Dispose();
@@ -2007,6 +2381,7 @@ public enum SpectrographHitArea
     PresetDropdown,
     PresetSave,
     FftButton,
+    TransformButton,
     WindowButton,
     OverlapButton,
     ScaleButton,
@@ -2038,8 +2413,17 @@ public enum SpectrographHitArea
 
 public record struct VocalSpectrographHitTest(SpectrographHitArea Area, int KnobIndex);
 
+/// <summary>
+/// UI timing snapshot for spectrograph rendering (microseconds).
+/// </summary>
+public readonly record struct SpectrographUiTimingSnapshot(
+    int TickUs,
+    int CopyUs,
+    int MapUs);
+
 public record struct VocalSpectrographState(
     int FftSize,
+    SpectrogramTransformType TransformType,
     WindowFunction WindowFunction,
     float Overlap,
     FrequencyScale Scale,
@@ -2076,6 +2460,10 @@ public record struct VocalSpectrographState(
     SpectrogramDynamicRangeMode DynamicRangeMode,
     bool IsBypassed,
     bool IsPaused,
+    bool UsingGpu,
+    bool IsProfiling,
+    SpectrographTimingSnapshot AnalysisTiming,
+    SpectrographUiTimingSnapshot UiTiming,
     bool ShowPitch,
     bool ShowFormants,
     bool ShowHarmonics,
@@ -2085,6 +2473,7 @@ public record struct VocalSpectrographState(
     float HighPassCutoff,
     long LatestFrameId,
     int AvailableFrames,
+    long DroppedHops,
     long? ReferenceFrameId,
     int DataVersion,
     string PresetName,
