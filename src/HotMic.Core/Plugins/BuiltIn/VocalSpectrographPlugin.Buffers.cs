@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Threading;
 using HotMic.Core.Dsp.Fft;
 using HotMic.Core.Dsp.Spectrogram;
@@ -29,6 +30,7 @@ public sealed partial class VocalSpectrographPlugin
     /// Copy the current display-bin magnitudes (linear) and overlay data into the provided arrays.
     /// Magnitudes are updated when reassignment is active; UI display mapping handles the standard path.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public bool CopySpectrogramData(
         float[] magnitudes,
         float[] pitchTrack,
@@ -37,6 +39,7 @@ public sealed partial class VocalSpectrographPlugin
         float[] formantBandwidths,
         byte[] voicingStates,
         float[] harmonicFrequencies,
+        float[] harmonicMagnitudes,
         float[] waveformMin,
         float[] waveformMax,
         float[] hnrTrack,
@@ -52,6 +55,7 @@ public sealed partial class VocalSpectrographPlugin
         var formantBandwidthBuffer = _formantBandwidths;
         var voicingBuffer = _voicingStates;
         var harmonicBuffer = _harmonicFrequencies;
+        var harmonicMagBuffer = _harmonicMagnitudes;
         var waveformMinBuffer = _waveformMin;
         var waveformMaxBuffer = _waveformMax;
         var hnrBuffer = _hnrTrack;
@@ -78,6 +82,7 @@ public sealed partial class VocalSpectrographPlugin
             || formantBandwidthBuffer.Length != formantLength
             || voicingBuffer.Length != frames
             || harmonicBuffer.Length != harmonicLength
+            || harmonicMagBuffer.Length != harmonicLength
             || waveformMinBuffer.Length != frames
             || waveformMaxBuffer.Length != frames
             || hnrBuffer.Length != frames
@@ -96,6 +101,7 @@ public sealed partial class VocalSpectrographPlugin
             || formantBandwidths.Length < formantLength
             || voicingStates.Length < frames
             || harmonicFrequencies.Length < harmonicLength
+            || harmonicMagnitudes.Length < harmonicLength
             || waveformMin.Length < frames
             || waveformMax.Length < frames
             || hnrTrack.Length < frames
@@ -127,6 +133,7 @@ public sealed partial class VocalSpectrographPlugin
                 Array.Clear(formantBandwidths, 0, formantLength);
                 Array.Clear(voicingStates, 0, frames);
                 Array.Clear(harmonicFrequencies, 0, harmonicLength);
+                Array.Clear(harmonicMagnitudes, 0, harmonicLength);
                 Array.Clear(waveformMin, 0, frames);
                 Array.Clear(waveformMax, 0, frames);
                 Array.Clear(hnrTrack, 0, frames);
@@ -150,6 +157,7 @@ public sealed partial class VocalSpectrographPlugin
                     Array.Clear(formantBandwidths, 0, padFrames * MaxFormants);
                     Array.Clear(voicingStates, 0, padFrames);
                     Array.Clear(harmonicFrequencies, 0, padFrames * MaxHarmonics);
+                    Array.Clear(harmonicMagnitudes, 0, padFrames * MaxHarmonics);
                     Array.Clear(waveformMin, 0, padFrames);
                     Array.Clear(waveformMax, 0, padFrames);
                     Array.Clear(hnrTrack, 0, padFrames);
@@ -166,6 +174,7 @@ public sealed partial class VocalSpectrographPlugin
                 CopyRing(formantBandwidthBuffer, formantBandwidths, availableFrames, MaxFormants, startIndex, padFrames);
                 CopyRing(voicingBuffer, voicingStates, availableFrames, startIndex, padFrames);
                 CopyRing(harmonicBuffer, harmonicFrequencies, availableFrames, MaxHarmonics, startIndex, padFrames);
+                CopyRing(harmonicMagBuffer, harmonicMagnitudes, availableFrames, MaxHarmonics, startIndex, padFrames);
                 CopyRing(waveformMinBuffer, waveformMin, availableFrames, 1, startIndex, padFrames);
                 CopyRing(waveformMaxBuffer, waveformMax, availableFrames, 1, startIndex, padFrames);
                 CopyRing(hnrBuffer, hnrTrack, availableFrames, 1, startIndex, padFrames);
@@ -186,54 +195,6 @@ public sealed partial class VocalSpectrographPlugin
     }
 
     /// <summary>
-    /// Copy the display-bin center frequencies into the provided array.
-    /// </summary>
-    public void GetBinFrequencies(float[] frequencies)
-    {
-        var centers = _mapper.CenterFrequencies;
-        if (frequencies.Length < centers.Length)
-        {
-            return;
-        }
-
-        for (int i = 0; i < centers.Length; i++)
-        {
-            frequencies[i] = centers[i];
-        }
-    }
-
-    /// <summary>
-    /// Copy the CQT center frequencies into the provided array.
-    /// Returns the number of CQT bins, or 0 if CQT is not active.
-    /// </summary>
-    public int GetCqtFrequencies(float[] frequencies)
-    {
-        if (_cqt is null)
-        {
-            return 0;
-        }
-
-        var centers = _cqt.CenterFrequencies;
-        int count = Math.Min(frequencies.Length, centers.Length);
-        for (int i = 0; i < count; i++)
-        {
-            frequencies[i] = centers[i];
-        }
-
-        return centers.Length;
-    }
-
-    /// <summary>
-    /// Get the ZoomFFT output bin count, or 0 if ZoomFFT is not active.
-    /// </summary>
-    public int ZoomFftBins => _zoomFft?.OutputBins ?? 0;
-
-    /// <summary>
-    /// Get the ZoomFFT frequency resolution in Hz, or 0 if ZoomFFT is not active.
-    /// </summary>
-    public float ZoomFftBinResolution => _zoomFft?.BinResolutionHz ?? 0f;
-
-    /// <summary>
     /// Copy post-clarity linear magnitude data at analysis resolution.
     /// Returns false if copy failed due to buffer size mismatch or data version change.
     /// </summary>
@@ -242,6 +203,7 @@ public sealed partial class VocalSpectrographPlugin
     /// <param name="binResolutionHz">Output: frequency resolution per bin in Hz.</param>
     /// <param name="transformType">Output: the active transform type.</param>
     /// <returns>True if copy succeeded, false if buffers don't match or data changed during copy.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public bool CopyLinearMagnitudes(
         float[] magnitudes,
         out int analysisBins,
@@ -249,8 +211,21 @@ public sealed partial class VocalSpectrographPlugin
         out SpectrogramTransformType transformType)
     {
         analysisBins = Volatile.Read(ref _activeAnalysisBins);
-        binResolutionHz = _binResolution;
         transformType = _activeTransformType;
+        binResolutionHz = 0f;
+        var descriptor = Volatile.Read(ref _analysisDescriptor);
+        if (descriptor is not null && descriptor.IsLinear)
+        {
+            binResolutionHz = descriptor.BinResolutionHz;
+        }
+        else if (transformType == SpectrogramTransformType.ZoomFft)
+        {
+            binResolutionHz = _zoomFft?.BinResolutionHz ?? _binResolution;
+        }
+        else if (transformType == SpectrogramTransformType.Fft)
+        {
+            binResolutionHz = _binResolution;
+        }
 
         int frames = Volatile.Read(ref _activeFrameCapacity);
         int requiredLength = frames * analysisBins;
@@ -348,8 +323,6 @@ public sealed partial class VocalSpectrographPlugin
             _activeOverlapIndex = overlapIndex;
             _activeTimeWindow = timeWindow;
             _activeHopSize = Math.Max(1, (int)(fftSize * (1f - OverlapOptions[overlapIndex])));
-            _activeAnalysisBins = fftSize / 2;
-            _activeDisplayBins = Math.Min(1024, _activeAnalysisBins);
             _activeFrameCapacity = Math.Max(1, (int)MathF.Ceiling(timeWindow * _sampleRate / _activeHopSize));
             _activeAnalysisSize = fftSize;
             _analysisFilled = 0;
@@ -370,28 +343,17 @@ public sealed partial class VocalSpectrographPlugin
             _fftMagnitudes = new float[_activeFftSize / 2];
             _fftDisplayMagnitudes = new float[_activeFftSize / 2];
             _aWeighting = new float[_activeFftSize / 2];
-            // Clarity processing buffers at analysis resolution (no display cap)
-            _spectrumScratch = new float[_activeAnalysisBins];
-            _displayWork = new float[_activeAnalysisBins];
-            _displayProcessed = new float[_activeAnalysisBins];
-            _displaySmoothed = new float[_activeAnalysisBins];
-            _displayGain = new float[_activeAnalysisBins];
-            _fftBinToDisplay = new int[_activeFftSize / 2];
-            _fftBinDisplayPos = new float[_activeFftSize / 2];
             _fftNormalization = 2f / MathF.Max(1f, _activeFftSize);
             _binResolution = _sampleRate / (float)_activeFftSize;
             UpdateAWeighting();
 
-            // Legacy normalized buffer kept for reassignment path
-            _spectrogramBuffer = new float[_activeFrameCapacity * _activeDisplayBins];
-            // Linear magnitude buffer at analysis resolution
-            _linearMagnitudeBuffer = new float[_activeFrameCapacity * _activeAnalysisBins];
             _pitchTrack = new float[_activeFrameCapacity];
             _pitchConfidence = new float[_activeFrameCapacity];
             _formantFrequencies = new float[_activeFrameCapacity * MaxFormants];
             _formantBandwidths = new float[_activeFrameCapacity * MaxFormants];
             _voicingStates = new byte[_activeFrameCapacity];
             _harmonicFrequencies = new float[_activeFrameCapacity * MaxHarmonics];
+            _harmonicMagnitudes = new float[_activeFrameCapacity * MaxHarmonics];
             _waveformMin = new float[_activeFrameCapacity];
             _waveformMax = new float[_activeFrameCapacity];
             _hnrTrack = new float[_activeFrameCapacity];
@@ -399,13 +361,6 @@ public sealed partial class VocalSpectrographPlugin
             _spectralCentroid = new float[_activeFrameCapacity];
             _spectralSlope = new float[_activeFrameCapacity];
             _spectralFlux = new float[_activeFrameCapacity];
-
-            // DSP components at analysis resolution for full-resolution clarity processing
-            _noiseReducer.EnsureCapacity(_activeAnalysisBins);
-            _hpssProcessor.EnsureCapacity(_activeAnalysisBins);
-            _smoother.EnsureCapacity(_activeAnalysisBins);
-            _harmonicComb.EnsureCapacity(_activeAnalysisBins);
-            _featureExtractor.EnsureCapacity(_activeAnalysisBins);
             resetBuffers = true;
         }
 
@@ -424,8 +379,6 @@ public sealed partial class VocalSpectrographPlugin
             _activeScale = scale;
             _activeMinFrequency = minHz;
             _activeMaxFrequency = maxHz;
-            _mapper.Configure(_activeFftSize, _sampleRate, _activeDisplayBins, minHz, maxHz, scale);
-            UpdateFftBinMapping();
             _swipePitchDetector ??= new SwipePitchDetector(_sampleRate, _activeFftSize, minHz, maxHz);
             _swipePitchDetector.Configure(_sampleRate, _activeFftSize, minHz, maxHz);
             resetBuffers = true;
@@ -498,10 +451,6 @@ public sealed partial class VocalSpectrographPlugin
                 _cqtPhaseDiff = new float[_cqt.BinCount];
             }
 
-            // Configure CQT to display mapping using CQT's actual frequency range
-            // (CQT may have clamped minHz to a higher value due to window size limits)
-            _cqtMapper.Configure(_activeDisplayBins, _cqt.CenterFrequencies,
-                _cqt.MinFrequency, _cqt.MaxFrequency, scale);
             _activeCqtBinsPerOctave = cqtBinsPerOctave;
             resetBuffers = true;
         }
@@ -511,6 +460,53 @@ public sealed partial class VocalSpectrographPlugin
         {
             _activeAnalysisSize = _activeFftSize;
             _analysisFilled = 0;
+        }
+
+        int desiredAnalysisBins = transformType switch
+        {
+            SpectrogramTransformType.Cqt => _cqt?.BinCount ?? _activeAnalysisBins,
+            SpectrogramTransformType.ZoomFft => _zoomFft?.OutputBins ?? _activeAnalysisBins,
+            _ => _activeFftSize / 2
+        };
+        desiredAnalysisBins = Math.Max(1, desiredAnalysisBins);
+        int desiredDisplayBins = Math.Min(1024, desiredAnalysisBins);
+        bool binsChanged = desiredAnalysisBins != _activeAnalysisBins
+            || desiredDisplayBins != _activeDisplayBins;
+
+        if (binsChanged)
+        {
+            _activeAnalysisBins = desiredAnalysisBins;
+            _activeDisplayBins = desiredDisplayBins;
+
+            // Clarity processing buffers at analysis resolution (no display cap).
+            _spectrumScratch = new float[_activeAnalysisBins];
+            _displayWork = new float[_activeAnalysisBins];
+            _displayProcessed = new float[_activeAnalysisBins];
+            _displaySmoothed = new float[_activeAnalysisBins];
+            _displayGain = new float[_activeAnalysisBins];
+
+            // DSP components at analysis resolution for full-resolution clarity processing.
+            _noiseReducer.EnsureCapacity(_activeAnalysisBins);
+            _hpssProcessor.EnsureCapacity(_activeAnalysisBins);
+            _smoother.EnsureCapacity(_activeAnalysisBins);
+            _harmonicComb.EnsureCapacity(_activeAnalysisBins);
+            _featureExtractor.EnsureCapacity(_activeAnalysisBins);
+
+            resetBuffers = true;
+        }
+
+        if (binsChanged || sizeChanged)
+        {
+            // Display buffer at display resolution.
+            _spectrogramBuffer = new float[_activeFrameCapacity * _activeDisplayBins];
+            // Linear magnitude buffer at analysis resolution.
+            _linearMagnitudeBuffer = new float[_activeFrameCapacity * _activeAnalysisBins];
+            resetBuffers = true;
+        }
+
+        if (binsChanged || transformChanged || sizeChanged || mappingChanged || cqtChanged)
+        {
+            UpdateAnalysisDescriptor(transformType);
         }
 
         if (transformChanged)
@@ -586,6 +582,7 @@ public sealed partial class VocalSpectrographPlugin
         Array.Clear(_formantBandwidths, 0, _formantBandwidths.Length);
         Array.Clear(_voicingStates, 0, _voicingStates.Length);
         Array.Clear(_harmonicFrequencies, 0, _harmonicFrequencies.Length);
+        Array.Clear(_harmonicMagnitudes, 0, _harmonicMagnitudes.Length);
         Array.Clear(_waveformMin, 0, _waveformMin.Length);
         Array.Clear(_waveformMax, 0, _waveformMax.Length);
         Array.Clear(_hnrTrack, 0, _hnrTrack.Length);
@@ -663,40 +660,48 @@ public sealed partial class VocalSpectrographPlugin
         }
     }
 
-    private void UpdateFftBinMapping()
+    private void UpdateAnalysisDescriptor(SpectrogramTransformType transformType)
     {
-        int half = _activeFftSize / 2;
-        if (_fftBinToDisplay.Length != half)
+        SpectrogramAnalysisDescriptor? descriptor = null;
+        switch (transformType)
         {
-            _fftBinToDisplay = new int[half];
+            case SpectrogramTransformType.Cqt:
+                if (_cqt is not null)
+                {
+                    descriptor = SpectrogramAnalysisDescriptor.CreateFromCenters(
+                        SpectrogramTransformType.Cqt,
+                        _cqt.CenterFrequencies);
+                }
+                break;
+            case SpectrogramTransformType.ZoomFft:
+                if (_zoomFft is not null)
+                {
+                    descriptor = SpectrogramAnalysisDescriptor.CreateLinear(
+                        SpectrogramTransformType.ZoomFft,
+                        _zoomFft.OutputBins,
+                        _zoomFft.MinFrequency,
+                        _zoomFft.BinResolutionHz);
+                }
+                break;
+            default:
+                int half = _activeFftSize / 2;
+                descriptor = SpectrogramAnalysisDescriptor.CreateLinear(
+                    SpectrogramTransformType.Fft,
+                    half,
+                    0f,
+                    _binResolution);
+                break;
         }
 
-        if (_fftBinDisplayPos.Length != half)
+        if (descriptor is not null)
         {
-            _fftBinDisplayPos = new float[half];
+            _featureExtractor.UpdateFrequencies(descriptor.BinCentersHz.Span);
+            Volatile.Write(ref _analysisDescriptor, descriptor);
         }
-
-        float nyquist = _sampleRate * 0.5f;
-        float minHz = Math.Clamp(_activeMinFrequency, 1f, nyquist - 1f);
-        float maxHz = Math.Clamp(_activeMaxFrequency, minHz + 1f, nyquist);
-        _scaledMin = FrequencyScaleUtils.ToScale(_activeScale, minHz);
-        _scaledMax = FrequencyScaleUtils.ToScale(_activeScale, maxHz);
-        _scaledRange = MathF.Max(1e-6f, _scaledMax - _scaledMin);
-        float invRange = 1f / _scaledRange;
-        float maxPos = Math.Max(1f, _activeDisplayBins - 1);
-
-        for (int bin = 0; bin < half; bin++)
+        else
         {
-            float freq = bin * _binResolution;
-            float clamped = Math.Clamp(freq, minHz, maxHz);
-            float scaled = FrequencyScaleUtils.ToScale(_activeScale, clamped);
-            float norm = (scaled - _scaledMin) * invRange;
-            float pos = Math.Clamp(norm * maxPos, 0f, maxPos);
-            _fftBinDisplayPos[bin] = pos;
-            _fftBinToDisplay[bin] = (int)MathF.Round(pos);
+            Volatile.Write(ref _analysisDescriptor, null);
         }
-
-        _featureExtractor.UpdateFrequencies(_mapper.CenterFrequencies);
     }
 
     private void UpdateAWeighting()
@@ -733,38 +738,19 @@ public sealed partial class VocalSpectrographPlugin
 
     private void BuildDisplayGain()
     {
-        for (int i = 0; i < _activeDisplayBins; i++)
+        int bins = Math.Min(_activeAnalysisBins, _displayGain.Length);
+        for (int i = 0; i < bins; i++)
         {
             float raw = _spectrumScratch[i];
             float processed = _displaySmoothed[i];
             float gain = raw > 1e-8f ? processed / raw : 0f;
             _displayGain[i] = Math.Clamp(gain, 0f, 4f);
         }
-    }
 
-    private float GetDisplayPosition(float fftBin)
-    {
-        int count = _fftBinDisplayPos.Length;
-        if (count == 0)
+        if (bins < _displayGain.Length)
         {
-            return 0f;
+            Array.Clear(_displayGain, bins, _displayGain.Length - bins);
         }
-
-        if (fftBin <= 0f)
-        {
-            return _fftBinDisplayPos[0];
-        }
-
-        if (fftBin >= count - 1)
-        {
-            return _fftBinDisplayPos[count - 1];
-        }
-
-        int index = (int)fftBin;
-        float frac = fftBin - index;
-        float pos0 = _fftBinDisplayPos[index];
-        float pos1 = _fftBinDisplayPos[index + 1];
-        return pos0 + (pos1 - pos0) * frac;
     }
 
     private static int SelectDiscrete(float value, IReadOnlyList<int> options)

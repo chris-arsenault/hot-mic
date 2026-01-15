@@ -53,7 +53,7 @@ public class KnobControl : SkiaControl
     private readonly SKPaint _basePaint = new() { Color = new SKColor(0x33, 0x33, 0x33), IsAntialias = true };
     private readonly SKPaint _ringPaint = new() { Color = new SKColor(0xFF, 0x6B, 0x00), StrokeWidth = 4f, IsAntialias = true, Style = SKPaintStyle.Stroke };
     private readonly SKPaint _tickPaint = new() { Color = SKColors.White, StrokeWidth = 2f, IsAntialias = true };
-    private readonly SKPaint _labelPaint = new() { Color = new SKColor(0xFF, 0xFF, 0xFF), TextAlign = SKTextAlign.Center, TextSize = 12f, IsAntialias = true };
+    private readonly SkiaTextPaint _labelPaint = new(new SKColor(0xFF, 0xFF, 0xFF), 12f, align: SKTextAlign.Center);
 
     protected override void Render(SKCanvas canvas, int width, int height)
     {

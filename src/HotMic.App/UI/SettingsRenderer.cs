@@ -25,10 +25,10 @@ public sealed class SettingsRenderer
     private readonly SKPaint _fieldBorderPaint;
     private readonly SKPaint _buttonPaint;
     private readonly SKPaint _buttonAccentPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _textPaint;
-    private readonly SKPaint _buttonTextPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _textPaint;
+    private readonly SkiaTextPaint _buttonTextPaint;
     private readonly SKPaint _iconPaint;
 
     private readonly Dictionary<SettingsField, SKRect> _fieldRects = new();
@@ -350,7 +350,7 @@ public sealed class SettingsRenderer
         canvas.DrawLine(center.X, center.Y + size / 2f, center.X + size, center.Y - size / 2f, _iconPaint);
     }
 
-    private void DrawEllipsizedText(SKCanvas canvas, string text, float x, float y, float maxWidth, SKPaint paint)
+    private void DrawEllipsizedText(SKCanvas canvas, string text, float x, float y, float maxWidth, SkiaTextPaint paint)
     {
         if (paint.MeasureText(text) <= maxWidth)
         {
@@ -400,16 +400,11 @@ public sealed class SettingsRenderer
 
     private static SKPaint CreateFillPaint(SKColor color) => new() { Color = color, IsAntialias = true, Style = SKPaintStyle.Fill };
     private static SKPaint CreateStrokePaint(SKColor color, float width) => new() { Color = color, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = width };
-    private static SKPaint CreateTextPaint(SKColor color, float size, SKFontStyle? style = null) => new()
-    {
-        Color = color, IsAntialias = true, TextSize = size, TextAlign = SKTextAlign.Left,
-        Typeface = SKTypeface.FromFamilyName("Segoe UI", style ?? SKFontStyle.Normal)
-    };
-    private static SKPaint CreateCenteredTextPaint(SKColor color, float size, SKFontStyle? style = null) => new()
-    {
-        Color = color, IsAntialias = true, TextSize = size, TextAlign = SKTextAlign.Center,
-        Typeface = SKTypeface.FromFamilyName("Segoe UI", style ?? SKFontStyle.Normal)
-    };
+    private static SkiaTextPaint CreateTextPaint(SKColor color, float size, SKFontStyle? style = null) =>
+        new(color, size, style, SKTextAlign.Left);
+
+    private static SkiaTextPaint CreateCenteredTextPaint(SKColor color, float size, SKFontStyle? style = null) =>
+        new(color, size, style, SKTextAlign.Center);
 
     private sealed record DropdownItemRect(SettingsField Field, int Index, SKRect Rect);
 }

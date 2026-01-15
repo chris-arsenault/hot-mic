@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using HotMic.Core.Dsp;
+using HotMic.Core.Dsp.Spectrogram;
 using HotMic.Core.Plugins.BuiltIn;
 using SkiaSharp;
 
@@ -86,6 +87,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         ["PitchOverlay"] = ("Pitch Track", "Yellow line showing detected fundamental frequency (F0)"),
         ["FormantOverlay"] = ("Formants", "Colored lines showing F1/F2/F3 vocal resonances"),
         ["HarmonicOverlay"] = ("Harmonics", "Dots marking detected harmonic peaks"),
+        ["HarmonicMode"] = ("Harmonic Mode", "D=Detected only, T=Theoretical positions, B=Both"),
         ["VoicingOverlay"] = ("Voicing", "Lane showing voiced/unvoiced/silence segments"),
         ["RangeOverlay"] = ("Vocal Range", "Band showing the selected voice range boundaries"),
         ["GuidesOverlay"] = ("Frequency Guides", "Reference lines at semitone intervals"),
@@ -150,6 +152,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private readonly SKPaint _formantLinePaint2;
     private readonly SKPaint _formantLinePaint3;
     private readonly SKPaint _harmonicPaint;
+    private readonly SKPaint _harmonicDetectedPaint;
+    private readonly SKPaint _harmonicTheoreticalPaint;
     private readonly SKPaint _voicedPaint;
     private readonly SKPaint _unvoicedPaint;
     private readonly SKPaint _silencePaint;
@@ -207,6 +211,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private SKRect _pitchToggleRect;
     private SKRect _formantToggleRect;
     private SKRect _harmonicToggleRect;
+    private SKRect _harmonicModeRect;
     private SKRect _voicingToggleRect;
     private SKRect _preEmphasisToggleRect;
     private SKRect _hpfToggleRect;
@@ -336,6 +341,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
         _formantLinePaint2 = new SKPaint { Color = new SKColor(0xFF, 0x96, 0x2A, 0xB0), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f };
         _formantLinePaint3 = new SKPaint { Color = new SKColor(0xFF, 0xD0, 0x3A, 0xB0), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f };
         _harmonicPaint = new SKPaint { Color = new SKColor(0xE0, 0xE0, 0xE6, 0x90), IsAntialias = true, Style = SKPaintStyle.Fill };
+        _harmonicDetectedPaint = new SKPaint { Color = new SKColor(0x00, 0xD4, 0xAA, 0xD0), IsAntialias = true, Style = SKPaintStyle.Fill };
+        _harmonicTheoreticalPaint = new SKPaint { Color = new SKColor(0x80, 0x80, 0x90, 0x40), IsAntialias = true, Style = SKPaintStyle.Fill };
         _voicedPaint = new SKPaint { Color = new SKColor(0x00, 0xD4, 0xAA, 0x50), Style = SKPaintStyle.Fill };
         _unvoicedPaint = new SKPaint { Color = new SKColor(0x80, 0x80, 0x90, 0x40), Style = SKPaintStyle.Fill };
         _silencePaint = new SKPaint { Color = new SKColor(0x00, 0x00, 0x00, 0x60), Style = SKPaintStyle.Fill };
@@ -865,6 +872,19 @@ public sealed class VocalSpectrographRenderer : IDisposable
         DrawPillButton(canvas, _harmonicToggleRect, "Harm", state.ShowHarmonics);
         tx = _harmonicToggleRect.Right + buttonSpacing;
 
+        // Harmonic mode toggle (D=Detected, T=Theoretical, B=Both)
+        float modeButtonWidth = 28f;
+        _harmonicModeRect = new SKRect(tx, row1Y, tx + modeButtonWidth, row1Y + toggleHeight);
+        string modeLabel = state.HarmonicDisplayMode switch
+        {
+            HarmonicDisplayMode.Detected => "D",
+            HarmonicDisplayMode.Theoretical => "T",
+            HarmonicDisplayMode.Both => "B",
+            _ => "?"
+        };
+        DrawPillButton(canvas, _harmonicModeRect, modeLabel, state.ShowHarmonics);
+        tx = _harmonicModeRect.Right + buttonSpacing;
+
         _voicingToggleRect = new SKRect(tx, row1Y, tx + toggleWidth, row1Y + toggleHeight);
         DrawPillButton(canvas, _voicingToggleRect, "Voice", state.ShowVoicing);
         tx = _voicingToggleRect.Right + buttonSpacing;
@@ -957,6 +977,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         if (_pitchToggleRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.PitchToggle, -1);
         if (_formantToggleRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.FormantToggle, -1);
         if (_harmonicToggleRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.HarmonicToggle, -1);
+        if (_harmonicModeRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.HarmonicModeToggle, -1);
         if (_voicingToggleRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.VoicingToggle, -1);
         if (_preEmphasisToggleRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.PreEmphasisToggle, -1);
         if (_hpfToggleRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.HpfToggle, -1);
@@ -1003,6 +1024,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         if (_pitchToggleRect.Contains(x, y)) return "PitchOverlay";
         if (_formantToggleRect.Contains(x, y)) return "FormantOverlay";
         if (_harmonicToggleRect.Contains(x, y)) return "HarmonicOverlay";
+        if (_harmonicModeRect.Contains(x, y)) return "HarmonicMode";
         if (_voicingToggleRect.Contains(x, y)) return "VoicingOverlay";
         if (_preEmphasisToggleRect.Contains(x, y)) return "PreEmphasis";
         if (_hpfToggleRect.Contains(x, y)) return "HPF";
@@ -1239,8 +1261,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
         float clampedMin = MathF.Max(minHz, state.MinFrequency);
         float clampedMax = MathF.Min(maxHz, state.MaxFrequency);
-        float normMin = FrequencyScaleUtils.Normalize(state.Scale, clampedMin, state.MinFrequency, state.MaxFrequency);
-        float normMax = FrequencyScaleUtils.Normalize(state.Scale, clampedMax, state.MinFrequency, state.MaxFrequency);
+        float normMin = FrequencyToNorm(state, clampedMin);
+        float normMax = FrequencyToNorm(state, clampedMax);
         float y1 = rect.Bottom - normMin * rect.Height;
         float y2 = rect.Bottom - normMax * rect.Height;
         float top = MathF.Min(y1, y2);
@@ -1258,7 +1280,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
                 continue;
             }
 
-            float norm = FrequencyScaleUtils.Normalize(state.Scale, freq, state.MinFrequency, state.MaxFrequency);
+            float norm = FrequencyToNorm(state, freq);
             float y = rect.Bottom - norm * rect.Height;
             canvas.DrawLine(rect.Left, y, rect.Right, y, _guidePaint);
         }
@@ -1777,7 +1799,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
                 continue;
             }
 
-            float norm = FrequencyScaleUtils.Normalize(state.Scale, freq, state.MinFrequency, state.MaxFrequency);
+            float norm = FrequencyToNorm(state, freq);
             float y = axisRect.Bottom - norm * axisRect.Height;
             canvas.DrawLine(axisRect.Right - 6f, y, axisRect.Right, y, _gridPaint);
             string label = state.AxisMode switch
@@ -1850,7 +1872,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
                 float confidence = state.PitchConfidence is { Length: > 0 } ? state.PitchConfidence[frame] : 1f;
                 bool high = confidence >= 0.6f;
 
-                float norm = FrequencyScaleUtils.Normalize(state.Scale, pitch, state.MinFrequency, state.MaxFrequency);
+                float norm = FrequencyToNorm(state, pitch);
                 float x = rect.Left + rect.Width * frame / Math.Max(1, state.FrameCount - 1);
                 float y = rect.Bottom - norm * rect.Height;
 
@@ -1912,7 +1934,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
                         float freq = state.FormantFrequencies[offset];
                         if (freq > 0f)
                         {
-                            float norm = FrequencyScaleUtils.Normalize(state.Scale, freq, state.MinFrequency, state.MaxFrequency);
+                            float norm = FrequencyToNorm(state, freq);
                             float y = rect.Bottom - norm * rect.Height;
                             if (!started1)
                             {
@@ -1935,7 +1957,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
                         float freq = state.FormantFrequencies[offset + 1];
                         if (freq > 0f)
                         {
-                            float norm = FrequencyScaleUtils.Normalize(state.Scale, freq, state.MinFrequency, state.MaxFrequency);
+                            float norm = FrequencyToNorm(state, freq);
                             float y = rect.Bottom - norm * rect.Height;
                             if (!started2)
                             {
@@ -1958,7 +1980,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
                         float freq = state.FormantFrequencies[offset + 2];
                         if (freq > 0f)
                         {
-                            float norm = FrequencyScaleUtils.Normalize(state.Scale, freq, state.MinFrequency, state.MaxFrequency);
+                            float norm = FrequencyToNorm(state, freq);
                             float y = rect.Bottom - norm * rect.Height;
                             if (!started3)
                             {
@@ -2001,7 +2023,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
                         {
                             continue;
                         }
-                        float norm = FrequencyScaleUtils.Normalize(state.Scale, freq, state.MinFrequency, state.MaxFrequency);
+                        float norm = FrequencyToNorm(state, freq);
                         float y = rect.Bottom - norm * rect.Height;
                         var paint = f switch
                         {
@@ -2018,8 +2040,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
                             {
                                 float low = freq - bw * 0.5f;
                                 float high = freq + bw * 0.5f;
-                                float lowNorm = FrequencyScaleUtils.Normalize(state.Scale, low, state.MinFrequency, state.MaxFrequency);
-                                float highNorm = FrequencyScaleUtils.Normalize(state.Scale, high, state.MinFrequency, state.MaxFrequency);
+                                float lowNorm = FrequencyToNorm(state, low);
+                                float highNorm = FrequencyToNorm(state, high);
                                 float y1 = rect.Bottom - lowNorm * rect.Height;
                                 float y2 = rect.Bottom - highNorm * rect.Height;
                                 canvas.DrawLine(x, y1, x, y2, paint);
@@ -2037,6 +2059,13 @@ public sealed class VocalSpectrographRenderer : IDisposable
             {
                 int frames = Math.Min(state.FrameCount, state.HarmonicFrequencies.Length / maxHarmonics);
                 int step = GetOverlayStep(rect, frames);
+                var displayMode = state.HarmonicDisplayMode;
+                bool hasMagnitudes = state.HarmonicMagnitudes is { Length: > 0 }
+                    && state.HarmonicMagnitudes.Length >= state.HarmonicFrequencies.Length;
+
+                // Detection threshold: -40 dB relative to fundamental
+                const float DetectionThresholdDb = -40f;
+
                 for (int frame = 0; frame < frames; frame += step)
                 {
                     float x = rect.Left + rect.Width * frame / Math.Max(1, state.FrameCount - 1);
@@ -2048,9 +2077,30 @@ public sealed class VocalSpectrographRenderer : IDisposable
                         {
                             continue;
                         }
-                        float norm = FrequencyScaleUtils.Normalize(state.Scale, freq, state.MinFrequency, state.MaxFrequency);
+
+                        float magDb = hasMagnitudes ? state.HarmonicMagnitudes![offset + h] : float.MinValue;
+                        bool isDetected = magDb > DetectionThresholdDb;
+
+                        // Determine which paint to use based on mode
+                        SKPaint? paint = displayMode switch
+                        {
+                            HarmonicDisplayMode.Detected => isDetected ? _harmonicDetectedPaint : null,
+                            HarmonicDisplayMode.Theoretical => _harmonicTheoreticalPaint,
+                            HarmonicDisplayMode.Both => isDetected ? _harmonicDetectedPaint : _harmonicTheoreticalPaint,
+                            _ => _harmonicPaint
+                        };
+
+                        if (paint is null)
+                        {
+                            continue;
+                        }
+
+                        float norm = FrequencyToNorm(state, freq);
                         float y = rect.Bottom - norm * rect.Height;
-                        canvas.DrawCircle(x, y, 1.5f, _harmonicPaint);
+
+                        // Use larger radius for detected harmonics
+                        float radius = isDetected ? 2.0f : 1.5f;
+                        canvas.DrawCircle(x, y, radius, paint);
                     }
                 }
             }
@@ -2129,6 +2179,16 @@ public sealed class VocalSpectrographRenderer : IDisposable
             return 0f;
         }
         return Math.Clamp((value - min) / (max - min), 0f, 1f);
+    }
+
+    /// <summary>
+    /// Convert frequency to normalized Y position using the unified display mapping.
+    /// Requires FrequencyMapper (DisplayPipeline) to be set in state for proper alignment with spectrogram.
+    /// Returns 0 if mapper is null or not yet configured.
+    /// </summary>
+    private static float FrequencyToNorm(VocalSpectrographState state, float frequencyHz)
+    {
+        return state.FrequencyMapper?.FrequencyToNormalizedY(frequencyHz) ?? 0f;
     }
 
     private static readonly float[] AxisHzLabels = { 80f, 150f, 250f, 500f, 1000f, 2000f, 4000f, 8000f };
@@ -2341,6 +2401,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
         _formantLinePaint2.Dispose();
         _formantLinePaint3.Dispose();
         _harmonicPaint.Dispose();
+        _harmonicDetectedPaint.Dispose();
+        _harmonicTheoreticalPaint.Dispose();
         _voicedPaint.Dispose();
         _unvoicedPaint.Dispose();
         _silencePaint.Dispose();
@@ -2395,6 +2457,7 @@ public enum SpectrographHitArea
     PitchToggle,
     FormantToggle,
     HarmonicToggle,
+    HarmonicModeToggle,
     VoicingToggle,
     PreEmphasisToggle,
     HpfToggle,
@@ -2429,6 +2492,7 @@ public record struct VocalSpectrographState(
     FrequencyScale Scale,
     float MinFrequency,
     float MaxFrequency,
+    DisplayPipeline? FrequencyMapper,
     float MinDb,
     float MaxDb,
     float TimeWindowSeconds,
@@ -2467,6 +2531,7 @@ public record struct VocalSpectrographState(
     bool ShowPitch,
     bool ShowFormants,
     bool ShowHarmonics,
+    HarmonicDisplayMode HarmonicDisplayMode,
     bool ShowVoicing,
     bool PreEmphasisEnabled,
     bool HighPassEnabled,
@@ -2484,6 +2549,7 @@ public record struct VocalSpectrographState(
     float[]? FormantBandwidths,
     byte[]? VoicingStates,
     float[]? HarmonicFrequencies,
+    float[]? HarmonicMagnitudes,
     float[]? WaveformMin,
     float[]? WaveformMax,
     float[]? HnrTrack,

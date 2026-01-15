@@ -26,8 +26,8 @@ public sealed class FFTNoiseRenderer : IDisposable
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _closeButtonPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
     private readonly SKPaint _spectrumBackgroundPaint;
@@ -36,13 +36,13 @@ public sealed class FFTNoiseRenderer : IDisposable
     private readonly SKPaint _noiseProfilePaint;
     private readonly SKPaint _noiseProfileFillPaint;
     private readonly SKPaint _gridPaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _valuePaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _valuePaint;
     private readonly SKPaint _learnButtonPaint;
     private readonly SKPaint _learningPaint;
     private readonly SKPaint _progressBarPaint;
     private readonly SKPaint _progressFillPaint;
-    private readonly SKPaint _latencyPaint;
+    private readonly SkiaTextPaint _latencyPaint;
 
     private readonly SKColor _inputColor = new(0x3D, 0xA5, 0xF4, 0x80);    // Blue, semi-transparent
     private readonly SKColor _outputColor = new(0x00, 0xD4, 0xAA, 0xA0);   // Teal, semi-transparent
@@ -82,22 +82,8 @@ public sealed class FFTNoiseRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _closeButtonPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 18f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _bypassPaint = new SKPaint
         {
@@ -167,32 +153,9 @@ public sealed class FFTNoiseRenderer : IDisposable
             ValueFormat = "0"
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _valuePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 12f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _latencyPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _valuePaint = new SkiaTextPaint(_theme.TextPrimary, 12f, SKFontStyle.Bold, SKTextAlign.Center);
+        _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
 
         _learnButtonPaint = new SKPaint
         {
@@ -267,14 +230,7 @@ public sealed class FFTNoiseRenderer : IDisposable
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SKPaint
-        {
-            Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
 
         if (state.LatencyMs >= 0f)
@@ -331,13 +287,7 @@ public sealed class FFTNoiseRenderer : IDisposable
         float maxFreq = state.SampleRate > 0 ? state.SampleRate / 2f : 24000f;
 
         // Axis label paint
-        using var axisLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 8f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        using var axisLabelPaint = new SkiaTextPaint(_theme.TextMuted, 8f, SKFontStyle.Normal);
 
         // Draw dB grid lines and labels
         int[] dbMarkers = { 0, -12, -24, -36, -48, -60, -72, -84 };
@@ -488,14 +438,7 @@ public sealed class FFTNoiseRenderer : IDisposable
             canvas.DrawRoundRect(new SKRoundRect(progressFill, 4f), _progressFillPaint);
 
             // Learning text
-            using var learningText = new SKPaint
-            {
-                Color = _theme.TextPrimary,
-                IsAntialias = true,
-                TextSize = 14f,
-                TextAlign = SKTextAlign.Center,
-                Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-            };
+            using var learningText = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold, SKTextAlign.Center);
             canvas.DrawText($"Learning noise profile... {state.LearningProgress}/{state.LearningTotal}",
                 graphRect.MidX, progressY - 12, learningText);
         }
@@ -507,13 +450,7 @@ public sealed class FFTNoiseRenderer : IDisposable
 
         // Legend (below everything)
         float legendY = outerRect.Bottom + 14;
-        using var legendPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        using var legendPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal);
 
         // Input legend
         using var inputSwatch = new SKPaint { Color = _inputColor, Style = SKPaintStyle.Fill };
@@ -546,14 +483,7 @@ public sealed class FFTNoiseRenderer : IDisposable
         canvas.DrawRoundRect(new SKRoundRect(_learnButtonRect, 6f), learnPaint);
         canvas.DrawRoundRect(new SKRoundRect(_learnButtonRect, 6f), _borderPaint);
 
-        using var learnTextPaint = new SKPaint
-        {
-            Color = SKColors.White,
-            IsAntialias = true,
-            TextSize = 12f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var learnTextPaint = new SkiaTextPaint(SKColors.White, 12f, SKFontStyle.Bold, SKTextAlign.Center);
         string learnLabel = state.IsLearning ? "STOP" : (state.HasNoiseProfile ? "RE-LEARN" : "LEARN");
         canvas.DrawText(learnLabel, _learnButtonRect.MidX, _learnButtonRect.MidY + 4, learnTextPaint);
 

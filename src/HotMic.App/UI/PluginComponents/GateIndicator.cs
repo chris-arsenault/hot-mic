@@ -12,7 +12,7 @@ public sealed class GateIndicator : IDisposable
     private readonly SKPaint _closedPaint;
     private readonly SKPaint _glowPaint;
     private readonly SKPaint _rimPaint;
-    private readonly SKPaint _labelPaint;
+    private readonly SkiaTextPaint _labelPaint;
 
     public GateIndicator(PluginComponentTheme? theme = null)
     {
@@ -48,14 +48,7 @@ public sealed class GateIndicator : IDisposable
             StrokeWidth = 2f
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
     }
 
     /// <summary>
@@ -162,14 +155,7 @@ public sealed class GateIndicator : IDisposable
         // Label
         if (!string.IsNullOrEmpty(label))
         {
-            using var textPaint = new SKPaint
-            {
-                Color = isOpen ? _theme.TextPrimary : _theme.TextMuted,
-                IsAntialias = true,
-                TextSize = 10f,
-                TextAlign = SKTextAlign.Center,
-                Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-            };
+            using var textPaint = new SkiaTextPaint(isOpen ? _theme.TextPrimary : _theme.TextMuted, 10f, SKFontStyle.Bold, SKTextAlign.Center);
             canvas.DrawText(label, rect.MidX, rect.MidY + 4, textPaint);
         }
     }

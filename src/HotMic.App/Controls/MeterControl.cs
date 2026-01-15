@@ -53,7 +53,7 @@ public class MeterControl : SkiaControl
     private readonly SKPaint _backgroundPaint = new() { Color = new SKColor(0x24, 0x24, 0x24) };
     private readonly SKPaint _peakPaint = new() { Color = SKColors.White, StrokeWidth = 2f, IsAntialias = true, Style = SKPaintStyle.Stroke };
     private readonly SKPaint _tickPaint = new() { Color = new SKColor(0x44, 0x44, 0x44), StrokeWidth = 1f, IsAntialias = true };
-    private readonly SKPaint _tickLabelPaint = new() { Color = new SKColor(0x88, 0x88, 0x88), TextSize = 9f, IsAntialias = true };
+    private readonly SkiaTextPaint _tickLabelPaint = new(new SKColor(0x88, 0x88, 0x88), 9f);
     private readonly SKPaint _greenPaint = new() { Color = new SKColor(0x40, 0xC0, 0x40) };
     private readonly SKPaint _yellowPaint = new() { Color = new SKColor(0xFF, 0xC0, 0x40) };
     private readonly SKPaint _redPaint = new() { Color = new SKColor(0xFF, 0x50, 0x50) };

@@ -30,12 +30,12 @@ public sealed class ReverbRenderer : IDisposable
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _closeButtonPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
-    private readonly SKPaint _sectionLabelPaint;
-    private readonly SKPaint _statusPaint;
+    private readonly SkiaTextPaint _sectionLabelPaint;
+    private readonly SkiaTextPaint _statusPaint;
     private readonly SKPaint _presetPaint;
     private readonly SKPaint _presetSelectedPaint;
     private readonly SKPaint _loadButtonPaint;
@@ -94,22 +94,8 @@ public sealed class ReverbRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _closeButtonPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 18f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _bypassPaint = new SKPaint
         {
@@ -125,22 +111,8 @@ public sealed class ReverbRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _sectionLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _statusPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _sectionLabelPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal);
+        _statusPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _presetPaint = new SKPaint
         {
@@ -217,14 +189,7 @@ public sealed class ReverbRenderer : IDisposable
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SKPaint
-        {
-            Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
 
         // Close button
@@ -249,14 +214,11 @@ public sealed class ReverbRenderer : IDisposable
             canvas.DrawRoundRect(presetRound, isSelected ? _presetSelectedPaint : _presetPaint);
             canvas.DrawRoundRect(presetRound, _borderPaint);
 
-            using var presetTextPaint = new SKPaint
-            {
-                Color = isSelected ? _theme.TextPrimary : _theme.TextSecondary,
-                IsAntialias = true,
-                TextSize = 9f,
-                TextAlign = SKTextAlign.Center,
-                Typeface = SKTypeface.FromFamilyName("Segoe UI", isSelected ? SKFontStyle.Bold : SKFontStyle.Normal)
-            };
+            using var presetTextPaint = new SkiaTextPaint(
+                isSelected ? _theme.TextPrimary : _theme.TextSecondary,
+                9f,
+                isSelected ? SKFontStyle.Bold : SKFontStyle.Normal,
+                SKTextAlign.Center);
             canvas.DrawText(PresetNames[i], _presetRects[i].MidX, _presetRects[i].MidY + 3, presetTextPaint);
         }
 
@@ -270,14 +232,7 @@ public sealed class ReverbRenderer : IDisposable
             canvas.DrawRoundRect(loadRound, _loadButtonPaint);
             canvas.DrawRoundRect(loadRound, _borderPaint);
 
-            using var loadTextPaint = new SKPaint
-            {
-                Color = _theme.TextPrimary,
-                IsAntialias = true,
-                TextSize = 10f,
-                TextAlign = SKTextAlign.Center,
-                Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-            };
+            using var loadTextPaint = new SkiaTextPaint(_theme.TextPrimary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
             canvas.DrawText("Load IR File...", _loadButtonRect.MidX, _loadButtonRect.MidY + 4, loadTextPaint);
 
             // Show loaded file name
@@ -285,13 +240,7 @@ public sealed class ReverbRenderer : IDisposable
             {
                 string fileName = Path.GetFileName(state.LoadedIrPath);
                 if (fileName.Length > 30) fileName = fileName[..27] + "...";
-                using var fileNamePaint = new SKPaint
-                {
-                    Color = _theme.TextSecondary,
-                    IsAntialias = true,
-                    TextSize = 9f,
-                    Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-                };
+                using var fileNamePaint = new SkiaTextPaint(_theme.TextSecondary, 9f, SKFontStyle.Normal);
                 canvas.DrawText(fileName, _loadButtonRect.Right + 10, _loadButtonRect.MidY + 3, fileNamePaint);
             }
             y += 36;
@@ -321,14 +270,7 @@ public sealed class ReverbRenderer : IDisposable
         else
         {
             // No IR loaded message
-            using var noIrPaint = new SKPaint
-            {
-                Color = _theme.TextMuted,
-                IsAntialias = true,
-                TextSize = 12f,
-                TextAlign = SKTextAlign.Center,
-                Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Italic)
-            };
+            using var noIrPaint = new SkiaTextPaint(_theme.TextMuted, 12f, SKFontStyle.Italic, SKTextAlign.Center);
             canvas.DrawText("No impulse response loaded", irDisplayRect.MidX, irDisplayRect.MidY + 4, noIrPaint);
         }
 
@@ -485,13 +427,7 @@ public sealed class ReverbRenderer : IDisposable
         }
 
         // Labels
-        using var labelPaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 9f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var labelPaint = new SkiaTextPaint(_theme.TextPrimary, 9f, SKFontStyle.Bold);
         canvas.DrawText("DRY", rect.Left + 8, rect.MidY + 3, labelPaint);
         labelPaint.TextAlign = SKTextAlign.Right;
         canvas.DrawText("WET", rect.Right - 8, rect.MidY + 3, labelPaint);

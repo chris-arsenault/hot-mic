@@ -1,7 +1,6 @@
 using System.Threading;
 using HotMic.Core.Dsp;
 using HotMic.Core.Dsp.Fft;
-using HotMic.Core.Dsp.Mapping;
 using HotMic.Core.Dsp.Spectrogram;
 using HotMic.Core.Threading;
 
@@ -56,6 +55,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     public const int DynamicRangeModeIndex = 40;
     public const int TransformTypeIndex = 41;
     public const int CqtBinsPerOctaveIndex = 42;
+    public const int HarmonicDisplayModeIndex = 43;
 
     private const float DefaultMinFrequency = 80f;
     private const float DefaultMaxFrequency = 8000f;
@@ -88,8 +88,6 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private const int ZoomFftZoomFactor = 2;
 
     private readonly LockFreeRingBuffer _captureBuffer = new(CaptureBufferSize);
-    private readonly SpectrumMapper _mapper = new();
-    private readonly CqtSpectrumMapper _cqtMapper = new();
     private readonly VoicingDetector _voicingDetector = new();
     private readonly BiquadFilter _rumbleHighPass = new();
     private readonly SpectrogramNoiseReducer _noiseReducer = new();
@@ -97,8 +95,10 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private readonly SpectrogramSmoother _smoother = new();
     private readonly HarmonicCombEnhancer _harmonicComb = new(MaxHarmonics);
     private readonly SpectralFeatureExtractor _featureExtractor = new();
+    private readonly SpectrographTimingCollector _timing = new();
     private OnePoleHighPass _dcHighPass = new();
     private PreEmphasisFilter _preEmphasisFilter = new();
+    private long _lastDroppedHops;
 
     private Thread? _analysisThread;
     private CancellationTokenSource? _analysisCts;
@@ -161,13 +161,9 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private float[] _displayProcessed = Array.Empty<float>();
     private float[] _displaySmoothed = Array.Empty<float>();
     private float[] _displayGain = Array.Empty<float>();
-    private int[] _fftBinToDisplay = Array.Empty<int>();
-    private float[] _fftBinDisplayPos = Array.Empty<float>();
     private float _fftNormalization = 1f;
     private float _binResolution;
-    private float _scaledMin;
-    private float _scaledMax;
-    private float _scaledRange;
+    private SpectrogramAnalysisDescriptor? _analysisDescriptor;
 
     private float[] _spectrogramBuffer = Array.Empty<float>();
     private float[] _linearMagnitudeBuffer = Array.Empty<float>();
@@ -177,6 +173,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private float[] _formantBandwidths = Array.Empty<float>();
     private byte[] _voicingStates = Array.Empty<byte>();
     private float[] _harmonicFrequencies = Array.Empty<float>();
+    private float[] _harmonicMagnitudes = Array.Empty<float>();
     private float[] _waveformMin = Array.Empty<float>();
     private float[] _waveformMax = Array.Empty<float>();
     private float[] _hnrTrack = Array.Empty<float>();
@@ -196,6 +193,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private float[] _formantFreqScratch = new float[MaxFormants];
     private float[] _formantBwScratch = new float[MaxFormants];
     private float[] _harmonicScratch = new float[MaxHarmonics];
+    private float[] _harmonicMagScratch = new float[MaxHarmonics];
 
     private int _analysisActive;
     private int _analysisFilled;
@@ -212,6 +210,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private int _requestedShowPitch = 1;
     private int _requestedShowFormants = 1;
     private int _requestedShowHarmonics = 1;
+    private int _requestedHarmonicDisplayMode = (int)HarmonicDisplayMode.Detected;
     private int _requestedShowVoicing = 1;
     private int _requestedPreEmphasis = 1;
     private int _requestedHighPassEnabled = 1;

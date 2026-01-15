@@ -25,8 +25,8 @@ public sealed class HighPassFilterRenderer : IDisposable
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _closeButtonPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
     private readonly SKPaint _meterBackgroundPaint;
@@ -36,11 +36,11 @@ public sealed class HighPassFilterRenderer : IDisposable
     private readonly SKPaint _curveAreaPaint;
     private readonly SKPaint _cutoffLinePaint;
     private readonly SKPaint _gridPaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _freqLabelPaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _freqLabelPaint;
     private readonly SKPaint _slopeButtonPaint;
     private readonly SKPaint _slopeButtonActivePaint;
-    private readonly SKPaint _latencyPaint;
+    private readonly SkiaTextPaint _latencyPaint;
     private readonly SKPaint _spectrumPaint;
 
     private SKRect _closeButtonRect;
@@ -81,22 +81,8 @@ public sealed class HighPassFilterRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _closeButtonPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 18f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _bypassPaint = new SKPaint
         {
@@ -165,23 +151,8 @@ public sealed class HighPassFilterRenderer : IDisposable
             StrokeWidth = 0.5f
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _freqLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _freqLabelPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _slopeButtonPaint = new SKPaint
         {
@@ -197,14 +168,7 @@ public sealed class HighPassFilterRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _latencyPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
 
         _spectrumPaint = new SKPaint
         {
@@ -258,14 +222,7 @@ public sealed class HighPassFilterRenderer : IDisposable
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SKPaint
-        {
-            Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
 
         if (state.LatencyMs >= 0f)
@@ -318,28 +275,14 @@ public sealed class HighPassFilterRenderer : IDisposable
         var slope18Round = new SKRoundRect(_slope18ButtonRect, 4f);
         canvas.DrawRoundRect(slope18Round, is18dB ? _slopeButtonActivePaint : _slopeButtonPaint);
         canvas.DrawRoundRect(slope18Round, _borderPaint);
-        using var slope18TextPaint = new SKPaint
-        {
-            Color = is18dB ? _theme.PanelBackground : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 11f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var slope18TextPaint = new SkiaTextPaint(is18dB ? _theme.PanelBackground : _theme.TextSecondary, 11f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("18dB", _slope18ButtonRect.MidX, _slope18ButtonRect.MidY + 4, slope18TextPaint);
 
         // 12 dB button
         var slope12Round = new SKRoundRect(_slope12ButtonRect, 4f);
         canvas.DrawRoundRect(slope12Round, !is18dB ? _slopeButtonActivePaint : _slopeButtonPaint);
         canvas.DrawRoundRect(slope12Round, _borderPaint);
-        using var slope12TextPaint = new SKPaint
-        {
-            Color = !is18dB ? _theme.PanelBackground : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 11f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var slope12TextPaint = new SkiaTextPaint(!is18dB ? _theme.PanelBackground : _theme.TextSecondary, 11f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("12dB", _slope12ButtonRect.MidX, _slope12ButtonRect.MidY + 4, slope12TextPaint);
 
         // Slope label

@@ -20,19 +20,19 @@ public sealed class GainRenderer : IDisposable
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _closeButtonPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
     private readonly SKPaint _meterBackgroundPaint;
     private readonly SKPaint _meterFillPaint;
     private readonly SKPaint _meterPeakPaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _valuePaint;
-    private readonly SKPaint _unitPaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _valuePaint;
+    private readonly SkiaTextPaint _unitPaint;
     private readonly SKPaint _phaseButtonPaint;
     private readonly SKPaint _phaseActivePaint;
-    private readonly SKPaint _latencyPaint;
+    private readonly SkiaTextPaint _latencyPaint;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
@@ -74,22 +74,8 @@ public sealed class GainRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _closeButtonPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 18f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _bypassPaint = new SKPaint
         {
@@ -135,32 +121,9 @@ public sealed class GainRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 11f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _valuePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 24f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _unitPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 12f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 11f, SKFontStyle.Normal, SKTextAlign.Center);
+        _valuePaint = new SkiaTextPaint(_theme.TextPrimary, 24f, SKFontStyle.Bold, SKTextAlign.Center);
+        _unitPaint = new SkiaTextPaint(_theme.TextMuted, 12f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _phaseButtonPaint = new SKPaint
         {
@@ -176,14 +139,7 @@ public sealed class GainRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _latencyPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
 
         // Initialize level meters with PPM-style ballistics
         _inputMeter = new LevelMeter();
@@ -238,14 +194,7 @@ public sealed class GainRenderer : IDisposable
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SKPaint
-        {
-            Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
 
         if (state.LatencyMs >= 0f)
@@ -293,14 +242,7 @@ public sealed class GainRenderer : IDisposable
         canvas.DrawRoundRect(phaseRound, state.IsPhaseInverted ? _phaseActivePaint : _phaseButtonPaint);
         canvas.DrawRoundRect(phaseRound, _borderPaint);
 
-        using var phaseTextPaint = new SKPaint
-        {
-            Color = state.IsPhaseInverted ? _theme.PanelBackground : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 11f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var phaseTextPaint = new SkiaTextPaint(state.IsPhaseInverted ? _theme.PanelBackground : _theme.TextSecondary, 11f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("\u00D8 PHASE", _phaseButtonRect.MidX, _phaseButtonRect.MidY + 4, phaseTextPaint);
 
         // Outer border
@@ -365,14 +307,7 @@ public sealed class GainRenderer : IDisposable
 
         // Level value
         string dbText = levelDb > -59f ? $"{levelDb:0}" : "-\u221E";
-        using var dbPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        using var dbPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Center);
         canvas.DrawText(dbText, rect.MidX, rect.Top - 4, dbPaint);
     }
 

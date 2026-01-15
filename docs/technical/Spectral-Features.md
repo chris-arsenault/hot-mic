@@ -9,7 +9,7 @@ Compute high-level spectral features for voice quality analysis.
 - Flux: mean-square change vs previous frame spectrum.
 
 ## Parameters and Defaults
-- Uses display-bin center frequencies from the active frequency scale.
+- Uses analysis-bin center frequencies from the active transform.
 - Flux uses a one-frame history buffer.
 
 ## Real-time Considerations

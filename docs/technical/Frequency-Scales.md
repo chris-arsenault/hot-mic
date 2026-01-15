@@ -11,15 +11,19 @@ Map FFT bins into perceptual frequency scales and fixed display bins.
 - Bark (Traunmuller): `13*atan(0.00076*f) + 3.5*atan((f/7500)^2)`.
 
 ## Bin Mapping
-- Display bin count = min(1024, fftSize/2).
-- The min/max frequency bounds are mapped into scale space.
+- Analysis bin count is derived from the active transform:
+  - FFT: `fftSize/2`
+  - ZoomFFT: `OutputBins`
+  - CQT: `BinCount`
+- Display bin count = `min(1024, analysisBins)`.
+- The min/max display bounds are mapped into scale space.
 - Each display bin spans a uniform interval in scale space and maps back to a
-  corresponding FFT-bin range.
-- Mapping uses max-hold across the FFT-bin range per display bin.
+  range of analysis bins using the analysis bin centers/edges.
+- Mapping uses max-hold across the analysis-bin range per display bin.
 - Display-bin center frequencies are computed from the scale midpoint and reused
-  for spectral features and overlays.
-- Reassignment uses a precomputed FFT-bin -> display position table for sub-bin
-  interpolation.
+  for axis/overlays.
+- Spectral features use analysis-bin center frequencies (not display bins).
+- Reassignment uses the same display scale mapping for frequency -> display bin.
 
 ## Parameters
 | Parameter | Default | Range | Notes |
@@ -34,5 +38,7 @@ Map FFT bins into perceptual frequency scales and fixed display bins.
 - No per-frame allocations.
 
 Implementation refs: (src/HotMic.Core/Dsp/Mapping/FrequencyScaleUtils.cs,
- src/HotMic.Core/Dsp/Mapping/SpectrumMapper.cs,
+ src/HotMic.Core/Dsp/Mapping/SpectrogramDisplayMapper.cs,
+ src/HotMic.Core/Dsp/Spectrogram/SpectrogramAnalysisDescriptor.cs,
+ src/HotMic.App/UI/PluginComponents/DisplayPipeline.cs,
  src/HotMic.Core/Plugins/BuiltIn/VocalSpectrographPlugin.Buffers.cs)

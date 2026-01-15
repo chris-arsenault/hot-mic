@@ -133,6 +133,16 @@ public sealed partial class VocalSpectrographPlugin
             },
             new PluginParameter
             {
+                Index = HarmonicDisplayModeIndex,
+                Name = "Harmonic Mode",
+                MinValue = 0f,
+                MaxValue = 2f,
+                DefaultValue = (float)HarmonicDisplayMode.Detected,
+                Unit = "",
+                FormatValue = value => ((HarmonicDisplayMode)Math.Clamp((int)MathF.Round(value), 0, 2)).ToString()
+            },
+            new PluginParameter
+            {
                 Index = ShowVoicingIndex,
                 Name = "Voicing",
                 MinValue = 0f,
@@ -440,6 +450,16 @@ public sealed partial class VocalSpectrographPlugin
 
     public int AnalysisBins => Volatile.Read(ref _activeAnalysisBins);
 
+    /// <summary>
+    /// Current analysis layout descriptor for display mapping.
+    /// </summary>
+    public SpectrogramAnalysisDescriptor? AnalysisDescriptor => Volatile.Read(ref _analysisDescriptor);
+
+    /// <summary>
+    /// Hop size in samples used for analysis.
+    /// </summary>
+    public int HopSize => Volatile.Read(ref _activeHopSize);
+
     public int FrameCount => Volatile.Read(ref _activeFrameCapacity);
 
     public int MaxFormantCount => MaxFormants;
@@ -540,6 +560,9 @@ public sealed partial class VocalSpectrographPlugin
 
     public bool ShowHarmonics => Volatile.Read(ref _requestedShowHarmonics) != 0;
 
+    public HarmonicDisplayMode HarmonicDisplayMode =>
+        (HarmonicDisplayMode)Math.Clamp(Volatile.Read(ref _requestedHarmonicDisplayMode), 0, 2);
+
     public bool ShowVoicing => Volatile.Read(ref _requestedShowVoicing) != 0;
 
     public bool PreEmphasisEnabled => Volatile.Read(ref _requestedPreEmphasis) != 0;
@@ -610,6 +633,9 @@ public sealed partial class VocalSpectrographPlugin
                 break;
             case ShowHarmonicsIndex:
                 Interlocked.Exchange(ref _requestedShowHarmonics, value >= 0.5f ? 1 : 0);
+                break;
+            case HarmonicDisplayModeIndex:
+                Interlocked.Exchange(ref _requestedHarmonicDisplayMode, Math.Clamp((int)MathF.Round(value), 0, 2));
                 break;
             case ShowVoicingIndex:
                 Interlocked.Exchange(ref _requestedShowVoicing, value >= 0.5f ? 1 : 0);
@@ -706,7 +732,7 @@ public sealed partial class VocalSpectrographPlugin
 
     public byte[] GetState()
     {
-        var bytes = new byte[sizeof(float) * 43];
+        var bytes = new byte[sizeof(float) * 44];
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedFftSize), 0, bytes, 0, 4);
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedWindow), 0, bytes, 4, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(OverlapOptions[_requestedOverlapIndex]), 0, bytes, 8, 4);
@@ -750,6 +776,7 @@ public sealed partial class VocalSpectrographPlugin
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedDynamicRangeMode), 0, bytes, 160, 4);
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedTransformType), 0, bytes, 164, 4);
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedCqtBinsPerOctave), 0, bytes, 168, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedHarmonicDisplayMode), 0, bytes, 172, 4);
         return bytes;
     }
 
@@ -818,6 +845,11 @@ public sealed partial class VocalSpectrographPlugin
         {
             SetParameter(TransformTypeIndex, BitConverter.ToSingle(state, 164));
             SetParameter(CqtBinsPerOctaveIndex, BitConverter.ToSingle(state, 168));
+        }
+
+        if (state.Length >= sizeof(float) * 44)
+        {
+            SetParameter(HarmonicDisplayModeIndex, BitConverter.ToSingle(state, 172));
         }
     }
 }

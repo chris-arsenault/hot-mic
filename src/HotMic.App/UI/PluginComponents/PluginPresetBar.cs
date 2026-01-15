@@ -17,7 +17,7 @@ public sealed class PluginPresetBar : IDisposable
     private readonly PluginComponentTheme _theme;
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _textPaint;
+    private readonly SkiaTextPaint _textPaint;
     private readonly SKPaint _arrowPaint;
     private readonly SKPaint _iconPaint;
 
@@ -43,13 +43,7 @@ public sealed class PluginPresetBar : IDisposable
             StrokeWidth = 1f
         };
 
-        _textPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _textPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal);
 
         _arrowPaint = new SKPaint
         {

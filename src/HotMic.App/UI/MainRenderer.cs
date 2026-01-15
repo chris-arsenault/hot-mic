@@ -47,12 +47,12 @@ public sealed class MainRenderer
     private readonly SKPaint _pluginSlotFilledPaint;
     private readonly SKPaint _pluginSlotBypassedPaint;
     private readonly SKPaint _accentPaint;
-    private readonly SKPaint _textPaint;
-    private readonly SKPaint _textSecondaryPaint;
-    private readonly SKPaint _textMutedPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _smallTextPaint;
-    private readonly SKPaint _tinyTextPaint;
+    private readonly SkiaTextPaint _textPaint;
+    private readonly SkiaTextPaint _textSecondaryPaint;
+    private readonly SkiaTextPaint _textMutedPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _smallTextPaint;
+    private readonly SkiaTextPaint _tinyTextPaint;
     private readonly SKPaint _meterBackgroundPaint;
     private readonly SKPaint _meterSegmentOffPaint;
     private readonly SKPaint _iconPaint;
@@ -1158,7 +1158,7 @@ public sealed class MainRenderer
         _topButtonRects[button] = rect;
     }
 
-    private void DrawEllipsizedText(SKCanvas canvas, string text, float x, float y, float maxWidth, SKPaint paint)
+    private void DrawEllipsizedText(SKCanvas canvas, string text, float x, float y, float maxWidth, SkiaTextPaint paint)
     {
         if (paint.MeasureText(text) <= maxWidth)
         {
@@ -1249,16 +1249,11 @@ public sealed class MainRenderer
     // Paint factories
     private static SKPaint CreateFillPaint(SKColor color) => new() { Color = color, IsAntialias = true, Style = SKPaintStyle.Fill };
     private static SKPaint CreateStrokePaint(SKColor color, float width) => new() { Color = color, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = width };
-    private static SKPaint CreateTextPaint(SKColor color, float size, SKFontStyle? style = null) => new()
-    {
-        Color = color, IsAntialias = true, TextSize = size, TextAlign = SKTextAlign.Left,
-        Typeface = SKTypeface.FromFamilyName("Segoe UI", style ?? SKFontStyle.Normal)
-    };
-    private static SKPaint CreateCenteredTextPaint(SKColor color, float size, SKFontStyle? style = null) => new()
-    {
-        Color = color, IsAntialias = true, TextSize = size, TextAlign = SKTextAlign.Center,
-        Typeface = SKTypeface.FromFamilyName("Segoe UI", style ?? SKFontStyle.Normal)
-    };
+    private static SkiaTextPaint CreateTextPaint(SKColor color, float size, SKFontStyle? style = null) =>
+        new(color, size, style, SKTextAlign.Left);
+
+    private static SkiaTextPaint CreateCenteredTextPaint(SKColor color, float size, SKFontStyle? style = null) =>
+        new(color, size, style, SKTextAlign.Center);
 
     // Internal records
     private sealed record KnobRect(int ChannelIndex, KnobType KnobType, SKRect Rect);

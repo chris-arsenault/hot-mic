@@ -79,9 +79,12 @@ public partial class SpeechDenoiserWindow : Window
             AttenLimitDb: GetParameterValue(SpeechDenoiserPlugin.AttenLimitIndex),
             AttenEnabled: GetParameterValue(SpeechDenoiserPlugin.AttenEnableIndex) >= 0.5f,
             LatencyMs: latencyMs,
+            LatencySamples: _plugin.LatencySamples,
             IsBypassed: _plugin.IsBypassed,
             StatusMessage: _plugin.StatusMessage,
-            PresetName: _presetHelper.CurrentPresetName
+            PresetName: _presetHelper.CurrentPresetName,
+            LatencyReport: _plugin.LatencyReport,
+            IsLatencyLearning: _plugin.IsLatencyLearning
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
@@ -151,6 +154,11 @@ public partial class SpeechDenoiserWindow : Window
 
             case SpeechDenoiserHitArea.PresetSave:
                 _presetHelper.ShowSaveMenu(SkiaCanvas, this);
+                e.Handled = true;
+                break;
+
+            case SpeechDenoiserHitArea.LearnLatency:
+                _plugin.LearnLatency();
                 e.Handled = true;
                 break;
         }

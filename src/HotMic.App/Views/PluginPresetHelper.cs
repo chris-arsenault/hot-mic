@@ -3,6 +3,8 @@ using System.Windows.Controls;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Presets;
 using SkiaSharp;
+using ContextMenu = System.Windows.Controls.ContextMenu;
+using MenuItem = System.Windows.Controls.MenuItem;
 
 namespace HotMic.App.Views;
 

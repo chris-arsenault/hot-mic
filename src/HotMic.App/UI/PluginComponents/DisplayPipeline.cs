@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using HotMic.Core.Dsp;
 using HotMic.Core.Dsp.Analysis;
 using HotMic.Core.Dsp.Mapping;
@@ -12,15 +13,13 @@ namespace HotMic.App.UI.PluginComponents;
 /// </summary>
 public sealed class DisplayPipeline
 {
-    private readonly SpectrumMapper _mapper = new();
-    private readonly CqtSpectrumMapper _cqtMapper = new();
+    private readonly SpectrogramDisplayMapper _mapper = new();
     private readonly SpectrogramDynamicRangeTracker _dynamicRangeTracker = new();
     private float[] _mappedBuffer = Array.Empty<float>();
     private int _displayBins;
     private int _analysisBins;
     private float _minDb;
     private float _maxDb;
-    private SpectrogramTransformType _transformType;
     private SpectrogramDynamicRangeMode _dynamicRangeMode;
     private bool _configured;
 
@@ -32,72 +31,64 @@ public sealed class DisplayPipeline
     /// <summary>
     /// Center frequencies for each display bin.
     /// </summary>
-    public ReadOnlySpan<float> CenterFrequencies => _transformType == SpectrogramTransformType.Cqt
-        ? _cqtMapper.CenterFrequencies
-        : _mapper.CenterFrequencies;
+    public ReadOnlySpan<float> CenterFrequencies => _mapper.CenterFrequencies;
 
     /// <summary>
-    /// Configure the pipeline for FFT-based transforms.
+    /// Convert a frequency to normalized Y position [0,1] for overlay rendering.
+    /// This uses the SAME mapping as the spectrogram display, ensuring alignment.
     /// </summary>
-    public void ConfigureForFft(int analysisBins, int displayBins, int sampleRate,
-        float minHz, float maxHz, FrequencyScale scale,
-        float minDb, float maxDb, SpectrogramDynamicRangeMode dynamicRangeMode)
+    /// <param name="frequencyHz">Frequency in Hz.</param>
+    /// <returns>Normalized position where 0 = bottom (min freq) and 1 = top (max freq).</returns>
+    public float FrequencyToNormalizedY(float frequencyHz)
     {
-        _analysisBins = analysisBins;
-        _displayBins = displayBins;
-        _transformType = SpectrogramTransformType.Fft;
-
-        if (_mappedBuffer.Length < displayBins)
+        if (!_configured || _displayBins <= 1)
         {
-            _mappedBuffer = new float[displayBins];
+            return 0f;
         }
 
-        // SpectrumMapper expects fftSize, so we pass analysisBins * 2
-        _mapper.Configure(analysisBins * 2, sampleRate, displayBins, minHz, maxHz, scale);
-        UpdateProcessing(minDb, maxDb, dynamicRangeMode);
-        _configured = true;
+        float displayPos = _mapper.GetDisplayPosition(frequencyHz);
+        return displayPos / (_displayBins - 1);
     }
 
     /// <summary>
-    /// Configure the pipeline for CQT transforms.
+    /// Convert a normalized Y position [0,1] back to frequency in Hz.
     /// </summary>
-    public void ConfigureForCqt(ReadOnlySpan<float> cqtFrequencies, int displayBins,
-        float minHz, float maxHz, FrequencyScale scale,
-        float minDb, float maxDb, SpectrogramDynamicRangeMode dynamicRangeMode)
+    /// <param name="normalizedY">Normalized position where 0 = min freq and 1 = max freq.</param>
+    /// <returns>Frequency in Hz.</returns>
+    public float NormalizedYToFrequency(float normalizedY)
     {
-        _analysisBins = cqtFrequencies.Length;
-        _displayBins = displayBins;
-        _transformType = SpectrogramTransformType.Cqt;
-
-        if (_mappedBuffer.Length < displayBins)
+        if (!_configured || _displayBins <= 1)
         {
-            _mappedBuffer = new float[displayBins];
+            return 0f;
         }
 
-        _cqtMapper.Configure(displayBins, cqtFrequencies, minHz, maxHz, scale);
-        UpdateProcessing(minDb, maxDb, dynamicRangeMode);
-        _configured = true;
+        var centers = _mapper.CenterFrequencies;
+        if (centers.Length == 0)
+        {
+            return 0f;
+        }
+
+        float displayPos = normalizedY * (_displayBins - 1);
+        int index = Math.Clamp((int)MathF.Round(displayPos), 0, centers.Length - 1);
+        return centers[index];
     }
 
     /// <summary>
-    /// Configure the pipeline for ZoomFFT transforms.
+    /// Configure the pipeline for the current analysis layout.
     /// </summary>
-    public void ConfigureForZoomFft(int zoomBins, int displayBins, int sampleRate,
+    public void Configure(SpectrogramAnalysisDescriptor analysis, int displayBins,
         float minHz, float maxHz, FrequencyScale scale,
-        float minDb, float maxDb, SpectrogramDynamicRangeMode dynamicRangeMode, float binResolutionHz)
+        float minDb, float maxDb, SpectrogramDynamicRangeMode dynamicRangeMode)
     {
-        _analysisBins = zoomBins;
+        _analysisBins = analysis.BinCount;
         _displayBins = displayBins;
-        _transformType = SpectrogramTransformType.ZoomFft;
 
         if (_mappedBuffer.Length < displayBins)
         {
             _mappedBuffer = new float[displayBins];
         }
 
-        // For ZoomFFT, use SpectrumMapper configured for the zoom range
-        int effectiveFftSize = (int)(sampleRate / binResolutionHz);
-        _mapper.Configure(effectiveFftSize, sampleRate, displayBins, minHz, maxHz, scale);
+        _mapper.Configure(analysis, displayBins, minHz, maxHz, scale);
         UpdateProcessing(minDb, maxDb, dynamicRangeMode);
         _configured = true;
     }
@@ -125,6 +116,7 @@ public sealed class DisplayPipeline
     /// </summary>
     /// <param name="linearMagnitudes">Input linear magnitudes at analysis resolution.</param>
     /// <param name="normalizedOutput">Output normalized values [0,1] at display resolution.</param>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public void ProcessFrame(ReadOnlySpan<float> linearMagnitudes, Span<float> normalizedOutput, byte voicingState)
     {
         if (!_configured || normalizedOutput.Length < _displayBins)
@@ -133,14 +125,7 @@ public sealed class DisplayPipeline
         }
 
         // Step 1: Map analysis bins to display bins
-        if (_transformType == SpectrogramTransformType.Cqt)
-        {
-            _cqtMapper.MapMax(linearMagnitudes, _mappedBuffer);
-        }
-        else
-        {
-            _mapper.MapMax(linearMagnitudes, _mappedBuffer);
-        }
+        _mapper.MapMax(linearMagnitudes, _mappedBuffer);
 
         // Step 2: Convert to dB, apply dynamic range, normalize to [0,1]
         NormalizeDisplayMagnitudes(_mappedBuffer.AsSpan(0, _displayBins), normalizedOutput, voicingState);
@@ -152,6 +137,7 @@ public sealed class DisplayPipeline
     /// <param name="linearMagnitudes">Input buffer with frames * analysisBins elements.</param>
     /// <param name="normalizedOutput">Output buffer with frames * displayBins elements.</param>
     /// <param name="frameCount">Number of frames to process.</param>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public void ProcessFrames(ReadOnlySpan<float> linearMagnitudes, Span<float> normalizedOutput, int frameCount,
         ReadOnlySpan<byte> voicingStates)
     {
@@ -172,6 +158,7 @@ public sealed class DisplayPipeline
     /// <summary>
     /// Process display-resolution linear magnitudes directly.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public void ProcessDisplayFrames(ReadOnlySpan<float> displayMagnitudes, Span<float> normalizedOutput, int frameCount,
         ReadOnlySpan<byte> voicingStates)
     {
@@ -190,6 +177,7 @@ public sealed class DisplayPipeline
         }
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void NormalizeDisplayMagnitudes(ReadOnlySpan<float> magnitudes, Span<float> normalizedOutput, byte voicingState)
     {
         if (_displayBins <= 0)

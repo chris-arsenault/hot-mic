@@ -32,19 +32,19 @@ public sealed class CompressorRenderer : IDisposable
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _closeButtonPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
-    private readonly SKPaint _sectionLabelPaint;
+    private readonly SkiaTextPaint _sectionLabelPaint;
     private readonly SKPaint _gridPaint;
     private readonly SKPaint _curvePaint;
     private readonly SKPaint _thresholdPaint;
     private readonly SKPaint _inputMarkerPaint;
     private readonly SKPaint _grBarPaint;
     private readonly SKPaint _grBackgroundPaint;
-    private readonly SKPaint _grTextPaint;
-    private readonly SKPaint _latencyPaint;
+    private readonly SkiaTextPaint _grTextPaint;
+    private readonly SkiaTextPaint _latencyPaint;
     private readonly SKPaint _togglePaint;
     private readonly SKPaint _toggleActivePaint;
 
@@ -116,22 +116,8 @@ public sealed class CompressorRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _closeButtonPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 18f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _bypassPaint = new SKPaint
         {
@@ -147,13 +133,7 @@ public sealed class CompressorRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _sectionLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _sectionLabelPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal);
 
         _gridPaint = new SKPaint
         {
@@ -202,23 +182,9 @@ public sealed class CompressorRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _grTextPaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 20f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        _grTextPaint = new SkiaTextPaint(_theme.TextPrimary, 20f, SKFontStyle.Bold, SKTextAlign.Center);
 
-        _latencyPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
 
         _togglePaint = new SKPaint
         {
@@ -286,14 +252,7 @@ public sealed class CompressorRenderer : IDisposable
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SKPaint
-        {
-            Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
 
         if (state.LatencyMs >= 0f)
@@ -472,13 +431,7 @@ public sealed class CompressorRenderer : IDisposable
         canvas.DrawRoundRect(roundRect, _borderPaint);
 
         // Labels
-        using var labelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 8f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        using var labelPaint = new SkiaTextPaint(_theme.TextMuted, 8f, SKFontStyle.Normal);
         labelPaint.TextAlign = SKTextAlign.Center;
         canvas.DrawText("IN", rect.MidX, rect.Bottom - 2, labelPaint);
         labelPaint.TextAlign = SKTextAlign.Left;
@@ -514,14 +467,7 @@ public sealed class CompressorRenderer : IDisposable
         canvas.DrawRoundRect(round, active ? _toggleActivePaint : _togglePaint);
         canvas.DrawRoundRect(round, _borderPaint);
 
-        using var textPaint = new SKPaint
-        {
-            Color = active ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var textPaint = new SkiaTextPaint(active ? _theme.TextPrimary : _theme.TextSecondary, 9f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText(label, rect.MidX, rect.MidY + 3f, textPaint);
     }
 
@@ -566,14 +512,7 @@ public sealed class CompressorRenderer : IDisposable
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f
         };
-        using var tickLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 7f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        using var tickLabelPaint = new SkiaTextPaint(_theme.TextMuted, 7f, SKFontStyle.Normal, SKTextAlign.Right);
 
         foreach (float db in new[] { 6f, 12f, 18f })
         {
@@ -588,14 +527,7 @@ public sealed class CompressorRenderer : IDisposable
         canvas.DrawText(grText, rect.MidX, rect.Top + 18, _grTextPaint);
 
         // dB label
-        using var dbLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 8f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        using var dbLabelPaint = new SkiaTextPaint(_theme.TextMuted, 8f, SKFontStyle.Normal, SKTextAlign.Center);
         canvas.DrawText("dB", rect.MidX, rect.Top + 28, dbLabelPaint);
 
         // Border

@@ -1,3 +1,5 @@
+using HotMic.Core.Dsp.Spectrogram;
+
 namespace HotMic.Core.Dsp.Analysis;
 
 /// <summary>
@@ -6,45 +8,71 @@ namespace HotMic.Core.Dsp.Analysis;
 public static class HarmonicPeakDetector
 {
     /// <summary>
-    /// Finds harmonic peak frequencies near expected multiples of the fundamental.
+    /// Default threshold in dB relative to fundamental for harmonic detection.
+    /// Harmonics must be within this many dB of the fundamental to be considered "detected".
     /// </summary>
-    public static int Detect(ReadOnlySpan<float> magnitudes, int sampleRate, int fftSize,
-        float fundamentalHz, Span<float> harmonicFrequencies, float tolerance = 0.03f)
+    public const float DefaultThresholdDb = -40f;
+
+    /// <summary>
+    /// Default SNR threshold in dB above local noise floor for harmonic detection.
+    /// </summary>
+    public const float DefaultSnrThresholdDb = 6f;
+
+    /// <summary>
+    /// Finds harmonic peak frequencies and magnitudes using the analysis descriptor.
+    /// Works with any transform type (FFT, ZoomFFT, CQT) by using the descriptor's frequency mapping.
+    /// </summary>
+    /// <param name="magnitudes">Magnitude spectrum from the active transform (linear scale).</param>
+    /// <param name="descriptor">Analysis descriptor providing bin-to-frequency mapping.</param>
+    /// <param name="fundamentalHz">Detected fundamental frequency.</param>
+    /// <param name="harmonicFrequencies">Output: frequency of each harmonic slot (0 if not detected).</param>
+    /// <param name="harmonicMagnitudes">Output: magnitude in dB relative to fundamental (MinValue if not detected).</param>
+    /// <param name="tolerance">Frequency tolerance as fraction of expected harmonic (default 3%).</param>
+    /// <returns>Number of harmonic slots populated.</returns>
+    public static int Detect(
+        ReadOnlySpan<float> magnitudes,
+        SpectrogramAnalysisDescriptor descriptor,
+        float fundamentalHz,
+        Span<float> harmonicFrequencies,
+        Span<float> harmonicMagnitudes,
+        float tolerance = 0.03f)
     {
-        if (magnitudes.IsEmpty || harmonicFrequencies.IsEmpty || fundamentalHz <= 0f)
+        if (magnitudes.IsEmpty || harmonicFrequencies.IsEmpty || fundamentalHz <= 0f || descriptor.BinCount <= 0)
         {
             return 0;
         }
 
-        float binResolution = sampleRate / (float)fftSize;
-        float nyquist = sampleRate * 0.5f;
+        int maxHarmonics = Math.Min(harmonicFrequencies.Length, harmonicMagnitudes.Length);
+        float maxFrequency = descriptor.MaxFrequencyHz;
         int count = 0;
 
-        for (int h = 1; h <= harmonicFrequencies.Length; h++)
+        // Find fundamental magnitude using descriptor's frequency lookup
+        var (_, fundamentalMag, _) = descriptor.FindPeakNear(magnitudes, fundamentalHz, tolerance);
+
+        for (int h = 1; h <= maxHarmonics; h++)
         {
             float expected = fundamentalHz * h;
-            if (expected >= nyquist)
+            if (expected >= maxFrequency)
             {
+                // Fill remaining slots with zeros
+                for (int i = count; i < maxHarmonics; i++)
+                {
+                    harmonicFrequencies[i] = 0f;
+                    harmonicMagnitudes[i] = float.MinValue;
+                }
                 break;
             }
 
-            float delta = expected * tolerance;
-            int startBin = (int)MathF.Max(1f, (expected - delta) / binResolution);
-            int endBin = (int)MathF.Min(magnitudes.Length - 1, (expected + delta) / binResolution);
+            // Use descriptor to find peak near expected harmonic frequency
+            var (peakBin, peakMag, peakFreq) = descriptor.FindPeakNear(magnitudes, expected, tolerance);
 
-            int bestBin = startBin;
-            float bestMag = 0f;
-            for (int bin = startBin; bin <= endBin; bin++)
-            {
-                float mag = magnitudes[bin];
-                if (mag > bestMag)
-                {
-                    bestMag = mag;
-                    bestBin = bin;
-                }
-            }
+            // Calculate magnitude in dB relative to fundamental
+            float relativeDb = fundamentalMag > 1e-10f
+                ? 20f * MathF.Log10(peakMag / fundamentalMag + 1e-10f)
+                : float.MinValue;
 
-            harmonicFrequencies[count] = bestBin * binResolution;
+            harmonicFrequencies[count] = peakFreq > 0f ? peakFreq : expected;
+            harmonicMagnitudes[count] = relativeDb;
             count++;
         }
 

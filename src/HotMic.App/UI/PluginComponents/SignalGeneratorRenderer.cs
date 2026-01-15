@@ -22,11 +22,11 @@ public sealed class SignalGeneratorRenderer : IDisposable
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _closeButtonPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SKPaint _slotBackgroundPaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _valuePaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _valuePaint;
     private readonly SKPaint _mutePaint;
     private readonly SKPaint _mutedPaint;
     private readonly SKPaint _soloPaint;
@@ -74,11 +74,11 @@ public sealed class SignalGeneratorRenderer : IDisposable
         _backgroundPaint = new SKPaint { Color = _theme.PanelBackground, IsAntialias = true, Style = SKPaintStyle.Fill };
         _titleBarPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
         _borderPaint = new SKPaint { Color = _theme.PanelBorder, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f };
-        _titlePaint = new SKPaint { Color = _theme.TextPrimary, IsAntialias = true, TextSize = 13f, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold) };
-        _closeButtonPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, TextSize = 16f, TextAlign = SKTextAlign.Center };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 13f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 16f, SKFontStyle.Normal, SKTextAlign.Center);
         _slotBackgroundPaint = new SKPaint { Color = _theme.MeterBackground, IsAntialias = true, Style = SKPaintStyle.Fill };
-        _labelPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Center, Typeface = SKTypeface.FromFamilyName("Segoe UI") };
-        _valuePaint = new SKPaint { Color = _theme.TextPrimary, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Center, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold) };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 9f, SKFontStyle.Normal, SKTextAlign.Center);
+        _valuePaint = new SkiaTextPaint(_theme.TextPrimary, 9f, SKFontStyle.Bold, SKTextAlign.Center);
         _mutePaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
         _mutedPaint = new SKPaint { Color = new SKColor(0xFF, 0x50, 0x50), IsAntialias = true, Style = SKPaintStyle.Fill };
         _soloPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
@@ -219,14 +219,7 @@ public sealed class SignalGeneratorRenderer : IDisposable
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SKPaint
-        {
-            Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 9f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 3, bypassTextPaint);
 
         // Close button
@@ -245,7 +238,7 @@ public sealed class SignalGeneratorRenderer : IDisposable
         float centerY = rect.MidY;
 
         // Slot label
-        using var slotLabelPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, TextSize = 10f, TextAlign = SKTextAlign.Left, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold) };
+        using var slotLabelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Left);
         canvas.DrawText($"S{slotIndex + 1}", x, centerY + 3, slotLabelPaint);
         x += 18;
 
@@ -313,7 +306,7 @@ public sealed class SignalGeneratorRenderer : IDisposable
         var muteRound = new SKRoundRect(_slotMuteRects[slotIndex], 3f);
         canvas.DrawRoundRect(muteRound, slot.IsMuted ? _mutedPaint : _mutePaint);
         canvas.DrawRoundRect(muteRound, _borderPaint);
-        using var muteTextPaint = new SKPaint { Color = slot.IsMuted ? _theme.TextPrimary : _theme.TextSecondary, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Center, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold) };
+        using var muteTextPaint = new SkiaTextPaint(slot.IsMuted ? _theme.TextPrimary : _theme.TextSecondary, 9f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("M", _slotMuteRects[slotIndex].MidX, _slotMuteRects[slotIndex].MidY + 3, muteTextPaint);
 
         buttonX += buttonWidth + 3;
@@ -321,7 +314,7 @@ public sealed class SignalGeneratorRenderer : IDisposable
         var soloRound = new SKRoundRect(_slotSoloRects[slotIndex], 3f);
         canvas.DrawRoundRect(soloRound, slot.IsSolo ? _soloedPaint : _soloPaint);
         canvas.DrawRoundRect(soloRound, _borderPaint);
-        using var soloTextPaint = new SKPaint { Color = slot.IsSolo ? _theme.PanelBackground : _theme.TextSecondary, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Center, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold) };
+        using var soloTextPaint = new SkiaTextPaint(slot.IsSolo ? _theme.PanelBackground : _theme.TextSecondary, 9f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("S", _slotSoloRects[slotIndex].MidX, _slotSoloRects[slotIndex].MidY + 3, soloTextPaint);
     }
 
@@ -390,7 +383,7 @@ public sealed class SignalGeneratorRenderer : IDisposable
         var toggleRound = new SKRoundRect(_slotSweepToggleRects[slotIndex], 3f);
         canvas.DrawRoundRect(toggleRound, slot.SweepEnabled ? _toggleOnPaint : _toggleOffPaint);
         canvas.DrawRoundRect(toggleRound, _borderPaint);
-        using var sweepTextPaint = new SKPaint { Color = slot.SweepEnabled ? _theme.TextPrimary : _theme.TextSecondary, IsAntialias = true, TextSize = 8f, TextAlign = SKTextAlign.Center };
+        using var sweepTextPaint = new SkiaTextPaint(slot.SweepEnabled ? _theme.TextPrimary : _theme.TextSecondary, 8f, SKFontStyle.Normal, SKTextAlign.Center);
         canvas.DrawText("SWEEP", _slotSweepToggleRects[slotIndex].MidX, centerY + 3, sweepTextPaint);
         x += toggleWidth + 4;
 
@@ -508,7 +501,7 @@ public sealed class SignalGeneratorRenderer : IDisposable
         float px = rect.Left + 8;
 
         // Master label
-        using var masterLabelPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, TextSize = 10f, TextAlign = SKTextAlign.Left, Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold) };
+        using var masterLabelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Left);
         canvas.DrawText("MASTER", px, centerY + 3, masterLabelPaint);
         px += 52;
 
@@ -543,7 +536,7 @@ public sealed class SignalGeneratorRenderer : IDisposable
         px += hrWidth + 16;
 
         // Hint text
-        using var hintPaint = new SKPaint { Color = _theme.TextMuted, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Left };
+        using var hintPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Left);
         canvas.DrawText("Drop WAV or click ● to capture input", px, centerY + 3, hintPaint);
     }
 

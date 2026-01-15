@@ -16,10 +16,10 @@ public sealed class GainReductionMeter : IDisposable
     private readonly SKPaint _borderPaint;
     private readonly SKPaint _currentFillPaint;
     private readonly SKPaint _peakPaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _valuePaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _valuePaint;
     private readonly SKPaint _tickPaint;
-    private readonly SKPaint _tickLabelPaint;
+    private readonly SkiaTextPaint _tickLabelPaint;
 
     public GainReductionMeter(PluginComponentTheme? theme = null)
     {
@@ -55,22 +55,8 @@ public sealed class GainReductionMeter : IDisposable
             StrokeWidth = 2f
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _valuePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 12f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal);
+        _valuePaint = new SkiaTextPaint(_theme.TextPrimary, 12f, SKFontStyle.Bold, SKTextAlign.Right);
 
         _tickPaint = new SKPaint
         {
@@ -80,14 +66,7 @@ public sealed class GainReductionMeter : IDisposable
             StrokeWidth = 1f
         };
 
-        _tickLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 8f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _tickLabelPaint = new SkiaTextPaint(_theme.TextMuted, 8f, SKFontStyle.Normal, SKTextAlign.Center);
     }
 
     /// <summary>

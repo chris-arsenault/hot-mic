@@ -19,7 +19,7 @@ public sealed class DynamicTransferCurveDisplay : IDisposable
     private readonly SKPaint _gridPaint;
     private readonly SKPaint _linearPaint;
     private readonly SKPaint _curvePaint;
-    private readonly SKPaint _labelPaint;
+    private readonly SkiaTextPaint _labelPaint;
 
     // Pre-allocated sample buffers
     private readonly float[] _inputs = new float[MaxSamples];
@@ -70,26 +70,11 @@ public sealed class DynamicTransferCurveDisplay : IDisposable
             StrokeWidth = 1.5f
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _rangePaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 8f,
-            TextAlign = SKTextAlign.Left,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _rangePaint = new SkiaTextPaint(_theme.TextMuted, 8f, SKFontStyle.Normal, SKTextAlign.Left);
     }
 
-    private readonly SKPaint _rangePaint;
+    private readonly SkiaTextPaint _rangePaint;
 
     public void Render(
         SKCanvas canvas,

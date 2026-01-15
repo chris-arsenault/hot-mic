@@ -28,8 +28,8 @@ public sealed class DeEsserRenderer : IDisposable
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _closeButtonPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
     private readonly SKPaint _meterBackgroundPaint;
@@ -40,9 +40,9 @@ public sealed class DeEsserRenderer : IDisposable
     private readonly SKPaint _freqBandPaint;
     private readonly SKPaint _freqBandActivePaint;
     private readonly SKPaint _thresholdLinePaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _freqLabelPaint;
-    private readonly SKPaint _latencyPaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _freqLabelPaint;
+    private readonly SkiaTextPaint _latencyPaint;
     private readonly SKPaint _activeIndicatorPaint;
     private readonly SKPaint _activeGlowPaint;
     private readonly SKPaint _spectrumPaint;
@@ -111,22 +111,8 @@ public sealed class DeEsserRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _closeButtonPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 18f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _bypassPaint = new SKPaint
         {
@@ -200,32 +186,10 @@ public sealed class DeEsserRenderer : IDisposable
             PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0)
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _freqLabelPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Center);
 
-        _freqLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _latencyPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
 
         _activeIndicatorPaint = new SKPaint
         {
@@ -325,14 +289,7 @@ public sealed class DeEsserRenderer : IDisposable
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SKPaint
-        {
-            Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
 
         if (state.LatencyMs >= 0f)
@@ -365,7 +322,7 @@ public sealed class DeEsserRenderer : IDisposable
         var sibMeterRect = new SKRect(grMeterRect.Left - meterSpacing - MeterWidth, meterY, grMeterRect.Left - meterSpacing, meterY + MeterHeight);
         _sibilanceMeter.Update(state.SibilanceLevel);
         _sibilanceMeter.Render(canvas, sibMeterRect, MeterOrientation.Vertical);
-        using var sibLabelPaint = new SKPaint { Color = _theme.TextMuted, IsAntialias = true, TextSize = 9f, TextAlign = SKTextAlign.Center };
+        using var sibLabelPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Center);
         canvas.DrawText("SIB", sibMeterRect.MidX, sibMeterRect.Bottom + 12, sibLabelPaint);
 
         // Input meter with PPM-style ballistics

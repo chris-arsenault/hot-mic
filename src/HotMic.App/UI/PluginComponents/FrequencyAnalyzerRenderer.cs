@@ -32,15 +32,15 @@ public sealed class FrequencyAnalyzerRenderer : IDisposable
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _panelPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _textPaint;
-    private readonly SKPaint _mutedTextPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _textPaint;
+    private readonly SkiaTextPaint _mutedTextPaint;
     private readonly SKPaint _gridPaint;
     private readonly SKPaint _spectrumPaint;
     private readonly SKPaint _spectrumFillPaint;
     private readonly SKPaint _buttonPaint;
     private readonly SKPaint _buttonActivePaint;
-    private readonly SKPaint _buttonTextPaint;
+    private readonly SkiaTextPaint _buttonTextPaint;
     private readonly SKPath _spectrumPath = new();
     private readonly SKPath _spectrumFillPath = new();
     private float[] _spectrumXPositions = Array.Empty<float>();
@@ -78,27 +78,9 @@ public sealed class FrequencyAnalyzerRenderer : IDisposable
         _backgroundPaint = new SKPaint { Color = _theme.PanelBackground, IsAntialias = true, Style = SKPaintStyle.Fill };
         _panelPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
         _borderPaint = new SKPaint { Color = _theme.PanelBorder, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1f };
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-        _textPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 11f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-        _mutedTextPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 10f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _textPaint = new SkiaTextPaint(_theme.TextSecondary, 11f, SKFontStyle.Normal);
+        _mutedTextPaint = new SkiaTextPaint(_theme.TextMuted, 10f, SKFontStyle.Normal);
         _gridPaint = new SKPaint
         {
             Color = _theme.PanelBorder.WithAlpha(50),
@@ -123,14 +105,7 @@ public sealed class FrequencyAnalyzerRenderer : IDisposable
         };
         _buttonPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
         _buttonActivePaint = new SKPaint { Color = _theme.KnobArc.WithAlpha(120), IsAntialias = true, Style = SKPaintStyle.Fill };
-        _buttonTextPaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        _buttonTextPaint = new SkiaTextPaint(_theme.TextPrimary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
     }
 
     public static SKSize GetPreferredSize() => new(760, 520);
@@ -346,7 +321,7 @@ public sealed class FrequencyAnalyzerRenderer : IDisposable
 
     private void DrawIconButton(SKCanvas canvas, SKRect rect, string label, SKColor color)
     {
-        using var paint = new SKPaint { Color = color, IsAntialias = true, TextSize = 12f, TextAlign = SKTextAlign.Center };
+        using var paint = new SkiaTextPaint(color, 12f, SKFontStyle.Normal, SKTextAlign.Center);
         canvas.DrawText(label, rect.MidX, rect.MidY + 4f, paint);
     }
 

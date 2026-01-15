@@ -13,7 +13,7 @@ public sealed class EnvelopeCurveDisplay : IDisposable
     private readonly SKPaint _gridPaint;
     private readonly SKPaint _curvePaint;
     private readonly SKPaint _fillPaint;
-    private readonly SKPaint _labelPaint;
+    private readonly SkiaTextPaint _labelPaint;
     private readonly SKPaint _markerPaint;
 
     public EnvelopeCurveDisplay(PluginComponentTheme? theme = null)
@@ -52,14 +52,7 @@ public sealed class EnvelopeCurveDisplay : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _markerPaint = new SKPaint
         {
@@ -212,14 +205,7 @@ public sealed class EnvelopeCurveDisplay : IDisposable
     {
         canvas.DrawCircle(x, y, 4f, _markerPaint);
 
-        using var textPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 8f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var textPaint = new SkiaTextPaint(_theme.TextSecondary, 8f, SKFontStyle.Bold, SKTextAlign.Center);
 
         float labelY = y < (y + 10) ? y + 14 : y - 8;
         canvas.DrawText(label, x, labelY, textPaint);

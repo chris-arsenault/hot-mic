@@ -10,6 +10,8 @@ using HotMic.App.ViewModels;
 using HotMic.Common.Configuration;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
+using ContextMenu = System.Windows.Controls.ContextMenu;
+using MenuItem = System.Windows.Controls.MenuItem;
 
 namespace HotMic.App;
 

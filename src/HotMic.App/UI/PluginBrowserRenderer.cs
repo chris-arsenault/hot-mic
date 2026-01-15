@@ -21,16 +21,16 @@ public sealed class PluginBrowserRenderer
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _panelPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _textPaint;
-    private readonly SKPaint _descriptionPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _categoryPaint;
+    private readonly SkiaTextPaint _textPaint;
+    private readonly SkiaTextPaint _descriptionPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _categoryPaint;
     private readonly SKPaint _buttonPaint;
     private readonly SKPaint _buttonActivePaint;
-    private readonly SKPaint _buttonTextPaint;
+    private readonly SkiaTextPaint _buttonTextPaint;
     private readonly SKPaint _searchBgPaint;
-    private readonly SKPaint _searchTextPaint;
-    private readonly SKPaint _placeholderPaint;
+    private readonly SkiaTextPaint _searchTextPaint;
+    private readonly SkiaTextPaint _placeholderPaint;
     private readonly SKPaint _selectedPaint;
 
     private readonly List<ItemRect> _itemRects = new();
@@ -77,7 +77,7 @@ public sealed class PluginBrowserRenderer
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         canvas.DrawRect(_titleBarRect, _panelPaint);
         canvas.DrawLine(0, TitleBarHeight, size.Width, TitleBarHeight, _borderPaint);
-        canvas.DrawText("Add Plugin", Padding, TitleBarHeight / 2f + _titlePaint.TextSize / 2.5f, _titlePaint);
+        canvas.DrawText("Add Plugin", Padding, TitleBarHeight / 2f + _titlePaint.Size / 2.5f, _titlePaint);
 
         // Search box
         float searchTop = TitleBarHeight + Padding;
@@ -234,7 +234,7 @@ public sealed class PluginBrowserRenderer
         canvas.DrawLine(cx + 4f, cy + 4f, cx + 8f, cy + 8f, iconPaint);
     }
 
-    private void DrawEllipsizedText(SKCanvas canvas, string text, float x, float y, float maxWidth, SKPaint paint)
+    private void DrawEllipsizedText(SKCanvas canvas, string text, float x, float y, float maxWidth, SkiaTextPaint paint)
     {
         if (paint.MeasureText(text) <= maxWidth)
         {
@@ -269,14 +269,8 @@ public sealed class PluginBrowserRenderer
         StrokeWidth = strokeWidth
     };
 
-    private static SKPaint CreateTextPaint(SKColor color, float size, SKFontStyle? style = null, SKTextAlign align = SKTextAlign.Left) => new()
-    {
-        Color = color,
-        IsAntialias = true,
-        TextSize = size,
-        TextAlign = align,
-        Typeface = SKTypeface.FromFamilyName("Segoe UI", style ?? SKFontStyle.Normal)
-    };
+    private static SkiaTextPaint CreateTextPaint(SKColor color, float size, SKFontStyle? style = null, SKTextAlign align = SKTextAlign.Left) =>
+        new(color, size, style, align);
 
     private sealed record ItemRect(int Index, PluginChoice Plugin, SKRect Rect);
 }

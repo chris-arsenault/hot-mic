@@ -12,6 +12,7 @@ using System.Runtime.InteropServices;
 using HotMic.App.Diagnostics;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Dsp;
+using HotMic.Core.Dsp.Spectrogram;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Presets;
 using SkiaSharp;
@@ -51,13 +52,13 @@ public partial class VocalSpectrographWindow : Window
     private float[] _spectrogram = Array.Empty<float>();
     private float[] _displayMagnitudes = Array.Empty<float>();
     private float[] _analysisMagnitudes = Array.Empty<float>();
-    private float[] _cqtFrequencies = Array.Empty<float>();
     private float[] _pitchTrack = Array.Empty<float>();
     private float[] _pitchConfidence = Array.Empty<float>();
     private float[] _formantFrequencies = Array.Empty<float>();
     private float[] _formantBandwidths = Array.Empty<float>();
     private byte[] _voicingStates = Array.Empty<byte>();
     private float[] _harmonicFrequencies = Array.Empty<float>();
+    private float[] _harmonicMagnitudes = Array.Empty<float>();
     private float[] _waveformMin = Array.Empty<float>();
     private float[] _waveformMax = Array.Empty<float>();
     private float[] _hnrTrack = Array.Empty<float>();
@@ -72,16 +73,13 @@ public partial class VocalSpectrographWindow : Window
     private int _bufferMaxFormants;
     private int _bufferMaxHarmonics;
     private int _lastDisplayBins;
-    private int _lastAnalysisBins;
-    private float _lastBinResolutionHz;
     private FrequencyScale _lastScale;
     private float _lastMinFrequency;
     private float _lastMaxFrequency;
     private float _lastMinDb;
     private float _lastMaxDb;
     private SpectrogramDynamicRangeMode _lastDynamicRangeMode;
-    private SpectrogramTransformType _lastTransformType;
-    private int _lastCqtBinsPerOctave;
+    private SpectrogramAnalysisDescriptor? _lastAnalysisDescriptor;
     private bool _profilingHotkeyDown;
     private int _uiTickUs;
     private int _uiCopyUs;
@@ -445,13 +443,6 @@ public partial class VocalSpectrographWindow : Window
         EnsureBuffers();
 
         bool dataUpdated = false;
-        int analysisBins = _bufferAnalysisBins;
-        SpectrogramTransformType transformType = _plugin.TransformType;
-        float binResolutionHz = _plugin.ZoomFftBinResolution;
-        if (binResolutionHz <= 0f)
-        {
-            binResolutionHz = _lastBinResolutionHz;
-        }
 
         if (!_isPaused)
         {
@@ -461,7 +452,7 @@ public partial class VocalSpectrographWindow : Window
                 long copyStartTicks = profiling ? Stopwatch.GetTimestamp() : 0;
                 bool overlayCopied = _plugin.CopySpectrogramData(_displayMagnitudes, _pitchTrack, _pitchConfidence,
                         _formantFrequencies, _formantBandwidths, _voicingStates, _harmonicFrequencies,
-                        _waveformMin, _waveformMax, _hnrTrack, _cppTrack, _spectralCentroid,
+                        _harmonicMagnitudes, _waveformMin, _waveformMax, _hnrTrack, _cppTrack, _spectralCentroid,
                         _spectralSlope, _spectralFlux);
                 if (overlayCopied)
                 {
@@ -471,11 +462,7 @@ public partial class VocalSpectrographWindow : Window
                 }
 
                 bool linearCopied = _plugin.CopyLinearMagnitudes(_analysisMagnitudes,
-                    out analysisBins, out binResolutionHz, out transformType);
-                if (linearCopied)
-                {
-                    _lastBinResolutionHz = binResolutionHz;
-                }
+                    out _, out _, out _);
                 if (profiling)
                 {
                     copyTicks = Stopwatch.GetTimestamp() - copyStartTicks;
@@ -497,7 +484,7 @@ public partial class VocalSpectrographWindow : Window
             }
         }
 
-        bool displayChanged = ConfigureDisplayPipeline(analysisBins, transformType, binResolutionHz);
+        bool displayChanged = ConfigureDisplayPipeline(_plugin.AnalysisDescriptor);
         if (displayChanged || dataUpdated)
         {
             long mapStartTicks = profiling ? Stopwatch.GetTimestamp() : 0;
@@ -691,6 +678,7 @@ public partial class VocalSpectrographWindow : Window
         if (_harmonicFrequencies.Length != harmonicLength)
         {
             _harmonicFrequencies = new float[harmonicLength];
+            _harmonicMagnitudes = new float[harmonicLength];
             _lastDataVersion = -1;
         }
 
@@ -713,9 +701,9 @@ public partial class VocalSpectrographWindow : Window
         }
     }
 
-    private bool ConfigureDisplayPipeline(int analysisBins, SpectrogramTransformType transformType, float binResolutionHz)
+    private bool ConfigureDisplayPipeline(SpectrogramAnalysisDescriptor? analysis)
     {
-        if (analysisBins <= 0 || _bufferBins <= 0)
+        if (analysis is null || analysis.BinCount <= 0 || _bufferBins <= 0)
         {
             return false;
         }
@@ -727,16 +715,12 @@ public partial class VocalSpectrographWindow : Window
         float maxDb = _plugin.MaxDb;
         var dynamicRangeMode = _plugin.DynamicRangeMode;
         int displayBins = _bufferBins;
-        int sampleRate = _plugin.SampleRate;
-        int cqtBinsPerOctave = _plugin.CqtBinsPerOctave;
 
         bool mappingChanged = displayBins != _lastDisplayBins
-            || analysisBins != _lastAnalysisBins
-            || transformType != _lastTransformType
+            || !ReferenceEquals(analysis, _lastAnalysisDescriptor)
             || scale != _lastScale
             || MathF.Abs(minHz - _lastMinFrequency) > 1e-3f
-            || MathF.Abs(maxHz - _lastMaxFrequency) > 1e-3f
-            || (transformType == SpectrogramTransformType.Cqt && cqtBinsPerOctave != _lastCqtBinsPerOctave);
+            || MathF.Abs(maxHz - _lastMaxFrequency) > 1e-3f;
 
         bool processingChanged = MathF.Abs(minDb - _lastMinDb) > 1e-3f
             || MathF.Abs(maxDb - _lastMaxDb) > 1e-3f
@@ -745,30 +729,9 @@ public partial class VocalSpectrographWindow : Window
         bool mappingApplied = false;
         if (mappingChanged)
         {
-            switch (transformType)
-            {
-                case SpectrogramTransformType.Cqt:
-                    if (TryGetCqtFrequencies(analysisBins, out var cqtFrequencies))
-                    {
-                        _displayPipeline.ConfigureForCqt(cqtFrequencies, displayBins, minHz, maxHz, scale,
-                            minDb, maxDb, dynamicRangeMode);
-                        mappingApplied = true;
-                    }
-                    break;
-                case SpectrogramTransformType.ZoomFft:
-                    if (binResolutionHz > 0f)
-                    {
-                        _displayPipeline.ConfigureForZoomFft(analysisBins, displayBins, sampleRate, minHz, maxHz, scale,
-                            minDb, maxDb, dynamicRangeMode, binResolutionHz);
-                        mappingApplied = true;
-                    }
-                    break;
-                default:
-                    _displayPipeline.ConfigureForFft(analysisBins, displayBins, sampleRate, minHz, maxHz, scale,
-                        minDb, maxDb, dynamicRangeMode);
-                    mappingApplied = true;
-                    break;
-            }
+            _displayPipeline.Configure(analysis, displayBins, minHz, maxHz, scale,
+                minDb, maxDb, dynamicRangeMode);
+            mappingApplied = true;
         }
         else if (processingChanged)
         {
@@ -779,12 +742,10 @@ public partial class VocalSpectrographWindow : Window
         {
             UpdateBinFrequencies();
             _lastDisplayBins = displayBins;
-            _lastAnalysisBins = analysisBins;
-            _lastTransformType = transformType;
+            _lastAnalysisDescriptor = analysis;
             _lastScale = scale;
             _lastMinFrequency = minHz;
             _lastMaxFrequency = maxHz;
-            _lastCqtBinsPerOctave = cqtBinsPerOctave;
         }
 
         if (mappingApplied || processingChanged)
@@ -795,36 +756,6 @@ public partial class VocalSpectrographWindow : Window
         }
 
         return mappingApplied || processingChanged;
-    }
-
-    private bool TryGetCqtFrequencies(int analysisBins, out ReadOnlySpan<float> frequencies)
-    {
-        if (analysisBins <= 0)
-        {
-            frequencies = ReadOnlySpan<float>.Empty;
-            return false;
-        }
-
-        if (_cqtFrequencies.Length < analysisBins)
-        {
-            _cqtFrequencies = new float[analysisBins];
-        }
-
-        int count = _plugin.GetCqtFrequencies(_cqtFrequencies);
-        if (count <= 0)
-        {
-            frequencies = ReadOnlySpan<float>.Empty;
-            return false;
-        }
-
-        if (count > _cqtFrequencies.Length)
-        {
-            _cqtFrequencies = new float[count];
-            count = _plugin.GetCqtFrequencies(_cqtFrequencies);
-        }
-
-        frequencies = _cqtFrequencies.AsSpan(0, Math.Min(count, _cqtFrequencies.Length));
-        return count > 0;
     }
 
     private void UpdateBinFrequencies()
@@ -880,6 +811,7 @@ public partial class VocalSpectrographWindow : Window
             Scale: _plugin.Scale,
             MinFrequency: _plugin.MinFrequency,
             MaxFrequency: _plugin.MaxFrequency,
+            FrequencyMapper: _displayPipeline,
             MinDb: _plugin.MinDb,
             MaxDb: _plugin.MaxDb,
             TimeWindowSeconds: _plugin.TimeWindowSeconds,
@@ -918,6 +850,7 @@ public partial class VocalSpectrographWindow : Window
             ShowPitch: _plugin.ShowPitch,
             ShowFormants: _plugin.ShowFormants,
             ShowHarmonics: _plugin.ShowHarmonics,
+            HarmonicDisplayMode: _plugin.HarmonicDisplayMode,
             ShowVoicing: _plugin.ShowVoicing,
             PreEmphasisEnabled: _plugin.PreEmphasisEnabled,
             HighPassEnabled: _plugin.HighPassEnabled,
@@ -935,6 +868,7 @@ public partial class VocalSpectrographWindow : Window
             FormantBandwidths: _formantBandwidths,
             VoicingStates: _voicingStates,
             HarmonicFrequencies: _harmonicFrequencies,
+            HarmonicMagnitudes: _harmonicMagnitudes,
             WaveformMin: _waveformMin,
             WaveformMax: _waveformMax,
             HnrTrack: _hnrTrack,
@@ -1124,6 +1058,9 @@ public partial class VocalSpectrographWindow : Window
             case SpectrographHitArea.HarmonicToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowHarmonicsIndex, _plugin.ShowHarmonics);
                 return true;
+            case SpectrographHitArea.HarmonicModeToggle:
+                CycleHarmonicDisplayMode();
+                return true;
             case SpectrographHitArea.VoicingToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowVoicingIndex, _plugin.ShowVoicing);
                 return true;
@@ -1260,6 +1197,20 @@ public partial class VocalSpectrographWindow : Window
     private void ToggleParameter(int index, bool current)
     {
         _parameterCallback(index, current ? 0f : 1f);
+        _presetHelper.MarkAsCustom();
+    }
+
+    private void CycleHarmonicDisplayMode()
+    {
+        var current = _plugin.HarmonicDisplayMode;
+        var next = current switch
+        {
+            HarmonicDisplayMode.Detected => HarmonicDisplayMode.Theoretical,
+            HarmonicDisplayMode.Theoretical => HarmonicDisplayMode.Both,
+            HarmonicDisplayMode.Both => HarmonicDisplayMode.Detected,
+            _ => HarmonicDisplayMode.Detected
+        };
+        _parameterCallback(VocalSpectrographPlugin.HarmonicDisplayModeIndex, (float)next);
         _presetHelper.MarkAsCustom();
     }
 
@@ -1452,6 +1403,7 @@ public partial class VocalSpectrographWindow : Window
         Array.Clear(_formantBandwidths, 0, _formantBandwidths.Length);
         Array.Clear(_voicingStates, 0, _voicingStates.Length);
         Array.Clear(_harmonicFrequencies, 0, _harmonicFrequencies.Length);
+        Array.Clear(_harmonicMagnitudes, 0, _harmonicMagnitudes.Length);
         Array.Clear(_waveformMin, 0, _waveformMin.Length);
         Array.Clear(_waveformMax, 0, _waveformMax.Length);
         Array.Clear(_hnrTrack, 0, _hnrTrack.Length);

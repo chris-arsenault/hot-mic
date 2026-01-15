@@ -56,12 +56,12 @@ public sealed class RotaryKnob : IDisposable
     private readonly SKPaint _arcPaint;
     private readonly SKPaint _pointerPaint;
     private readonly SKPaint _highlightPaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _valuePaint;
-    private readonly SKPaint _unitPaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _valuePaint;
+    private readonly SkiaTextPaint _unitPaint;
     private readonly SKPaint _shadowPaint;
     private readonly SKPaint _tooltipBgPaint;
-    private readonly SKPaint _tooltipTextPaint;
+    private readonly SkiaTextPaint _tooltipTextPaint;
 
     public RotaryKnob(PluginComponentTheme? theme = null)
     {
@@ -117,32 +117,9 @@ public sealed class RotaryKnob : IDisposable
             MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 4f)
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 11f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _valuePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 13f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _unitPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 11f, SKFontStyle.Normal, SKTextAlign.Center);
+        _valuePaint = new SkiaTextPaint(_theme.TextPrimary, 13f, SKFontStyle.Bold, SKTextAlign.Center);
+        _unitPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _tooltipBgPaint = new SKPaint
         {
@@ -151,14 +128,7 @@ public sealed class RotaryKnob : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _tooltipTextPaint = new SKPaint
-        {
-            Color = SKColors.White,
-            IsAntialias = true,
-            TextSize = 12f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _tooltipTextPaint = new SkiaTextPaint(SKColors.White, 12f, SKFontStyle.Normal, SKTextAlign.Center);
     }
 
     /// <summary>
