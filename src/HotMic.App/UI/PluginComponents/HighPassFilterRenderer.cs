@@ -16,10 +16,11 @@ public sealed class HighPassFilterRenderer : IDisposable
     private const float CornerRadius = 10f;
 
     private readonly PluginComponentTheme _theme;
-    private readonly RotaryKnob _knob;
     private readonly PluginPresetBar _presetBar;
     private readonly LevelMeter _inputMeter;
     private readonly LevelMeter _outputMeter;
+
+    public KnobWidget CutoffKnob { get; }
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -45,17 +46,18 @@ public sealed class HighPassFilterRenderer : IDisposable
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
-    private SKPoint _cutoffKnobCenter;
     private SKRect _slope12ButtonRect;
     private SKRect _slope18ButtonRect;
 
     public HighPassFilterRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
-        _knob = new RotaryKnob(_theme);
         _presetBar = new PluginPresetBar(_theme);
         _inputMeter = new LevelMeter();
         _outputMeter = new LevelMeter();
+
+        var knobStyle = KnobStyle.Standard;
+        CutoffKnob = new KnobWidget(KnobRadius, 40f, 200f, "CUTOFF", "Hz", knobStyle, _theme) { IsLogarithmic = true, ValueFormat = "0" };
 
         _backgroundPaint = new SKPaint
         {
@@ -297,15 +299,15 @@ public sealed class HighPassFilterRenderer : IDisposable
 
         // Cutoff knob
         float knobAreaX = outputMeterRect.Right + 30;
-        _cutoffKnobCenter = new SKPoint(knobAreaX + KnobRadius, meterY + 50);
-        float cutoffNorm = (MathF.Log10(state.CutoffHz) - MathF.Log10(40f)) / (MathF.Log10(200f) - MathF.Log10(40f));
-        _knob.Render(canvas, _cutoffKnobCenter, KnobRadius, cutoffNorm, "CUTOFF", $"{state.CutoffHz:0}", "Hz", state.HoveredElement == HpfElement.CutoffKnob);
+        CutoffKnob.Center = new SKPoint(knobAreaX + KnobRadius, meterY + 50);
+        CutoffKnob.Value = state.CutoffHz;
+        CutoffKnob.Render(canvas);
 
         // Slope selector buttons
         float slopeButtonY = meterY + MeterHeight - 34;
         float slopeButtonWidth = 50f;
         float slopeButtonHeight = 28f;
-        float slopeButtonX = _cutoffKnobCenter.X + KnobRadius + 20;
+        float slopeButtonX = CutoffKnob.Center.X + KnobRadius + 20;
 
         _slope12ButtonRect = new SKRect(slopeButtonX, slopeButtonY, slopeButtonX + slopeButtonWidth, slopeButtonY + slopeButtonHeight);
         _slope18ButtonRect = new SKRect(slopeButtonX, slopeButtonY - 36, slopeButtonX + slopeButtonWidth, slopeButtonY - 36 + slopeButtonHeight);
@@ -486,9 +488,7 @@ public sealed class HighPassFilterRenderer : IDisposable
         if (_slope18ButtonRect.Contains(x, y))
             return new HpfHitTest(HpfHitArea.SlopeButton, HpfElement.Slope18);
 
-        float dx = x - _cutoffKnobCenter.X;
-        float dy = y - _cutoffKnobCenter.Y;
-        if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
+        if (CutoffKnob.HitTest(x, y))
             return new HpfHitTest(HpfHitArea.Knob, HpfElement.CutoffKnob);
 
         if (_titleBarRect.Contains(x, y))
@@ -505,8 +505,8 @@ public sealed class HighPassFilterRenderer : IDisposable
     {
         _inputMeter.Dispose();
         _outputMeter.Dispose();
-        _knob.Dispose();
         _presetBar.Dispose();
+        CutoffKnob.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -537,7 +537,6 @@ public record struct HighPassFilterState(
     float OutputLevel,
     float LatencyMs,
     bool IsBypassed,
-    HpfElement HoveredElement = HpfElement.None,
     float[]? Spectrum = null,
     string PresetName = "Custom");
 

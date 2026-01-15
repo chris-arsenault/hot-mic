@@ -19,11 +19,6 @@ public partial class FrequencyAnalyzerWindow : Window
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
 
-    private int _activeKnob = -1;
-    private float _dragStartY;
-    private float _dragStartValue;
-    private int _hoveredKnob = -1;
-
     private float[] _spectrum = Array.Empty<float>();
 
     private static readonly int[] FftSizes = { 1024, 2048, 4096, 8192 };
@@ -37,20 +32,18 @@ public partial class FrequencyAnalyzerWindow : Window
         FrequencyScale.Bark
     };
 
-    private static readonly (int paramIndex, float min, float max)[] KnobParams =
-    {
-        (FrequencyAnalyzerPlugin.MinFrequencyIndex, 20f, 2000f),
-        (FrequencyAnalyzerPlugin.MaxFrequencyIndex, 2000f, 12000f),
-        (FrequencyAnalyzerPlugin.MinDbIndex, -120f, -20f),
-        (FrequencyAnalyzerPlugin.MaxDbIndex, -40f, 0f)
-    };
-
     public FrequencyAnalyzerWindow(FrequencyAnalyzerPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
         InitializeComponent();
         _plugin = plugin;
         _parameterCallback = parameterCallback;
         _bypassCallback = bypassCallback;
+
+        // Wire up KnobWidget ValueChanged events
+        _renderer.MinFreqKnob.ValueChanged += v => _parameterCallback(FrequencyAnalyzerPlugin.MinFrequencyIndex, v);
+        _renderer.MaxFreqKnob.ValueChanged += v => _parameterCallback(FrequencyAnalyzerPlugin.MaxFrequencyIndex, v);
+        _renderer.MinDbKnob.ValueChanged += v => _parameterCallback(FrequencyAnalyzerPlugin.MinDbIndex, v);
+        _renderer.MaxDbKnob.ValueChanged += v => _parameterCallback(FrequencyAnalyzerPlugin.MaxDbIndex, v);
 
         var preferredSize = FrequencyAnalyzerRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -98,7 +91,6 @@ public partial class FrequencyAnalyzerWindow : Window
             MinDb: _plugin.MinDb,
             MaxDb: _plugin.MaxDb,
             IsBypassed: _plugin.IsBypassed,
-            HoveredKnob: _hoveredKnob,
             Spectrum: _spectrum
         );
 
@@ -107,14 +99,25 @@ public partial class FrequencyAnalyzerWindow : Window
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
+        var pos = e.GetPosition(SkiaCanvas);
+        float x = (float)pos.X;
+        float y = (float)pos.Y;
+
+        // Check if any knob handles the mouse first
+        if (_renderer.MinFreqKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas) ||
+            _renderer.MaxFreqKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas) ||
+            _renderer.MinDbKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas) ||
+            _renderer.MaxDbKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+        {
+            SkiaCanvas.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+
         if (e.ChangedButton != MouseButton.Left)
         {
             return;
         }
-
-        var pos = e.GetPosition(SkiaCanvas);
-        float x = (float)pos.X;
-        float y = (float)pos.Y;
 
         var hit = _renderer.HitTest(x, y);
         switch (hit.Area)
@@ -143,13 +146,6 @@ public partial class FrequencyAnalyzerWindow : Window
                 CycleScale();
                 e.Handled = true;
                 break;
-            case AnalyzerHitArea.Knob:
-                _activeKnob = hit.KnobIndex;
-                _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
-                SkiaCanvas.CaptureMouse();
-                e.Handled = true;
-                break;
         }
     }
 
@@ -158,63 +154,24 @@ public partial class FrequencyAnalyzerWindow : Window
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+        bool leftDown = e.LeftButton == MouseButtonState.Pressed;
 
-        if (_activeKnob >= 0 && e.LeftButton == MouseButtonState.Pressed)
-        {
-            float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.004f);
-            ApplyKnobValue(_activeKnob, newNormalized);
-            e.Handled = true;
-        }
-        else
-        {
-            var hit = _renderer.HitTest(x, y);
-            _hoveredKnob = hit.Area == AnalyzerHitArea.Knob ? hit.KnobIndex : -1;
-        }
+        // Forward to all knobs
+        _renderer.MinFreqKnob.HandleMouseMove(x, y, leftDown);
+        _renderer.MaxFreqKnob.HandleMouseMove(x, y, leftDown);
+        _renderer.MinDbKnob.HandleMouseMove(x, y, leftDown);
+        _renderer.MaxDbKnob.HandleMouseMove(x, y, leftDown);
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-        {
-            return;
-        }
+        // Forward to all knobs
+        _renderer.MinFreqKnob.HandleMouseUp(e.ChangedButton);
+        _renderer.MaxFreqKnob.HandleMouseUp(e.ChangedButton);
+        _renderer.MinDbKnob.HandleMouseUp(e.ChangedButton);
+        _renderer.MaxDbKnob.HandleMouseUp(e.ChangedButton);
 
-        _activeKnob = -1;
         SkiaCanvas.ReleaseMouseCapture();
-    }
-
-    private float GetKnobNormalizedValue(int knobIndex)
-    {
-        if (knobIndex < 0 || knobIndex >= KnobParams.Length)
-        {
-            return 0f;
-        }
-
-        float value = knobIndex switch
-        {
-            0 => _plugin.MinFrequency,
-            1 => _plugin.MaxFrequency,
-            2 => _plugin.MinDb,
-            3 => _plugin.MaxDb,
-            _ => 0f
-        };
-
-        var (_, min, max) = KnobParams[knobIndex];
-        return (value - min) / (max - min);
-    }
-
-    private void ApplyKnobValue(int knobIndex, float normalizedValue)
-    {
-        if (knobIndex < 0 || knobIndex >= KnobParams.Length)
-        {
-            return;
-        }
-
-        normalizedValue = Math.Clamp(normalizedValue, 0f, 1f);
-        var (paramIndex, min, max) = KnobParams[knobIndex];
-        float value = min + normalizedValue * (max - min);
-        _parameterCallback(paramIndex, value);
     }
 
     private void CycleFftSize()

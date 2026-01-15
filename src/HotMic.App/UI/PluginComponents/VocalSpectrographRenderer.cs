@@ -23,8 +23,27 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private const float VoicingLaneHeight = 8f;
 
     private readonly PluginComponentTheme _theme;
-    private readonly RotaryKnob _knob;
     private readonly PluginPresetBar _presetBar;
+
+    // KnobWidgets for all 15 knobs
+    public KnobWidget MinFreqKnob { get; }
+    public KnobWidget MaxFreqKnob { get; }
+    public KnobWidget MinDbKnob { get; }
+    public KnobWidget MaxDbKnob { get; }
+    public KnobWidget TimeKnob { get; }
+    public KnobWidget HpfKnob { get; }
+    public KnobWidget ReassignThresholdKnob { get; }
+    public KnobWidget ReassignSpreadKnob { get; }
+    public KnobWidget ClarityNoiseKnob { get; }
+    public KnobWidget ClarityHarmonicKnob { get; }
+    public KnobWidget ClaritySmoothingKnob { get; }
+    public KnobWidget BrightnessKnob { get; }
+    public KnobWidget GammaKnob { get; }
+    public KnobWidget ContrastKnob { get; }
+    public KnobWidget LevelsKnob { get; }
+
+    /// <summary>All knob widgets for iteration.</summary>
+    public IReadOnlyList<KnobWidget> AllKnobs => _allKnobs;
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _panelPaint;
@@ -60,8 +79,26 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private readonly SKPaint _guidePaint;
     private readonly SKPaint _metricPaint;
     private readonly SKPaint _vowelTrailPaint;
+    private readonly SKPaint _iconPaint;
+    private readonly SKPaint _axisImagePaint;
+    private readonly SKPaint _colorBarPaint;
+    private SKShader? _colorBarShader;
+    private SKRect _colorBarRectCache;
+    private int _colorBarMapCache = -1;
 
-    private readonly SKPoint[] _knobCenters = new SKPoint[15];
+    private KnobWidget[] _allKnobs = null!; // Initialized in constructor
+
+    private readonly SKPath _waveformEnvelopeTop = new();
+    private readonly SKPath _waveformEnvelopeBottom = new();
+    private readonly SKPath _spectrumSlicePath = new();
+    private readonly SKPath _pitchHighPath = new();
+    private readonly SKPath _pitchLowPath = new();
+    private readonly SKPath _formantPath1 = new();
+    private readonly SKPath _formantPath2 = new();
+    private readonly SKPath _formantPath3 = new();
+    private readonly SKPath _vowelTrailPath = new();
+    private readonly int[] _peakBins = new int[3];
+    private readonly float[] _peakValues = new float[3];
 
     private SKRect _titleBarRect;
     private SKRect _closeRect;
@@ -114,11 +151,46 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private int[] _colorLut = Array.Empty<int>();
     private byte[] _colorIndexLut = Array.Empty<byte>();
 
+    private SKSurface? _axisSurface;
+    private SKImage? _axisImage;
+    private SKImageInfo _axisInfo;
+    private SKRect _axisDrawRect;
+    private float _axisDpiScale = -1f;
+    private SpectrogramAxisMode _axisModeCache;
+    private FrequencyScale _axisScaleCache;
+    private float _axisMinHzCache;
+    private float _axisMaxHzCache;
+    private float _axisTimeWindowCache;
+    private int _axisColorMapCache = -1;
+    private bool _axisShowWaveformCache;
+    private bool _axisShowSpectrumCache;
+    private bool _axisShowPitchMeterCache;
+    private bool _axisShowVowelSpaceCache;
     public VocalSpectrographRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
-        _knob = new RotaryKnob(_theme);
         _presetBar = new PluginPresetBar(_theme);
+
+        // Initialize all KnobWidgets
+        var knobStyle = KnobStyle.Compact;
+        MinFreqKnob = new KnobWidget(KnobRadius, 20f, 2000f, "MIN FREQ", "Hz", knobStyle, _theme) { IsLogarithmic = true, ValueFormat = "0" };
+        MaxFreqKnob = new KnobWidget(KnobRadius, 2000f, 12000f, "MAX FREQ", "Hz", knobStyle, _theme) { IsLogarithmic = true, ValueFormat = "0" };
+        MinDbKnob = new KnobWidget(KnobRadius, -120f, -20f, "MIN dB", "dB", knobStyle, _theme) { ValueFormat = "0" };
+        MaxDbKnob = new KnobWidget(KnobRadius, -40f, 0f, "MAX dB", "dB", knobStyle, _theme) { ValueFormat = "0" };
+        TimeKnob = new KnobWidget(KnobRadius, 1f, 60f, "TIME", "s", knobStyle, _theme) { ValueFormat = "0.0" };
+        HpfKnob = new KnobWidget(KnobRadius, 20f, 120f, "HPF", "Hz", knobStyle, _theme) { ValueFormat = "0" };
+        ReassignThresholdKnob = new KnobWidget(KnobRadius, -120f, -20f, "R THRESH", "dB", knobStyle, _theme) { ValueFormat = "0" };
+        ReassignSpreadKnob = new KnobWidget(KnobRadius, 0f, 100f, "R SPREAD", "%", knobStyle, _theme) { ValueFormat = "0" };
+        ClarityNoiseKnob = new KnobWidget(KnobRadius, 0f, 100f, "NOISE", "%", knobStyle, _theme) { ValueFormat = "0" };
+        ClarityHarmonicKnob = new KnobWidget(KnobRadius, 0f, 100f, "HARM", "%", knobStyle, _theme) { ValueFormat = "0" };
+        ClaritySmoothingKnob = new KnobWidget(KnobRadius, 0f, 100f, "SMOOTH", "%", knobStyle, _theme) { ValueFormat = "0" };
+        BrightnessKnob = new KnobWidget(KnobRadius, 0.5f, 2f, "BRIGHT", "x", knobStyle, _theme) { ValueFormat = "0.00" };
+        GammaKnob = new KnobWidget(KnobRadius, 0.6f, 1.2f, "GAMMA", "", knobStyle, _theme) { ValueFormat = "0.00" };
+        ContrastKnob = new KnobWidget(KnobRadius, 0.8f, 1.5f, "CONTRAST", "x", knobStyle, _theme) { ValueFormat = "0.00" };
+        LevelsKnob = new KnobWidget(KnobRadius, 16f, 64f, "LEVELS", "", knobStyle, _theme) { ValueFormat = "0" };
+        _allKnobs = new[] { MinFreqKnob, MaxFreqKnob, MinDbKnob, MaxDbKnob, TimeKnob, HpfKnob,
+            ReassignThresholdKnob, ReassignSpreadKnob, ClarityNoiseKnob, ClarityHarmonicKnob,
+            ClaritySmoothingKnob, BrightnessKnob, GammaKnob, ContrastKnob, LevelsKnob };
 
         _backgroundPaint = new SKPaint { Color = _theme.PanelBackground, IsAntialias = true, Style = SKPaintStyle.Fill };
         _panelPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
@@ -259,13 +331,30 @@ public sealed class VocalSpectrographRenderer : IDisposable
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1.2f
         };
+        _iconPaint = new SKPaint
+        {
+            Color = _theme.TextPrimary,
+            IsAntialias = true,
+            TextSize = 12f,
+            TextAlign = SKTextAlign.Center
+        };
+        _axisImagePaint = new SKPaint
+        {
+            IsAntialias = false,
+            FilterQuality = SKFilterQuality.None
+        };
+        _colorBarPaint = new SKPaint
+        {
+            IsAntialias = true
+        };
+        _colorBarRectCache = SKRect.Empty;
     }
 
     public static SKSize GetPreferredSize() => new(920, 820);
 
     public void Render(SKCanvas canvas, SKSize size, float dpiScale, VocalSpectrographState state)
     {
-        canvas.Clear(SKColors.Transparent);
+        canvas.Clear(_theme.PanelBackground);
         canvas.Save();
         canvas.Scale(dpiScale);
         size = new SKSize(size.Width / dpiScale, size.Height / dpiScale);
@@ -276,7 +365,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
         DrawTitleBar(canvas, size, state);
         DrawControlBar(canvas, size, state);
-        DrawSpectrogram(canvas, size, state);
+        DrawSpectrogram(canvas, size, dpiScale, state);
         DrawKnobs(canvas, size, state);
 
         canvas.Restore();
@@ -337,9 +426,9 @@ public sealed class VocalSpectrographRenderer : IDisposable
         if (_vowelToggleRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.VowelToggle, -1);
         if (_spectrogramRect.Contains(x, y)) return new VocalSpectrographHitTest(SpectrographHitArea.Spectrogram, -1);
 
-        for (int i = 0; i < _knobCenters.Length; i++)
+        for (int i = 0; i < _allKnobs.Length; i++)
         {
-            if (Distance(_knobCenters[i], x, y) <= KnobRadius)
+            if (_allKnobs[i].HitTest(x, y))
             {
                 return new VocalSpectrographHitTest(SpectrographHitArea.Knob, i);
             }
@@ -496,7 +585,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         DrawPillButton(canvas, _vowelToggleRect, "Vowel", state.ShowVowelSpace);
     }
 
-    private void DrawSpectrogram(SKCanvas canvas, SKSize size, VocalSpectrographState state)
+    private void DrawSpectrogram(SKCanvas canvas, SKSize size, float dpiScale, VocalSpectrographState state)
     {
         float top = TitleBarHeight + Padding + ControlBarHeight + Padding;
         float waveformHeight = state.ShowWaveform ? WaveformHeight : 0f;
@@ -520,6 +609,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
         UpdateSpectrogramBitmap(state);
         DrawSpectrogramBitmap(canvas, spectrumRect);
+        EnsureAxisLayer(size, dpiScale, state, spectrumRect, axisRect, colorRect);
+        DrawAxisLayer(canvas);
 
         if (state.ShowRange)
         {
@@ -529,9 +620,6 @@ public sealed class VocalSpectrographRenderer : IDisposable
         {
             DrawFrequencyGuides(canvas, spectrumRect, state);
         }
-        DrawFrequencyAxis(canvas, axisRect, state);
-        DrawColorBar(canvas, colorRect, state);
-        DrawTimeAxis(canvas, spectrumRect, state);
         DrawOverlays(canvas, spectrumRect, state);
         DrawReferenceLine(canvas, spectrumRect, state);
 
@@ -540,6 +628,78 @@ public sealed class VocalSpectrographRenderer : IDisposable
             var auxRect = new SKRect(Padding, spectrumRect.Bottom + Padding, size.Width - Padding, spectrumRect.Bottom + Padding + auxHeight);
             DrawAuxViews(canvas, auxRect, state);
         }
+    }
+
+    private void EnsureAxisLayer(SKSize size, float dpiScale, VocalSpectrographState state, SKRect spectrumRect, SKRect axisRect, SKRect colorRect)
+    {
+        int pixelWidth = (int)MathF.Ceiling(size.Width * dpiScale);
+        int pixelHeight = (int)MathF.Ceiling(size.Height * dpiScale);
+        bool sizeChanged = _axisInfo.Width != pixelWidth || _axisInfo.Height != pixelHeight;
+        bool dpiChanged = MathF.Abs(_axisDpiScale - dpiScale) > 1e-3f;
+        bool layoutChanged = state.ShowWaveform != _axisShowWaveformCache
+            || state.ShowSpectrum != _axisShowSpectrumCache
+            || state.ShowPitchMeter != _axisShowPitchMeterCache
+            || state.ShowVowelSpace != _axisShowVowelSpaceCache;
+        bool axisChanged = state.AxisMode != _axisModeCache
+            || state.Scale != _axisScaleCache
+            || MathF.Abs(state.MinFrequency - _axisMinHzCache) > 1e-3f
+            || MathF.Abs(state.MaxFrequency - _axisMaxHzCache) > 1e-3f
+            || MathF.Abs(state.TimeWindowSeconds - _axisTimeWindowCache) > 1e-3f
+            || state.ColorMap != _axisColorMapCache;
+
+        if (!sizeChanged && !dpiChanged && !layoutChanged && !axisChanged && _axisImage is not null)
+        {
+            return;
+        }
+
+        InvalidateAxisCache();
+        _axisInfo = new SKImageInfo(pixelWidth, pixelHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
+        _axisSurface = SKSurface.Create(_axisInfo);
+        if (_axisSurface is null)
+        {
+            return;
+        }
+
+        var axisCanvas = _axisSurface.Canvas;
+        axisCanvas.Clear(SKColors.Transparent);
+        axisCanvas.Save();
+        axisCanvas.Scale(dpiScale);
+        DrawFrequencyAxis(axisCanvas, axisRect, state);
+        DrawColorBar(axisCanvas, colorRect, state);
+        DrawTimeAxis(axisCanvas, spectrumRect, state);
+        axisCanvas.Restore();
+        _axisImage = _axisSurface.Snapshot();
+        _axisDrawRect = new SKRect(0, 0, size.Width, size.Height);
+
+        _axisDpiScale = dpiScale;
+        _axisModeCache = state.AxisMode;
+        _axisScaleCache = state.Scale;
+        _axisMinHzCache = state.MinFrequency;
+        _axisMaxHzCache = state.MaxFrequency;
+        _axisTimeWindowCache = state.TimeWindowSeconds;
+        _axisColorMapCache = state.ColorMap;
+        _axisShowWaveformCache = state.ShowWaveform;
+        _axisShowSpectrumCache = state.ShowSpectrum;
+        _axisShowPitchMeterCache = state.ShowPitchMeter;
+        _axisShowVowelSpaceCache = state.ShowVowelSpace;
+    }
+
+    private void DrawAxisLayer(SKCanvas canvas)
+    {
+        if (_axisImage is null)
+        {
+            return;
+        }
+
+        canvas.DrawImage(_axisImage, _axisDrawRect, _axisImagePaint);
+    }
+
+    private void InvalidateAxisCache()
+    {
+        _axisImage?.Dispose();
+        _axisImage = null;
+        _axisSurface?.Dispose();
+        _axisSurface = null;
     }
 
     private void DrawWaveform(SKCanvas canvas, SKRect rect, VocalSpectrographState state)
@@ -563,8 +723,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
         float xStep = rect.Width / Math.Max(1, state.FrameCount - 1);
         float center = rect.MidY;
         float half = rect.Height * 0.45f;
-        using var envelopeTop = new SKPath();
-        using var envelopeBottom = new SKPath();
+        _waveformEnvelopeTop.Reset();
+        _waveformEnvelopeBottom.Reset();
         bool envelopeStarted = false;
 
         for (int frame = 0; frame < frames; frame += step)
@@ -581,14 +741,14 @@ public sealed class VocalSpectrographRenderer : IDisposable
             float yEnvBottom = center + envelope * half;
             if (!envelopeStarted)
             {
-                envelopeTop.MoveTo(x, yEnvTop);
-                envelopeBottom.MoveTo(x, yEnvBottom);
+                _waveformEnvelopeTop.MoveTo(x, yEnvTop);
+                _waveformEnvelopeBottom.MoveTo(x, yEnvBottom);
                 envelopeStarted = true;
             }
             else
             {
-                envelopeTop.LineTo(x, yEnvTop);
-                envelopeBottom.LineTo(x, yEnvBottom);
+                _waveformEnvelopeTop.LineTo(x, yEnvTop);
+                _waveformEnvelopeBottom.LineTo(x, yEnvBottom);
             }
 
             if (min < 0f && max > 0f)
@@ -599,8 +759,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
         if (envelopeStarted)
         {
-            canvas.DrawPath(envelopeTop, _waveformEnvelopePaint);
-            canvas.DrawPath(envelopeBottom, _waveformEnvelopePaint);
+            canvas.DrawPath(_waveformEnvelopeTop, _waveformEnvelopePaint);
+            canvas.DrawPath(_waveformEnvelopeBottom, _waveformEnvelopePaint);
         }
     }
 
@@ -699,7 +859,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         float dbRange = MathF.Max(1f, maxDb - minDb);
         float freqRange = MathF.Max(1f, state.MaxFrequency - state.MinFrequency);
 
-        using var path = new SKPath();
+        _spectrumSlicePath.Reset();
         bool started = false;
         for (int i = 0; i < bins && i < state.BinFrequencies.Length; i++)
         {
@@ -719,26 +879,24 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
             if (!started)
             {
-                path.MoveTo(x, y);
+                _spectrumSlicePath.MoveTo(x, y);
                 started = true;
             }
             else
             {
-                path.LineTo(x, y);
+                _spectrumSlicePath.LineTo(x, y);
             }
         }
 
-        if (!path.IsEmpty)
+        if (!_spectrumSlicePath.IsEmpty)
         {
-            canvas.DrawPath(path, _spectrumPaint);
+            canvas.DrawPath(_spectrumSlicePath, _spectrumPaint);
         }
 
-        Span<int> peakBins = stackalloc int[3];
-        Span<float> peakValues = stackalloc float[3];
-        for (int i = 0; i < peakBins.Length; i++)
+        for (int i = 0; i < _peakBins.Length; i++)
         {
-            peakBins[i] = -1;
-            peakValues[i] = 0f;
+            _peakBins[i] = -1;
+            _peakValues[i] = 0f;
         }
 
         for (int i = 1; i < bins - 1 && i + offset + 1 < state.Spectrogram.Length; i++)
@@ -751,26 +909,26 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
             if (value >= state.Spectrogram[offset + i - 1] && value > state.Spectrogram[offset + i + 1])
             {
-                for (int k = 0; k < peakBins.Length; k++)
+                for (int k = 0; k < _peakBins.Length; k++)
                 {
-                    if (value > peakValues[k])
+                    if (value > _peakValues[k])
                     {
-                        for (int shift = peakBins.Length - 1; shift > k; shift--)
+                        for (int shift = _peakBins.Length - 1; shift > k; shift--)
                         {
-                            peakBins[shift] = peakBins[shift - 1];
-                            peakValues[shift] = peakValues[shift - 1];
+                            _peakBins[shift] = _peakBins[shift - 1];
+                            _peakValues[shift] = _peakValues[shift - 1];
                         }
-                        peakBins[k] = i;
-                        peakValues[k] = value;
+                        _peakBins[k] = i;
+                        _peakValues[k] = value;
                         break;
                     }
                 }
             }
         }
 
-        for (int i = 0; i < peakBins.Length; i++)
+        for (int i = 0; i < _peakBins.Length; i++)
         {
-            int bin = peakBins[i];
+            int bin = _peakBins[i];
             if (bin < 0 || bin >= state.BinFrequencies.Length)
             {
                 continue;
@@ -857,7 +1015,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
             int frames = Math.Min(state.FrameCount, state.FormantFrequencies.Length / state.MaxFormants);
             int trailFrames = Math.Min(frames, 60);
             int start = Math.Max(0, frames - trailFrames);
-            using var trail = new SKPath();
+            _vowelTrailPath.Reset();
             bool started = false;
             for (int frame = start; frame < frames; frame++)
             {
@@ -881,18 +1039,18 @@ public sealed class VocalSpectrographRenderer : IDisposable
                 float y = plotRect.Bottom - plotRect.Height * yNorm;
                 if (!started)
                 {
-                    trail.MoveTo(x, y);
+                    _vowelTrailPath.MoveTo(x, y);
                     started = true;
                 }
                 else
                 {
-                    trail.LineTo(x, y);
+                    _vowelTrailPath.LineTo(x, y);
                 }
             }
 
-            if (!trail.IsEmpty)
+            if (!_vowelTrailPath.IsEmpty)
             {
-                canvas.DrawPath(trail, _vowelTrailPaint);
+                canvas.DrawPath(_vowelTrailPath, _vowelTrailPaint);
             }
         }
 
@@ -943,11 +1101,12 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private void DrawKnobs(SKCanvas canvas, SKSize size, VocalSpectrographState state)
     {
         float knobsTop = size.Height - Padding - KnobAreaHeight;
-        int total = _knobCenters.Length;
+        int total = _allKnobs.Length;
         int columns = 6;
         float rowSpacing = 46f;
         int rows = (total + columns - 1) / columns;
 
+        // Calculate knob positions
         for (int row = 0; row < rows; row++)
         {
             int rowStart = row * columns;
@@ -957,54 +1116,59 @@ public sealed class VocalSpectrographRenderer : IDisposable
             for (int col = 0; col < rowCount; col++)
             {
                 int index = rowStart + col;
-                _knobCenters[index] = new SKPoint(Padding + knobSpacing * (col + 1), y);
+                _allKnobs[index].Center = new SKPoint(Padding + knobSpacing * (col + 1), y);
             }
         }
 
-        float minFreqNorm = Normalize(state.MinFrequency, 20f, 2000f);
-        _knob.Render(canvas, _knobCenters[0], KnobRadius, minFreqNorm, "MIN FREQ", FormatHz(state.MinFrequency), "Hz", state.HoveredKnob == 0);
+        // Update knob values from state and render
+        MinFreqKnob.Value = state.MinFrequency;
+        MinFreqKnob.Render(canvas);
 
-        float maxFreqNorm = Normalize(state.MaxFrequency, 2000f, 12000f);
-        _knob.Render(canvas, _knobCenters[1], KnobRadius, maxFreqNorm, "MAX FREQ", FormatHz(state.MaxFrequency), "Hz", state.HoveredKnob == 1);
+        MaxFreqKnob.Value = state.MaxFrequency;
+        MaxFreqKnob.Render(canvas);
 
-        float minDbNorm = Normalize(state.MinDb, -120f, -20f);
-        _knob.Render(canvas, _knobCenters[2], KnobRadius, minDbNorm, "MIN dB", $"{state.MinDb:0}", "dB", state.HoveredKnob == 2);
+        MinDbKnob.Value = state.MinDb;
+        MinDbKnob.Render(canvas);
 
-        float maxDbNorm = Normalize(state.MaxDb, -40f, 0f);
-        _knob.Render(canvas, _knobCenters[3], KnobRadius, maxDbNorm, "MAX dB", $"{state.MaxDb:0}", "dB", state.HoveredKnob == 3);
+        MaxDbKnob.Value = state.MaxDb;
+        MaxDbKnob.Render(canvas);
 
-        float timeNorm = Normalize(state.TimeWindowSeconds, 1f, 60f);
-        _knob.Render(canvas, _knobCenters[4], KnobRadius, timeNorm, "TIME", $"{state.TimeWindowSeconds:0.0}", "s", state.HoveredKnob == 4);
+        TimeKnob.Value = state.TimeWindowSeconds;
+        TimeKnob.Render(canvas);
 
-        float hpfNorm = Normalize(state.HighPassCutoff, 20f, 120f);
-        _knob.Render(canvas, _knobCenters[5], KnobRadius, hpfNorm, "HPF", $"{state.HighPassCutoff:0}", "Hz", state.HoveredKnob == 5);
+        HpfKnob.Value = state.HighPassCutoff;
+        HpfKnob.Render(canvas);
 
-        float reassignThresholdNorm = Normalize(state.ReassignThresholdDb, -120f, -20f);
-        _knob.Render(canvas, _knobCenters[6], KnobRadius, reassignThresholdNorm, "R THRESH", $"{state.ReassignThresholdDb:0}", "dB", state.HoveredKnob == 6);
+        ReassignThresholdKnob.Value = state.ReassignThresholdDb;
+        ReassignThresholdKnob.Render(canvas);
 
-        float reassignSpreadNorm = Normalize(state.ReassignSpread, 0f, 1f);
-        _knob.Render(canvas, _knobCenters[7], KnobRadius, reassignSpreadNorm, "R SPREAD", $"{state.ReassignSpread * 100f:0}", "%", state.HoveredKnob == 7);
+        // ReassignSpread comes in as 0-1, but knob expects 0-100 (%)
+        ReassignSpreadKnob.Value = state.ReassignSpread * 100f;
+        ReassignSpreadKnob.Render(canvas);
 
-        float clarityNoiseNorm = Normalize(state.ClarityNoise, 0f, 1f);
-        _knob.Render(canvas, _knobCenters[8], KnobRadius, clarityNoiseNorm, "NOISE", $"{state.ClarityNoise * 100f:0}", "%", state.HoveredKnob == 8);
+        // ClarityNoise comes in as 0-1, but knob expects 0-100 (%)
+        ClarityNoiseKnob.Value = state.ClarityNoise * 100f;
+        ClarityNoiseKnob.Render(canvas);
 
-        float clarityHarmNorm = Normalize(state.ClarityHarmonic, 0f, 1f);
-        _knob.Render(canvas, _knobCenters[9], KnobRadius, clarityHarmNorm, "HARM", $"{state.ClarityHarmonic * 100f:0}", "%", state.HoveredKnob == 9);
+        // ClarityHarmonic comes in as 0-1, but knob expects 0-100 (%)
+        ClarityHarmonicKnob.Value = state.ClarityHarmonic * 100f;
+        ClarityHarmonicKnob.Render(canvas);
 
-        float claritySmoothNorm = Normalize(state.ClaritySmoothing, 0f, 1f);
-        _knob.Render(canvas, _knobCenters[10], KnobRadius, claritySmoothNorm, "SMOOTH", $"{state.ClaritySmoothing * 100f:0}", "%", state.HoveredKnob == 10);
+        // ClaritySmoothing comes in as 0-1, but knob expects 0-100 (%)
+        ClaritySmoothingKnob.Value = state.ClaritySmoothing * 100f;
+        ClaritySmoothingKnob.Render(canvas);
 
-        float brightnessNorm = Normalize(state.Brightness, 0.5f, 2f);
-        _knob.Render(canvas, _knobCenters[11], KnobRadius, brightnessNorm, "BRIGHT", $"{state.Brightness:0.00}", "x", state.HoveredKnob == 11);
+        BrightnessKnob.Value = state.Brightness;
+        BrightnessKnob.Render(canvas);
 
-        float gammaNorm = Normalize(state.Gamma, 0.6f, 1.2f);
-        _knob.Render(canvas, _knobCenters[12], KnobRadius, gammaNorm, "GAMMA", $"{state.Gamma:0.00}", "", state.HoveredKnob == 12);
+        GammaKnob.Value = state.Gamma;
+        GammaKnob.Render(canvas);
 
-        float contrastNorm = Normalize(state.Contrast, 0.8f, 1.5f);
-        _knob.Render(canvas, _knobCenters[13], KnobRadius, contrastNorm, "CONTRAST", $"{state.Contrast:0.00}", "x", state.HoveredKnob == 13);
+        ContrastKnob.Value = state.Contrast;
+        ContrastKnob.Render(canvas);
 
-        float levelsNorm = Normalize(state.ColorLevels, 16f, 64f);
-        _knob.Render(canvas, _knobCenters[14], KnobRadius, levelsNorm, "LEVELS", $"{state.ColorLevels}", "", state.HoveredKnob == 14);
+        LevelsKnob.Value = state.ColorLevels;
+        LevelsKnob.Render(canvas);
     }
 
     private void UpdateSpectrogramBitmap(VocalSpectrographState state)
@@ -1271,18 +1435,29 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
     private void DrawColorBar(SKCanvas canvas, SKRect rect, VocalSpectrographState state)
     {
-        var colors = SpectrogramColorMaps.GetColors((SpectrogramColorMap)state.ColorMap);
-        using var paint = new SKPaint
-        {
-            Shader = SKShader.CreateLinearGradient(
-                new SKPoint(rect.Left, rect.Top),
-                new SKPoint(rect.Left, rect.Bottom),
-                new[] { colors[255], colors[0] },
-                null,
-                SKShaderTileMode.Clamp)
-        };
-        canvas.DrawRoundRect(new SKRoundRect(rect, 4f), paint);
+        EnsureColorBarShader(rect, state.ColorMap);
+        canvas.DrawRoundRect(new SKRoundRect(rect, 4f), _colorBarPaint);
         canvas.DrawRoundRect(new SKRoundRect(rect, 4f), _borderPaint);
+    }
+
+    private void EnsureColorBarShader(SKRect rect, int colorMap)
+    {
+        if (_colorBarShader is not null && _colorBarMapCache == colorMap && RectEquals(_colorBarRectCache, rect))
+        {
+            return;
+        }
+
+        _colorBarShader?.Dispose();
+        var colors = SpectrogramColorMaps.GetColors((SpectrogramColorMap)colorMap);
+        _colorBarShader = SKShader.CreateLinearGradient(
+            new SKPoint(rect.Left, rect.Top),
+            new SKPoint(rect.Left, rect.Bottom),
+            new[] { colors[255], colors[0] },
+            null,
+            SKShaderTileMode.Clamp);
+        _colorBarPaint.Shader = _colorBarShader;
+        _colorBarRectCache = rect;
+        _colorBarMapCache = colorMap;
     }
 
     private void DrawTimeAxis(SKCanvas canvas, SKRect rect, VocalSpectrographState state)
@@ -1299,8 +1474,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
         {
             int frames = Math.Min(state.FrameCount, state.PitchTrack.Length);
             int step = GetOverlayStep(rect, frames);
-            using var highPath = new SKPath();
-            using var lowPath = new SKPath();
+            _pitchHighPath.Reset();
+            _pitchLowPath.Reset();
             bool highStarted = false;
             bool lowStarted = false;
 
@@ -1325,12 +1500,12 @@ public sealed class VocalSpectrographRenderer : IDisposable
                 {
                     if (!highStarted)
                     {
-                        highPath.MoveTo(x, y);
+                        _pitchHighPath.MoveTo(x, y);
                         highStarted = true;
                     }
                     else
                     {
-                        highPath.LineTo(x, y);
+                        _pitchHighPath.LineTo(x, y);
                     }
                     lowStarted = false;
                 }
@@ -1338,19 +1513,19 @@ public sealed class VocalSpectrographRenderer : IDisposable
                 {
                     if (!lowStarted)
                     {
-                        lowPath.MoveTo(x, y);
+                        _pitchLowPath.MoveTo(x, y);
                         lowStarted = true;
                     }
                     else
                     {
-                        lowPath.LineTo(x, y);
+                        _pitchLowPath.LineTo(x, y);
                     }
                     highStarted = false;
                 }
             }
 
-            canvas.DrawPath(highPath, _pitchPaint);
-            canvas.DrawPath(lowPath, _pitchLowPaint);
+            canvas.DrawPath(_pitchHighPath, _pitchPaint);
+            canvas.DrawPath(_pitchLowPath, _pitchLowPaint);
         }
 
         if (state.FormantFrequencies is { Length: > 0 } && state.ShowFormants)
@@ -1362,9 +1537,9 @@ public sealed class VocalSpectrographRenderer : IDisposable
                 int step = GetOverlayStep(rect, frames);
 
                 int trackCount = Math.Min(3, maxFormants);
-                using var path1 = new SKPath();
-                using var path2 = new SKPath();
-                using var path3 = new SKPath();
+                _formantPath1.Reset();
+                _formantPath2.Reset();
+                _formantPath3.Reset();
                 bool started1 = false;
                 bool started2 = false;
                 bool started3 = false;
@@ -1383,12 +1558,12 @@ public sealed class VocalSpectrographRenderer : IDisposable
                             float y = rect.Bottom - norm * rect.Height;
                             if (!started1)
                             {
-                                path1.MoveTo(x, y);
+                                _formantPath1.MoveTo(x, y);
                                 started1 = true;
                             }
                             else
                             {
-                                path1.LineTo(x, y);
+                                _formantPath1.LineTo(x, y);
                             }
                         }
                         else
@@ -1406,12 +1581,12 @@ public sealed class VocalSpectrographRenderer : IDisposable
                             float y = rect.Bottom - norm * rect.Height;
                             if (!started2)
                             {
-                                path2.MoveTo(x, y);
+                                _formantPath2.MoveTo(x, y);
                                 started2 = true;
                             }
                             else
                             {
-                                path2.LineTo(x, y);
+                                _formantPath2.LineTo(x, y);
                             }
                         }
                         else
@@ -1429,12 +1604,12 @@ public sealed class VocalSpectrographRenderer : IDisposable
                             float y = rect.Bottom - norm * rect.Height;
                             if (!started3)
                             {
-                                path3.MoveTo(x, y);
+                                _formantPath3.MoveTo(x, y);
                                 started3 = true;
                             }
                             else
                             {
-                                path3.LineTo(x, y);
+                                _formantPath3.LineTo(x, y);
                             }
                         }
                         else
@@ -1444,17 +1619,17 @@ public sealed class VocalSpectrographRenderer : IDisposable
                     }
                 }
 
-                if (!path1.IsEmpty)
+                if (!_formantPath1.IsEmpty)
                 {
-                    canvas.DrawPath(path1, _formantLinePaint1);
+                    canvas.DrawPath(_formantPath1, _formantLinePaint1);
                 }
-                if (!path2.IsEmpty)
+                if (!_formantPath2.IsEmpty)
                 {
-                    canvas.DrawPath(path2, _formantLinePaint2);
+                    canvas.DrawPath(_formantPath2, _formantLinePaint2);
                 }
-                if (!path3.IsEmpty)
+                if (!_formantPath3.IsEmpty)
                 {
-                    canvas.DrawPath(path3, _formantLinePaint3);
+                    canvas.DrawPath(_formantPath3, _formantLinePaint3);
                 }
 
                 for (int frame = 0; frame < frames; frame += step)
@@ -1585,8 +1760,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
     private void DrawIconButton(SKCanvas canvas, SKRect rect, string label, SKColor color)
     {
-        using var paint = new SKPaint { Color = color, IsAntialias = true, TextSize = 12f, TextAlign = SKTextAlign.Center };
-        canvas.DrawText(label, rect.MidX, rect.MidY + 4f, paint);
+        _iconPaint.Color = color;
+        canvas.DrawText(label, rect.MidX, rect.MidY + 4f, _iconPaint);
     }
 
     private static float Normalize(float value, float min, float max)
@@ -1734,6 +1909,14 @@ public sealed class VocalSpectrographRenderer : IDisposable
         return MathF.Sqrt(dx * dx + dy * dy);
     }
 
+    private static bool RectEquals(SKRect a, SKRect b)
+    {
+        return MathF.Abs(a.Left - b.Left) < 1e-3f
+            && MathF.Abs(a.Top - b.Top) < 1e-3f
+            && MathF.Abs(a.Right - b.Right) < 1e-3f
+            && MathF.Abs(a.Bottom - b.Bottom) < 1e-3f;
+    }
+
     private static int GetOverlayStep(SKRect rect, int frameCount)
     {
         int pixels = Math.Max(1, (int)MathF.Round(rect.Width));
@@ -1758,7 +1941,10 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
     public void Dispose()
     {
-        _knob.Dispose();
+        foreach (var knob in _allKnobs)
+        {
+            knob.Dispose();
+        }
         _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _panelPaint.Dispose();
@@ -1794,6 +1980,20 @@ public sealed class VocalSpectrographRenderer : IDisposable
         _guidePaint.Dispose();
         _metricPaint.Dispose();
         _vowelTrailPaint.Dispose();
+        _iconPaint.Dispose();
+        _axisImagePaint.Dispose();
+        _colorBarPaint.Dispose();
+        _colorBarShader?.Dispose();
+        _waveformEnvelopeTop.Dispose();
+        _waveformEnvelopeBottom.Dispose();
+        _spectrumSlicePath.Dispose();
+        _pitchHighPath.Dispose();
+        _pitchLowPath.Dispose();
+        _formantPath1.Dispose();
+        _formantPath2.Dispose();
+        _formantPath3.Dispose();
+        _vowelTrailPath.Dispose();
+        InvalidateAxisCache();
         _spectrogramBitmap?.Dispose();
     }
 }
@@ -1886,7 +2086,6 @@ public record struct VocalSpectrographState(
     long LatestFrameId,
     int AvailableFrames,
     long? ReferenceFrameId,
-    int HoveredKnob,
     int DataVersion,
     string PresetName,
     float[]? Spectrogram,

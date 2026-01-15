@@ -18,7 +18,7 @@ Derived values:
 ## Algorithm
 - Analysis buffer is shifted by hop size each frame.
 - Window is applied to the processed buffer before FFT.
-- Magnitude per bin: `sqrt(re^2 + im^2) * (2 / fftSize)`.
+- Magnitude per bin: `sqrt(re^2 + im^2) * (2 / sum(window))` (coherent gain compensation).
 
 ## Reassignment Support
 - When reassignment is enabled, two extra FFTs are computed using:

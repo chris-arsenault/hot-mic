@@ -89,8 +89,15 @@ public sealed class SpectrogramNoiseReducer
     /// </summary>
     public void Apply(float[] magnitudes, float amount, VoicingState voicing)
     {
-        int bins = magnitudes.Length;
-        if (bins == 0 || amount <= 0f)
+        Apply(magnitudes, amount, voicing, magnitudes.Length);
+    }
+
+    /// <summary>
+    /// Apply adaptive noise reduction to the magnitude spectrum with explicit bin count.
+    /// </summary>
+    public void Apply(float[] magnitudes, float amount, VoicingState voicing, int bins)
+    {
+        if (bins <= 0 || bins > magnitudes.Length || amount <= 0f)
         {
             return;
         }

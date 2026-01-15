@@ -16,8 +16,14 @@ public sealed class DeEsserRenderer : IDisposable
     private const float CornerRadius = 10f;
 
     private readonly PluginComponentTheme _theme;
-    private readonly RotaryKnob _knob;
     private readonly PluginPresetBar _presetBar;
+
+    // Knob widgets
+    public KnobWidget CenterFreqKnob { get; }
+    public KnobWidget BandwidthKnob { get; }
+    public KnobWidget ThresholdKnob { get; }
+    public KnobWidget ReductionKnob { get; }
+    public KnobWidget MaxRangeKnob { get; }
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -45,7 +51,6 @@ public sealed class DeEsserRenderer : IDisposable
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
-    private SKPoint[] _knobCenters = new SKPoint[5];
 
     // Level meters with PPM-style ballistics
     private readonly LevelMeter _inputMeter;
@@ -54,8 +59,35 @@ public sealed class DeEsserRenderer : IDisposable
     public DeEsserRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
-        _knob = new RotaryKnob(_theme);
         _presetBar = new PluginPresetBar(_theme);
+
+        // Initialize knob widgets
+        CenterFreqKnob = new KnobWidget(KnobRadius, 4000f, 9000f, "CENTER", "Hz", KnobStyle.Standard, _theme)
+        {
+            IsLogarithmic = true,
+            ValueFormat = "0",
+            DragSensitivity = 0.004f
+        };
+        BandwidthKnob = new KnobWidget(KnobRadius, 1000f, 4000f, "WIDTH", "Hz", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0",
+            DragSensitivity = 0.004f
+        };
+        ThresholdKnob = new KnobWidget(KnobRadius, -40f, 0f, "THRESH", "dB", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0",
+            DragSensitivity = 0.004f
+        };
+        ReductionKnob = new KnobWidget(KnobRadius, 0f, 12f, "REDUCE", "dB", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0.0",
+            DragSensitivity = 0.004f
+        };
+        MaxRangeKnob = new KnobWidget(KnobRadius, 0f, 20f, "RANGE", "dB", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0",
+            DragSensitivity = 0.004f
+        };
 
         _backgroundPaint = new SKPaint
         {
@@ -351,34 +383,32 @@ public sealed class DeEsserRenderer : IDisposable
 
         // Row 1: Center, Bandwidth, Threshold (centered across available width)
         float knobY1 = meterY + KnobRadius + 10;
-        _knobCenters[0] = new SKPoint(knobAreaLeft, knobY1);
-        _knobCenters[1] = new SKPoint(knobAreaLeft + knobSpacingX, knobY1);
-        _knobCenters[2] = new SKPoint(knobAreaLeft + knobSpacingX * 2, knobY1);
-
-        // Row 2: Reduction, Max Range (centered below row 1)
         float knobY2 = knobY1 + knobSpacingY;
-        _knobCenters[3] = new SKPoint(knobAreaLeft + knobSpacingX * 0.5f, knobY2);
-        _knobCenters[4] = new SKPoint(knobAreaLeft + knobSpacingX * 1.5f, knobY2);
 
         // Center Freq (log scale display)
-        float centerNorm = (MathF.Log10(state.CenterHz) - MathF.Log10(4000f)) / (MathF.Log10(9000f) - MathF.Log10(4000f));
-        _knob.Render(canvas, _knobCenters[0], KnobRadius, centerNorm, "CENTER", $"{state.CenterHz / 1000f:0.0}k", "Hz", state.HoveredKnob == DeEsserKnob.CenterFreq);
+        CenterFreqKnob.Center = new SKPoint(knobAreaLeft, knobY1);
+        CenterFreqKnob.Value = state.CenterHz;
+        CenterFreqKnob.Render(canvas);
 
         // Bandwidth
-        float bwNorm = (state.BandwidthHz - 1000f) / 3000f;
-        _knob.Render(canvas, _knobCenters[1], KnobRadius, bwNorm, "WIDTH", $"{state.BandwidthHz / 1000f:0.0}k", "Hz", state.HoveredKnob == DeEsserKnob.Bandwidth);
+        BandwidthKnob.Center = new SKPoint(knobAreaLeft + knobSpacingX, knobY1);
+        BandwidthKnob.Value = state.BandwidthHz;
+        BandwidthKnob.Render(canvas);
 
         // Threshold
-        float threshNorm = (state.ThresholdDb + 40f) / 40f;
-        _knob.Render(canvas, _knobCenters[2], KnobRadius, threshNorm, "THRESH", $"{state.ThresholdDb:0}", "dB", state.HoveredKnob == DeEsserKnob.Threshold);
+        ThresholdKnob.Center = new SKPoint(knobAreaLeft + knobSpacingX * 2, knobY1);
+        ThresholdKnob.Value = state.ThresholdDb;
+        ThresholdKnob.Render(canvas);
 
         // Reduction
-        float redNorm = state.ReductionDb / 12f;
-        _knob.Render(canvas, _knobCenters[3], KnobRadius, redNorm, "REDUCE", $"{state.ReductionDb:0.0}", "dB", state.HoveredKnob == DeEsserKnob.Reduction);
+        ReductionKnob.Center = new SKPoint(knobAreaLeft + knobSpacingX * 0.5f, knobY2);
+        ReductionKnob.Value = state.ReductionDb;
+        ReductionKnob.Render(canvas);
 
         // Max Range
-        float rangeNorm = state.MaxRangeDb / 20f;
-        _knob.Render(canvas, _knobCenters[4], KnobRadius, rangeNorm, "RANGE", $"{state.MaxRangeDb:0}", "dB", state.HoveredKnob == DeEsserKnob.MaxRange);
+        MaxRangeKnob.Center = new SKPoint(knobAreaLeft + knobSpacingX * 1.5f, knobY2);
+        MaxRangeKnob.Value = state.MaxRangeDb;
+        MaxRangeKnob.Render(canvas);
 
         // Outer border
         canvas.DrawRoundRect(roundRect, _borderPaint);
@@ -541,16 +571,16 @@ public sealed class DeEsserRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new DeEsserHitTest(DeEsserHitArea.PresetSave, DeEsserKnob.None);
 
-        for (int i = 0; i < _knobCenters.Length; i++)
-        {
-            float dx = x - _knobCenters[i].X;
-            float dy = y - _knobCenters[i].Y;
-            if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
-            {
-                var knob = (DeEsserKnob)(i + 1);
-                return new DeEsserHitTest(DeEsserHitArea.Knob, knob);
-            }
-        }
+        if (CenterFreqKnob.HitTest(x, y))
+            return new DeEsserHitTest(DeEsserHitArea.Knob, DeEsserKnob.CenterFreq);
+        if (BandwidthKnob.HitTest(x, y))
+            return new DeEsserHitTest(DeEsserHitArea.Knob, DeEsserKnob.Bandwidth);
+        if (ThresholdKnob.HitTest(x, y))
+            return new DeEsserHitTest(DeEsserHitArea.Knob, DeEsserKnob.Threshold);
+        if (ReductionKnob.HitTest(x, y))
+            return new DeEsserHitTest(DeEsserHitArea.Knob, DeEsserKnob.Reduction);
+        if (MaxRangeKnob.HitTest(x, y))
+            return new DeEsserHitTest(DeEsserHitArea.Knob, DeEsserKnob.MaxRange);
 
         if (_titleBarRect.Contains(x, y))
             return new DeEsserHitTest(DeEsserHitArea.TitleBar, DeEsserKnob.None);
@@ -566,7 +596,11 @@ public sealed class DeEsserRenderer : IDisposable
     {
         _inputMeter.Dispose();
         _sibilanceMeter.Dispose();
-        _knob.Dispose();
+        CenterFreqKnob.Dispose();
+        BandwidthKnob.Dispose();
+        ThresholdKnob.Dispose();
+        ReductionKnob.Dispose();
+        MaxRangeKnob.Dispose();
         _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
@@ -604,7 +638,6 @@ public record struct DeEsserState(
     float GainReductionDb,
     float LatencyMs,
     bool IsBypassed,
-    DeEsserKnob HoveredKnob = DeEsserKnob.None,
     float[]? Spectrum = null,
     string PresetName = "Custom");
 

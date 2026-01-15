@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -20,13 +19,6 @@ public partial class SignalGeneratorWindow : Window
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
-
-    private int _activeKnobSlot = -1;
-    private SignalGeneratorHitArea _activeKnobType;
-    private float _dragStartY;
-    private float _dragStartValue;
-    private SignalGeneratorHitArea _hoveredArea = SignalGeneratorHitArea.None;
-    private int _hoveredSlot = -1;
 
     private float _smoothedOutputLevel;
     private readonly float[] _smoothedSlotLevels = new float[3];
@@ -49,6 +41,9 @@ public partial class SignalGeneratorWindow : Window
         Width = preferredSize.Width;
         Height = preferredSize.Height;
 
+        // Wire up KnobWidget ValueChanged events
+        WireUpKnobEvents();
+
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += OnRenderTick;
         Loaded += (_, _) => _renderTimer.Start();
@@ -57,6 +52,89 @@ public partial class SignalGeneratorWindow : Window
             _renderTimer.Stop();
             _renderer.Dispose();
         };
+    }
+
+    private void WireUpKnobEvents()
+    {
+        // Master gain knob
+        _renderer.MasterGainKnob.ValueChanged += value =>
+        {
+            _parameterCallback(SignalGeneratorPlugin.MasterGainIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+
+        // Per-slot knobs
+        for (int i = 0; i < 3; i++)
+        {
+            int slotIndex = i; // Capture for closure
+            int baseIndex = slotIndex * 20;
+
+            _renderer.SlotGainKnobs[i].ValueChanged += value =>
+            {
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.GainIndex, value);
+                _presetHelper.MarkAsCustom();
+            };
+
+            _renderer.SlotFreqKnobs[i].ValueChanged += value =>
+            {
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.FrequencyIndex, value);
+                _presetHelper.MarkAsCustom();
+            };
+
+            _renderer.SlotSweepStartKnobs[i].ValueChanged += value =>
+            {
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.SweepStartHzIndex, value);
+                _presetHelper.MarkAsCustom();
+            };
+
+            _renderer.SlotSweepEndKnobs[i].ValueChanged += value =>
+            {
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.SweepEndHzIndex, value);
+                _presetHelper.MarkAsCustom();
+            };
+
+            _renderer.SlotSweepDurKnobs[i].ValueChanged += value =>
+            {
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.SweepDurationMsIndex, value);
+                _presetHelper.MarkAsCustom();
+            };
+
+            _renderer.SlotPulseWidthKnobs[i].ValueChanged += value =>
+            {
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.PulseWidthIndex, value);
+                _presetHelper.MarkAsCustom();
+            };
+
+            _renderer.SlotIntervalKnobs[i].ValueChanged += value =>
+            {
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.ImpulseIntervalMsIndex, value);
+                _presetHelper.MarkAsCustom();
+            };
+
+            _renderer.SlotChirpDurKnobs[i].ValueChanged += value =>
+            {
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.ChirpDurationMsIndex, value);
+                _presetHelper.MarkAsCustom();
+            };
+
+            _renderer.SlotSpeedKnobs[i].ValueChanged += value =>
+            {
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.SampleSpeedIndex, value);
+                _presetHelper.MarkAsCustom();
+            };
+
+            _renderer.SlotTrimStartKnobs[i].ValueChanged += value =>
+            {
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.SampleTrimStartIndex, value);
+                _presetHelper.MarkAsCustom();
+            };
+
+            _renderer.SlotTrimEndKnobs[i].ValueChanged += value =>
+            {
+                _parameterCallback(baseIndex + SignalGeneratorPlugin.SampleTrimEndIndex, value);
+                _presetHelper.MarkAsCustom();
+            };
+        }
     }
 
     private void OnRenderTick(object? sender, EventArgs e)
@@ -86,12 +164,11 @@ public partial class SignalGeneratorWindow : Window
             PresetName = _presetHelper.CurrentPresetName,
             OutputLevel = _smoothedOutputLevel,
             MasterGainDb = masterState.GainDb,
-            HeadroomMode = masterState.Headroom,
-            HoveredArea = _hoveredArea,
-            HoveredSlot = _hoveredSlot
+            HeadroomMode = masterState.Headroom
         };
 
         // Build slot states from plugin
+        int recordingSlot = _plugin.RecordingTargetSlot;
         for (int i = 0; i < 3; i++)
         {
             var slotState = _plugin.GetSlotState(i);
@@ -113,7 +190,8 @@ public partial class SignalGeneratorWindow : Window
                 SampleSpeed = slotState.SampleSpeed,
                 TrimStart = slotState.TrimStart,
                 TrimEnd = slotState.TrimEnd,
-                Level = _smoothedSlotLevels[i]
+                Level = _smoothedSlotLevels[i],
+                IsRecording = recordingSlot == i
             };
         }
 
@@ -122,12 +200,23 @@ public partial class SignalGeneratorWindow : Window
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Check if any knob handles the mouse first
+        if (TryHandleKnobMouseDown(x, y, e.ChangedButton))
+        {
+            if (GetActiveKnob()?.IsDragging == true)
+            {
+                SkiaCanvas.CaptureMouse();
+            }
+            e.Handled = true;
+            return;
+        }
+
+        if (e.ChangedButton != MouseButton.Left)
+            return;
 
         var hit = _renderer.HitTest(x, y);
 
@@ -163,27 +252,6 @@ public partial class SignalGeneratorWindow : Window
                 e.Handled = true;
                 break;
 
-            // All knob types
-            case SignalGeneratorHitArea.SlotGainKnob:
-            case SignalGeneratorHitArea.SlotFreqKnob:
-            case SignalGeneratorHitArea.SlotSweepStartKnob:
-            case SignalGeneratorHitArea.SlotSweepEndKnob:
-            case SignalGeneratorHitArea.SlotSweepDurKnob:
-            case SignalGeneratorHitArea.SlotPulseWidthKnob:
-            case SignalGeneratorHitArea.SlotIntervalKnob:
-            case SignalGeneratorHitArea.SlotChirpDurKnob:
-            case SignalGeneratorHitArea.SlotSpeedKnob:
-            case SignalGeneratorHitArea.SlotTrimStartKnob:
-            case SignalGeneratorHitArea.SlotTrimEndKnob:
-            case SignalGeneratorHitArea.MasterGainKnob:
-                _activeKnobSlot = hit.SlotIndex;
-                _activeKnobType = hit.Area;
-                _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue(hit.Area, hit.SlotIndex);
-                SkiaCanvas.CaptureMouse();
-                e.Handled = true;
-                break;
-
             case SignalGeneratorHitArea.SlotMuteButton:
                 ToggleSlotMute(hit.SlotIndex);
                 e.Handled = true;
@@ -210,7 +278,7 @@ public partial class SignalGeneratorWindow : Window
                 break;
 
             case SignalGeneratorHitArea.RecordButton:
-                ToggleRecording();
+                ToggleRecordingToSlot(hit.SlotIndex);
                 e.Handled = true;
                 break;
 
@@ -221,35 +289,121 @@ public partial class SignalGeneratorWindow : Window
         }
     }
 
+    private bool TryHandleKnobMouseDown(float x, float y, MouseButton button)
+    {
+        // Check master gain knob
+        if (_renderer.MasterGainKnob.HandleMouseDown(x, y, button, SkiaCanvas))
+            return true;
+
+        // Check all slot knobs
+        for (int i = 0; i < 3; i++)
+        {
+            if (_renderer.SlotGainKnobs[i].HandleMouseDown(x, y, button, SkiaCanvas))
+                return true;
+            if (_renderer.SlotFreqKnobs[i].HandleMouseDown(x, y, button, SkiaCanvas))
+                return true;
+            if (_renderer.SlotSweepStartKnobs[i].HandleMouseDown(x, y, button, SkiaCanvas))
+                return true;
+            if (_renderer.SlotSweepEndKnobs[i].HandleMouseDown(x, y, button, SkiaCanvas))
+                return true;
+            if (_renderer.SlotSweepDurKnobs[i].HandleMouseDown(x, y, button, SkiaCanvas))
+                return true;
+            if (_renderer.SlotPulseWidthKnobs[i].HandleMouseDown(x, y, button, SkiaCanvas))
+                return true;
+            if (_renderer.SlotIntervalKnobs[i].HandleMouseDown(x, y, button, SkiaCanvas))
+                return true;
+            if (_renderer.SlotChirpDurKnobs[i].HandleMouseDown(x, y, button, SkiaCanvas))
+                return true;
+            if (_renderer.SlotSpeedKnobs[i].HandleMouseDown(x, y, button, SkiaCanvas))
+                return true;
+            if (_renderer.SlotTrimStartKnobs[i].HandleMouseDown(x, y, button, SkiaCanvas))
+                return true;
+            if (_renderer.SlotTrimEndKnobs[i].HandleMouseDown(x, y, button, SkiaCanvas))
+                return true;
+        }
+
+        return false;
+    }
+
+    private KnobWidget? GetActiveKnob()
+    {
+        if (_renderer.MasterGainKnob.IsDragging)
+            return _renderer.MasterGainKnob;
+
+        for (int i = 0; i < 3; i++)
+        {
+            if (_renderer.SlotGainKnobs[i].IsDragging) return _renderer.SlotGainKnobs[i];
+            if (_renderer.SlotFreqKnobs[i].IsDragging) return _renderer.SlotFreqKnobs[i];
+            if (_renderer.SlotSweepStartKnobs[i].IsDragging) return _renderer.SlotSweepStartKnobs[i];
+            if (_renderer.SlotSweepEndKnobs[i].IsDragging) return _renderer.SlotSweepEndKnobs[i];
+            if (_renderer.SlotSweepDurKnobs[i].IsDragging) return _renderer.SlotSweepDurKnobs[i];
+            if (_renderer.SlotPulseWidthKnobs[i].IsDragging) return _renderer.SlotPulseWidthKnobs[i];
+            if (_renderer.SlotIntervalKnobs[i].IsDragging) return _renderer.SlotIntervalKnobs[i];
+            if (_renderer.SlotChirpDurKnobs[i].IsDragging) return _renderer.SlotChirpDurKnobs[i];
+            if (_renderer.SlotSpeedKnobs[i].IsDragging) return _renderer.SlotSpeedKnobs[i];
+            if (_renderer.SlotTrimStartKnobs[i].IsDragging) return _renderer.SlotTrimStartKnobs[i];
+            if (_renderer.SlotTrimEndKnobs[i].IsDragging) return _renderer.SlotTrimEndKnobs[i];
+        }
+
+        return null;
+    }
+
     private void SkiaCanvas_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+        bool isLeftDown = e.LeftButton == MouseButtonState.Pressed;
 
-        if (_activeKnobSlot >= -1 && _activeKnobType != SignalGeneratorHitArea.None && e.LeftButton == MouseButtonState.Pressed)
+        // Forward to all knobs (handles both dragging and hover updates)
+        ForwardMouseMoveToKnobs(x, y, isLeftDown);
+    }
+
+    private void ForwardMouseMoveToKnobs(float x, float y, bool isLeftButtonDown)
+    {
+        _renderer.MasterGainKnob.HandleMouseMove(x, y, isLeftButtonDown);
+
+        for (int i = 0; i < 3; i++)
         {
-            float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.004f);
-            ApplyKnobValue(_activeKnobType, _activeKnobSlot, newNormalized);
-            e.Handled = true;
-        }
-        else
-        {
-            var hit = _renderer.HitTest(x, y);
-            _hoveredArea = hit.Area;
-            _hoveredSlot = hit.SlotIndex;
+            _renderer.SlotGainKnobs[i].HandleMouseMove(x, y, isLeftButtonDown);
+            _renderer.SlotFreqKnobs[i].HandleMouseMove(x, y, isLeftButtonDown);
+            _renderer.SlotSweepStartKnobs[i].HandleMouseMove(x, y, isLeftButtonDown);
+            _renderer.SlotSweepEndKnobs[i].HandleMouseMove(x, y, isLeftButtonDown);
+            _renderer.SlotSweepDurKnobs[i].HandleMouseMove(x, y, isLeftButtonDown);
+            _renderer.SlotPulseWidthKnobs[i].HandleMouseMove(x, y, isLeftButtonDown);
+            _renderer.SlotIntervalKnobs[i].HandleMouseMove(x, y, isLeftButtonDown);
+            _renderer.SlotChirpDurKnobs[i].HandleMouseMove(x, y, isLeftButtonDown);
+            _renderer.SlotSpeedKnobs[i].HandleMouseMove(x, y, isLeftButtonDown);
+            _renderer.SlotTrimStartKnobs[i].HandleMouseMove(x, y, isLeftButtonDown);
+            _renderer.SlotTrimEndKnobs[i].HandleMouseMove(x, y, isLeftButtonDown);
         }
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
-        _activeKnobSlot = -1;
-        _activeKnobType = SignalGeneratorHitArea.None;
+        // Forward to all knobs
+        ForwardMouseUpToKnobs(e.ChangedButton);
         SkiaCanvas.ReleaseMouseCapture();
+    }
+
+    private void ForwardMouseUpToKnobs(MouseButton button)
+    {
+        _renderer.MasterGainKnob.HandleMouseUp(button);
+
+        for (int i = 0; i < 3; i++)
+        {
+            _renderer.SlotGainKnobs[i].HandleMouseUp(button);
+            _renderer.SlotFreqKnobs[i].HandleMouseUp(button);
+            _renderer.SlotSweepStartKnobs[i].HandleMouseUp(button);
+            _renderer.SlotSweepEndKnobs[i].HandleMouseUp(button);
+            _renderer.SlotSweepDurKnobs[i].HandleMouseUp(button);
+            _renderer.SlotPulseWidthKnobs[i].HandleMouseUp(button);
+            _renderer.SlotIntervalKnobs[i].HandleMouseUp(button);
+            _renderer.SlotChirpDurKnobs[i].HandleMouseUp(button);
+            _renderer.SlotSpeedKnobs[i].HandleMouseUp(button);
+            _renderer.SlotTrimStartKnobs[i].HandleMouseUp(button);
+            _renderer.SlotTrimEndKnobs[i].HandleMouseUp(button);
+        }
     }
 
     private void SkiaCanvas_MouseWheel(object sender, MouseWheelEventArgs e)
@@ -505,9 +659,32 @@ public partial class SignalGeneratorWindow : Window
         _presetHelper.MarkAsCustom();
     }
 
-    private void ToggleRecording()
+    private void ToggleRecordingToSlot(int slotIndex)
     {
-        _plugin.SetRecordingEnabled(true);
+        if (slotIndex < 0 || slotIndex >= 3)
+            return;
+
+        // If already recording to this slot, stop and capture
+        if (_plugin.IsRecording && _plugin.RecordingTargetSlot == slotIndex)
+        {
+            _plugin.StopRecordingToSlot();
+
+            // Switch slot type to Sample so it will play back
+            int typeIndex = slotIndex * 20 + SignalGeneratorPlugin.TypeIndex;
+            _parameterCallback(typeIndex, (float)GeneratorType.Sample);
+            _presetHelper.MarkAsCustom();
+        }
+        else
+        {
+            // Stop any existing recording first
+            if (_plugin.IsRecording)
+            {
+                _plugin.StopRecordingToSlot();
+            }
+
+            // Start recording to this slot
+            _plugin.StartRecordingToSlot(slotIndex);
+        }
     }
 
     private void LoadSampleFile(int slotIndex)

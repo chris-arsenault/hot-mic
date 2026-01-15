@@ -20,8 +20,13 @@ public sealed class RNNoiseRenderer : IDisposable
     private readonly VadMeter _vadMeter;
     private readonly GainReductionMeter _grMeter;
     private readonly AiProcessingIndicator _processingIndicator;
-    private readonly RotaryKnob _knob;
     private readonly PluginPresetBar _presetBar;
+
+    /// <summary>Reduction percentage knob (0-100%).</summary>
+    public KnobWidget ReductionKnob { get; }
+
+    /// <summary>VAD threshold knob (0-100%).</summary>
+    public KnobWidget VadThresholdKnob { get; }
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -37,8 +42,6 @@ public sealed class RNNoiseRenderer : IDisposable
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
-    private readonly SKRect[] _knobRects = new SKRect[KnobCount];
-    private readonly SKPoint[] _knobCenters = new SKPoint[KnobCount];
 
     public RNNoiseRenderer(PluginComponentTheme? theme = null)
     {
@@ -46,8 +49,17 @@ public sealed class RNNoiseRenderer : IDisposable
         _vadMeter = new VadMeter(_theme);
         _grMeter = new GainReductionMeter(_theme);
         _processingIndicator = new AiProcessingIndicator(_theme);
-        _knob = new RotaryKnob(_theme);
         _presetBar = new PluginPresetBar(_theme);
+
+        var knobStyle = KnobStyle.Standard;
+        ReductionKnob = new KnobWidget(KnobRadius, 0f, 100f, "REDUCTION", "%", knobStyle, _theme)
+        {
+            ValueFormat = "0"
+        };
+        VadThresholdKnob = new KnobWidget(KnobRadius, 0f, 100f, "VAD THRESH", "%", knobStyle, _theme)
+        {
+            ValueFormat = "0"
+        };
 
         _backgroundPaint = new SKPaint
         {
@@ -255,18 +267,14 @@ public sealed class RNNoiseRenderer : IDisposable
         float knobsStartX = (size.Width - knobsTotalWidth) / 2 + KnobSpacing / 2;
 
         // Reduction knob
-        _knobCenters[0] = new SKPoint(knobsStartX, knobsY);
-        float reductionNorm = state.ReductionPercent / 100f;
-        _knob.Render(canvas, _knobCenters[0], KnobRadius, reductionNorm,
-            "REDUCTION", $"{state.ReductionPercent:0}", "%", state.HoveredKnob == 0);
-        _knobRects[0] = _knob.GetHitRect(_knobCenters[0], KnobRadius);
+        ReductionKnob.Center = new SKPoint(knobsStartX, knobsY);
+        ReductionKnob.Value = state.ReductionPercent;
+        ReductionKnob.Render(canvas);
 
         // VAD Threshold knob
-        _knobCenters[1] = new SKPoint(knobsStartX + KnobSpacing, knobsY);
-        float vadNorm = state.VadThreshold / 100f;
-        _knob.Render(canvas, _knobCenters[1], KnobRadius, vadNorm,
-            "VAD THRESH", $"{state.VadThreshold:0}", "%", state.HoveredKnob == 1);
-        _knobRects[1] = _knob.GetHitRect(_knobCenters[1], KnobRadius);
+        VadThresholdKnob.Center = new SKPoint(knobsStartX + KnobSpacing, knobsY);
+        VadThresholdKnob.Value = state.VadThreshold;
+        VadThresholdKnob.Render(canvas);
 
         // Status bar at bottom
         float barHeight = 24f;
@@ -312,15 +320,11 @@ public sealed class RNNoiseRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new RNNoiseHitTest(RNNoiseHitArea.PresetSave, -1);
 
-        for (int i = 0; i < KnobCount; i++)
-        {
-            float dx = x - _knobCenters[i].X;
-            float dy = y - _knobCenters[i].Y;
-            if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
-            {
-                return new RNNoiseHitTest(RNNoiseHitArea.Knob, i);
-            }
-        }
+        if (ReductionKnob.HitTest(x, y))
+            return new RNNoiseHitTest(RNNoiseHitArea.Knob, 0);
+
+        if (VadThresholdKnob.HitTest(x, y))
+            return new RNNoiseHitTest(RNNoiseHitArea.Knob, 1);
 
         if (_titleBarRect.Contains(x, y))
             return new RNNoiseHitTest(RNNoiseHitArea.TitleBar, -1);
@@ -337,7 +341,8 @@ public sealed class RNNoiseRenderer : IDisposable
         _vadMeter.Dispose();
         _grMeter.Dispose();
         _processingIndicator.Dispose();
-        _knob.Dispose();
+        ReductionKnob.Dispose();
+        VadThresholdKnob.Dispose();
         _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
@@ -360,8 +365,7 @@ public record struct RNNoiseState(
     float LatencyMs,
     bool IsBypassed,
     string StatusMessage = "",
-    string PresetName = "Custom",
-    int HoveredKnob = -1);
+    string PresetName = "Custom");
 
 public enum RNNoiseHitArea
 {

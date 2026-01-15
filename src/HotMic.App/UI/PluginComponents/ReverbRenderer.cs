@@ -20,8 +20,12 @@ public sealed class ReverbRenderer : IDisposable
 
     private readonly PluginComponentTheme _theme;
     private readonly WaveformDisplay _waveformDisplay;
-    private readonly RotaryKnob _knob;
     private readonly PluginPresetBar _presetBar;
+
+    // Knob widgets
+    public KnobWidget DryWetKnob { get; }
+    public KnobWidget DecayKnob { get; }
+    public KnobWidget PreDelayKnob { get; }
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -41,8 +45,6 @@ public sealed class ReverbRenderer : IDisposable
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
     private SKRect _loadButtonRect;
-    private readonly SKRect[] _knobRects = new SKRect[KnobCount];
-    private readonly SKPoint[] _knobCenters = new SKPoint[KnobCount];
     private readonly SKRect[] _presetRects = new SKRect[PresetCount];
 
     public WaveformBuffer IrWaveformBuffer { get; } = new(256);
@@ -51,8 +53,24 @@ public sealed class ReverbRenderer : IDisposable
     {
         _theme = theme ?? PluginComponentTheme.Default;
         _waveformDisplay = new WaveformDisplay(_theme);
-        _knob = new RotaryKnob(_theme);
         _presetBar = new PluginPresetBar(_theme);
+
+        // Initialize knob widgets
+        DryWetKnob = new KnobWidget(KnobRadius, 0f, 100f, "DRY/WET", "%", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0",
+            DragSensitivity = 0.004f
+        };
+        DecayKnob = new KnobWidget(KnobRadius, 0.1f, 2f, "DECAY", "x", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0.0",
+            DragSensitivity = 0.004f
+        };
+        PreDelayKnob = new KnobWidget(KnobRadius, 0f, 100f, "PRE-DLY", "ms", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0",
+            DragSensitivity = 0.004f
+        };
 
         _backgroundPaint = new SKPaint
         {
@@ -322,24 +340,19 @@ public sealed class ReverbRenderer : IDisposable
         float knobsStartX = Padding + (size.Width - Padding * 2 - knobsTotalWidth) / 2 + KnobSpacing / 2;
 
         // Dry/Wet knob
-        _knobCenters[0] = new SKPoint(knobsStartX, knobsY);
-        _knob.Render(canvas, _knobCenters[0], KnobRadius, state.DryWet,
-            "DRY/WET", $"{state.DryWet * 100:0}", "%", state.HoveredKnob == 0);
-        _knobRects[0] = _knob.GetHitRect(_knobCenters[0], KnobRadius);
+        DryWetKnob.Center = new SKPoint(knobsStartX, knobsY);
+        DryWetKnob.Value = state.DryWet * 100f; // Convert to percentage
+        DryWetKnob.Render(canvas);
 
         // Decay knob
-        _knobCenters[1] = new SKPoint(knobsStartX + KnobSpacing, knobsY);
-        float decayNorm = (state.Decay - 0.1f) / (2f - 0.1f);
-        _knob.Render(canvas, _knobCenters[1], KnobRadius, decayNorm,
-            "DECAY", $"{state.Decay:0.0}", "x", state.HoveredKnob == 1);
-        _knobRects[1] = _knob.GetHitRect(_knobCenters[1], KnobRadius);
+        DecayKnob.Center = new SKPoint(knobsStartX + KnobSpacing, knobsY);
+        DecayKnob.Value = state.Decay;
+        DecayKnob.Render(canvas);
 
         // Pre-delay knob
-        _knobCenters[2] = new SKPoint(knobsStartX + KnobSpacing * 2, knobsY);
-        float preDelayNorm = state.PreDelayMs / 100f;
-        _knob.Render(canvas, _knobCenters[2], KnobRadius, preDelayNorm,
-            "PRE-DLY", $"{state.PreDelayMs:0}", "ms", state.HoveredKnob == 2);
-        _knobRects[2] = _knob.GetHitRect(_knobCenters[2], KnobRadius);
+        PreDelayKnob.Center = new SKPoint(knobsStartX + KnobSpacing * 2, knobsY);
+        PreDelayKnob.Value = state.PreDelayMs;
+        PreDelayKnob.Render(canvas);
 
         // Dry/Wet meter bar at bottom
         float barHeight = 20f;
@@ -509,15 +522,12 @@ public sealed class ReverbRenderer : IDisposable
         if (!_loadButtonRect.IsEmpty && _loadButtonRect.Contains(x, y))
             return new ReverbHitTest(ReverbHitArea.LoadButton, -1);
 
-        for (int i = 0; i < KnobCount; i++)
-        {
-            float dx = x - _knobCenters[i].X;
-            float dy = y - _knobCenters[i].Y;
-            if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
-            {
-                return new ReverbHitTest(ReverbHitArea.Knob, i);
-            }
-        }
+        if (DryWetKnob.HitTest(x, y))
+            return new ReverbHitTest(ReverbHitArea.Knob, 0);
+        if (DecayKnob.HitTest(x, y))
+            return new ReverbHitTest(ReverbHitArea.Knob, 1);
+        if (PreDelayKnob.HitTest(x, y))
+            return new ReverbHitTest(ReverbHitArea.Knob, 2);
 
         for (int i = 0; i < PresetCount; i++)
         {
@@ -540,7 +550,9 @@ public sealed class ReverbRenderer : IDisposable
     public void Dispose()
     {
         _waveformDisplay.Dispose();
-        _knob.Dispose();
+        DryWetKnob.Dispose();
+        DecayKnob.Dispose();
+        PreDelayKnob.Dispose();
         _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
@@ -567,7 +579,6 @@ public record struct ReverbState(
     string StatusMessage,
     string? LoadedIrPath,
     bool IsBypassed,
-    int HoveredKnob = -1,
     string PresetName = "Custom");
 
 public enum ReverbHitArea

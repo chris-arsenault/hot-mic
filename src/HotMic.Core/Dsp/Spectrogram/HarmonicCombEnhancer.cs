@@ -100,11 +100,71 @@ public sealed class HarmonicCombEnhancer
     }
 
     /// <summary>
+    /// Update the harmonic comb mask using linear Hz-to-bin mapping at analysis resolution.
+    /// </summary>
+    public void UpdateMaskLinear(float pitchHz, float confidence, VoicingState voicing,
+        float binResolutionHz, int analysisBins)
+    {
+        if (pitchHz <= 0f || confidence < ConfidenceThreshold || voicing != VoicingState.Voiced || binResolutionHz <= 0f)
+        {
+            if (_maskActive)
+            {
+                Array.Clear(_mask, 0, Math.Min(_mask.Length, analysisBins));
+                _maskActive = false;
+            }
+            return;
+        }
+
+        int bins = Math.Min(_mask.Length, analysisBins);
+        Array.Clear(_mask, 0, bins);
+        _maskActive = true;
+
+        float ratio = MathF.Pow(2f, ToleranceCents / 1200f);
+        float nyquist = analysisBins * binResolutionHz;
+
+        for (int harmonic = 1; harmonic <= _maxHarmonics; harmonic++)
+        {
+            float frequency = pitchHz * harmonic;
+            if (frequency > nyquist)
+            {
+                break;
+            }
+
+            // Linear Hz to bin: bin = frequency / binResolution
+            float centerBin = frequency / binResolutionHz;
+            float startBin = MathF.Max(0f, (frequency / ratio) / binResolutionHz);
+            float endBin = MathF.Min(bins - 1, (frequency * ratio) / binResolutionHz);
+
+            int startIdx = Math.Clamp((int)MathF.Floor(startBin), 0, bins - 1);
+            int endIdx = Math.Clamp((int)MathF.Ceiling(endBin), 0, bins - 1);
+            float halfSpan = MathF.Max(1f, (endIdx - startIdx) * 0.5f);
+
+            for (int bin = startIdx; bin <= endIdx; bin++)
+            {
+                float dist = MathF.Abs(bin - centerBin);
+                float weight = 1f - dist / halfSpan;
+                if (weight > _mask[bin])
+                {
+                    _mask[bin] = Math.Clamp(weight, 0f, 1f);
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Apply the harmonic comb to the magnitude spectrum and return the HNR estimate.
     /// </summary>
     public float Apply(float[] magnitudes, float amount)
     {
-        if (!_maskActive || magnitudes.Length == 0)
+        return Apply(magnitudes, amount, magnitudes.Length);
+    }
+
+    /// <summary>
+    /// Apply the harmonic comb with explicit bin count and return the HNR estimate.
+    /// </summary>
+    public float Apply(float[] magnitudes, float amount, int bins)
+    {
+        if (!_maskActive || bins <= 0 || bins > magnitudes.Length)
         {
             return 0f;
         }
@@ -112,7 +172,7 @@ public sealed class HarmonicCombEnhancer
         double harmonicEnergy = 0.0;
         double noiseEnergy = 0.0;
 
-        for (int i = 0; i < magnitudes.Length; i++)
+        for (int i = 0; i < bins; i++)
         {
             float mask = _mask[i];
             float value = magnitudes[i];

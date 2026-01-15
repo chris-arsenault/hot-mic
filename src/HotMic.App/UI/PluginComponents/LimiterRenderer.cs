@@ -16,10 +16,13 @@ public sealed class LimiterRenderer : IDisposable
     private const float CornerRadius = 10f;
 
     private readonly PluginComponentTheme _theme;
-    private readonly RotaryKnob _knob;
     private readonly PluginPresetBar _presetBar;
     private readonly LevelMeter _inputMeter;
     private readonly LevelMeter _outputMeter;
+
+    // Knob widgets
+    public KnobWidget CeilingKnob { get; }
+    public KnobWidget ReleaseKnob { get; }
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -41,16 +44,25 @@ public sealed class LimiterRenderer : IDisposable
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
-    private SKPoint _ceilingKnobCenter;
-    private SKPoint _releaseKnobCenter;
 
     public LimiterRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
-        _knob = new RotaryKnob(_theme);
         _presetBar = new PluginPresetBar(_theme);
         _inputMeter = new LevelMeter();
         _outputMeter = new LevelMeter();
+
+        // Initialize knob widgets
+        CeilingKnob = new KnobWidget(KnobRadius, -3f, 0f, "CEILING", "dB", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0.0",
+            DragSensitivity = 0.004f
+        };
+        ReleaseKnob = new KnobWidget(KnobRadius, 10f, 200f, "RELEASE", "ms", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0",
+            DragSensitivity = 0.004f
+        };
 
         _backgroundPaint = new SKPaint
         {
@@ -290,16 +302,14 @@ public sealed class LimiterRenderer : IDisposable
         float knobSpacing = 90f;
 
         // Ceiling knob
-        _ceilingKnobCenter = new SKPoint(knobAreaX + KnobRadius + 10, knobY);
-        float ceilingNormalized = (state.CeilingDb + 3f) / 3f; // -3 to 0 -> 0 to 1
-        string ceilingDisplay = $"{state.CeilingDb:0.0}";
-        _knob.Render(canvas, _ceilingKnobCenter, KnobRadius, ceilingNormalized, "CEILING", ceilingDisplay, "dB", state.HoveredKnob == LimiterKnob.Ceiling);
+        CeilingKnob.Center = new SKPoint(knobAreaX + KnobRadius + 10, knobY);
+        CeilingKnob.Value = state.CeilingDb;
+        CeilingKnob.Render(canvas);
 
         // Release knob
-        _releaseKnobCenter = new SKPoint(knobAreaX + KnobRadius + 10, knobY + knobSpacing);
-        float releaseNormalized = (state.ReleaseMs - 10f) / 190f; // 10 to 200 -> 0 to 1
-        string releaseDisplay = $"{state.ReleaseMs:0}";
-        _knob.Render(canvas, _releaseKnobCenter, KnobRadius, releaseNormalized, "RELEASE", releaseDisplay, "ms", state.HoveredKnob == LimiterKnob.Release);
+        ReleaseKnob.Center = new SKPoint(knobAreaX + KnobRadius + 10, knobY + knobSpacing);
+        ReleaseKnob.Value = state.ReleaseMs;
+        ReleaseKnob.Render(canvas);
 
         // Outer border
         canvas.DrawRoundRect(roundRect, _borderPaint);
@@ -375,14 +385,9 @@ public sealed class LimiterRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new LimiterHitTest(LimiterHitArea.PresetSave, LimiterKnob.None);
 
-        float dx = x - _ceilingKnobCenter.X;
-        float dy = y - _ceilingKnobCenter.Y;
-        if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
+        if (CeilingKnob.HitTest(x, y))
             return new LimiterHitTest(LimiterHitArea.Knob, LimiterKnob.Ceiling);
-
-        dx = x - _releaseKnobCenter.X;
-        dy = y - _releaseKnobCenter.Y;
-        if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
+        if (ReleaseKnob.HitTest(x, y))
             return new LimiterHitTest(LimiterHitArea.Knob, LimiterKnob.Release);
 
         if (_titleBarRect.Contains(x, y))
@@ -399,7 +404,8 @@ public sealed class LimiterRenderer : IDisposable
     {
         _inputMeter.Dispose();
         _outputMeter.Dispose();
-        _knob.Dispose();
+        CeilingKnob.Dispose();
+        ReleaseKnob.Dispose();
         _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
@@ -428,7 +434,6 @@ public record struct LimiterState(
     float GainReductionDb,
     float LatencyMs,
     bool IsBypassed,
-    LimiterKnob HoveredKnob = LimiterKnob.None,
     string PresetName = "Custom");
 
 public enum LimiterHitArea

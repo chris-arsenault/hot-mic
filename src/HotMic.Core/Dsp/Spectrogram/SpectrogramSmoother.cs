@@ -84,8 +84,21 @@ public sealed class SpectrogramSmoother
     /// </summary>
     public void ApplyEma(float[] input, float[] output, float amount)
     {
+        ApplyEma(input, output, amount, input.Length);
+    }
+
+    /// <summary>
+    /// Apply exponential smoothing with explicit bin count.
+    /// </summary>
+    public void ApplyEma(float[] input, float[] output, float amount, int bins)
+    {
+        if (bins <= 0 || bins > input.Length)
+        {
+            return;
+        }
+
         float blend = 1f - amount;
-        for (int i = 0; i < input.Length; i++)
+        for (int i = 0; i < bins; i++)
         {
             float current = output[i];
             output[i] = current + (input[i] - current) * blend;
@@ -97,8 +110,15 @@ public sealed class SpectrogramSmoother
     /// </summary>
     public void ApplyBilateral(float[] input, float[] output, float amount)
     {
-        int bins = input.Length;
-        if (bins == 0)
+        ApplyBilateral(input, output, amount, input.Length);
+    }
+
+    /// <summary>
+    /// Apply bilateral time/frequency smoothing with explicit bin count.
+    /// </summary>
+    public void ApplyBilateral(float[] input, float[] output, float amount, int bins)
+    {
+        if (bins <= 0 || bins > input.Length)
         {
             return;
         }

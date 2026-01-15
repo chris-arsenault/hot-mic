@@ -24,11 +24,6 @@ public sealed class GainRenderer : IDisposable
     private readonly SKPaint _closeButtonPaint;
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
-    private readonly SKPaint _knobBackgroundPaint;
-    private readonly SKPaint _knobTrackPaint;
-    private readonly SKPaint _knobArcPaint;
-    private readonly SKPaint _knobPointerPaint;
-    private readonly SKPaint _knobCenterPaint;
     private readonly SKPaint _meterBackgroundPaint;
     private readonly SKPaint _meterFillPaint;
     private readonly SKPaint _meterPeakPaint;
@@ -48,6 +43,9 @@ public sealed class GainRenderer : IDisposable
     // Level meters with PPM-style ballistics
     private readonly LevelMeter _inputMeter;
     private readonly LevelMeter _outputMeter;
+
+    /// <summary>The gain knob widget. Handles its own rendering and interaction.</summary>
+    public KnobWidget GainKnob { get; }
 
     public GainRenderer(PluginComponentTheme? theme = null)
     {
@@ -107,45 +105,13 @@ public sealed class GainRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _knobBackgroundPaint = new SKPaint
+        GainKnob = new KnobWidget(
+            KnobRadius, -24f, 24f, "GAIN", "dB",
+            KnobStyle.Bipolar with { TrackWidth = 8f, ArcWidth = 8f, PointerWidth = 4f },
+            _theme)
         {
-            Color = _theme.KnobBackground,
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-
-        _knobTrackPaint = new SKPaint
-        {
-            Color = _theme.KnobTrack,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 8f,
-            StrokeCap = SKStrokeCap.Round
-        };
-
-        _knobArcPaint = new SKPaint
-        {
-            Color = _theme.KnobArc,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 8f,
-            StrokeCap = SKStrokeCap.Round
-        };
-
-        _knobPointerPaint = new SKPaint
-        {
-            Color = _theme.KnobPointer,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 4f,
-            StrokeCap = SKStrokeCap.Round
-        };
-
-        _knobCenterPaint = new SKPaint
-        {
-            Color = _theme.KnobHighlight,
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
+            ShowPositiveSign = true,
+            ValueFormat = "0.0"
         };
 
         _meterBackgroundPaint = new SKPaint
@@ -312,7 +278,9 @@ public sealed class GainRenderer : IDisposable
 
         // Large center knob
         _knobCenter = new SKPoint(size.Width / 2, contentTop + contentHeight / 2 - 20);
-        DrawLargeKnob(canvas, _knobCenter, state.GainDb, state.IsKnobHovered);
+        GainKnob.Center = _knobCenter;
+        GainKnob.Value = state.GainDb;
+        GainKnob.Render(canvas);
 
         // Phase invert button below knob
         float phaseY = _knobCenter.Y + KnobRadius + 50;
@@ -339,123 +307,6 @@ public sealed class GainRenderer : IDisposable
         canvas.DrawRoundRect(roundRect, _borderPaint);
 
         canvas.Restore();
-    }
-
-    private void DrawLargeKnob(SKCanvas canvas, SKPoint center, float gainDb, bool isHovered)
-    {
-        const float startAngle = 135f;
-        const float sweepAngle = 270f;
-        float arcRadius = KnobRadius * 0.85f;
-
-        // Shadow
-        using var shadowPaint = new SKPaint
-        {
-            Color = new SKColor(0, 0, 0, 40),
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill,
-            MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 6f)
-        };
-        canvas.DrawCircle(center.X + 3, center.Y + 3, KnobRadius, shadowPaint);
-
-        // Knob background
-        canvas.DrawCircle(center, KnobRadius, _knobBackgroundPaint);
-
-        // Track (background arc)
-        using var trackPath = new SKPath();
-        trackPath.AddArc(
-            new SKRect(center.X - arcRadius, center.Y - arcRadius, center.X + arcRadius, center.Y + arcRadius),
-            startAngle, sweepAngle);
-        canvas.DrawPath(trackPath, _knobTrackPaint);
-
-        // Value arc - from center (0dB) to current value
-        // Normalized: -24 to +24 maps to 0 to 1, with 0.5 being center (0dB)
-        float normalizedValue = (gainDb + 24f) / 48f;
-        float centerAngle = startAngle + sweepAngle * 0.5f; // 0dB position
-
-        if (MathF.Abs(gainDb) > 0.1f)
-        {
-            float valueAngle = startAngle + sweepAngle * normalizedValue;
-            float arcStart = gainDb > 0 ? centerAngle : valueAngle;
-            float arcSweep = gainDb > 0 ? valueAngle - centerAngle : centerAngle - valueAngle;
-
-            // Color based on boost/cut
-            _knobArcPaint.Color = gainDb > 0
-                ? _theme.KnobArc
-                : _theme.WaveformLine;
-
-            using var arcPath = new SKPath();
-            arcPath.AddArc(
-                new SKRect(center.X - arcRadius, center.Y - arcRadius, center.X + arcRadius, center.Y + arcRadius),
-                arcStart, arcSweep);
-            canvas.DrawPath(arcPath, _knobArcPaint);
-        }
-
-        // Center marker line at 0dB
-        float centerRad = centerAngle * MathF.PI / 180f;
-        float markerInner = arcRadius - 12f;
-        float markerOuter = arcRadius + 4f;
-        using var centerMarkerPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 2f
-        };
-        canvas.DrawLine(
-            center.X + markerInner * MathF.Cos(centerRad),
-            center.Y + markerInner * MathF.Sin(centerRad),
-            center.X + markerOuter * MathF.Cos(centerRad),
-            center.Y + markerOuter * MathF.Sin(centerRad),
-            centerMarkerPaint);
-
-        // Inner circle with gradient
-        float innerRadius = KnobRadius * 0.65f;
-        using var innerPaint = new SKPaint
-        {
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill,
-            Shader = SKShader.CreateRadialGradient(
-                new SKPoint(center.X - innerRadius * 0.2f, center.Y - innerRadius * 0.2f),
-                innerRadius * 2,
-                new[] { _theme.KnobHighlight, _theme.KnobBackground },
-                null,
-                SKShaderTileMode.Clamp)
-        };
-        canvas.DrawCircle(center, innerRadius, innerPaint);
-
-        // Pointer
-        float pointerAngle = startAngle + sweepAngle * normalizedValue;
-        float pointerRad = pointerAngle * MathF.PI / 180f;
-        float pointerStartRadius = innerRadius * 0.3f;
-        float pointerEndRadius = innerRadius * 0.85f;
-        canvas.DrawLine(
-            center.X + pointerStartRadius * MathF.Cos(pointerRad),
-            center.Y + pointerStartRadius * MathF.Sin(pointerRad),
-            center.X + pointerEndRadius * MathF.Cos(pointerRad),
-            center.Y + pointerEndRadius * MathF.Sin(pointerRad),
-            _knobPointerPaint);
-
-        // Hover highlight
-        if (isHovered)
-        {
-            using var hoverPaint = new SKPaint
-            {
-                Color = _theme.KnobArc.WithAlpha(40),
-                IsAntialias = true,
-                Style = SKPaintStyle.Stroke,
-                StrokeWidth = 3f
-            };
-            canvas.DrawCircle(center, KnobRadius + 4, hoverPaint);
-        }
-
-        // Value display below knob
-        string sign = gainDb > 0.05f ? "+" : "";
-        string valueText = $"{sign}{gainDb:0.0}";
-        canvas.DrawText(valueText, center.X, center.Y + KnobRadius + 24, _valuePaint);
-        canvas.DrawText("dB", center.X, center.Y + KnobRadius + 40, _unitPaint);
-
-        // Label above knob
-        canvas.DrawText("GAIN", center.X, center.Y - KnobRadius - 12, _labelPaint);
     }
 
     private void DrawMeter(SKCanvas canvas, SKRect rect, float level, string label)
@@ -542,12 +393,8 @@ public sealed class GainRenderer : IDisposable
         if (_phaseButtonRect.Contains(x, y))
             return new GainHitTest(GainHitArea.PhaseButton);
 
-        float dx = x - _knobCenter.X;
-        float dy = y - _knobCenter.Y;
-        if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
-        {
+        if (GainKnob.HitTest(x, y))
             return new GainHitTest(GainHitArea.Knob);
-        }
 
         if (_titleBarRect.Contains(x, y))
             return new GainHitTest(GainHitArea.TitleBar);
@@ -571,11 +418,7 @@ public sealed class GainRenderer : IDisposable
         _closeButtonPaint.Dispose();
         _bypassPaint.Dispose();
         _bypassActivePaint.Dispose();
-        _knobBackgroundPaint.Dispose();
-        _knobTrackPaint.Dispose();
-        _knobArcPaint.Dispose();
-        _knobPointerPaint.Dispose();
-        _knobCenterPaint.Dispose();
+        GainKnob.Dispose();
         _meterBackgroundPaint.Dispose();
         _meterFillPaint.Dispose();
         _meterPeakPaint.Dispose();
@@ -598,8 +441,7 @@ public record struct GainState(
     bool IsPhaseInverted,
     float LatencyMs,
     bool IsBypassed,
-    string PresetName = "Custom",
-    bool IsKnobHovered = false);
+    string PresetName = "Custom");
 
 public enum GainHitArea
 {

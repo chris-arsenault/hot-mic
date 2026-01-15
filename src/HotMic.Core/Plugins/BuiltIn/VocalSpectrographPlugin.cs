@@ -1,5 +1,8 @@
 using System.Threading;
 using HotMic.Core.Dsp;
+using HotMic.Core.Dsp.Fft;
+using HotMic.Core.Dsp.Mapping;
+using HotMic.Core.Dsp.Spectrogram;
 using HotMic.Core.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
@@ -51,6 +54,8 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     public const int ColorLevelsIndex = 38;
     public const int NormalizationModeIndex = 39;
     public const int DynamicRangeModeIndex = 40;
+    public const int TransformTypeIndex = 41;
+    public const int CqtBinsPerOctaveIndex = 42;
 
     private const float DefaultMinFrequency = 80f;
     private const float DefaultMaxFrequency = 8000f;
@@ -74,9 +79,17 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
 
     private static readonly int[] FftSizes = { 1024, 2048, 4096, 8192 };
     private static readonly float[] OverlapOptions = { 0.5f, 0.75f, 0.875f };
+    private static readonly int[] CqtBinsPerOctaveOptions = { 12, 24, 48, 96 };
+
+    /// <summary>
+    /// ZoomFFT zoom factor. Higher = better resolution but more latency.
+    /// 2x zoom at 4096 FFT: ~170ms latency, 5.86 Hz resolution.
+    /// </summary>
+    private const int ZoomFftZoomFactor = 2;
 
     private readonly LockFreeRingBuffer _captureBuffer = new(CaptureBufferSize);
     private readonly SpectrumMapper _mapper = new();
+    private readonly CqtSpectrumMapper _cqtMapper = new();
     private readonly VoicingDetector _voicingDetector = new();
     private readonly BiquadFilter _rumbleHighPass = new();
     private readonly SpectrogramNoiseReducer _noiseReducer = new();
@@ -84,7 +97,6 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private readonly SpectrogramSmoother _smoother = new();
     private readonly HarmonicCombEnhancer _harmonicComb = new(MaxHarmonics);
     private readonly SpectralFeatureExtractor _featureExtractor = new();
-    private readonly SpectrogramDynamicRangeTracker _dynamicRangeTracker = new();
     private OnePoleHighPass _dcHighPass = new();
     private PreEmphasisFilter _preEmphasisFilter = new();
 
@@ -94,6 +106,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private int _sampleRate;
     private int _activeFftSize;
     private int _activeHopSize;
+    private int _activeAnalysisBins;
     private int _activeDisplayBins;
     private int _activeOverlapIndex;
     private WindowFunction _activeWindow;
@@ -105,12 +118,29 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private bool _activeHighPassEnabled;
     private bool _activePreEmphasisEnabled;
     private int _activeFrameCapacity;
+    private int _activeAnalysisSize;
     private long _frameCounter;
     private long _latestFrameId = -1;
     private int _availableFrames;
     private int _reassignLatencyFrames;
     private int _dataVersion;
     private FastFft? _fft;
+    private ZoomFft? _zoomFft;
+    private ConstantQTransform? _cqt;
+    private SpectrogramTransformType _activeTransformType;
+    private int _activeCqtBinsPerOctave = 48;
+    private float[] _cqtMagnitudes = Array.Empty<float>();
+    private float[] _cqtReal = Array.Empty<float>();
+    private float[] _cqtImag = Array.Empty<float>();
+    private float[] _cqtTimeReal = Array.Empty<float>();
+    private float[] _cqtTimeImag = Array.Empty<float>();
+    private float[] _cqtPhaseDiff = Array.Empty<float>();
+    private float[] _zoomReal = Array.Empty<float>();
+    private float[] _zoomImag = Array.Empty<float>();
+    private float[] _zoomTimeReal = Array.Empty<float>();
+    private float[] _zoomTimeImag = Array.Empty<float>();
+    private float[] _zoomDerivReal = Array.Empty<float>();
+    private float[] _zoomDerivImag = Array.Empty<float>();
     private float[] _analysisBufferRaw = Array.Empty<float>();
     private float[] _analysisBufferProcessed = Array.Empty<float>();
     private float[] _hopBuffer = Array.Empty<float>();
@@ -140,6 +170,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private float _scaledRange;
 
     private float[] _spectrogramBuffer = Array.Empty<float>();
+    private float[] _linearMagnitudeBuffer = Array.Empty<float>();
     private float[] _pitchTrack = Array.Empty<float>();
     private float[] _pitchConfidence = Array.Empty<float>();
     private float[] _formantFrequencies = Array.Empty<float>();
@@ -167,6 +198,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private float[] _harmonicScratch = new float[MaxHarmonics];
 
     private int _analysisActive;
+    private int _analysisFilled;
     private int _requestedFftSize = 2048;
     private int _requestedWindow = (int)WindowFunction.Hann;
     private int _requestedOverlapIndex = 1;
@@ -208,5 +240,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private int _requestedColorLevels = 32;
     private int _requestedNormalizationMode = (int)SpectrogramNormalizationMode.None;
     private int _requestedDynamicRangeMode = (int)SpectrogramDynamicRangeMode.Custom;
+    private int _requestedTransformType = (int)SpectrogramTransformType.Fft;
+    private int _requestedCqtBinsPerOctave = 48;
     private SpectrogramReassignMode _activeReassignMode;
 }

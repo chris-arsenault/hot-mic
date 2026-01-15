@@ -21,11 +21,6 @@ public partial class VoiceGateWindow : Window
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
 
-    private int _activeKnob = -1;
-    private float _dragStartY;
-    private float _dragStartValue;
-    private int _hoveredKnob = -1;
-
     public VoiceGateWindow(SileroVoiceGatePlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
         InitializeComponent();
@@ -38,6 +33,28 @@ public partial class VoiceGateWindow : Window
             PluginPresetManager.Default,
             ApplyPreset,
             GetCurrentParameters);
+
+        // Wire up knob value changes
+        _renderer.ThresholdKnob.ValueChanged += value =>
+        {
+            _parameterCallback(SileroVoiceGatePlugin.ThresholdIndex, value / 100f); // Convert from percentage
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.AttackKnob.ValueChanged += value =>
+        {
+            _parameterCallback(SileroVoiceGatePlugin.AttackIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.ReleaseKnob.ValueChanged += value =>
+        {
+            _parameterCallback(SileroVoiceGatePlugin.ReleaseIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.HoldKnob.ValueChanged += value =>
+        {
+            _parameterCallback(SileroVoiceGatePlugin.HoldIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
 
         var preferredSize = VoiceGateRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -82,7 +99,6 @@ public partial class VoiceGateWindow : Window
             IsGateOpen: vad >= threshold,
             IsBypassed: _plugin.IsBypassed,
             StatusMessage: _plugin.StatusMessage,
-            HoveredKnob: _hoveredKnob,
             PresetName: _presetHelper.CurrentPresetName
         );
 
@@ -91,12 +107,25 @@ public partial class VoiceGateWindow : Window
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Let knobs handle their own input (drag, right-click edit)
+        foreach (var knob in new[] { _renderer.ThresholdKnob, _renderer.AttackKnob,
+                                      _renderer.ReleaseKnob, _renderer.HoldKnob })
+        {
+            if (knob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+            {
+                if (knob.IsDragging)
+                    SkiaCanvas.CaptureMouse();
+                e.Handled = true;
+                return;
+            }
+        }
+
+        if (e.ChangedButton != MouseButton.Left)
+            return;
 
         var hit = _renderer.HitTest(x, y);
 
@@ -114,14 +143,6 @@ public partial class VoiceGateWindow : Window
 
             case VoiceGateHitArea.BypassButton:
                 _bypassCallback(!_plugin.IsBypassed);
-                e.Handled = true;
-                break;
-
-            case VoiceGateHitArea.Knob:
-                _activeKnob = hit.KnobIndex;
-                _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
-                SkiaCanvas.CaptureMouse();
                 e.Handled = true;
                 break;
 
@@ -143,27 +164,25 @@ public partial class VoiceGateWindow : Window
         float x = (float)pos.X;
         float y = (float)pos.Y;
 
-        if (_activeKnob >= 0 && e.LeftButton == MouseButtonState.Pressed)
+        // Let knobs handle drag and hover
+        foreach (var knob in new[] { _renderer.ThresholdKnob, _renderer.AttackKnob,
+                                      _renderer.ReleaseKnob, _renderer.HoldKnob })
         {
-            float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.003f);
-            ApplyKnobValue(_activeKnob, newNormalized);
-            e.Handled = true;
-        }
-        else
-        {
-            var hit = _renderer.HitTest(x, y);
-            _hoveredKnob = hit.Area == VoiceGateHitArea.Knob ? hit.KnobIndex : -1;
+            knob.HandleMouseMove(x, y, e.LeftButton == MouseButtonState.Pressed);
         }
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
+        // Let knobs handle mouse up
+        foreach (var knob in new[] { _renderer.ThresholdKnob, _renderer.AttackKnob,
+                                      _renderer.ReleaseKnob, _renderer.HoldKnob })
+        {
+            knob.HandleMouseUp(e.ChangedButton);
+        }
 
-        _activeKnob = -1;
-        SkiaCanvas.ReleaseMouseCapture();
+        if (e.ChangedButton == MouseButton.Left)
+            SkiaCanvas.ReleaseMouseCapture();
     }
 
     private float GetParameterValue(int index)
@@ -187,45 +206,6 @@ public partial class VoiceGateWindow : Window
             return BitConverter.ToSingle(state, stateIndex * sizeof(float));
         }
         return defaultValue;
-    }
-
-    private float GetKnobNormalizedValue(int knobIndex)
-    {
-        return knobIndex switch
-        {
-            0 => (GetParameterValue(SileroVoiceGatePlugin.ThresholdIndex) - 0.05f) / (0.95f - 0.05f),
-            1 => (GetParameterValue(SileroVoiceGatePlugin.AttackIndex) - 1f) / (50f - 1f),
-            2 => (GetParameterValue(SileroVoiceGatePlugin.ReleaseIndex) - 20f) / (500f - 20f),
-            3 => GetParameterValue(SileroVoiceGatePlugin.HoldIndex) / 300f,
-            _ => 0f
-        };
-    }
-
-    private void ApplyKnobValue(int knobIndex, float normalizedValue)
-    {
-        float value = knobIndex switch
-        {
-            0 => 0.05f + normalizedValue * 0.90f,        // Threshold: 0.05 to 0.95
-            1 => 1f + normalizedValue * 49f,             // Attack: 1 to 50 ms
-            2 => 20f + normalizedValue * 480f,           // Release: 20 to 500 ms
-            3 => normalizedValue * 300f,                 // Hold: 0 to 300 ms
-            _ => 0f
-        };
-
-        int paramIndex = knobIndex switch
-        {
-            0 => SileroVoiceGatePlugin.ThresholdIndex,
-            1 => SileroVoiceGatePlugin.AttackIndex,
-            2 => SileroVoiceGatePlugin.ReleaseIndex,
-            3 => SileroVoiceGatePlugin.HoldIndex,
-            _ => -1
-        };
-
-        if (paramIndex >= 0)
-        {
-            _parameterCallback(paramIndex, value);
-            _presetHelper.MarkAsCustom();
-        }
     }
 
     private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)

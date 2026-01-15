@@ -5,4 +5,3 @@ global using HotMic.Core.Dsp.Fft;
 global using HotMic.Core.Dsp.Mapping;
 global using HotMic.Core.Dsp.Spectrogram;
 global using HotMic.Core.Dsp.Voice;
-global using SkiaSharp.Views.Desktop;

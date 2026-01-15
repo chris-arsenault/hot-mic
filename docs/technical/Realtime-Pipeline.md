@@ -26,6 +26,8 @@ Define the threading model, buffering, and synchronization used for analysis out
 ## Activation
 - Analysis can be paused.
 - When re-enabled, capture and visualization buffers are cleared to avoid stale data.
+- After re-enable or FFT size changes, analysis waits until the FFT buffer is fully filled
+  before emitting frames.
 
 ## Real-time Considerations
 - Audio callback only writes to the ring buffer; no allocations or locks.

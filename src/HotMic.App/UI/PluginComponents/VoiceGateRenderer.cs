@@ -21,9 +21,13 @@ public sealed class VoiceGateRenderer : IDisposable
     private readonly VadMeter _vadMeter;
     private readonly WaveformDisplay _waveformDisplay;
     private readonly AiProcessingIndicator _processingIndicator;
-    private readonly RotaryKnob _knob;
     private readonly GateIndicator _gateIndicator;
     private readonly PluginPresetBar _presetBar;
+
+    public KnobWidget ThresholdKnob { get; }
+    public KnobWidget AttackKnob { get; }
+    public KnobWidget ReleaseKnob { get; }
+    public KnobWidget HoldKnob { get; }
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -39,8 +43,6 @@ public sealed class VoiceGateRenderer : IDisposable
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
-    private readonly SKRect[] _knobRects = new SKRect[KnobCount];
-    private readonly SKPoint[] _knobCenters = new SKPoint[KnobCount];
 
     public WaveformBuffer WaveformBuffer { get; } = new(256);
 
@@ -50,9 +52,14 @@ public sealed class VoiceGateRenderer : IDisposable
         _vadMeter = new VadMeter(_theme);
         _waveformDisplay = new WaveformDisplay(_theme);
         _processingIndicator = new AiProcessingIndicator(_theme);
-        _knob = new RotaryKnob(_theme);
         _gateIndicator = new GateIndicator(_theme);
         _presetBar = new PluginPresetBar(_theme);
+
+        var knobStyle = KnobStyle.Standard;
+        ThresholdKnob = new KnobWidget(KnobRadius, 0.05f, 0.95f, "THRESH", "%", knobStyle, _theme) { ValueFormat = "0" };
+        AttackKnob = new KnobWidget(KnobRadius, 1f, 50f, "ATTACK", "ms", knobStyle, _theme) { ValueFormat = "0" };
+        ReleaseKnob = new KnobWidget(KnobRadius, 20f, 500f, "RELEASE", "ms", knobStyle, _theme) { ValueFormat = "0" };
+        HoldKnob = new KnobWidget(KnobRadius, 0f, 300f, "HOLD", "ms", knobStyle, _theme) { ValueFormat = "0" };
 
         _backgroundPaint = new SKPaint
         {
@@ -252,32 +259,24 @@ public sealed class VoiceGateRenderer : IDisposable
         float knobsStartX = vizLeft + (vizRight - vizLeft - knobsTotalWidth) / 2 + KnobSpacing / 2;
 
         // Threshold knob
-        _knobCenters[0] = new SKPoint(knobsStartX, knobsY);
-        float thresholdNorm = (state.Threshold - 0.05f) / (0.95f - 0.05f);
-        _knob.Render(canvas, _knobCenters[0], KnobRadius, thresholdNorm,
-            "THRESH", $"{state.Threshold * 100:0}", "%", state.HoveredKnob == 0);
-        _knobRects[0] = _knob.GetHitRect(_knobCenters[0], KnobRadius);
+        ThresholdKnob.Center = new SKPoint(knobsStartX, knobsY);
+        ThresholdKnob.Value = state.Threshold * 100f;
+        ThresholdKnob.Render(canvas);
 
         // Attack knob
-        _knobCenters[1] = new SKPoint(knobsStartX + KnobSpacing, knobsY);
-        float attackNorm = (state.AttackMs - 1f) / (50f - 1f);
-        _knob.Render(canvas, _knobCenters[1], KnobRadius, attackNorm,
-            "ATTACK", $"{state.AttackMs:0}", "ms", state.HoveredKnob == 1);
-        _knobRects[1] = _knob.GetHitRect(_knobCenters[1], KnobRadius);
+        AttackKnob.Center = new SKPoint(knobsStartX + KnobSpacing, knobsY);
+        AttackKnob.Value = state.AttackMs;
+        AttackKnob.Render(canvas);
 
         // Release knob
-        _knobCenters[2] = new SKPoint(knobsStartX + KnobSpacing * 2, knobsY);
-        float releaseNorm = (state.ReleaseMs - 20f) / (500f - 20f);
-        _knob.Render(canvas, _knobCenters[2], KnobRadius, releaseNorm,
-            "RELEASE", $"{state.ReleaseMs:0}", "ms", state.HoveredKnob == 2);
-        _knobRects[2] = _knob.GetHitRect(_knobCenters[2], KnobRadius);
+        ReleaseKnob.Center = new SKPoint(knobsStartX + KnobSpacing * 2, knobsY);
+        ReleaseKnob.Value = state.ReleaseMs;
+        ReleaseKnob.Render(canvas);
 
         // Hold knob
-        _knobCenters[3] = new SKPoint(knobsStartX + KnobSpacing * 3, knobsY);
-        float holdNorm = state.HoldMs / 300f;
-        _knob.Render(canvas, _knobCenters[3], KnobRadius, holdNorm,
-            "HOLD", $"{state.HoldMs:0}", "ms", state.HoveredKnob == 3);
-        _knobRects[3] = _knob.GetHitRect(_knobCenters[3], KnobRadius);
+        HoldKnob.Center = new SKPoint(knobsStartX + KnobSpacing * 3, knobsY);
+        HoldKnob.Value = state.HoldMs;
+        HoldKnob.Render(canvas);
 
         // Gate status bar
         float barHeight = 24f;
@@ -305,15 +304,14 @@ public sealed class VoiceGateRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new VoiceGateHitTest(VoiceGateHitArea.PresetSave, -1);
 
-        for (int i = 0; i < KnobCount; i++)
-        {
-            float dx = x - _knobCenters[i].X;
-            float dy = y - _knobCenters[i].Y;
-            if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
-            {
-                return new VoiceGateHitTest(VoiceGateHitArea.Knob, i);
-            }
-        }
+        if (ThresholdKnob.HitTest(x, y))
+            return new VoiceGateHitTest(VoiceGateHitArea.Knob, 0);
+        if (AttackKnob.HitTest(x, y))
+            return new VoiceGateHitTest(VoiceGateHitArea.Knob, 1);
+        if (ReleaseKnob.HitTest(x, y))
+            return new VoiceGateHitTest(VoiceGateHitArea.Knob, 2);
+        if (HoldKnob.HitTest(x, y))
+            return new VoiceGateHitTest(VoiceGateHitArea.Knob, 3);
 
         if (_titleBarRect.Contains(x, y))
             return new VoiceGateHitTest(VoiceGateHitArea.TitleBar, -1);
@@ -330,9 +328,12 @@ public sealed class VoiceGateRenderer : IDisposable
         _vadMeter.Dispose();
         _waveformDisplay.Dispose();
         _processingIndicator.Dispose();
-        _knob.Dispose();
         _gateIndicator.Dispose();
         _presetBar.Dispose();
+        ThresholdKnob.Dispose();
+        AttackKnob.Dispose();
+        ReleaseKnob.Dispose();
+        HoldKnob.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -355,7 +356,6 @@ public record struct VoiceGateState(
     bool IsGateOpen,
     bool IsBypassed,
     string StatusMessage = "",
-    int HoveredKnob = -1,
     string PresetName = "Custom");
 
 public enum VoiceGateHitArea

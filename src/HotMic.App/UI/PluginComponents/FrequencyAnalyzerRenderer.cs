@@ -16,7 +16,18 @@ public sealed class FrequencyAnalyzerRenderer : IDisposable
     private const float KnobRadius = 26f;
 
     private readonly PluginComponentTheme _theme;
-    private readonly RotaryKnob _knob;
+
+    /// <summary>Minimum frequency knob (20-2000 Hz).</summary>
+    public KnobWidget MinFreqKnob { get; }
+
+    /// <summary>Maximum frequency knob (2000-12000 Hz).</summary>
+    public KnobWidget MaxFreqKnob { get; }
+
+    /// <summary>Minimum dB knob (-120 to -20 dB).</summary>
+    public KnobWidget MinDbKnob { get; }
+
+    /// <summary>Maximum dB knob (-40 to 0 dB).</summary>
+    public KnobWidget MaxDbKnob { get; }
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _panelPaint;
@@ -35,7 +46,6 @@ public sealed class FrequencyAnalyzerRenderer : IDisposable
     private float[] _spectrumXPositions = Array.Empty<float>();
     private float _lastSpectrumWidth;
 
-    private readonly SKPoint[] _knobCenters = new SKPoint[4];
     private SKRect _titleBarRect;
     private SKRect _closeRect;
     private SKRect _bypassRect;
@@ -46,7 +56,24 @@ public sealed class FrequencyAnalyzerRenderer : IDisposable
     public FrequencyAnalyzerRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
-        _knob = new RotaryKnob(_theme);
+
+        var knobStyle = KnobStyle.Standard;
+        MinFreqKnob = new KnobWidget(KnobRadius, 20f, 2000f, "MIN FREQ", "Hz", knobStyle, _theme)
+        {
+            ValueFormat = "0"
+        };
+        MaxFreqKnob = new KnobWidget(KnobRadius, 2000f, 12000f, "MAX FREQ", "Hz", knobStyle, _theme)
+        {
+            ValueFormat = "0"
+        };
+        MinDbKnob = new KnobWidget(KnobRadius, -120f, -20f, "MIN dB", "dB", knobStyle, _theme)
+        {
+            ValueFormat = "0"
+        };
+        MaxDbKnob = new KnobWidget(KnobRadius, -40f, 0f, "MAX dB", "dB", knobStyle, _theme)
+        {
+            ValueFormat = "0"
+        };
 
         _backgroundPaint = new SKPaint { Color = _theme.PanelBackground, IsAntialias = true, Style = SKPaintStyle.Fill };
         _panelPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
@@ -158,13 +185,17 @@ public sealed class FrequencyAnalyzerRenderer : IDisposable
             return new FrequencyAnalyzerHitTest(AnalyzerHitArea.ScaleButton, -1);
         }
 
-        for (int i = 0; i < _knobCenters.Length; i++)
-        {
-            if (Distance(_knobCenters[i], x, y) <= KnobRadius)
-            {
-                return new FrequencyAnalyzerHitTest(AnalyzerHitArea.Knob, i);
-            }
-        }
+        if (MinFreqKnob.HitTest(x, y))
+            return new FrequencyAnalyzerHitTest(AnalyzerHitArea.Knob, 0);
+
+        if (MaxFreqKnob.HitTest(x, y))
+            return new FrequencyAnalyzerHitTest(AnalyzerHitArea.Knob, 1);
+
+        if (MinDbKnob.HitTest(x, y))
+            return new FrequencyAnalyzerHitTest(AnalyzerHitArea.Knob, 2);
+
+        if (MaxDbKnob.HitTest(x, y))
+            return new FrequencyAnalyzerHitTest(AnalyzerHitArea.Knob, 3);
 
         return new FrequencyAnalyzerHitTest(AnalyzerHitArea.None, -1);
     }
@@ -219,23 +250,24 @@ public sealed class FrequencyAnalyzerRenderer : IDisposable
 
         // Knobs
         float knobRowY = controlRect.Bottom + Padding + KnobRadius;
-        float knobSpacing = (size.Width - Padding * 2f) / (_knobCenters.Length + 1);
-        for (int i = 0; i < _knobCenters.Length; i++)
-        {
-            _knobCenters[i] = new SKPoint(Padding + knobSpacing * (i + 1), knobRowY);
-        }
+        int knobCount = 4;
+        float knobSpacing = (size.Width - Padding * 2f) / (knobCount + 1);
 
-        float minFreqNorm = Normalize(state.MinFrequency, 20f, 2000f);
-        _knob.Render(canvas, _knobCenters[0], KnobRadius, minFreqNorm, "MIN FREQ", FormatHz(state.MinFrequency), "Hz", state.HoveredKnob == 0);
+        MinFreqKnob.Center = new SKPoint(Padding + knobSpacing * 1, knobRowY);
+        MinFreqKnob.Value = state.MinFrequency;
+        MinFreqKnob.Render(canvas);
 
-        float maxFreqNorm = Normalize(state.MaxFrequency, 2000f, 12000f);
-        _knob.Render(canvas, _knobCenters[1], KnobRadius, maxFreqNorm, "MAX FREQ", FormatHz(state.MaxFrequency), "Hz", state.HoveredKnob == 1);
+        MaxFreqKnob.Center = new SKPoint(Padding + knobSpacing * 2, knobRowY);
+        MaxFreqKnob.Value = state.MaxFrequency;
+        MaxFreqKnob.Render(canvas);
 
-        float minDbNorm = Normalize(state.MinDb, -120f, -20f);
-        _knob.Render(canvas, _knobCenters[2], KnobRadius, minDbNorm, "MIN dB", $"{state.MinDb:0}", "dB", state.HoveredKnob == 2);
+        MinDbKnob.Center = new SKPoint(Padding + knobSpacing * 3, knobRowY);
+        MinDbKnob.Value = state.MinDb;
+        MinDbKnob.Render(canvas);
 
-        float maxDbNorm = Normalize(state.MaxDb, -40f, 0f);
-        _knob.Render(canvas, _knobCenters[3], KnobRadius, maxDbNorm, "MAX dB", $"{state.MaxDb:0}", "dB", state.HoveredKnob == 3);
+        MaxDbKnob.Center = new SKPoint(Padding + knobSpacing * 4, knobRowY);
+        MaxDbKnob.Value = state.MaxDb;
+        MaxDbKnob.Render(canvas);
     }
 
     private void DrawSpectrumGrid(SKCanvas canvas, SKRect rect, FrequencyAnalyzerState state)
@@ -332,13 +364,6 @@ public sealed class FrequencyAnalyzerRenderer : IDisposable
         return hz >= 1000f ? $"{hz / 1000f:0.#}k" : $"{hz:0}";
     }
 
-    private static float Distance(SKPoint center, float x, float y)
-    {
-        float dx = center.X - x;
-        float dy = center.Y - y;
-        return MathF.Sqrt(dx * dx + dy * dy);
-    }
-
     private void EnsureSpectrumPositions(SKRect rect, int bins)
     {
         if (_spectrumXPositions.Length != bins || _lastSpectrumWidth != rect.Width)
@@ -358,7 +383,10 @@ public sealed class FrequencyAnalyzerRenderer : IDisposable
     {
         _spectrumPath.Dispose();
         _spectrumFillPath.Dispose();
-        _knob.Dispose();
+        MinFreqKnob.Dispose();
+        MaxFreqKnob.Dispose();
+        MinDbKnob.Dispose();
+        MaxDbKnob.Dispose();
         _backgroundPaint.Dispose();
         _panelPaint.Dispose();
         _borderPaint.Dispose();
@@ -397,5 +425,4 @@ public record struct FrequencyAnalyzerState(
     float MinDb,
     float MaxDb,
     bool IsBypassed,
-    int HoveredKnob,
     float[]? Spectrum);

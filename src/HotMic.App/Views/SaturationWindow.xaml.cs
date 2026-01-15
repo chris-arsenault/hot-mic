@@ -21,10 +21,6 @@ public partial class SaturationWindow : Window
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
 
-    private SaturationKnob _activeKnob = SaturationKnob.None;
-    private float _dragStartY;
-    private float _dragStartValue;
-    private SaturationKnob _hoveredKnob = SaturationKnob.None;
     private float _smoothedInputLevel;
     private float _smoothedOutputLevel;
 
@@ -40,6 +36,18 @@ public partial class SaturationWindow : Window
             PluginPresetManager.Default,
             ApplyPreset,
             GetCurrentParameters);
+
+        // Wire up knob value changes
+        _renderer.WarmthKnob.ValueChanged += value =>
+        {
+            _parameterCallback(SaturationPlugin.WarmthIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.BlendKnob.ValueChanged += value =>
+        {
+            _parameterCallback(SaturationPlugin.BlendIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
 
         var preferredSize = SaturationRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -80,7 +88,6 @@ public partial class SaturationWindow : Window
             OutputLevel: _smoothedOutputLevel,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
-            HoveredKnob: _hoveredKnob,
             PresetName: _presetHelper.CurrentPresetName,
             SampleRate: _plugin.SampleRate,
             GetTransferCurveSamples: diagnostics.GetTransferCurveSamples,
@@ -93,12 +100,24 @@ public partial class SaturationWindow : Window
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Let knobs handle their own input (drag, right-click edit)
+        foreach (var knob in new[] { _renderer.WarmthKnob, _renderer.BlendKnob })
+        {
+            if (knob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+            {
+                if (knob.IsDragging)
+                    SkiaCanvas.CaptureMouse();
+                e.Handled = true;
+                return;
+            }
+        }
+
+        if (e.ChangedButton != MouseButton.Left)
+            return;
 
         var hit = _renderer.HitTest(x, y);
 
@@ -116,14 +135,6 @@ public partial class SaturationWindow : Window
 
             case SaturationHitArea.BypassButton:
                 _bypassCallback(!_plugin.IsBypassed);
-                e.Handled = true;
-                break;
-
-            case SaturationHitArea.Knob:
-                _activeKnob = hit.Knob;
-                _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue(hit.Knob);
-                SkiaCanvas.CaptureMouse();
                 e.Handled = true;
                 break;
 
@@ -145,51 +156,23 @@ public partial class SaturationWindow : Window
         float x = (float)pos.X;
         float y = (float)pos.Y;
 
-        if (_activeKnob != SaturationKnob.None && e.LeftButton == MouseButtonState.Pressed)
+        // Let knobs handle drag and hover
+        foreach (var knob in new[] { _renderer.WarmthKnob, _renderer.BlendKnob })
         {
-            float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.004f);
-            ApplyKnobValue(_activeKnob, newNormalized);
-            e.Handled = true;
-        }
-        else
-        {
-            var hit = _renderer.HitTest(x, y);
-            _hoveredKnob = hit.Area == SaturationHitArea.Knob ? hit.Knob : SaturationKnob.None;
+            knob.HandleMouseMove(x, y, e.LeftButton == MouseButtonState.Pressed);
         }
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
-        _activeKnob = SaturationKnob.None;
-        SkiaCanvas.ReleaseMouseCapture();
-    }
-
-    private float GetKnobNormalizedValue(SaturationKnob knob) => knob switch
-    {
-        SaturationKnob.Warmth => _plugin.WarmthPct / 100f,
-        SaturationKnob.Blend => _plugin.BlendPct / 100f,
-        _ => 0f
-    };
-
-    private void ApplyKnobValue(SaturationKnob knob, float normalizedValue)
-    {
-        switch (knob)
+        // Let knobs handle mouse up
+        foreach (var knob in new[] { _renderer.WarmthKnob, _renderer.BlendKnob })
         {
-            case SaturationKnob.Warmth:
-                float warmthPct = normalizedValue * 100f;
-                _parameterCallback(SaturationPlugin.WarmthIndex, warmthPct);
-                break;
-
-            case SaturationKnob.Blend:
-                float blendPct = normalizedValue * 100f;
-                _parameterCallback(SaturationPlugin.BlendIndex, blendPct);
-                break;
+            knob.HandleMouseUp(e.ChangedButton);
         }
-        _presetHelper.MarkAsCustom();
+
+        if (e.ChangedButton == MouseButton.Left)
+            SkiaCanvas.ReleaseMouseCapture();
     }
 
     private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)

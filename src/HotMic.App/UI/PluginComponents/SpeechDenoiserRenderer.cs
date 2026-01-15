@@ -18,8 +18,13 @@ public sealed class SpeechDenoiserRenderer : IDisposable
 
     private readonly PluginComponentTheme _theme;
     private readonly AiProcessingIndicator _processingIndicator;
-    private readonly RotaryKnob _knob;
     private readonly PluginPresetBar _presetBar;
+
+    /// <summary>Dry/Wet mix knob (0-100%).</summary>
+    public KnobWidget MixKnob { get; }
+
+    /// <summary>Attenuation limit knob (0-100 dB).</summary>
+    public KnobWidget AttenLimitKnob { get; }
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -42,15 +47,22 @@ public sealed class SpeechDenoiserRenderer : IDisposable
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
     private SKRect _attenToggleRect;
-    private readonly SKRect[] _knobRects = new SKRect[KnobCount];
-    private readonly SKPoint[] _knobCenters = new SKPoint[KnobCount];
 
     public SpeechDenoiserRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
         _processingIndicator = new AiProcessingIndicator(_theme);
-        _knob = new RotaryKnob(_theme);
         _presetBar = new PluginPresetBar(_theme);
+
+        var knobStyle = KnobStyle.Standard;
+        MixKnob = new KnobWidget(KnobRadius, 0f, 100f, "DRY / WET", "%", knobStyle, _theme)
+        {
+            ValueFormat = "0"
+        };
+        AttenLimitKnob = new KnobWidget(KnobRadius, 0f, 100f, "ATTEN LIMIT", "dB", knobStyle, _theme)
+        {
+            ValueFormat = "0"
+        };
 
         _backgroundPaint = new SKPaint
         {
@@ -278,18 +290,14 @@ public sealed class SpeechDenoiserRenderer : IDisposable
 
         float knobsY = y + KnobRadius + 8;
         float knobsStartX = size.Width / 2 - KnobSpacing / 2f;
-        _knobCenters[0] = new SKPoint(knobsStartX, knobsY);
-        _knobCenters[1] = new SKPoint(knobsStartX + KnobSpacing, knobsY);
 
-        float mixNorm = state.MixPercent / 100f;
-        _knob.Render(canvas, _knobCenters[0], KnobRadius, mixNorm,
-            "DRY / WET", $"{state.MixPercent:0}", "%", state.HoveredKnob == 0);
-        _knobRects[0] = _knob.GetHitRect(_knobCenters[0], KnobRadius);
+        MixKnob.Center = new SKPoint(knobsStartX, knobsY);
+        MixKnob.Value = state.MixPercent;
+        MixKnob.Render(canvas);
 
-        float attenNorm = MathF.Min(MathF.Max(state.AttenLimitDb / 100f, 0f), 1f);
-        _knob.Render(canvas, _knobCenters[1], KnobRadius, attenNorm,
-            "ATTEN LIMIT", $"{state.AttenLimitDb:0}", "dB", state.HoveredKnob == 1);
-        _knobRects[1] = _knob.GetHitRect(_knobCenters[1], KnobRadius);
+        AttenLimitKnob.Center = new SKPoint(knobsStartX + KnobSpacing, knobsY);
+        AttenLimitKnob.Value = state.AttenLimitDb;
+        AttenLimitKnob.Render(canvas);
 
         float toggleHeight = 22f;
         float toggleWidth = 170f;
@@ -337,15 +345,11 @@ public sealed class SpeechDenoiserRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new SpeechDenoiserHitTest(SpeechDenoiserHitArea.PresetSave, -1);
 
-        for (int i = 0; i < KnobCount; i++)
-        {
-            float dx = x - _knobCenters[i].X;
-            float dy = y - _knobCenters[i].Y;
-            if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
-            {
-                return new SpeechDenoiserHitTest(SpeechDenoiserHitArea.Knob, i);
-            }
-        }
+        if (MixKnob.HitTest(x, y))
+            return new SpeechDenoiserHitTest(SpeechDenoiserHitArea.Knob, 0);
+
+        if (AttenLimitKnob.HitTest(x, y))
+            return new SpeechDenoiserHitTest(SpeechDenoiserHitArea.Knob, 1);
 
         if (_attenToggleRect.Contains(x, y))
             return new SpeechDenoiserHitTest(SpeechDenoiserHitArea.AttenLimitToggle, -1);
@@ -363,7 +367,8 @@ public sealed class SpeechDenoiserRenderer : IDisposable
     public void Dispose()
     {
         _processingIndicator.Dispose();
-        _knob.Dispose();
+        MixKnob.Dispose();
+        AttenLimitKnob.Dispose();
         _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
@@ -438,7 +443,6 @@ public record struct SpeechDenoiserState(
     float LatencyMs,
     bool IsBypassed,
     string StatusMessage = "",
-    int HoveredKnob = -1,
     string PresetName = "Custom");
 
 public enum SpeechDenoiserHitArea

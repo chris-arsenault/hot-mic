@@ -22,7 +22,12 @@ public enum GeneratorType
     BlueNoise = 7,
     Impulse = 8,
     Chirp = 9,
-    Sample = 10
+    Sample = 10,
+    /// <summary>
+    /// Diagnostic: outputs constant 0.5 (DC). If vertical bars appear with DC,
+    /// the issue is in capture/processing, not generation.
+    /// </summary>
+    DcTest = 11
 }
 
 /// <summary>
@@ -395,6 +400,7 @@ public sealed class SignalGeneratorPlugin : IPlugin
             GeneratorType.Impulse => slot.Impulse.Next(),
             GeneratorType.Chirp => slot.Chirp.Next(),
             GeneratorType.Sample => slot.SamplePlayer.Next(_sampleBuffers[slotIndex]),
+            GeneratorType.DcTest => 0.5f, // Constant DC for diagnostics
             _ => 0f
         };
     }
@@ -605,6 +611,42 @@ public sealed class SignalGeneratorPlugin : IPlugin
             _recordBuffer.Clear();
         }
     }
+
+    /// <summary>
+    /// Start recording input to a specific slot.
+    /// Recording continues until StopRecordingToSlot is called.
+    /// </summary>
+    public void StartRecordingToSlot(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= SlotCount)
+            return;
+
+        _targetSlotForCapture = slotIndex;
+        _recordBuffer.Clear();
+        _recordingEnabled = true;
+    }
+
+    /// <summary>
+    /// Stop recording and capture the recorded audio to the target slot.
+    /// </summary>
+    public void StopRecordingToSlot()
+    {
+        if (!_recordingEnabled)
+            return;
+
+        _recordingEnabled = false;
+        _captureRequested = true;
+    }
+
+    /// <summary>
+    /// Check if currently recording.
+    /// </summary>
+    public bool IsRecording => _recordingEnabled;
+
+    /// <summary>
+    /// Get the slot index currently being recorded to, or -1 if not recording.
+    /// </summary>
+    public int RecordingTargetSlot => _recordingEnabled ? _targetSlotForCapture : -1;
 
     /// <summary>
     /// Request capture of recorded audio into the specified slot.

@@ -21,11 +21,6 @@ public partial class ReverbWindow : Window
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
 
-    private int _activeKnob = -1;
-    private float _dragStartY;
-    private float _dragStartValue;
-    private int _hoveredKnob = -1;
-
     public ReverbWindow(ConvolutionReverbPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
         InitializeComponent();
@@ -38,6 +33,23 @@ public partial class ReverbWindow : Window
             PluginPresetManager.Default,
             ApplyPreset,
             GetCurrentParameters);
+
+        // Wire up knob value changes
+        _renderer.DryWetKnob.ValueChanged += value =>
+        {
+            _parameterCallback(ConvolutionReverbPlugin.DryWetIndex, value / 100f); // Convert from percentage
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.DecayKnob.ValueChanged += value =>
+        {
+            _parameterCallback(ConvolutionReverbPlugin.DecayIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.PreDelayKnob.ValueChanged += value =>
+        {
+            _parameterCallback(ConvolutionReverbPlugin.PreDelayIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
 
         var preferredSize = ReverbRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -73,7 +85,6 @@ public partial class ReverbWindow : Window
             StatusMessage: _plugin.StatusMessage,
             LoadedIrPath: _plugin.LoadedIrPath,
             IsBypassed: _plugin.IsBypassed,
-            HoveredKnob: _hoveredKnob,
             PresetName: _presetHelper.CurrentPresetName
         );
 
@@ -82,12 +93,35 @@ public partial class ReverbWindow : Window
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Let knobs handle their own input (drag, right-click edit)
+        if (_renderer.DryWetKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+        {
+            if (_renderer.DryWetKnob.IsDragging)
+                SkiaCanvas.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+        if (_renderer.DecayKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+        {
+            if (_renderer.DecayKnob.IsDragging)
+                SkiaCanvas.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+        if (_renderer.PreDelayKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+        {
+            if (_renderer.PreDelayKnob.IsDragging)
+                SkiaCanvas.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.ChangedButton != MouseButton.Left)
+            return;
 
         var hit = _renderer.HitTest(x, y);
 
@@ -128,14 +162,6 @@ public partial class ReverbWindow : Window
                 _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
-
-            case ReverbHitArea.Knob:
-                _activeKnob = hit.Index;
-                _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue(hit.Index);
-                SkiaCanvas.CaptureMouse();
-                e.Handled = true;
-                break;
         }
     }
 
@@ -145,27 +171,21 @@ public partial class ReverbWindow : Window
         float x = (float)pos.X;
         float y = (float)pos.Y;
 
-        if (_activeKnob >= 0 && e.LeftButton == MouseButtonState.Pressed)
-        {
-            float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.003f);
-            ApplyKnobValue(_activeKnob, newNormalized);
-            e.Handled = true;
-        }
-        else
-        {
-            var hit = _renderer.HitTest(x, y);
-            _hoveredKnob = hit.Area == ReverbHitArea.Knob ? hit.Index : -1;
-        }
+        // Let knobs handle drag and hover
+        bool isPressed = e.LeftButton == MouseButtonState.Pressed;
+        _renderer.DryWetKnob.HandleMouseMove(x, y, isPressed);
+        _renderer.DecayKnob.HandleMouseMove(x, y, isPressed);
+        _renderer.PreDelayKnob.HandleMouseMove(x, y, isPressed);
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
+        _renderer.DryWetKnob.HandleMouseUp(e.ChangedButton);
+        _renderer.DecayKnob.HandleMouseUp(e.ChangedButton);
+        _renderer.PreDelayKnob.HandleMouseUp(e.ChangedButton);
 
-        _activeKnob = -1;
-        SkiaCanvas.ReleaseMouseCapture();
+        if (e.ChangedButton == MouseButton.Left)
+            SkiaCanvas.ReleaseMouseCapture();
     }
 
     private void LoadCustomIr()
@@ -181,42 +201,6 @@ public partial class ReverbWindow : Window
         {
             _plugin.LoadImpulseResponse(dialog.FileName);
             SkiaCanvas.InvalidateVisual();
-        }
-    }
-
-    private float GetKnobNormalizedValue(int knobIndex)
-    {
-        return knobIndex switch
-        {
-            0 => _plugin.DryWet,
-            1 => (_plugin.Decay - 0.1f) / (2f - 0.1f),
-            2 => _plugin.PreDelayMs / 100f,
-            _ => 0f
-        };
-    }
-
-    private void ApplyKnobValue(int knobIndex, float normalizedValue)
-    {
-        float value = knobIndex switch
-        {
-            0 => normalizedValue,                          // Dry/Wet: 0 to 1
-            1 => 0.1f + normalizedValue * 1.9f,            // Decay: 0.1 to 2.0
-            2 => normalizedValue * 100f,                   // Pre-delay: 0 to 100 ms
-            _ => 0f
-        };
-
-        int paramIndex = knobIndex switch
-        {
-            0 => ConvolutionReverbPlugin.DryWetIndex,
-            1 => ConvolutionReverbPlugin.DecayIndex,
-            2 => ConvolutionReverbPlugin.PreDelayIndex,
-            _ => -1
-        };
-
-        if (paramIndex >= 0)
-        {
-            _parameterCallback(paramIndex, value);
-            _presetHelper.MarkAsCustom();
         }
     }
 

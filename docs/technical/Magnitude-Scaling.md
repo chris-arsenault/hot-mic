@@ -8,7 +8,7 @@ Normalize FFT magnitudes and map them into a fixed dB display range.
 2. Apply per-frame normalization (optional).
 3. Map to display bins via max-hold.
 4. Apply clarity processing if enabled (see Cleanup.md).
-5. Convert to dB and clamp to [floor, ceiling].
+5. Convert to dB and clamp to [floor, ceiling] in the display pipeline.
 6. Normalize to 0..1 for rendering.
 
 ## Normalization Modes
@@ -43,4 +43,5 @@ Noise Floor mode:
 
 Implementation refs: (src/HotMic.Core/Dsp/Analysis/AWeighting.cs,
  src/HotMic.Core/Dsp/Spectrogram/SpectrogramDynamicRangeTracker.cs,
- src/HotMic.Core/Plugins/BuiltIn/VocalSpectrographPlugin.Analysis.cs)
+ src/HotMic.Core/Plugins/BuiltIn/VocalSpectrographPlugin.Analysis.cs,
+ src/HotMic.App/UI/PluginComponents/DisplayPipeline.cs)

@@ -1,4 +1,6 @@
 using System.Threading;
+using HotMic.Core.Dsp.Fft;
+using HotMic.Core.Dsp.Spectrogram;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
@@ -14,6 +16,7 @@ public sealed partial class VocalSpectrographPlugin
             Volatile.Write(ref _analysisActive, 0);
             _captureBuffer.Clear();
             ClearVisualizationBuffers();
+            Volatile.Write(ref _analysisFilled, 0);
             Volatile.Write(ref _analysisActive, 1);
         }
         else
@@ -23,7 +26,8 @@ public sealed partial class VocalSpectrographPlugin
     }
 
     /// <summary>
-    /// Copy the current spectrogram and overlay data into the provided arrays.
+    /// Copy the current display-bin magnitudes (linear) and overlay data into the provided arrays.
+    /// Magnitudes are updated when reassignment is active; UI display mapping handles the standard path.
     /// </summary>
     public bool CopySpectrogramData(
         float[] magnitudes,
@@ -198,6 +202,108 @@ public sealed partial class VocalSpectrographPlugin
         }
     }
 
+    /// <summary>
+    /// Copy the CQT center frequencies into the provided array.
+    /// Returns the number of CQT bins, or 0 if CQT is not active.
+    /// </summary>
+    public int GetCqtFrequencies(float[] frequencies)
+    {
+        if (_cqt is null)
+        {
+            return 0;
+        }
+
+        var centers = _cqt.CenterFrequencies;
+        int count = Math.Min(frequencies.Length, centers.Length);
+        for (int i = 0; i < count; i++)
+        {
+            frequencies[i] = centers[i];
+        }
+
+        return centers.Length;
+    }
+
+    /// <summary>
+    /// Get the ZoomFFT output bin count, or 0 if ZoomFFT is not active.
+    /// </summary>
+    public int ZoomFftBins => _zoomFft?.OutputBins ?? 0;
+
+    /// <summary>
+    /// Get the ZoomFFT frequency resolution in Hz, or 0 if ZoomFFT is not active.
+    /// </summary>
+    public float ZoomFftBinResolution => _zoomFft?.BinResolutionHz ?? 0f;
+
+    /// <summary>
+    /// Copy post-clarity linear magnitude data at analysis resolution.
+    /// Returns false if copy failed due to buffer size mismatch or data version change.
+    /// </summary>
+    /// <param name="magnitudes">Output array for linear magnitudes (must be at least FrameCount * AnalysisBins).</param>
+    /// <param name="analysisBins">Output: number of analysis bins per frame.</param>
+    /// <param name="binResolutionHz">Output: frequency resolution per bin in Hz.</param>
+    /// <param name="transformType">Output: the active transform type.</param>
+    /// <returns>True if copy succeeded, false if buffers don't match or data changed during copy.</returns>
+    public bool CopyLinearMagnitudes(
+        float[] magnitudes,
+        out int analysisBins,
+        out float binResolutionHz,
+        out SpectrogramTransformType transformType)
+    {
+        analysisBins = Volatile.Read(ref _activeAnalysisBins);
+        binResolutionHz = _binResolution;
+        transformType = _activeTransformType;
+
+        int frames = Volatile.Read(ref _activeFrameCapacity);
+        int requiredLength = frames * analysisBins;
+
+        if (analysisBins <= 0 || frames <= 0)
+        {
+            return false;
+        }
+
+        if (magnitudes.Length < requiredLength || _linearMagnitudeBuffer.Length < requiredLength)
+        {
+            return false;
+        }
+
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            int versionStart = Volatile.Read(ref _dataVersion);
+            if ((versionStart & 1) != 0)
+            {
+                Thread.Yield();
+                continue;
+            }
+
+            long latestFrameId = Volatile.Read(ref _latestFrameId);
+            int availableFrames = Volatile.Read(ref _availableFrames);
+            if (availableFrames <= 0 || latestFrameId < 0)
+            {
+                Array.Clear(magnitudes, 0, requiredLength);
+            }
+            else
+            {
+                long oldestFrameId = latestFrameId - availableFrames + 1;
+                int startIndex = (int)(oldestFrameId % frames);
+                int padFrames = Math.Max(0, frames - availableFrames);
+
+                if (padFrames > 0)
+                {
+                    Array.Clear(magnitudes, 0, padFrames * analysisBins);
+                }
+
+                CopyRing(_linearMagnitudeBuffer, magnitudes, availableFrames, analysisBins, startIndex, padFrames);
+            }
+
+            int versionEnd = Volatile.Read(ref _dataVersion);
+            if (versionStart == versionEnd && (versionEnd & 1) == 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void ConfigureAnalysis(bool force)
     {
         int fftSize = SelectDiscrete(Volatile.Read(ref _requestedFftSize), FftSizes);
@@ -212,6 +318,8 @@ public sealed partial class VocalSpectrographPlugin
         float hpfCutoff = Volatile.Read(ref _requestedHighPassCutoff);
         bool hpfEnabled = Volatile.Read(ref _requestedHighPassEnabled) != 0;
         bool preEmphasisEnabled = Volatile.Read(ref _requestedPreEmphasis) != 0;
+        var transformType = (SpectrogramTransformType)Math.Clamp(Volatile.Read(ref _requestedTransformType), 0, 2);
+        int cqtBinsPerOctave = SelectDiscrete(Volatile.Read(ref _requestedCqtBinsPerOctave), CqtBinsPerOctaveOptions);
 
         bool sizeChanged = force
             || fftSize != _activeFftSize
@@ -230,6 +338,8 @@ public sealed partial class VocalSpectrographPlugin
             || preEmphasisEnabled != _activePreEmphasisEnabled;
         bool lpcChanged = force || _lpcAnalyzer is null || lpcOrder != _lpcAnalyzer.Order;
         bool reassignChanged = force || reassignMode != _activeReassignMode;
+        bool transformChanged = force || transformType != _activeTransformType;
+        bool cqtChanged = force || cqtBinsPerOctave != _activeCqtBinsPerOctave;
         bool resetBuffers = false;
 
         if (sizeChanged)
@@ -238,8 +348,11 @@ public sealed partial class VocalSpectrographPlugin
             _activeOverlapIndex = overlapIndex;
             _activeTimeWindow = timeWindow;
             _activeHopSize = Math.Max(1, (int)(fftSize * (1f - OverlapOptions[overlapIndex])));
-            _activeDisplayBins = Math.Min(1024, fftSize / 2);
+            _activeAnalysisBins = fftSize / 2;
+            _activeDisplayBins = Math.Min(1024, _activeAnalysisBins);
             _activeFrameCapacity = Math.Max(1, (int)MathF.Ceiling(timeWindow * _sampleRate / _activeHopSize));
+            _activeAnalysisSize = fftSize;
+            _analysisFilled = 0;
 
             _fft = new FastFft(_activeFftSize);
             _analysisBufferRaw = new float[_activeFftSize];
@@ -257,18 +370,22 @@ public sealed partial class VocalSpectrographPlugin
             _fftMagnitudes = new float[_activeFftSize / 2];
             _fftDisplayMagnitudes = new float[_activeFftSize / 2];
             _aWeighting = new float[_activeFftSize / 2];
-            _spectrumScratch = new float[_activeDisplayBins];
-            _displayWork = new float[_activeDisplayBins];
-            _displayProcessed = new float[_activeDisplayBins];
-            _displaySmoothed = new float[_activeDisplayBins];
-            _displayGain = new float[_activeDisplayBins];
+            // Clarity processing buffers at analysis resolution (no display cap)
+            _spectrumScratch = new float[_activeAnalysisBins];
+            _displayWork = new float[_activeAnalysisBins];
+            _displayProcessed = new float[_activeAnalysisBins];
+            _displaySmoothed = new float[_activeAnalysisBins];
+            _displayGain = new float[_activeAnalysisBins];
             _fftBinToDisplay = new int[_activeFftSize / 2];
             _fftBinDisplayPos = new float[_activeFftSize / 2];
             _fftNormalization = 2f / MathF.Max(1f, _activeFftSize);
             _binResolution = _sampleRate / (float)_activeFftSize;
             UpdateAWeighting();
 
+            // Legacy normalized buffer kept for reassignment path
             _spectrogramBuffer = new float[_activeFrameCapacity * _activeDisplayBins];
+            // Linear magnitude buffer at analysis resolution
+            _linearMagnitudeBuffer = new float[_activeFrameCapacity * _activeAnalysisBins];
             _pitchTrack = new float[_activeFrameCapacity];
             _pitchConfidence = new float[_activeFrameCapacity];
             _formantFrequencies = new float[_activeFrameCapacity * MaxFormants];
@@ -283,12 +400,12 @@ public sealed partial class VocalSpectrographPlugin
             _spectralSlope = new float[_activeFrameCapacity];
             _spectralFlux = new float[_activeFrameCapacity];
 
-            _noiseReducer.EnsureCapacity(_activeDisplayBins);
-            _hpssProcessor.EnsureCapacity(_activeDisplayBins);
-            _smoother.EnsureCapacity(_activeDisplayBins);
-            _harmonicComb.EnsureCapacity(_activeDisplayBins);
-            _featureExtractor.EnsureCapacity(_activeDisplayBins);
-            _dynamicRangeTracker.EnsureCapacity(_activeDisplayBins);
+            // DSP components at analysis resolution for full-resolution clarity processing
+            _noiseReducer.EnsureCapacity(_activeAnalysisBins);
+            _hpssProcessor.EnsureCapacity(_activeAnalysisBins);
+            _smoother.EnsureCapacity(_activeAnalysisBins);
+            _harmonicComb.EnsureCapacity(_activeAnalysisBins);
+            _featureExtractor.EnsureCapacity(_activeAnalysisBins);
             resetBuffers = true;
         }
 
@@ -297,6 +414,7 @@ public sealed partial class VocalSpectrographPlugin
         {
             _activeWindow = window;
             WindowFunctions.Fill(_fftWindow, window);
+            UpdateWindowNormalization();
             UpdateReassignWindows();
             resetBuffers = true;
         }
@@ -322,9 +440,89 @@ public sealed partial class VocalSpectrographPlugin
             resetBuffers = true;
         }
 
+        // Configure Zoom FFT when selected
+        if (transformType == SpectrogramTransformType.ZoomFft && (transformChanged || mappingChanged || sizeChanged))
+        {
+            _zoomFft ??= new ZoomFft();
+            _zoomFft.Configure(_sampleRate, _activeFftSize, minHz, maxHz, ZoomFftZoomFactor, window);
+
+            // ZoomFFT requires larger analysis buffer for true zoom resolution
+            int requiredSize = _zoomFft.RequiredInputSize;
+            if (requiredSize > _analysisBufferRaw.Length)
+            {
+                _analysisBufferRaw = new float[requiredSize];
+                _analysisBufferProcessed = new float[requiredSize];
+                _analysisFilled = 0;
+            }
+            _activeAnalysisSize = requiredSize;
+
+            // Allocate ZoomFFT reassignment buffers (at output bins = fftSize/2)
+            int zoomBins = _zoomFft.OutputBins;
+            if (_zoomReal.Length < zoomBins)
+            {
+                _zoomReal = new float[zoomBins];
+                _zoomImag = new float[zoomBins];
+                _zoomTimeReal = new float[zoomBins];
+                _zoomTimeImag = new float[zoomBins];
+                _zoomDerivReal = new float[zoomBins];
+                _zoomDerivImag = new float[zoomBins];
+            }
+
+            resetBuffers = true;
+        }
+
+        // Configure CQT when selected
+        if (transformType == SpectrogramTransformType.Cqt && (transformChanged || mappingChanged || cqtChanged))
+        {
+            _cqt ??= new ConstantQTransform();
+            _cqt.Configure(_sampleRate, minHz, maxHz, cqtBinsPerOctave);
+
+            // CQT requires larger analysis buffers for low frequencies
+            int requiredSize = _cqt.MaxWindowLength;
+            if (requiredSize > _analysisBufferRaw.Length)
+            {
+                _analysisBufferRaw = new float[requiredSize];
+                _analysisBufferProcessed = new float[requiredSize];
+                _analysisFilled = 0;
+            }
+            _activeAnalysisSize = requiredSize;
+
+            // Allocate CQT buffers if needed (including reassignment buffers)
+            if (_cqtMagnitudes.Length < _cqt.BinCount)
+            {
+                _cqtMagnitudes = new float[_cqt.BinCount];
+                _cqtReal = new float[_cqt.BinCount];
+                _cqtImag = new float[_cqt.BinCount];
+                _cqtTimeReal = new float[_cqt.BinCount];
+                _cqtTimeImag = new float[_cqt.BinCount];
+                _cqtPhaseDiff = new float[_cqt.BinCount];
+            }
+
+            // Configure CQT to display mapping using CQT's actual frequency range
+            // (CQT may have clamped minHz to a higher value due to window size limits)
+            _cqtMapper.Configure(_activeDisplayBins, _cqt.CenterFrequencies,
+                _cqt.MinFrequency, _cqt.MaxFrequency, scale);
+            _activeCqtBinsPerOctave = cqtBinsPerOctave;
+            resetBuffers = true;
+        }
+
+        // Reset analysis size when switching to standard FFT (away from CQT or ZoomFFT)
+        if (transformType == SpectrogramTransformType.Fft && _activeAnalysisSize != _activeFftSize)
+        {
+            _activeAnalysisSize = _activeFftSize;
+            _analysisFilled = 0;
+        }
+
+        if (transformChanged)
+        {
+            _activeTransformType = transformType;
+            resetBuffers = true;
+        }
+
         if (sizeChanged || filterChanged)
         {
             _dcHighPass.Configure(DcCutoffHz, _sampleRate);
+            _dcHighPass.Reset();
             _rumbleHighPass.SetHighPass(_sampleRate, hpfCutoff, 0.707f);
             _rumbleHighPass.Reset();
             _activeHighPassCutoff = hpfCutoff;
@@ -381,6 +579,7 @@ public sealed partial class VocalSpectrographPlugin
         Interlocked.Increment(ref _dataVersion);
 
         Array.Clear(_spectrogramBuffer, 0, _spectrogramBuffer.Length);
+        Array.Clear(_linearMagnitudeBuffer, 0, _linearMagnitudeBuffer.Length);
         Array.Clear(_pitchTrack, 0, _pitchTrack.Length);
         Array.Clear(_pitchConfidence, 0, _pitchConfidence.Length);
         Array.Clear(_formantFrequencies, 0, _formantFrequencies.Length);
@@ -404,7 +603,8 @@ public sealed partial class VocalSpectrographPlugin
         _smoother.Reset();
         _harmonicComb.Reset();
         _featureExtractor.Reset();
-        _dynamicRangeTracker.Reset(DefaultMinDb);
+        _cqt?.Reset();
+        _zoomFft?.Reset();
 
         Volatile.Write(ref _frameCounter, 0);
         Volatile.Write(ref _latestFrameId, -1);
@@ -517,6 +717,18 @@ public sealed partial class VocalSpectrographPlugin
             float freq = bin * _binResolution;
             _aWeighting[bin] = AWeighting.GetLinearWeight(freq);
         }
+    }
+
+    private void UpdateWindowNormalization()
+    {
+        double sum = 0.0;
+        for (int i = 0; i < _fftWindow.Length; i++)
+        {
+            sum += _fftWindow[i];
+        }
+
+        float denom = sum > 1e-6 ? (float)sum : 1f;
+        _fftNormalization = 2f / denom;
     }
 
     private void BuildDisplayGain()

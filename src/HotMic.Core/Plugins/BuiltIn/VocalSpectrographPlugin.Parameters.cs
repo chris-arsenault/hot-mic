@@ -1,4 +1,5 @@
 using System.Threading;
+using HotMic.Core.Dsp.Spectrogram;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
@@ -397,6 +398,26 @@ public sealed partial class VocalSpectrographPlugin
                 DefaultValue = (float)SpectrogramDynamicRangeMode.Custom,
                 Unit = "",
                 FormatValue = value => ((SpectrogramDynamicRangeMode)Math.Clamp((int)MathF.Round(value), 0, 4)).ToString()
+            },
+            new PluginParameter
+            {
+                Index = TransformTypeIndex,
+                Name = "Transform",
+                MinValue = 0f,
+                MaxValue = 2f,
+                DefaultValue = (float)SpectrogramTransformType.Fft,
+                Unit = "",
+                FormatValue = value => ((SpectrogramTransformType)Math.Clamp((int)MathF.Round(value), 0, 2)).ToString()
+            },
+            new PluginParameter
+            {
+                Index = CqtBinsPerOctaveIndex,
+                Name = "CQT Bins/Oct",
+                MinValue = 12f,
+                MaxValue = 96f,
+                DefaultValue = 48f,
+                Unit = "",
+                FormatValue = value => FormatDiscrete(value, CqtBinsPerOctaveOptions, "")
             }
         ];
     }
@@ -417,6 +438,8 @@ public sealed partial class VocalSpectrographPlugin
 
     public int DisplayBins => Volatile.Read(ref _activeDisplayBins);
 
+    public int AnalysisBins => Volatile.Read(ref _activeAnalysisBins);
+
     public int FrameCount => Volatile.Read(ref _activeFrameCapacity);
 
     public int MaxFormantCount => MaxFormants;
@@ -428,6 +451,11 @@ public sealed partial class VocalSpectrographPlugin
     public long LatestFrameId => Volatile.Read(ref _latestFrameId);
 
     public int AvailableFrames => Volatile.Read(ref _availableFrames);
+
+    /// <summary>
+    /// Total samples dropped while enqueueing analysis input.
+    /// </summary>
+    public long DroppedSamples => _captureBuffer.DroppedSamples;
 
     public FrequencyScale Scale => (FrequencyScale)Math.Clamp(Volatile.Read(ref _requestedScale), 0, 4);
 
@@ -488,6 +516,11 @@ public sealed partial class VocalSpectrographPlugin
 
     public SpectrogramDynamicRangeMode DynamicRangeMode =>
         (SpectrogramDynamicRangeMode)Math.Clamp(Volatile.Read(ref _requestedDynamicRangeMode), 0, 4);
+
+    public SpectrogramTransformType TransformType =>
+        (SpectrogramTransformType)Math.Clamp(Volatile.Read(ref _requestedTransformType), 0, 2);
+
+    public int CqtBinsPerOctave => SelectDiscrete(Volatile.Read(ref _requestedCqtBinsPerOctave), CqtBinsPerOctaveOptions);
 
     public float MinFrequency => Volatile.Read(ref _requestedMinFrequency);
 
@@ -662,12 +695,18 @@ public sealed partial class VocalSpectrographPlugin
             case DynamicRangeModeIndex:
                 Interlocked.Exchange(ref _requestedDynamicRangeMode, Math.Clamp((int)MathF.Round(value), 0, 4));
                 break;
+            case TransformTypeIndex:
+                Interlocked.Exchange(ref _requestedTransformType, Math.Clamp((int)MathF.Round(value), 0, 2));
+                break;
+            case CqtBinsPerOctaveIndex:
+                Interlocked.Exchange(ref _requestedCqtBinsPerOctave, SelectDiscrete(value, CqtBinsPerOctaveOptions));
+                break;
         }
     }
 
     public byte[] GetState()
     {
-        var bytes = new byte[sizeof(float) * 41];
+        var bytes = new byte[sizeof(float) * 43];
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedFftSize), 0, bytes, 0, 4);
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedWindow), 0, bytes, 4, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(OverlapOptions[_requestedOverlapIndex]), 0, bytes, 8, 4);
@@ -709,6 +748,8 @@ public sealed partial class VocalSpectrographPlugin
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedColorLevels), 0, bytes, 152, 4);
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedNormalizationMode), 0, bytes, 156, 4);
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedDynamicRangeMode), 0, bytes, 160, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedTransformType), 0, bytes, 164, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedCqtBinsPerOctave), 0, bytes, 168, 4);
         return bytes;
     }
 
@@ -771,6 +812,12 @@ public sealed partial class VocalSpectrographPlugin
         {
             SetParameter(NormalizationModeIndex, BitConverter.ToSingle(state, 156));
             SetParameter(DynamicRangeModeIndex, BitConverter.ToSingle(state, 160));
+        }
+
+        if (state.Length >= sizeof(float) * 43)
+        {
+            SetParameter(TransformTypeIndex, BitConverter.ToSingle(state, 164));
+            SetParameter(CqtBinsPerOctaveIndex, BitConverter.ToSingle(state, 168));
         }
     }
 }

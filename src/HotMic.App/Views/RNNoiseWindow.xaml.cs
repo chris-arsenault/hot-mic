@@ -21,11 +21,6 @@ public partial class RNNoiseWindow : Window
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
 
-    private int _activeKnob = -1;
-    private float _dragStartY;
-    private float _dragStartValue;
-    private int _hoveredKnob = -1;
-
     public RNNoiseWindow(RNNoisePlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
         InitializeComponent();
@@ -38,6 +33,18 @@ public partial class RNNoiseWindow : Window
             PluginPresetManager.Default,
             ApplyPreset,
             GetCurrentParameters);
+
+        // Wire up knob ValueChanged events
+        _renderer.ReductionKnob.ValueChanged += value =>
+        {
+            _parameterCallback(RNNoisePlugin.ReductionIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.VadThresholdKnob.ValueChanged += value =>
+        {
+            _parameterCallback(RNNoisePlugin.VadThresholdIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
 
         var preferredSize = RNNoiseRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -75,8 +82,7 @@ public partial class RNNoiseWindow : Window
             LatencyMs: latencyMs,
             IsBypassed: _plugin.IsBypassed,
             StatusMessage: _plugin.StatusMessage,
-            PresetName: _presetHelper.CurrentPresetName,
-            HoveredKnob: _hoveredKnob
+            PresetName: _presetHelper.CurrentPresetName
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
@@ -84,12 +90,28 @@ public partial class RNNoiseWindow : Window
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Check if any knob handles the mouse first
+        if (_renderer.ReductionKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+        {
+            if (e.ChangedButton == MouseButton.Left)
+                SkiaCanvas.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+        if (_renderer.VadThresholdKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+        {
+            if (e.ChangedButton == MouseButton.Left)
+                SkiaCanvas.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.ChangedButton != MouseButton.Left)
+            return;
 
         var hit = _renderer.HitTest(x, y);
 
@@ -110,14 +132,6 @@ public partial class RNNoiseWindow : Window
                 e.Handled = true;
                 break;
 
-            case RNNoiseHitArea.Knob:
-                _activeKnob = hit.KnobIndex;
-                _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
-                SkiaCanvas.CaptureMouse();
-                e.Handled = true;
-                break;
-
             case RNNoiseHitArea.PresetDropdown:
                 _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
                 e.Handled = true;
@@ -135,28 +149,21 @@ public partial class RNNoiseWindow : Window
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+        bool isLeftDown = e.LeftButton == MouseButtonState.Pressed;
 
-        if (_activeKnob >= 0 && e.LeftButton == MouseButtonState.Pressed)
-        {
-            float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.003f);
-            ApplyKnobValue(_activeKnob, newNormalized);
-            e.Handled = true;
-        }
-        else
-        {
-            var hit = _renderer.HitTest(x, y);
-            _hoveredKnob = hit.Area == RNNoiseHitArea.Knob ? hit.KnobIndex : -1;
-        }
+        // Forward to all knobs
+        _renderer.ReductionKnob.HandleMouseMove(x, y, isLeftDown);
+        _renderer.VadThresholdKnob.HandleMouseMove(x, y, isLeftDown);
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
+        // Forward to all knobs
+        _renderer.ReductionKnob.HandleMouseUp(e.ChangedButton);
+        _renderer.VadThresholdKnob.HandleMouseUp(e.ChangedButton);
 
-        _activeKnob = -1;
-        SkiaCanvas.ReleaseMouseCapture();
+        if (e.ChangedButton == MouseButton.Left)
+            SkiaCanvas.ReleaseMouseCapture();
     }
 
     private float GetParameterValue(int index)
@@ -167,39 +174,6 @@ public partial class RNNoiseWindow : Window
             return BitConverter.ToSingle(state, index * sizeof(float));
         }
         return _plugin.Parameters[index].DefaultValue;
-    }
-
-    private float GetKnobNormalizedValue(int knobIndex)
-    {
-        return knobIndex switch
-        {
-            0 => GetParameterValue(RNNoisePlugin.ReductionIndex) / 100f,
-            1 => GetParameterValue(RNNoisePlugin.VadThresholdIndex) / 100f,
-            _ => 0f
-        };
-    }
-
-    private void ApplyKnobValue(int knobIndex, float normalizedValue)
-    {
-        float value = knobIndex switch
-        {
-            0 => normalizedValue * 100f,  // Reduction: 0 to 100%
-            1 => normalizedValue * 100f,  // VAD Threshold: 0 to 100%
-            _ => 0f
-        };
-
-        int paramIndex = knobIndex switch
-        {
-            0 => RNNoisePlugin.ReductionIndex,
-            1 => RNNoisePlugin.VadThresholdIndex,
-            _ => -1
-        };
-
-        if (paramIndex >= 0)
-        {
-            _parameterCallback(paramIndex, value);
-            _presetHelper.MarkAsCustom();
-        }
     }
 
     private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)

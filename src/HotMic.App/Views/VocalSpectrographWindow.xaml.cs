@@ -2,6 +2,7 @@ using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Forms.Integration;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -10,7 +11,10 @@ using HotMic.Core.Dsp;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Presets;
 using SkiaSharp;
+using SkiaSharp.Views.Desktop;
 using SkiaSharp.Views.WPF;
+using DesktopPaintGLSurfaceEventArgs = SkiaSharp.Views.Desktop.SKPaintGLSurfaceEventArgs;
+using WpfPaintSurfaceEventArgs = SkiaSharp.Views.WPF.SKPaintSurfaceEventArgs;
 using WpfToolTip = System.Windows.Controls.ToolTip;
 
 namespace HotMic.App.Views;
@@ -18,11 +22,18 @@ namespace HotMic.App.Views;
 public partial class VocalSpectrographWindow : Window
 {
     private readonly VocalSpectrographRenderer _renderer = new(PluginComponentTheme.BlueOnBlack);
+    private readonly DisplayPipeline _displayPipeline = new();
     private readonly VocalSpectrographPlugin _plugin;
     private readonly Action<int, float> _parameterCallback;
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
+
+    private FrameworkElement? _skiaCanvas;
+    private WindowsFormsHost? _glHost;
+    private SKGLControl? _glControl;
+    private bool _backendLocked;
+    private bool _usingGpu;
 
     private int _activeKnob = -1;
     private float _dragStartY;
@@ -37,6 +48,9 @@ public partial class VocalSpectrographWindow : Window
 
     private int _lastDataVersion = -1;
     private float[] _spectrogram = Array.Empty<float>();
+    private float[] _displayMagnitudes = Array.Empty<float>();
+    private float[] _analysisMagnitudes = Array.Empty<float>();
+    private float[] _cqtFrequencies = Array.Empty<float>();
     private float[] _pitchTrack = Array.Empty<float>();
     private float[] _pitchConfidence = Array.Empty<float>();
     private float[] _formantFrequencies = Array.Empty<float>();
@@ -53,11 +67,20 @@ public partial class VocalSpectrographWindow : Window
     private float[] _binFrequencies = Array.Empty<float>();
     private int _bufferFrameCount;
     private int _bufferBins;
+    private int _bufferAnalysisBins;
     private int _bufferMaxFormants;
     private int _bufferMaxHarmonics;
+    private int _lastDisplayBins;
+    private int _lastAnalysisBins;
+    private float _lastBinResolutionHz;
     private FrequencyScale _lastScale;
     private float _lastMinFrequency;
     private float _lastMaxFrequency;
+    private float _lastMinDb;
+    private float _lastMaxDb;
+    private SpectrogramDynamicRangeMode _lastDynamicRangeMode;
+    private SpectrogramTransformType _lastTransformType;
+    private int _lastCqtBinsPerOctave;
 
     private static readonly int[] FftSizes = { 1024, 2048, 4096, 8192 };
     private static readonly WindowFunction[] WindowFunctions =
@@ -112,6 +135,7 @@ public partial class VocalSpectrographWindow : Window
             PluginPresetManager.Default,
             ApplyPreset,
             GetCurrentParameters);
+        InitializeSkiaSurface();
 
         var preferredSize = VocalSpectrographRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -120,12 +144,9 @@ public partial class VocalSpectrographWindow : Window
         _spectrogramToolTip = new WpfToolTip
         {
             Placement = PlacementMode.Relative,
-            PlacementTarget = SkiaCanvas,
             StaysOpen = true
         };
-        ToolTipService.SetInitialShowDelay(SkiaCanvas, 0);
-        ToolTipService.SetShowDuration(SkiaCanvas, int.MaxValue);
-        SkiaCanvas.ToolTip = _spectrogramToolTip;
+        AttachTooltip();
 
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += OnRenderTick;
@@ -139,44 +160,256 @@ public partial class VocalSpectrographWindow : Window
             _renderTimer.Stop();
             _plugin.SetVisualizationActive(false);
             _renderer.Dispose();
+            if (_glControl is not null)
+            {
+                DetachWinFormsInputHandlers(_glControl);
+                _glControl.PaintSurface -= SkiaCanvas_PaintSurfaceGpu;
+                _glControl.Dispose();
+                _glControl = null;
+            }
+            if (_glHost is not null)
+            {
+                _glHost.Child = null;
+                _glHost.Dispose();
+                _glHost = null;
+            }
         };
+    }
+
+    private void InitializeSkiaSurface()
+    {
+        if (TryCreateGpuCanvas())
+        {
+            return;
+        }
+
+        CreateCpuCanvas();
+    }
+
+    private bool TryCreateGpuCanvas()
+    {
+        SKGLControl? glControl = null;
+        WindowsFormsHost? host = null;
+        try
+        {
+            glControl = new SKGLControl
+            {
+                Dock = System.Windows.Forms.DockStyle.Fill,
+                BackColor = System.Drawing.Color.FromArgb(10, 13, 18)
+            };
+            glControl.CreateControl();
+            host = new WindowsFormsHost
+            {
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
+                VerticalAlignment = System.Windows.VerticalAlignment.Stretch,
+                Child = glControl
+            };
+
+            _usingGpu = true;
+            _backendLocked = false;
+            _skiaCanvas = host;
+            _glControl = glControl;
+            _glHost = host;
+            glControl.PaintSurface += SkiaCanvas_PaintSurfaceGpu;
+            AttachWinFormsInputHandlers(glControl);
+            SkiaHost.Children.Clear();
+            SkiaHost.Children.Add(host);
+            AttachTooltip();
+            return true;
+        }
+        catch (Exception)
+        {
+            glControl?.Dispose();
+            host?.Dispose();
+            _usingGpu = false;
+            _glControl = null;
+            _glHost = null;
+            return false;
+        }
+    }
+
+    private void CreateCpuCanvas()
+    {
+        var element = new SKElement
+        {
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
+            VerticalAlignment = System.Windows.VerticalAlignment.Stretch
+        };
+
+        _usingGpu = false;
+        _backendLocked = true;
+        _glControl = null;
+        _glHost = null;
+        _skiaCanvas = element;
+        element.PaintSurface += SkiaCanvas_PaintSurface;
+        AttachInputHandlers(element);
+        SkiaHost.Children.Clear();
+        SkiaHost.Children.Add(element);
+        AttachTooltip();
+    }
+
+    private void AttachInputHandlers(UIElement element)
+    {
+        element.MouseDown += SkiaCanvas_MouseDown;
+        element.MouseMove += SkiaCanvas_MouseMove;
+        element.MouseUp += SkiaCanvas_MouseUp;
+        element.MouseLeave += SkiaCanvas_MouseLeave;
+    }
+
+    private void DetachInputHandlers(UIElement element)
+    {
+        element.MouseDown -= SkiaCanvas_MouseDown;
+        element.MouseMove -= SkiaCanvas_MouseMove;
+        element.MouseUp -= SkiaCanvas_MouseUp;
+        element.MouseLeave -= SkiaCanvas_MouseLeave;
+    }
+
+    private void AttachWinFormsInputHandlers(SKGLControl control)
+    {
+        control.MouseDown += SkiaCanvas_MouseDownWinForms;
+        control.MouseMove += SkiaCanvas_MouseMoveWinForms;
+        control.MouseUp += SkiaCanvas_MouseUpWinForms;
+        control.MouseLeave += SkiaCanvas_MouseLeaveWinForms;
+    }
+
+    private void DetachWinFormsInputHandlers(SKGLControl control)
+    {
+        control.MouseDown -= SkiaCanvas_MouseDownWinForms;
+        control.MouseMove -= SkiaCanvas_MouseMoveWinForms;
+        control.MouseUp -= SkiaCanvas_MouseUpWinForms;
+        control.MouseLeave -= SkiaCanvas_MouseLeaveWinForms;
+    }
+
+    private void AttachTooltip()
+    {
+        if (_spectrogramToolTip is null || _skiaCanvas is null)
+        {
+            return;
+        }
+
+        _spectrogramToolTip.PlacementTarget = _skiaCanvas;
+        ToolTipService.SetInitialShowDelay(_skiaCanvas, 0);
+        ToolTipService.SetShowDuration(_skiaCanvas, int.MaxValue);
+        _skiaCanvas.ToolTip = _spectrogramToolTip;
+    }
+
+    private void FallbackToCpu()
+    {
+        if (_backendLocked || !_usingGpu)
+        {
+            return;
+        }
+
+        _backendLocked = true;
+        if (_glControl is not null)
+        {
+            _glControl.PaintSurface -= SkiaCanvas_PaintSurfaceGpu;
+            DetachWinFormsInputHandlers(_glControl);
+            _glControl.Dispose();
+            _glControl = null;
+        }
+        if (_glHost is not null)
+        {
+            _glHost.Child = null;
+            SkiaHost.Children.Clear();
+            _glHost.Dispose();
+            _glHost = null;
+        }
+
+        CreateCpuCanvas();
     }
 
     private void OnRenderTick(object? sender, EventArgs e)
     {
         EnsureBuffers();
 
+        bool dataUpdated = false;
+        int analysisBins = _bufferAnalysisBins;
+        SpectrogramTransformType transformType = _plugin.TransformType;
+        float binResolutionHz = _plugin.ZoomFftBinResolution;
+        if (binResolutionHz <= 0f)
+        {
+            binResolutionHz = _lastBinResolutionHz;
+        }
+
         if (!_isPaused)
         {
             int dataVersion = _plugin.DataVersion;
             if (dataVersion != _lastDataVersion)
             {
-                if (_plugin.CopySpectrogramData(_spectrogram, _pitchTrack, _pitchConfidence,
+                bool overlayCopied = _plugin.CopySpectrogramData(_displayMagnitudes, _pitchTrack, _pitchConfidence,
                         _formantFrequencies, _formantBandwidths, _voicingStates, _harmonicFrequencies,
                         _waveformMin, _waveformMax, _hnrTrack, _cppTrack, _spectralCentroid,
-                        _spectralSlope, _spectralFlux))
+                        _spectralSlope, _spectralFlux);
+                if (overlayCopied)
+                {
+                    _latestFrameId = _plugin.LatestFrameId;
+                    _availableFrames = _plugin.AvailableFrames;
+                    CullReferenceLine();
+                }
+
+                bool linearCopied = _plugin.CopyLinearMagnitudes(_analysisMagnitudes,
+                    out analysisBins, out binResolutionHz, out transformType);
+                if (linearCopied)
+                {
+                    _lastBinResolutionHz = binResolutionHz;
+                }
+
+                bool reassignActive = _plugin.ReassignMode != SpectrogramReassignMode.Off;
+                if (overlayCopied && (reassignActive || linearCopied))
                 {
                     _lastDataVersion = dataVersion;
+                    dataUpdated = true;
                 }
             }
 
-            _latestFrameId = _plugin.LatestFrameId;
-            _availableFrames = _plugin.AvailableFrames;
-            CullReferenceLine();
+            if (_lastDataVersion == dataVersion)
+            {
+                _latestFrameId = _plugin.LatestFrameId;
+                _availableFrames = _plugin.AvailableFrames;
+                CullReferenceLine();
+            }
         }
 
-        SkiaCanvas.InvalidateVisual();
+        bool displayChanged = ConfigureDisplayPipeline(analysisBins, transformType, binResolutionHz);
+        if (displayChanged || dataUpdated)
+        {
+            bool reassignActive = _plugin.ReassignMode != SpectrogramReassignMode.Off;
+            if (reassignActive)
+            {
+                _displayPipeline.ProcessDisplayFrames(_displayMagnitudes, _spectrogram, _bufferFrameCount, _voicingStates);
+            }
+            else
+            {
+                _displayPipeline.ProcessFrames(_analysisMagnitudes, _spectrogram, _bufferFrameCount, _voicingStates);
+            }
+        }
+
+        InvalidateRenderSurface();
+    }
+
+    private void InvalidateRenderSurface()
+    {
+        if (_usingGpu)
+        {
+            _glControl?.Invalidate();
+            return;
+        }
+
+        _skiaCanvas?.InvalidateVisual();
     }
 
     private void EnsureBuffers()
     {
         int frames = Math.Max(1, _plugin.FrameCount);
         int bins = Math.Max(1, _plugin.DisplayBins);
+        int analysisBins = Math.Max(1, _plugin.AnalysisBins);
         int maxFormants = _plugin.MaxFormantCount;
         int maxHarmonics = _plugin.MaxHarmonicCount;
 
         _bufferFrameCount = frames;
         _bufferBins = bins;
+        _bufferAnalysisBins = analysisBins;
         _bufferMaxFormants = maxFormants;
         _bufferMaxHarmonics = maxHarmonics;
 
@@ -184,6 +417,19 @@ public partial class VocalSpectrographWindow : Window
         if (_spectrogram.Length != spectrogramLength)
         {
             _spectrogram = new float[spectrogramLength];
+            _lastDataVersion = -1;
+        }
+
+        if (_displayMagnitudes.Length != spectrogramLength)
+        {
+            _displayMagnitudes = new float[spectrogramLength];
+            _lastDataVersion = -1;
+        }
+
+        int analysisLength = frames * analysisBins;
+        if (_analysisMagnitudes.Length != analysisLength)
+        {
+            _analysisMagnitudes = new float[analysisLength];
             _lastDataVersion = -1;
         }
 
@@ -222,29 +468,167 @@ public partial class VocalSpectrographWindow : Window
             _lastDataVersion = -1;
         }
 
-        bool mappingChanged = _binFrequencies.Length != bins
-            || _lastScale != _plugin.Scale
-            || MathF.Abs(_lastMinFrequency - _plugin.MinFrequency) > 1e-3f
-            || MathF.Abs(_lastMaxFrequency - _plugin.MaxFrequency) > 1e-3f;
-
         if (_binFrequencies.Length != bins)
         {
             _binFrequencies = new float[bins];
-        }
-
-        if (mappingChanged)
-        {
-            _plugin.GetBinFrequencies(_binFrequencies);
-            _lastScale = _plugin.Scale;
-            _lastMinFrequency = _plugin.MinFrequency;
-            _lastMaxFrequency = _plugin.MaxFrequency;
+            _lastDataVersion = -1;
         }
     }
 
-    private void SkiaCanvas_PaintSurface(object sender, SKPaintSurfaceEventArgs e)
+    private bool ConfigureDisplayPipeline(int analysisBins, SpectrogramTransformType transformType, float binResolutionHz)
     {
-        var canvas = e.Surface.Canvas;
-        var size = new SKSize(e.Info.Width, e.Info.Height);
+        if (analysisBins <= 0 || _bufferBins <= 0)
+        {
+            return false;
+        }
+
+        float minHz = _plugin.MinFrequency;
+        float maxHz = _plugin.MaxFrequency;
+        var scale = _plugin.Scale;
+        float minDb = _plugin.MinDb;
+        float maxDb = _plugin.MaxDb;
+        var dynamicRangeMode = _plugin.DynamicRangeMode;
+        int displayBins = _bufferBins;
+        int sampleRate = _plugin.SampleRate;
+        int cqtBinsPerOctave = _plugin.CqtBinsPerOctave;
+
+        bool mappingChanged = displayBins != _lastDisplayBins
+            || analysisBins != _lastAnalysisBins
+            || transformType != _lastTransformType
+            || scale != _lastScale
+            || MathF.Abs(minHz - _lastMinFrequency) > 1e-3f
+            || MathF.Abs(maxHz - _lastMaxFrequency) > 1e-3f
+            || (transformType == SpectrogramTransformType.Cqt && cqtBinsPerOctave != _lastCqtBinsPerOctave);
+
+        bool processingChanged = MathF.Abs(minDb - _lastMinDb) > 1e-3f
+            || MathF.Abs(maxDb - _lastMaxDb) > 1e-3f
+            || dynamicRangeMode != _lastDynamicRangeMode;
+
+        bool mappingApplied = false;
+        if (mappingChanged)
+        {
+            switch (transformType)
+            {
+                case SpectrogramTransformType.Cqt:
+                    if (TryGetCqtFrequencies(analysisBins, out var cqtFrequencies))
+                    {
+                        _displayPipeline.ConfigureForCqt(cqtFrequencies, displayBins, minHz, maxHz, scale,
+                            minDb, maxDb, dynamicRangeMode);
+                        mappingApplied = true;
+                    }
+                    break;
+                case SpectrogramTransformType.ZoomFft:
+                    if (binResolutionHz > 0f)
+                    {
+                        _displayPipeline.ConfigureForZoomFft(analysisBins, displayBins, sampleRate, minHz, maxHz, scale,
+                            minDb, maxDb, dynamicRangeMode, binResolutionHz);
+                        mappingApplied = true;
+                    }
+                    break;
+                default:
+                    _displayPipeline.ConfigureForFft(analysisBins, displayBins, sampleRate, minHz, maxHz, scale,
+                        minDb, maxDb, dynamicRangeMode);
+                    mappingApplied = true;
+                    break;
+            }
+        }
+        else if (processingChanged)
+        {
+            _displayPipeline.UpdateProcessing(minDb, maxDb, dynamicRangeMode);
+        }
+
+        if (mappingApplied)
+        {
+            UpdateBinFrequencies();
+            _lastDisplayBins = displayBins;
+            _lastAnalysisBins = analysisBins;
+            _lastTransformType = transformType;
+            _lastScale = scale;
+            _lastMinFrequency = minHz;
+            _lastMaxFrequency = maxHz;
+            _lastCqtBinsPerOctave = cqtBinsPerOctave;
+        }
+
+        if (mappingApplied || processingChanged)
+        {
+            _lastMinDb = minDb;
+            _lastMaxDb = maxDb;
+            _lastDynamicRangeMode = dynamicRangeMode;
+        }
+
+        return mappingApplied || processingChanged;
+    }
+
+    private bool TryGetCqtFrequencies(int analysisBins, out ReadOnlySpan<float> frequencies)
+    {
+        if (analysisBins <= 0)
+        {
+            frequencies = ReadOnlySpan<float>.Empty;
+            return false;
+        }
+
+        if (_cqtFrequencies.Length < analysisBins)
+        {
+            _cqtFrequencies = new float[analysisBins];
+        }
+
+        int count = _plugin.GetCqtFrequencies(_cqtFrequencies);
+        if (count <= 0)
+        {
+            frequencies = ReadOnlySpan<float>.Empty;
+            return false;
+        }
+
+        if (count > _cqtFrequencies.Length)
+        {
+            _cqtFrequencies = new float[count];
+            count = _plugin.GetCqtFrequencies(_cqtFrequencies);
+        }
+
+        frequencies = _cqtFrequencies.AsSpan(0, Math.Min(count, _cqtFrequencies.Length));
+        return count > 0;
+    }
+
+    private void UpdateBinFrequencies()
+    {
+        var centers = _displayPipeline.CenterFrequencies;
+        if (centers.Length == 0)
+        {
+            return;
+        }
+
+        if (_binFrequencies.Length != centers.Length)
+        {
+            _binFrequencies = new float[centers.Length];
+        }
+
+        centers.CopyTo(_binFrequencies);
+    }
+
+    private void SkiaCanvas_PaintSurfaceGpu(object? sender, DesktopPaintGLSurfaceEventArgs e)
+    {
+        if (!_backendLocked)
+        {
+            if (_glControl?.GRContext is null)
+            {
+                FallbackToCpu();
+                return;
+            }
+
+            _backendLocked = true;
+        }
+
+        RenderSurface(e.Surface.Canvas, e.Info);
+    }
+
+    private void SkiaCanvas_PaintSurface(object? sender, WpfPaintSurfaceEventArgs e)
+    {
+        RenderSurface(e.Surface.Canvas, e.Info);
+    }
+
+    private void RenderSurface(SKCanvas canvas, SKImageInfo info)
+    {
+        var size = new SKSize(info.Width, info.Height);
         float dpiScale = GetDpiScale();
 
         var state = new VocalSpectrographState(
@@ -295,7 +679,6 @@ public partial class VocalSpectrographWindow : Window
             LatestFrameId: _latestFrameId,
             AvailableFrames: _availableFrames,
             ReferenceFrameId: _referenceFrameId,
-            HoveredKnob: _hoveredKnob,
             DataVersion: _lastDataVersion,
             PresetName: _presetHelper.CurrentPresetName,
             Spectrogram: _spectrogram,
@@ -320,204 +703,264 @@ public partial class VocalSpectrographWindow : Window
         _renderer.Render(canvas, size, dpiScale, state);
     }
 
-    private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
+    private void SkiaCanvas_MouseDown(object? sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left || _skiaCanvas is null)
+        {
+            return;
+        }
+
+        var pos = e.GetPosition(_skiaCanvas);
+        bool handled = HandlePointerDown((float)pos.X, (float)pos.Y);
+        if (handled)
+        {
+            e.Handled = true;
+        }
+    }
+
+    private void SkiaCanvas_MouseMove(object? sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (_skiaCanvas is null)
+        {
+            return;
+        }
+
+        var pos = e.GetPosition(_skiaCanvas);
+        HandlePointerMove((float)pos.X, (float)pos.Y, e.LeftButton == MouseButtonState.Pressed);
+    }
+
+    private void SkiaCanvas_MouseLeave(object? sender, System.Windows.Input.MouseEventArgs e)
+    {
+        HandlePointerLeave();
+    }
+
+    private void SkiaCanvas_MouseUp(object? sender, MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Left)
         {
             return;
         }
 
-        var pos = e.GetPosition(SkiaCanvas);
-        float x = (float)pos.X;
-        float y = (float)pos.Y;
+        HandlePointerUp();
+    }
 
+    private void SkiaCanvas_MouseDownWinForms(object? sender, System.Windows.Forms.MouseEventArgs e)
+    {
+        if (e.Button != System.Windows.Forms.MouseButtons.Left)
+        {
+            return;
+        }
+
+        var (x, y) = ToDipPoint(e.X, e.Y);
+        HandlePointerDown(x, y);
+    }
+
+    private void SkiaCanvas_MouseMoveWinForms(object? sender, System.Windows.Forms.MouseEventArgs e)
+    {
+        var (x, y) = ToDipPoint(e.X, e.Y);
+        bool leftDown = (e.Button & System.Windows.Forms.MouseButtons.Left) != 0;
+        HandlePointerMove(x, y, leftDown);
+    }
+
+    private void SkiaCanvas_MouseUpWinForms(object? sender, System.Windows.Forms.MouseEventArgs e)
+    {
+        if (e.Button != System.Windows.Forms.MouseButtons.Left)
+        {
+            return;
+        }
+
+        HandlePointerUp();
+    }
+
+    private void SkiaCanvas_MouseLeaveWinForms(object? sender, EventArgs e)
+    {
+        HandlePointerLeave();
+    }
+
+    private bool HandlePointerDown(float x, float y)
+    {
         var hit = _renderer.HitTest(x, y);
         switch (hit.Area)
         {
             case SpectrographHitArea.TitleBar:
                 DragMove();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.CloseButton:
                 Close();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.BypassButton:
                 _bypassCallback(!_plugin.IsBypassed);
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.FftButton:
                 CycleFftSize();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.WindowButton:
                 CycleWindow();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.OverlapButton:
                 CycleOverlap();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.ScaleButton:
                 CycleScale();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.ColorButton:
                 CycleColorMap();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.ReassignButton:
                 CycleReassignMode();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.ClarityButton:
                 CycleClarityMode();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.PitchAlgorithmButton:
                 CyclePitchAlgorithm();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.AxisModeButton:
                 CycleAxisMode();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.SmoothingModeButton:
                 CycleSmoothingMode();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.PauseButton:
                 TogglePause();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.PresetDropdown:
-                _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
-                e.Handled = true;
-                break;
+                if (_skiaCanvas is not null)
+                {
+                    _presetHelper.ShowPresetMenu(_skiaCanvas, _renderer.GetPresetDropdownRect());
+                }
+                return true;
             case SpectrographHitArea.PresetSave:
-                _presetHelper.ShowSaveMenu(SkiaCanvas, this);
-                e.Handled = true;
-                break;
+                if (_skiaCanvas is not null)
+                {
+                    _presetHelper.ShowSaveMenu(_skiaCanvas, this);
+                }
+                return true;
             case SpectrographHitArea.PitchToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowPitchIndex, _plugin.ShowPitch);
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.FormantToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowFormantsIndex, _plugin.ShowFormants);
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.HarmonicToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowHarmonicsIndex, _plugin.ShowHarmonics);
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.VoicingToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowVoicingIndex, _plugin.ShowVoicing);
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.PreEmphasisToggle:
                 ToggleParameter(VocalSpectrographPlugin.PreEmphasisIndex, _plugin.PreEmphasisEnabled);
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.HpfToggle:
                 ToggleParameter(VocalSpectrographPlugin.HighPassEnabledIndex, _plugin.HighPassEnabled);
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.RangeToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowRangeIndex, _plugin.ShowRange);
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.GuidesToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowGuidesIndex, _plugin.ShowGuides);
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.VoiceRangeButton:
                 CycleVoiceRange();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.NormalizationButton:
                 CycleNormalizationMode();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.DynamicRangeButton:
                 CycleDynamicRangeMode();
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.WaveformToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowWaveformIndex, _plugin.ShowWaveform);
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.SpectrumToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowSpectrumIndex, _plugin.ShowSpectrum);
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.PitchMeterToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowPitchMeterIndex, _plugin.ShowPitchMeter);
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.VowelToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowVowelSpaceIndex, _plugin.ShowVowelSpace);
-                e.Handled = true;
-                break;
+                return true;
             case SpectrographHitArea.Spectrogram:
-                if (TrySetReferenceLine(x))
-                {
-                    e.Handled = true;
-                }
-                break;
+                return TrySetReferenceLine(x);
             case SpectrographHitArea.Knob:
                 _activeKnob = hit.KnobIndex;
                 _dragStartY = y;
                 _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
-                SkiaCanvas.CaptureMouse();
-                e.Handled = true;
-                break;
+                CapturePointer();
+                return true;
+            default:
+                return false;
         }
     }
 
-    private void SkiaCanvas_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    private void HandlePointerMove(float x, float y, bool leftDown)
     {
-        var pos = e.GetPosition(SkiaCanvas);
-        float x = (float)pos.X;
-        float y = (float)pos.Y;
-
-        if (_activeKnob >= 0 && e.LeftButton == MouseButtonState.Pressed)
+        if (_activeKnob >= 0 && leftDown)
         {
             float deltaY = _dragStartY - y;
             float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.004f);
             ApplyKnobValue(_activeKnob, newNormalized);
             SetTooltip(null);
-            e.Handled = true;
+            return;
+        }
+
+        var hit = _renderer.HitTest(x, y);
+        _hoveredKnob = hit.Area == SpectrographHitArea.Knob ? hit.KnobIndex : -1;
+        if (hit.Area == SpectrographHitArea.Spectrogram)
+        {
+            UpdateSpectrogramTooltip(x, y);
         }
         else
         {
-            var hit = _renderer.HitTest(x, y);
-            _hoveredKnob = hit.Area == SpectrographHitArea.Knob ? hit.KnobIndex : -1;
-            if (hit.Area == SpectrographHitArea.Spectrogram)
-            {
-                UpdateSpectrogramTooltip(x, y);
-            }
-            else
-            {
-                SetTooltip(null);
-            }
+            SetTooltip(null);
         }
     }
 
-    private void SkiaCanvas_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    private void HandlePointerLeave()
     {
         _hoveredKnob = -1;
         SetTooltip(null);
     }
 
-    private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
+    private void HandlePointerUp()
     {
-        if (e.ChangedButton != MouseButton.Left)
+        _activeKnob = -1;
+        ReleasePointer();
+    }
+
+    private void CapturePointer()
+    {
+        if (_usingGpu)
         {
+            if (_glControl is not null)
+            {
+                _glControl.Capture = true;
+            }
             return;
         }
 
-        _activeKnob = -1;
-        SkiaCanvas.ReleaseMouseCapture();
+        _skiaCanvas?.CaptureMouse();
+    }
+
+    private void ReleasePointer()
+    {
+        if (_usingGpu)
+        {
+            if (_glControl is not null)
+            {
+                _glControl.Capture = false;
+            }
+            return;
+        }
+
+        _skiaCanvas?.ReleaseMouseCapture();
+    }
+
+    private (float x, float y) ToDipPoint(int x, int y)
+    {
+        float dpiScale = GetDpiScale();
+        return (x / dpiScale, y / dpiScale);
     }
 
     private float GetKnobNormalizedValue(int knobIndex)
@@ -740,6 +1183,8 @@ public partial class VocalSpectrographWindow : Window
     private void ClearLocalBuffers()
     {
         Array.Clear(_spectrogram, 0, _spectrogram.Length);
+        Array.Clear(_displayMagnitudes, 0, _displayMagnitudes.Length);
+        Array.Clear(_analysisMagnitudes, 0, _analysisMagnitudes.Length);
         Array.Clear(_pitchTrack, 0, _pitchTrack.Length);
         Array.Clear(_pitchConfidence, 0, _pitchConfidence.Length);
         Array.Clear(_formantFrequencies, 0, _formantFrequencies.Length);

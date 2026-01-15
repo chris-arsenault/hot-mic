@@ -21,10 +21,6 @@ public partial class GainWindow : Window
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
 
-    private bool _isKnobActive;
-    private float _dragStartY;
-    private float _dragStartValue;
-    private bool _isKnobHovered;
     private float _smoothedInputLevel;
     private float _smoothedOutputLevel;
 
@@ -40,6 +36,13 @@ public partial class GainWindow : Window
             PluginPresetManager.Default,
             ApplyPreset,
             GetCurrentParameters);
+
+        // Wire up knob value changes
+        _renderer.GainKnob.ValueChanged += value =>
+        {
+            _parameterCallback(GainPlugin.GainIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
 
         var preferredSize = GainRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -79,7 +82,6 @@ public partial class GainWindow : Window
             IsPhaseInverted: _plugin.IsPhaseInverted,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
-            IsKnobHovered: _isKnobHovered,
             PresetName: _presetHelper.CurrentPresetName
         );
 
@@ -88,12 +90,21 @@ public partial class GainWindow : Window
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Let the knob handle its own input (drag, right-click edit)
+        if (_renderer.GainKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+        {
+            if (_renderer.GainKnob.IsDragging)
+                SkiaCanvas.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.ChangedButton != MouseButton.Left)
+            return;
 
         var hit = _renderer.HitTest(x, y);
 
@@ -130,14 +141,6 @@ public partial class GainWindow : Window
                 _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
-
-            case GainHitArea.Knob:
-                _isKnobActive = true;
-                _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue();
-                SkiaCanvas.CaptureMouse();
-                e.Handled = true;
-                break;
         }
     }
 
@@ -147,41 +150,16 @@ public partial class GainWindow : Window
         float x = (float)pos.X;
         float y = (float)pos.Y;
 
-        if (_isKnobActive && e.LeftButton == MouseButtonState.Pressed)
-        {
-            float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.004f);
-            ApplyKnobValue(newNormalized);
-            e.Handled = true;
-        }
-        else
-        {
-            var hit = _renderer.HitTest(x, y);
-            _isKnobHovered = hit.Area == GainHitArea.Knob;
-        }
+        // Let the knob handle drag and hover
+        _renderer.GainKnob.HandleMouseMove(x, y, e.LeftButton == MouseButtonState.Pressed);
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
+        _renderer.GainKnob.HandleMouseUp(e.ChangedButton);
 
-        _isKnobActive = false;
-        SkiaCanvas.ReleaseMouseCapture();
-    }
-
-    private float GetKnobNormalizedValue()
-    {
-        // -24 to +24 dB maps to 0 to 1
-        return (_plugin.GainDb + 24f) / 48f;
-    }
-
-    private void ApplyKnobValue(float normalizedValue)
-    {
-        // 0 to 1 maps to -24 to +24 dB
-        float gainDb = -24f + normalizedValue * 48f;
-        _parameterCallback(GainPlugin.GainIndex, gainDb);
-        _presetHelper.MarkAsCustom();
+        if (e.ChangedButton == MouseButton.Left)
+            SkiaCanvas.ReleaseMouseCapture();
     }
 
     private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)

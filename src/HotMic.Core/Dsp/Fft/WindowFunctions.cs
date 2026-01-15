@@ -18,7 +18,8 @@ public enum WindowFunction
 public static class WindowFunctions
 {
     private const float TwoPi = MathF.PI * 2f;
-    private const float DefaultGaussianSigma = 0.4f;
+    // Sigma 0.25 ensures endpoint values ~0.0003 (near zero) to reduce frame-to-frame variation
+    private const float DefaultGaussianSigma = 0.25f;
     private const float DefaultKaiserBeta = 9f;
 
     /// <summary>

@@ -76,8 +76,15 @@ public sealed class SpectrogramHpssProcessor
     /// </summary>
     public void Apply(float[] input, float[] output, float amount)
     {
-        int bins = input.Length;
-        if (bins == 0)
+        Apply(input, output, amount, input.Length);
+    }
+
+    /// <summary>
+    /// Apply harmonic/percussive separation with explicit bin count.
+    /// </summary>
+    public void Apply(float[] input, float[] output, float amount, int bins)
+    {
+        if (bins <= 0 || bins > input.Length)
         {
             return;
         }

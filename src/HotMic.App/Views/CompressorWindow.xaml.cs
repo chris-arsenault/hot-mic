@@ -20,10 +20,6 @@ public partial class CompressorWindow : Window
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
 
-    private int _activeKnob = -1;
-    private float _dragStartY;
-    private float _dragStartValue;
-    private int _hoveredKnob = -1;
     private float _smoothedInputLevel;
 
     public CompressorWindow(CompressorPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
@@ -38,6 +34,38 @@ public partial class CompressorWindow : Window
             PluginPresetManager.Default,
             ApplyPreset,
             GetCurrentParameters);
+
+        // Wire up knob value changes
+        _renderer.ThresholdKnob.ValueChanged += value =>
+        {
+            _parameterCallback(CompressorPlugin.ThresholdIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.RatioKnob.ValueChanged += value =>
+        {
+            _parameterCallback(CompressorPlugin.RatioIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.AttackKnob.ValueChanged += value =>
+        {
+            _parameterCallback(CompressorPlugin.AttackIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.ReleaseKnob.ValueChanged += value =>
+        {
+            _parameterCallback(CompressorPlugin.ReleaseIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.KneeKnob.ValueChanged += value =>
+        {
+            _parameterCallback(CompressorPlugin.KneeIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.MakeupKnob.ValueChanged += value =>
+        {
+            _parameterCallback(CompressorPlugin.MakeupIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
 
         var preferredSize = CompressorRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -81,8 +109,7 @@ public partial class CompressorWindow : Window
             SidechainHpfEnabled: _plugin.IsSidechainHpfEnabled,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
-            PresetName: _presetHelper.CurrentPresetName,
-            HoveredKnob: _hoveredKnob
+            PresetName: _presetHelper.CurrentPresetName
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
@@ -90,12 +117,25 @@ public partial class CompressorWindow : Window
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Let knobs handle their own input (drag, right-click edit)
+        foreach (var knob in new[] { _renderer.ThresholdKnob, _renderer.RatioKnob, _renderer.AttackKnob,
+                                      _renderer.ReleaseKnob, _renderer.KneeKnob, _renderer.MakeupKnob })
+        {
+            if (knob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+            {
+                if (knob.IsDragging)
+                    SkiaCanvas.CaptureMouse();
+                e.Handled = true;
+                return;
+            }
+        }
+
+        if (e.ChangedButton != MouseButton.Left)
+            return;
 
         var hit = _renderer.HitTest(x, y);
 
@@ -126,14 +166,6 @@ public partial class CompressorWindow : Window
                 e.Handled = true;
                 break;
 
-            case CompressorHitArea.Knob:
-                _activeKnob = hit.KnobIndex;
-                _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
-                SkiaCanvas.CaptureMouse();
-                e.Handled = true;
-                break;
-
             case CompressorHitArea.PresetDropdown:
                 _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
                 e.Handled = true;
@@ -152,72 +184,25 @@ public partial class CompressorWindow : Window
         float x = (float)pos.X;
         float y = (float)pos.Y;
 
-        if (_activeKnob >= 0 && e.LeftButton == MouseButtonState.Pressed)
+        // Let knobs handle drag and hover
+        foreach (var knob in new[] { _renderer.ThresholdKnob, _renderer.RatioKnob, _renderer.AttackKnob,
+                                      _renderer.ReleaseKnob, _renderer.KneeKnob, _renderer.MakeupKnob })
         {
-            float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.003f);
-            ApplyKnobValue(_activeKnob, newNormalized);
-            e.Handled = true;
-        }
-        else
-        {
-            var hit = _renderer.HitTest(x, y);
-            _hoveredKnob = hit.Area == CompressorHitArea.Knob ? hit.KnobIndex : -1;
+            knob.HandleMouseMove(x, y, e.LeftButton == MouseButtonState.Pressed);
         }
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
-        _activeKnob = -1;
-        SkiaCanvas.ReleaseMouseCapture();
-    }
-
-    private float GetKnobNormalizedValue(int knobIndex)
-    {
-        return knobIndex switch
+        // Let knobs handle mouse up
+        foreach (var knob in new[] { _renderer.ThresholdKnob, _renderer.RatioKnob, _renderer.AttackKnob,
+                                      _renderer.ReleaseKnob, _renderer.KneeKnob, _renderer.MakeupKnob })
         {
-            0 => (_plugin.ThresholdDb - (-60f)) / (0f - (-60f)),
-            1 => (_plugin.Ratio - 1f) / (20f - 1f),
-            2 => (_plugin.AttackMs - 0.1f) / (100f - 0.1f),
-            3 => (_plugin.ReleaseMs - 10f) / (1000f - 10f),
-            4 => _plugin.KneeDb / 12f,
-            5 => _plugin.MakeupDb / 24f,
-            _ => 0f
-        };
-    }
-
-    private void ApplyKnobValue(int knobIndex, float normalizedValue)
-    {
-        float value = knobIndex switch
-        {
-            0 => -60f + normalizedValue * 60f,             // Threshold: -60 to 0 dB
-            1 => 1f + normalizedValue * 19f,               // Ratio: 1:1 to 20:1
-            2 => 0.1f + normalizedValue * 99.9f,           // Attack: 0.1 to 100 ms
-            3 => 10f + normalizedValue * 990f,             // Release: 10 to 1000 ms
-            4 => normalizedValue * 12f,                     // Knee: 0 to 12 dB
-            5 => normalizedValue * 24f,                     // Makeup: 0 to 24 dB
-            _ => 0f
-        };
-
-        int paramIndex = knobIndex switch
-        {
-            0 => CompressorPlugin.ThresholdIndex,
-            1 => CompressorPlugin.RatioIndex,
-            2 => CompressorPlugin.AttackIndex,
-            3 => CompressorPlugin.ReleaseIndex,
-            4 => CompressorPlugin.KneeIndex,
-            5 => CompressorPlugin.MakeupIndex,
-            _ => -1
-        };
-
-        if (paramIndex >= 0)
-        {
-            _parameterCallback(paramIndex, value);
-            _presetHelper.MarkAsCustom();
+            knob.HandleMouseUp(e.ChangedButton);
         }
+
+        if (e.ChangedButton == MouseButton.Left)
+            SkiaCanvas.ReleaseMouseCapture();
     }
 
     private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)

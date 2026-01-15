@@ -21,23 +21,12 @@ public partial class FFTNoiseWindow : Window
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
 
-    private int _activeKnob = -1;
-    private float _dragStartY;
-    private float _dragStartValue;
-    private int _hoveredKnob = -1;
-
     // Pre-allocated spectrum buffers
     private readonly float[] _inputSpectrum = new float[FFTNoiseRemovalPlugin.DisplayBins];
     private readonly float[] _inputPeaks = new float[FFTNoiseRemovalPlugin.DisplayBins];
     private readonly float[] _outputSpectrum = new float[FFTNoiseRemovalPlugin.DisplayBins];
     private readonly float[] _outputPeaks = new float[FFTNoiseRemovalPlugin.DisplayBins];
     private readonly float[] _noiseProfile = new float[FFTNoiseRemovalPlugin.DisplayBins];
-
-    // Knob parameter mapping: index -> (paramIndex, minValue, maxValue)
-    private static readonly (int paramIndex, float min, float max)[] KnobParams =
-    {
-        (FFTNoiseRemovalPlugin.ReductionIndex, 0f, 1f)      // 0: Reduction
-    };
 
     public FFTNoiseWindow(FFTNoiseRemovalPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback, Action learnToggleCallback)
     {
@@ -52,6 +41,13 @@ public partial class FFTNoiseWindow : Window
             PluginPresetManager.Default,
             ApplyPreset,
             GetCurrentParameters);
+
+        // Wire up knob value changes
+        _renderer.ReductionKnob.ValueChanged += value =>
+        {
+            _parameterCallback(FFTNoiseRemovalPlugin.ReductionIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
 
         var preferredSize = FFTNoiseRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -95,7 +91,6 @@ public partial class FFTNoiseWindow : Window
             OutputSpectrum: _outputSpectrum,
             OutputPeaks: _outputPeaks,
             NoiseProfile: _noiseProfile,
-            HoveredKnob: _hoveredKnob,
             PresetName: _presetHelper.CurrentPresetName
         );
 
@@ -104,12 +99,21 @@ public partial class FFTNoiseWindow : Window
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Let the knob handle its own input (drag, right-click edit)
+        if (_renderer.ReductionKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+        {
+            if (_renderer.ReductionKnob.IsDragging)
+                SkiaCanvas.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.ChangedButton != MouseButton.Left)
+            return;
 
         var hit = _renderer.HitTest(x, y);
 
@@ -135,14 +139,6 @@ public partial class FFTNoiseWindow : Window
                 e.Handled = true;
                 break;
 
-            case FFTNoiseHitArea.Knob:
-                _activeKnob = hit.KnobIndex;
-                _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
-                SkiaCanvas.CaptureMouse();
-                e.Handled = true;
-                break;
-
             case FFTNoiseHitArea.PresetDropdown:
                 _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
                 e.Handled = true;
@@ -161,58 +157,16 @@ public partial class FFTNoiseWindow : Window
         float x = (float)pos.X;
         float y = (float)pos.Y;
 
-        if (_activeKnob >= 0 && e.LeftButton == MouseButtonState.Pressed)
-        {
-            float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.004f);
-            ApplyKnobValue(_activeKnob, newNormalized);
-            e.Handled = true;
-        }
-        else
-        {
-            var hit = _renderer.HitTest(x, y);
-            _hoveredKnob = hit.Area == FFTNoiseHitArea.Knob ? hit.KnobIndex : -1;
-        }
+        // Let the knob handle drag and hover
+        _renderer.ReductionKnob.HandleMouseMove(x, y, e.LeftButton == MouseButtonState.Pressed);
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
+        _renderer.ReductionKnob.HandleMouseUp(e.ChangedButton);
 
-        _activeKnob = -1;
-        SkiaCanvas.ReleaseMouseCapture();
-    }
-
-    private float GetKnobNormalizedValue(int knobIndex)
-    {
-        if (knobIndex < 0 || knobIndex >= KnobParams.Length)
-            return 0f;
-
-        var (paramIndex, min, max) = KnobParams[knobIndex];
-        float value = GetPluginParamValue(paramIndex);
-        return (value - min) / (max - min);
-    }
-
-    private void ApplyKnobValue(int knobIndex, float normalizedValue)
-    {
-        if (knobIndex < 0 || knobIndex >= KnobParams.Length)
-            return;
-
-        normalizedValue = Math.Clamp(normalizedValue, 0f, 1f);
-        var (paramIndex, min, max) = KnobParams[knobIndex];
-        float value = min + normalizedValue * (max - min);
-        _parameterCallback(paramIndex, value);
-        _presetHelper.MarkAsCustom();
-    }
-
-    private float GetPluginParamValue(int paramIndex)
-    {
-        return paramIndex switch
-        {
-            FFTNoiseRemovalPlugin.ReductionIndex => _plugin.Reduction,
-            _ => 0f
-        };
+        if (e.ChangedButton == MouseButton.Left)
+            SkiaCanvas.ReleaseMouseCapture();
     }
 
     private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)

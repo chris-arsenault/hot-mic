@@ -20,13 +20,15 @@ public sealed class SaturationRenderer : IDisposable
     private const float WarmthOverdriveMax = 2f;
 
     private readonly PluginComponentTheme _theme;
-    private readonly RotaryKnob _knob;
     private readonly PluginPresetBar _presetBar;
     private readonly LevelMeter _inputMeter;
     private readonly LevelMeter _outputMeter;
     private readonly DynamicTransferCurveDisplay _transferCurve;
     private readonly NullDifferenceScope _nullScope;
     private readonly HarmonicAnalyzer _harmonicAnalyzer;
+
+    public KnobWidget WarmthKnob { get; }
+    public KnobWidget BlendKnob { get; }
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -48,19 +50,20 @@ public sealed class SaturationRenderer : IDisposable
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
-    private SKPoint _warmthKnobCenter;
-    private SKPoint _blendKnobCenter;
 
     public SaturationRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
-        _knob = new RotaryKnob(_theme);
         _presetBar = new PluginPresetBar(_theme);
         _inputMeter = new LevelMeter();
         _outputMeter = new LevelMeter();
         _transferCurve = new DynamicTransferCurveDisplay(_theme);
         _nullScope = new NullDifferenceScope(_theme);
         _harmonicAnalyzer = new HarmonicAnalyzer(_theme);
+
+        var knobStyle = KnobStyle.Standard;
+        WarmthKnob = new KnobWidget(KnobRadius, 0f, 100f, "WARMTH", "%", knobStyle, _theme) { ValueFormat = "0" };
+        BlendKnob = new KnobWidget(KnobRadius, 0f, 100f, "BLEND", "%", knobStyle, _theme) { ValueFormat = "0" };
 
         _backgroundPaint = new SKPaint
         {
@@ -277,14 +280,14 @@ public sealed class SaturationRenderer : IDisposable
         float knobY = meterY + 20;
 
         // Warmth knob
-        _warmthKnobCenter = new SKPoint(knobAreaX + KnobRadius, knobY);
-        float warmthNorm = state.WarmthPct / 100f;
-        _knob.Render(canvas, _warmthKnobCenter, KnobRadius, warmthNorm, "WARMTH", $"{state.WarmthPct:0}", "%", state.HoveredKnob == SaturationKnob.Warmth);
+        WarmthKnob.Center = new SKPoint(knobAreaX + KnobRadius, knobY);
+        WarmthKnob.Value = state.WarmthPct;
+        WarmthKnob.Render(canvas);
 
         // Blend knob
-        _blendKnobCenter = new SKPoint(knobAreaX + KnobRadius, knobY + 70);
-        float blendNorm = state.BlendPct / 100f;
-        _knob.Render(canvas, _blendKnobCenter, KnobRadius, blendNorm, "BLEND", $"{state.BlendPct:0}", "%", state.HoveredKnob == SaturationKnob.Blend);
+        BlendKnob.Center = new SKPoint(knobAreaX + KnobRadius, knobY + 70);
+        BlendKnob.Value = state.BlendPct;
+        BlendKnob.Render(canvas);
 
         // Dynamic Transfer curve (larger, shows real samples)
         float curveX = knobAreaX + KnobRadius * 2 + 24;
@@ -430,14 +433,10 @@ public sealed class SaturationRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new SaturationHitTest(SaturationHitArea.PresetSave, SaturationKnob.None);
 
-        float dx = x - _warmthKnobCenter.X;
-        float dy = y - _warmthKnobCenter.Y;
-        if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
+        if (WarmthKnob.HitTest(x, y))
             return new SaturationHitTest(SaturationHitArea.Knob, SaturationKnob.Warmth);
 
-        dx = x - _blendKnobCenter.X;
-        dy = y - _blendKnobCenter.Y;
-        if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
+        if (BlendKnob.HitTest(x, y))
             return new SaturationHitTest(SaturationHitArea.Knob, SaturationKnob.Blend);
 
         if (_titleBarRect.Contains(x, y))
@@ -454,8 +453,9 @@ public sealed class SaturationRenderer : IDisposable
     {
         _inputMeter.Dispose();
         _outputMeter.Dispose();
-        _knob.Dispose();
         _presetBar.Dispose();
+        WarmthKnob.Dispose();
+        BlendKnob.Dispose();
         _transferCurve.Dispose();
         _nullScope.Dispose();
         _harmonicAnalyzer.Dispose();
@@ -485,7 +485,6 @@ public record struct SaturationState(
     float OutputLevel,
     float LatencyMs,
     bool IsBypassed,
-    SaturationKnob HoveredKnob = SaturationKnob.None,
     string PresetName = "Custom",
     int SampleRate = 0,
     Func<float[], float[], float[], int>? GetTransferCurveSamples = null,
