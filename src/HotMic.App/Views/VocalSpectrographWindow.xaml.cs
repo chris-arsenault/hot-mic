@@ -14,7 +14,6 @@ using SkiaSharp;
 using SkiaSharp.Views.Desktop;
 using SkiaSharp.Views.WPF;
 using DesktopPaintGLSurfaceEventArgs = SkiaSharp.Views.Desktop.SKPaintGLSurfaceEventArgs;
-using WpfPaintSurfaceEventArgs = SkiaSharp.Views.WPF.SKPaintSurfaceEventArgs;
 using WpfToolTip = System.Windows.Controls.ToolTip;
 
 namespace HotMic.App.Views;
@@ -621,7 +620,7 @@ public partial class VocalSpectrographWindow : Window
         RenderSurface(e.Surface.Canvas, e.Info);
     }
 
-    private void SkiaCanvas_PaintSurface(object? sender, WpfPaintSurfaceEventArgs e)
+    private void SkiaCanvas_PaintSurface(object? sender, SKPaintSurfaceEventArgs e)
     {
         RenderSurface(e.Surface.Canvas, e.Info);
     }
