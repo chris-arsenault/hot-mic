@@ -519,14 +519,12 @@ public sealed partial class VocalSpectrographPlugin
             int decimatedLen = decimated1Len / 2;
             _lpcDecimator2.ProcessDownsample(_lpcDecimateBuffer1.AsSpan(0, decimated1Len), _lpcDecimatedBuffer.AsSpan(0, decimatedLen));
 
-            // Step 4: Apply pre-emphasis at 12kHz (after decimation for proper spectral balance)
-            _lpcPreEmphasisFilter.Reset();
-            for (int i = 0; i < decimatedLen; i++)
-            {
-                _lpcDecimatedBuffer[i] = _lpcPreEmphasisFilter.Process(_lpcDecimatedBuffer[i]);
-            }
+            // Note: No pre-emphasis for LPC at 12kHz - the decimated signal's natural
+            // spectral balance is better for formant extraction. Pre-emphasis at 0.97
+            // was causing low-frequency poles to have very low magnitudes (0.6-0.7)
+            // which got filtered out, missing F1 entirely.
 
-            // Step 5: Run LPC on decimated signal at 12kHz
+            // Step 4: Run LPC on decimated signal at 12kHz
             // At 12kHz, use order 10-12 for 4-5 formants (rule: order = 2*formants + 2)
             const int LpcOrderAt12kHz = 12;
             if (_lpcAnalyzer.Order != LpcOrderAt12kHz)
