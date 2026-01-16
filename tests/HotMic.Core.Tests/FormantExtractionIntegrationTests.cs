@@ -1,4 +1,5 @@
 using HotMic.Core.Dsp.Analysis.Formants;
+using Xunit;
 
 namespace HotMic.Core.Tests;
 

@@ -1,5 +1,6 @@
 using System.Numerics;
 using HotMic.Core.Dsp.Analysis.Formants;
+using Xunit;
 
 namespace HotMic.Core.Tests;
 
@@ -22,17 +23,23 @@ public class FormantTrackerTests
         double theta = Math.PI / 4;
         double r = 0.9;
 
-        // LPC coefficients for this: [1, -2r*cos(θ), r^2]
-        float[] lpcCoeffs = new float[3];
+        // FormantTracker minimum order is 4, so we need to pad the polynomial
+        // Original: z^2 - 2r*cos(θ)*z + r^2
+        // Padded: z^4 + 0*z^3 + (-2r*cos(θ))*z^2 + 0*z + r^2
+        // Actually, to have the same roots, we need (z^2 - 2r*cos(θ)*z + r^2) * z^2
+        // which adds two roots at z=0 (filtered out by magnitude check)
+        float[] lpcCoeffs = new float[5];
         lpcCoeffs[0] = 1.0f;
         lpcCoeffs[1] = (float)(-2 * r * Math.Cos(theta));
         lpcCoeffs[2] = (float)(r * r);
+        lpcCoeffs[3] = 0f;
+        lpcCoeffs[4] = 0f;
 
-        var tracker = new FormantTracker(2);
-        float[] freqs = new float[2];
-        float[] bws = new float[2];
+        var tracker = new FormantTracker(4);
+        float[] freqs = new float[4];
+        float[] bws = new float[4];
 
-        int count = tracker.Track(lpcCoeffs, 1000, freqs, bws, 0, 500, 2);
+        int count = tracker.Track(lpcCoeffs, 1000, freqs, bws, 0, 500, 4);
 
         // Should find one formant (only positive imaginary root counts)
         Assert.True(count >= 1, $"Expected at least 1 formant, got {count}");

@@ -137,15 +137,6 @@ public sealed class BeamSearchFormantTracker
         // Run beam search to find best assignment
         int resultCount = BeamSearch(maxOutput);
 
-        // Diagnostic logging
-        bool shouldLog = ++_diagCounter % 100 == 0;
-        if (shouldLog && resultCount > 0)
-        {
-            Console.WriteLine($"[BeamSearch] Found {resultCount} formants: " +
-                string.Join(", ", Enumerable.Range(0, resultCount)
-                    .Select(i => $"F{i + 1}={formantFrequencies[i]:F0}Hz")));
-        }
-
         // Copy results
         if (resultCount > 0 && _beamCount > 0)
         {
@@ -171,6 +162,15 @@ public sealed class BeamSearchFormantTracker
                     _prevFormants[i] = 0;
             }
             _hasPrevious = true;
+
+            // Diagnostic logging (after copy so we use _prevFormants instead of Span)
+            if (++_diagCounter % 100 == 0)
+            {
+                var parts = new string[outCount];
+                for (int i = 0; i < outCount; i++)
+                    parts[i] = $"F{i + 1}={_prevFormants[i]:F0}Hz";
+                Console.WriteLine($"[BeamSearch] Found {outCount} formants: {string.Join(", ", parts)}");
+            }
 
             return outCount;
         }
