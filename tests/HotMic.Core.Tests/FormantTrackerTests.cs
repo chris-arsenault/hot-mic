@@ -6,32 +6,27 @@ namespace HotMic.Core.Tests;
 
 /// <summary>
 /// Tests to verify polynomial root finding and formant extraction math.
-/// These are targeted verification tests for math correctness.
+/// Reference values computed externally with Python (see compute_reference_values.py).
 /// </summary>
 public class FormantTrackerTests
 {
+    // Pre-computed reference values (from Python: freq = angle * sr / (2*pi), bw = -sr/pi * ln(mag))
+    // At sr=12000: bw=100Hz -> mag=0.974160, bw=500Hz -> mag=0.877306, bw=1000Hz -> mag=0.769665
+    // At sr=1000, theta=π/4, r=0.9: freq=125Hz, bw=33.54Hz
+
     [Fact]
     public void PolynomialRoots_KnownQuadratic_FindsCorrectRoots()
     {
-        // Polynomial: z^2 - 1.8*cos(θ)*z + 0.81 = 0
-        // Has roots at r*e^(±jθ) where r = 0.9
-        // For θ = π/4 (45°), roots are 0.9*(cos(π/4) ± j*sin(π/4))
+        // Polynomial with known roots: r=0.9, theta=π/4 (45°)
+        // Pre-computed coefficients: z^2 - 2*0.9*cos(π/4)*z + 0.81
+        // = z^2 - 1.2727922...*z + 0.81
+        // Padded to order 4 by multiplying by z^2 (adds roots at z=0, filtered by magnitude)
 
-        // At sample rate 1000 Hz, angle π/4 corresponds to frequency:
-        // f = θ * fs / (2π) = (π/4) * 1000 / (2π) = 125 Hz
-
-        double theta = Math.PI / 4;
-        double r = 0.9;
-
-        // FormantTracker minimum order is 4, so we need to pad the polynomial
-        // Original: z^2 - 2r*cos(θ)*z + r^2
-        // Padded: z^4 + 0*z^3 + (-2r*cos(θ))*z^2 + 0*z + r^2
-        // Actually, to have the same roots, we need (z^2 - 2r*cos(θ)*z + r^2) * z^2
-        // which adds two roots at z=0 (filtered out by magnitude check)
+        // Pre-computed coefficient: -2 * 0.9 * cos(π/4) = -1.2727922061357855
         float[] lpcCoeffs = new float[5];
         lpcCoeffs[0] = 1.0f;
-        lpcCoeffs[1] = (float)(-2 * r * Math.Cos(theta));
-        lpcCoeffs[2] = (float)(r * r);
+        lpcCoeffs[1] = -1.2727922f;  // Pre-computed: -2 * 0.9 * cos(π/4)
+        lpcCoeffs[2] = 0.81f;        // Pre-computed: 0.9^2
         lpcCoeffs[3] = 0f;
         lpcCoeffs[4] = 0f;
 
@@ -41,56 +36,36 @@ public class FormantTrackerTests
 
         int count = tracker.Track(lpcCoeffs, 1000, freqs, bws, 0, 500, 4);
 
-        // Should find one formant (only positive imaginary root counts)
         Assert.True(count >= 1, $"Expected at least 1 formant, got {count}");
 
-        // The frequency should be close to 125 Hz
+        // Pre-computed expected: freq = (π/4) * 1000 / (2π) = 125 Hz
         Assert.InRange(freqs[0], 120f, 130f);
 
-        // Bandwidth should be based on magnitude 0.9:
-        // bw = -fs/π * ln(0.9) ≈ 33.5 Hz at fs=1000
-        float expectedBw = (float)(-1000 / Math.PI * Math.Log(0.9));
-        Assert.InRange(bws[0], expectedBw - 5, expectedBw + 5);
+        // Pre-computed expected: bw = -1000/π * ln(0.9) = 33.54 Hz
+        Assert.InRange(bws[0], 28f, 39f);
     }
 
     [Fact]
     public void PolynomialRoots_TwoFormants_FindsBoth()
     {
-        // Create LPC coefficients for two resonances
-        // Formant 1: 300 Hz, magnitude 0.95
-        // Formant 2: 1500 Hz, magnitude 0.90
-        int sampleRate = 12000;
+        // Pre-computed LPC coefficients for two resonances:
+        // Formant 1: 300 Hz, magnitude 0.95 (bw ≈ 196 Hz)
+        // Formant 2: 1500 Hz, magnitude 0.90 (bw ≈ 402 Hz)
+        // Sample rate: 12000 Hz
+        // Coefficients computed in Python by convolving two second-order sections
 
-        double f1 = 300, r1 = 0.95;
-        double f2 = 1500, r2 = 0.90;
-
-        double theta1 = 2 * Math.PI * f1 / sampleRate;
-        double theta2 = 2 * Math.PI * f2 / sampleRate;
-
-        // Each resonance contributes a second-order section:
-        // (z - r*e^jθ)(z - r*e^-jθ) = z^2 - 2r*cos(θ)*z + r^2
-        // Combined is 4th order
-
-        // Build the polynomial by multiplying two quadratics
-        double a1_1 = -2 * r1 * Math.Cos(theta1);
-        double a1_2 = r1 * r1;
-        double a2_1 = -2 * r2 * Math.Cos(theta2);
-        double a2_2 = r2 * r2;
-
-        // Convolve [1, a1_1, a1_2] with [1, a2_1, a2_2]
-        // Result: [1, a1_1+a2_1, a1_2+a1_1*a2_1+a2_2, a1_1*a2_2+a1_2*a2_1, a1_2*a2_2]
         float[] lpcCoeffs = new float[5];
         lpcCoeffs[0] = 1.0f;
-        lpcCoeffs[1] = (float)(a1_1 + a2_1);
-        lpcCoeffs[2] = (float)(a1_2 + a1_1 * a2_1 + a2_2);
-        lpcCoeffs[3] = (float)(a1_1 * a2_2 + a1_2 * a2_1);
-        lpcCoeffs[4] = (float)(a1_2 * a2_2);
+        lpcCoeffs[1] = -3.1494001f;   // Pre-computed
+        lpcCoeffs[2] = 4.1010318f;    // Pre-computed
+        lpcCoeffs[3] = -2.6687473f;   // Pre-computed
+        lpcCoeffs[4] = 0.731025f;     // Pre-computed (0.95^2 * 0.90^2)
 
         var tracker = new FormantTracker(4);
         float[] freqs = new float[4];
         float[] bws = new float[4];
 
-        int count = tracker.Track(lpcCoeffs, sampleRate, freqs, bws, 0, 6000, 4);
+        int count = tracker.Track(lpcCoeffs, 12000, freqs, bws, 0, 6000, 4);
 
         Assert.True(count >= 2, $"Expected at least 2 formants, got {count}");
 
@@ -99,6 +74,11 @@ public class FormantTrackerTests
 
         // Second formant should be near 1500 Hz
         Assert.InRange(freqs[1], 1450f, 1550f);
+
+        // Bandwidths should match expected values
+        // F1: ~196 Hz, F2: ~402 Hz
+        Assert.InRange(bws[0], 150f, 250f);
+        Assert.InRange(bws[1], 350f, 450f);
     }
 
     [Fact]
@@ -135,54 +115,48 @@ public class FormantTrackerTests
     }
 
     [Fact]
-    public void FrequencyFromAngle_CorrectFormula()
+    public void Track_SingleResonance_ExtractsCorrectBandwidth()
     {
-        // Verify the formula: freq = angle * sampleRate / (2 * PI)
-        int sampleRate = 12000;
-        double angle = Math.PI / 3; // 60 degrees
+        // Test that bandwidth extraction matches the magnitude-bandwidth relationship
+        // Pre-computed: at sr=12000, magnitude 0.95 -> bandwidth = 195.93 Hz
+        // Polynomial for single resonance at 1000 Hz, mag 0.95:
+        // theta = 2*pi*1000/12000 = 0.5236 rad
+        // coeffs: [1, -2*0.95*cos(0.5236), 0.95^2] = [1, -1.6454, 0.9025]
 
-        double expectedFreq = angle * sampleRate / (2 * Math.PI);
-        // = (π/3) * 12000 / (2π) = 12000/6 = 2000 Hz
+        float[] lpcCoeffs = new float[5];
+        lpcCoeffs[0] = 1.0f;
+        lpcCoeffs[1] = -1.6454f;  // Pre-computed: -2 * 0.95 * cos(2π*1000/12000)
+        lpcCoeffs[2] = 0.9025f;   // Pre-computed: 0.95^2
+        lpcCoeffs[3] = 0f;
+        lpcCoeffs[4] = 0f;
 
-        Assert.Equal(2000.0, expectedFreq, 1);
+        var tracker = new FormantTracker(4);
+        float[] freqs = new float[4];
+        float[] bws = new float[4];
+
+        int count = tracker.Track(lpcCoeffs, 12000, freqs, bws, 0, 6000, 4);
+
+        Assert.True(count >= 1, $"Expected at least 1 formant, got {count}");
+        Assert.InRange(freqs[0], 950f, 1050f);  // ~1000 Hz
+        Assert.InRange(bws[0], 180f, 210f);     // Pre-computed: 195.93 Hz
     }
 
-    [Fact]
-    public void BandwidthFromMagnitude_CorrectFormula()
+    [Theory]
+    [InlineData(0.974160, 100)]   // Pre-computed: mag -> bw at sr=12000
+    [InlineData(0.948987, 200)]
+    [InlineData(0.877306, 500)]
+    [InlineData(0.769665, 1000)]
+    [InlineData(0.675232, 1500)]
+    public void MagnitudeToBandwidth_MatchesPrecomputedValues(double magnitude, double expectedBw)
     {
-        // Verify the formula: bandwidth = -sampleRate / PI * ln(magnitude)
+        // Verify the magnitude-bandwidth relationship using pre-computed values
+        // Formula: bw = -sampleRate / π * ln(magnitude)
+        // These values were computed externally with Python
+
         int sampleRate = 12000;
-        double magnitude = 0.95;
+        double computedBw = -sampleRate / Math.PI * Math.Log(magnitude);
 
-        double expectedBw = -sampleRate / Math.PI * Math.Log(magnitude);
-        // = -12000 / π * ln(0.95) ≈ -12000 / 3.14159 * (-0.05129) ≈ 196 Hz
-
-        Assert.InRange(expectedBw, 190, 200);
-    }
-
-    [Fact]
-    public void MagnitudeThreshold_AtTypicalFormantBandwidths()
-    {
-        // At 12kHz sample rate, what magnitudes correspond to typical bandwidths?
-        int sampleRate = 12000;
-
-        // For bandwidth 100 Hz: mag = exp(-bw * π / sr) = exp(-100 * π / 12000)
-        double mag100 = Math.Exp(-100 * Math.PI / sampleRate);
-        Assert.InRange(mag100, 0.97, 0.98); // Should be about 0.974
-
-        // For bandwidth 200 Hz:
-        double mag200 = Math.Exp(-200 * Math.PI / sampleRate);
-        Assert.InRange(mag200, 0.94, 0.96); // Should be about 0.949
-
-        // For bandwidth 500 Hz:
-        double mag500 = Math.Exp(-500 * Math.PI / sampleRate);
-        Assert.InRange(mag500, 0.87, 0.89); // Should be about 0.877
-
-        // For bandwidth 1000 Hz (wide formant):
-        double mag1000 = Math.Exp(-1000 * Math.PI / sampleRate);
-        Assert.InRange(mag1000, 0.76, 0.78); // Should be about 0.769
-
-        // This shows why 0.80 threshold was filtering out F1!
-        // A formant with 1000 Hz bandwidth has magnitude ~0.77
+        // Allow 0.5 Hz tolerance for floating point
+        Assert.InRange(computedBw, expectedBw - 0.5, expectedBw + 0.5);
     }
 }
