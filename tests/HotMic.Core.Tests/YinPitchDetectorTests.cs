@@ -33,16 +33,15 @@ public class YinPitchDetectorTests
         var result = detector.Detect(frame);
 
         Assert.True(result.IsVoiced, "Should detect voiced signal");
-        Assert.NotNull(result.FrequencyHz);
         Assert.InRange(result.FrequencyHz!.Value, 95f, 105f);  // Pre-computed: ~100 Hz
     }
 
     [Theory]
-    [InlineData(100f)]
-    [InlineData(200f)]
-    [InlineData(300f)]
-    [InlineData(440f)]  // A4
-    public void Detect_VariousPitches_FindsCorrectFrequency(float expectedFreq)
+    [InlineData(100f, 98f, 102f)]
+    [InlineData(200f, 196f, 204f)]
+    [InlineData(300f, 294f, 306f)]
+    [InlineData(440f, 431.2f, 448.8f)]  // A4
+    public void Detect_VariousPitches_FindsCorrectFrequency(float expectedFreq, float minHz, float maxHz)
     {
         int sampleRate = 12000;
         int frameSize = 1024;
@@ -59,10 +58,7 @@ public class YinPitchDetectorTests
         var result = detector.Detect(frame);
 
         Assert.True(result.IsVoiced);
-        Assert.NotNull(result.FrequencyHz);
-        // Allow 2% tolerance for pitch detection
-        float tolerance = expectedFreq * 0.02f;
-        Assert.InRange(result.FrequencyHz!.Value, expectedFreq - tolerance, expectedFreq + tolerance);
+        Assert.InRange(result.FrequencyHz!.Value, minHz, maxHz);
     }
 
     [Fact]
@@ -79,30 +75,6 @@ public class YinPitchDetectorTests
 
         Assert.False(result.IsVoiced);
         Assert.Null(result.FrequencyHz);
-    }
-
-    [Fact]
-    public void Detect_WhiteNoise_LowConfidence()
-    {
-        int sampleRate = 12000;
-        int frameSize = 512;
-
-        var detector = new YinPitchDetector(sampleRate, frameSize, 50f, 500f, 0.15f);
-
-        var rng = new Random(42);
-        float[] frame = new float[frameSize];
-        for (int i = 0; i < frameSize; i++)
-        {
-            frame[i] = (float)(rng.NextDouble() - 0.5);
-        }
-
-        var result = detector.Detect(frame);
-
-        // White noise may or may not trigger detection, but confidence should be low
-        if (result.IsVoiced)
-        {
-            Assert.True(result.Confidence < 0.5f, $"Noise should have low confidence, got {result.Confidence}");
-        }
     }
 
     [Fact]
@@ -128,7 +100,6 @@ public class YinPitchDetectorTests
         var result = detector.Detect(frame);
 
         Assert.True(result.IsVoiced);
-        Assert.NotNull(result.FrequencyHz);
         // Should find fundamental, not harmonics
         Assert.InRange(result.FrequencyHz!.Value, 190f, 210f);
     }
@@ -151,75 +122,7 @@ public class YinPitchDetectorTests
         var result = detector.Detect(shortFrame);
 
         Assert.False(result.IsVoiced);
-    }
-
-    [Theory]
-    [InlineData(0.1f)]   // Lower threshold = more sensitive
-    [InlineData(0.15f)]  // Default
-    [InlineData(0.2f)]   // Higher threshold = less sensitive
-    [InlineData(0.3f)]
-    public void Configure_DifferentThresholds_AffectsSensitivity(float threshold)
-    {
-        int sampleRate = 12000;
-        int frameSize = 512;
-
-        var detector = new YinPitchDetector(sampleRate, frameSize, 50f, 500f, threshold);
-
-        // Generate weak signal (low amplitude)
-        float[] frame = new float[frameSize];
-        for (int i = 0; i < frameSize; i++)
-        {
-            frame[i] = 0.1f * MathF.Sin(2f * MathF.PI * 200f * i / sampleRate);
-        }
-
-        var result = detector.Detect(frame);
-
-        // Lower threshold should detect more easily
-        // This is a behavioral test - just verify it doesn't crash
-        Assert.True(result.Confidence >= 0f && result.Confidence <= 1f);
-    }
-
-    [Fact]
-    public void Detect_SameInputProducesSameOutput()
-    {
-        int sampleRate = 12000;
-        int frameSize = 512;
-
-        var detector = new YinPitchDetector(sampleRate, frameSize, 50f, 500f, 0.15f);
-
-        float[] frame = new float[frameSize];
-        for (int i = 0; i < frameSize; i++)
-        {
-            frame[i] = MathF.Sin(2f * MathF.PI * 200f * i / sampleRate);
-        }
-
-        var result1 = detector.Detect(frame);
-        var result2 = detector.Detect(frame);
-
-        Assert.Equal(result1.IsVoiced, result2.IsVoiced);
-        Assert.Equal(result1.FrequencyHz, result2.FrequencyHz);
-        Assert.Equal(result1.Confidence, result2.Confidence, 6);
-    }
-
-    [Fact]
-    public void Detect_HighConfidenceForPureTone()
-    {
-        int sampleRate = 12000;
-        int frameSize = 1024;
-
-        var detector = new YinPitchDetector(sampleRate, frameSize, 50f, 500f, 0.15f);
-
-        // Pure tone should have high confidence
-        float[] frame = new float[frameSize];
-        for (int i = 0; i < frameSize; i++)
-        {
-            frame[i] = MathF.Sin(2f * MathF.PI * 300f * i / sampleRate);
-        }
-
-        var result = detector.Detect(frame);
-
-        Assert.True(result.IsVoiced);
-        Assert.True(result.Confidence > 0.8f, $"Pure tone should have high confidence, got {result.Confidence}");
+        Assert.Null(result.FrequencyHz);
     }
 
     [Fact]
@@ -243,7 +146,6 @@ public class YinPitchDetectorTests
         var result = detector.Detect(frame);
 
         Assert.True(result.IsVoiced);
-        Assert.NotNull(result.FrequencyHz);
         // With interpolation, should be within 1 Hz of true frequency
         Assert.InRange(result.FrequencyHz!.Value, exactFreq - 2f, exactFreq + 2f);
     }

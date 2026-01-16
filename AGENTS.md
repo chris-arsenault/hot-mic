@@ -422,7 +422,9 @@ Testing for mathematical accuracy via **independent verification** is acceptable
    Assert.InRange(freqs[0], 120f, 130f);
    ```
 
-4. **Never re-implement the algorithm** - Tests must not compute expected values using the same formula being tested. This is invalid:
+4. **Direct production outputs only** - Tests must call the production method under test and compare its output to pre-computed constants. Do not compare one production method to another (no roundtrips, no internal consistency checks).
+
+5. **Never re-implement the algorithm** - Tests must not compute expected values using the same formula being tested. This is invalid:
    ```csharp
    // BAD: Re-implements the formula being tested
    double expected = -sampleRate / Math.PI * Math.Log(magnitude);
@@ -432,7 +434,9 @@ Testing for mathematical accuracy via **independent verification** is acceptable
    Assert.InRange(actual, 195.0, 197.0);  // Pre-computed: 195.93 Hz
    ```
 
-5. **Document reference source** - Include comments noting how values were computed (tool, formula, textbook reference).
+6. **No presence-only tests** - Avoid "does not throw", `NotNull`, or "range-only" checks without a concrete expected value. Every test should assert specific expected outputs (with tolerance).
+
+7. **Document reference source** - Include comments noting how values were computed (tool, formula, textbook reference).
 
 **Example test structure:**
 ```csharp

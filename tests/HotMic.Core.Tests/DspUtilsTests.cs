@@ -38,31 +38,19 @@ public class DspUtilsTests
     }
 
     [Fact]
-    public void LinearToDb_ZeroInput_ReturnsLargeNegative()
+    public void LinearToDb_ZeroInput_MatchesReferenceFloor()
     {
-        // Should not throw and should return a large negative value
+        // Pre-computed: clamp to 1e-10 -> 20*log10(1e-10) = -200 dB
         float result = DspUtils.LinearToDb(0f);
-        Assert.True(result < -100f, $"Expected large negative dB for 0 input, got {result}");
+        Assert.InRange(result, -200.1f, -199.9f);
     }
 
     [Fact]
-    public void LinearToDb_NegativeInput_ReturnsLargeNegative()
+    public void LinearToDb_NegativeInput_MatchesReferenceFloor()
     {
-        // Implementation clamps to floor (1e-10), so negative input treated as ~0
+        // Pre-computed: clamp to 1e-10 -> 20*log10(1e-10) = -200 dB
         float result = DspUtils.LinearToDb(-1f);
-        Assert.True(result < -100f);
-    }
-
-    [Fact]
-    public void DbToLinear_Roundtrip_RecoversOriginal()
-    {
-        float[] testValues = { -20f, -10f, -6f, -3f, 0f, 3f, 6f, 10f, 20f };
-        foreach (float db in testValues)
-        {
-            float linear = DspUtils.DbToLinear(db);
-            float recovered = DspUtils.LinearToDb(linear);
-            Assert.InRange(recovered, db - 0.01f, db + 0.01f);
-        }
+        Assert.InRange(result, -200.1f, -199.9f);
     }
 
     // Pre-computed time-to-coefficient: 1 - exp(-1/(time_s * sampleRate))
@@ -77,36 +65,4 @@ public class DspUtilsTests
         Assert.InRange(result, expected - 0.00001f, expected + 0.00001f);
     }
 
-    [Theory]
-    [InlineData(0f)]      // Zero time should clamp to minimum
-    [InlineData(-10f)]    // Negative time should clamp
-    public void TimeToCoefficient_EdgeCases_DoesNotThrow(float timeMs)
-    {
-        // Should not throw
-        float result = DspUtils.TimeToCoefficient(timeMs, 48000);
-        Assert.True(float.IsFinite(result));
-        Assert.True(result > 0f && result < 1f);
-    }
-
-    [Fact]
-    public void TimeToCoefficient_LongerTime_SmallerCoefficient()
-    {
-        // Longer time constants should produce smaller coefficients (slower response)
-        float coeff10ms = DspUtils.TimeToCoefficient(10f, 48000);
-        float coeff100ms = DspUtils.TimeToCoefficient(100f, 48000);
-        float coeff1000ms = DspUtils.TimeToCoefficient(1000f, 48000);
-
-        Assert.True(coeff10ms > coeff100ms, "10ms should have larger coeff than 100ms");
-        Assert.True(coeff100ms > coeff1000ms, "100ms should have larger coeff than 1000ms");
-    }
-
-    [Fact]
-    public void TimeToCoefficient_HigherSampleRate_SmallerCoefficient()
-    {
-        // Higher sample rate = more samples per time period = smaller per-sample coefficient
-        float coeff12k = DspUtils.TimeToCoefficient(10f, 12000);
-        float coeff48k = DspUtils.TimeToCoefficient(10f, 48000);
-
-        Assert.True(coeff12k > coeff48k, "12kHz should have larger coeff than 48kHz for same time");
-    }
 }

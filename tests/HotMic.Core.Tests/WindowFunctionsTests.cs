@@ -107,19 +107,6 @@ public class WindowFunctionsTests
     }
 
     [Fact]
-    public void Hann_IsSymmetric()
-    {
-        float[] window = new float[8];
-        WindowFunctions.FillHann(window);
-
-        // Hann should be symmetric
-        Assert.Equal(window[0], window[7], 6);
-        Assert.Equal(window[1], window[6], 6);
-        Assert.Equal(window[2], window[5], 6);
-        Assert.Equal(window[3], window[4], 6);
-    }
-
-    [Fact]
     public void Hann_EndpointsAreZero()
     {
         float[] window = new float[8];
@@ -156,51 +143,4 @@ public class WindowFunctionsTests
         Assert.Equal(1f, window[0]);
     }
 
-    [Fact]
-    public void Fill_Empty_DoesNotThrow()
-    {
-        float[] window = Array.Empty<float>();
-
-        // Should not throw
-        WindowFunctions.Fill(window, WindowFunction.Hann);
-        WindowFunctions.Fill(window, WindowFunction.Hamming);
-        WindowFunctions.Fill(window, WindowFunction.BlackmanHarris);
-    }
-
-    [Theory]
-    [InlineData(WindowFunction.Hann)]
-    [InlineData(WindowFunction.Hamming)]
-    [InlineData(WindowFunction.BlackmanHarris)]
-    [InlineData(WindowFunction.Gaussian)]
-    [InlineData(WindowFunction.Kaiser)]
-    public void Fill_AllTypes_ProduceValuesInZeroOneRange(WindowFunction type)
-    {
-        float[] window = new float[256];
-        WindowFunctions.Fill(window, type);
-
-        foreach (float value in window)
-        {
-            Assert.InRange(value, 0f, 1.001f);  // Small tolerance for floating point
-        }
-    }
-
-    [Theory]
-    [InlineData(WindowFunction.Hann)]
-    [InlineData(WindowFunction.Hamming)]
-    [InlineData(WindowFunction.BlackmanHarris)]
-    [InlineData(WindowFunction.Gaussian)]
-    [InlineData(WindowFunction.Kaiser)]
-    public void Fill_AllTypes_SameInputProducesSameOutput(WindowFunction type)
-    {
-        float[] window1 = new float[64];
-        float[] window2 = new float[64];
-
-        WindowFunctions.Fill(window1, type);
-        WindowFunctions.Fill(window2, type);
-
-        for (int i = 0; i < 64; i++)
-        {
-            Assert.Equal(window1[i], window2[i], 6);
-        }
-    }
 }

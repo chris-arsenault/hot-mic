@@ -1,4 +1,3 @@
-using System.Numerics;
 using HotMic.Core.Dsp.Analysis.Formants;
 using Xunit;
 
@@ -36,7 +35,7 @@ public class FormantTrackerTests
 
         int count = tracker.Track(lpcCoeffs, 1000, freqs, bws, 0, 500, 4);
 
-        Assert.True(count >= 1, $"Expected at least 1 formant, got {count}");
+        Assert.Equal(1, count);
 
         // Pre-computed expected: freq = (π/4) * 1000 / (2π) = 125 Hz
         Assert.InRange(freqs[0], 120f, 130f);
@@ -67,7 +66,7 @@ public class FormantTrackerTests
 
         int count = tracker.Track(lpcCoeffs, 12000, freqs, bws, 0, 6000, 4);
 
-        Assert.True(count >= 2, $"Expected at least 2 formants, got {count}");
+        Assert.Equal(2, count);
 
         // First formant should be near 300 Hz
         Assert.InRange(freqs[0], 280f, 320f);
@@ -136,27 +135,9 @@ public class FormantTrackerTests
 
         int count = tracker.Track(lpcCoeffs, 12000, freqs, bws, 0, 6000, 4);
 
-        Assert.True(count >= 1, $"Expected at least 1 formant, got {count}");
+        Assert.Equal(1, count);
         Assert.InRange(freqs[0], 950f, 1050f);  // ~1000 Hz
         Assert.InRange(bws[0], 180f, 210f);     // Pre-computed: 195.93 Hz
     }
 
-    [Theory]
-    [InlineData(0.974160, 100)]   // Pre-computed: mag -> bw at sr=12000
-    [InlineData(0.948987, 200)]
-    [InlineData(0.877306, 500)]
-    [InlineData(0.769665, 1000)]
-    [InlineData(0.675232, 1500)]
-    public void MagnitudeToBandwidth_MatchesPrecomputedValues(double magnitude, double expectedBw)
-    {
-        // Verify the magnitude-bandwidth relationship using pre-computed values
-        // Formula: bw = -sampleRate / π * ln(magnitude)
-        // These values were computed externally with Python
-
-        int sampleRate = 12000;
-        double computedBw = -sampleRate / Math.PI * Math.Log(magnitude);
-
-        // Allow 0.5 Hz tolerance for floating point
-        Assert.InRange(computedBw, expectedBw - 0.5, expectedBw + 0.5);
-    }
 }
