@@ -44,6 +44,11 @@ Index: `docs/technical/README.md`
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### UI/Core Consistency
+
+- UI must never present a state the core layer will not execute.
+- If core clamps or auto-adjusts parameters, the UI must mirror the enforced value immediately (auto-switch), so backend and UI stay in lockstep.
+
 ### Audio Thread Safety Rules
 
 **CRITICAL: The audio callback thread has strict requirements.**

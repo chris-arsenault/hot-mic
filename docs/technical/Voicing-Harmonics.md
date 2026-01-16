@@ -32,6 +32,7 @@ Logic: Voiced when confidence >= threshold and ZCR/flatness are below thresholds
 
 ## Real-time Considerations
 - Voicing and harmonic peak detection run per analysis frame with preallocated buffers.
+- When Pitch, Pitch Meter, Harmonics, Voicing, and Clarity are all off, voicing/harmonic work is skipped.
 
 Implementation refs: (src/HotMic.Core/Dsp/Analysis/VoicingDetector.cs,
  src/HotMic.Core/Dsp/Analysis/HarmonicPeakDetector.cs,

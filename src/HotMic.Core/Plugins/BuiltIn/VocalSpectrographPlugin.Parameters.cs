@@ -34,10 +34,10 @@ public sealed partial class VocalSpectrographPlugin
                 Index = OverlapIndex,
                 Name = "Overlap",
                 MinValue = 0.5f,
-                MaxValue = 0.875f,
-                DefaultValue = 0.75f,
+                MaxValue = 0.96875f,
+                DefaultValue = 0.875f, // 87.5% default for smoother display
                 Unit = "%",
-                FormatValue = value => $"{SelectOverlap(value) * 100f:0.#}%"
+                FormatValue = value => $"{SelectOverlap(value) * 100f:0.##}%"
             },
             new PluginParameter
             {
@@ -120,6 +120,15 @@ public sealed partial class VocalSpectrographPlugin
                 MinValue = 0f,
                 MaxValue = 1f,
                 DefaultValue = 1f,
+                Unit = ""
+            },
+            new PluginParameter
+            {
+                Index = ShowFormantBandwidthsIndex,
+                Name = "Formant Bandwidths",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 0f, // Default to dots-only like Praat
                 Unit = ""
             },
             new PluginParameter
@@ -456,6 +465,28 @@ public sealed partial class VocalSpectrographPlugin
     public SpectrogramAnalysisDescriptor? AnalysisDescriptor => Volatile.Read(ref _analysisDescriptor);
 
     /// <summary>
+    /// Gets discontinuity events that occurred at or after the specified frame ID.
+    /// Used by the renderer to display markers indicating parameter changes.
+    /// </summary>
+    /// <param name="oldestFrameId">Only return events at or after this frame ID.</param>
+    /// <returns>List of discontinuity events within the visible range.</returns>
+    public IReadOnlyList<DiscontinuityEvent> GetDiscontinuities(long oldestFrameId)
+    {
+        lock (_discontinuityLock)
+        {
+            var result = new List<DiscontinuityEvent>();
+            foreach (var evt in _discontinuityEvents)
+            {
+                if (evt.FrameId >= oldestFrameId)
+                {
+                    result.Add(evt);
+                }
+            }
+            return result;
+        }
+    }
+
+    /// <summary>
     /// Hop size in samples used for analysis.
     /// </summary>
     public int HopSize => Volatile.Read(ref _activeHopSize);
@@ -558,6 +589,8 @@ public sealed partial class VocalSpectrographPlugin
 
     public bool ShowFormants => Volatile.Read(ref _requestedShowFormants) != 0;
 
+    public bool ShowFormantBandwidths => Volatile.Read(ref _requestedShowFormantBandwidths) != 0;
+
     public bool ShowHarmonics => Volatile.Read(ref _requestedShowHarmonics) != 0;
 
     public HarmonicDisplayMode HarmonicDisplayMode =>
@@ -631,6 +664,9 @@ public sealed partial class VocalSpectrographPlugin
             case ShowFormantsIndex:
                 Interlocked.Exchange(ref _requestedShowFormants, value >= 0.5f ? 1 : 0);
                 break;
+            case ShowFormantBandwidthsIndex:
+                Interlocked.Exchange(ref _requestedShowFormantBandwidths, value >= 0.5f ? 1 : 0);
+                break;
             case ShowHarmonicsIndex:
                 Interlocked.Exchange(ref _requestedShowHarmonics, value >= 0.5f ? 1 : 0);
                 break;
@@ -674,7 +710,13 @@ public sealed partial class VocalSpectrographPlugin
                 Interlocked.Exchange(ref _requestedClaritySmoothing, Math.Clamp(value, 0f, 1f));
                 break;
             case PitchAlgorithmIndex:
-                Interlocked.Exchange(ref _requestedPitchAlgorithm, Math.Clamp((int)MathF.Round(value), 0, 4));
+                int pitchAlgorithm = Math.Clamp((int)MathF.Round(value), 0, 4);
+                if (pitchAlgorithm == (int)PitchDetectorType.Swipe
+                    && Volatile.Read(ref _requestedTransformType) == (int)SpectrogramTransformType.Cqt)
+                {
+                    pitchAlgorithm = (int)PitchDetectorType.Yin;
+                }
+                Interlocked.Exchange(ref _requestedPitchAlgorithm, pitchAlgorithm);
                 break;
             case AxisModeIndex:
                 Interlocked.Exchange(ref _requestedAxisMode, Math.Clamp((int)MathF.Round(value), 0, 2));
@@ -722,7 +764,13 @@ public sealed partial class VocalSpectrographPlugin
                 Interlocked.Exchange(ref _requestedDynamicRangeMode, Math.Clamp((int)MathF.Round(value), 0, 4));
                 break;
             case TransformTypeIndex:
-                Interlocked.Exchange(ref _requestedTransformType, Math.Clamp((int)MathF.Round(value), 0, 2));
+                int transformType = Math.Clamp((int)MathF.Round(value), 0, 2);
+                Interlocked.Exchange(ref _requestedTransformType, transformType);
+                if (transformType == (int)SpectrogramTransformType.Cqt
+                    && (PitchDetectorType)Math.Clamp(Volatile.Read(ref _requestedPitchAlgorithm), 0, 4) == PitchDetectorType.Swipe)
+                {
+                    Interlocked.Exchange(ref _requestedPitchAlgorithm, (int)PitchDetectorType.Yin);
+                }
                 break;
             case CqtBinsPerOctaveIndex:
                 Interlocked.Exchange(ref _requestedCqtBinsPerOctave, SelectDiscrete(value, CqtBinsPerOctaveOptions));

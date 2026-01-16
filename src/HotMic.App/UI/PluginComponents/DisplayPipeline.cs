@@ -29,6 +29,26 @@ public sealed class DisplayPipeline
     public int DisplayBins => _displayBins;
 
     /// <summary>
+    /// Whether the pipeline has been configured with valid analysis parameters.
+    /// </summary>
+    public bool IsConfigured => _configured;
+
+    /// <summary>
+    /// The frequency scale the mapper is configured with.
+    /// </summary>
+    public FrequencyScale ConfiguredScale => _mapper.Scale;
+
+    /// <summary>
+    /// Minimum frequency the mapper is configured with.
+    /// </summary>
+    public float ConfiguredMinHz => _mapper.MinFrequencyHz;
+
+    /// <summary>
+    /// Maximum frequency the mapper is configured with.
+    /// </summary>
+    public float ConfiguredMaxHz => _mapper.MaxFrequencyHz;
+
+    /// <summary>
     /// Center frequencies for each display bin.
     /// </summary>
     public ReadOnlySpan<float> CenterFrequencies => _mapper.CenterFrequencies;
@@ -175,6 +195,20 @@ public sealed class DisplayPipeline
             byte voicing = f < voicingStates.Length ? voicingStates[f] : (byte)VoicingState.Silence;
             NormalizeDisplayMagnitudes(src, dst, voicing);
         }
+    }
+
+    /// <summary>
+    /// Process a single display-resolution frame into normalized output.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public void ProcessDisplayFrame(ReadOnlySpan<float> displayMagnitudes, Span<float> normalizedOutput, byte voicingState)
+    {
+        if (!_configured || normalizedOutput.Length < _displayBins)
+        {
+            return;
+        }
+
+        NormalizeDisplayMagnitudes(displayMagnitudes, normalizedOutput, voicingState);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

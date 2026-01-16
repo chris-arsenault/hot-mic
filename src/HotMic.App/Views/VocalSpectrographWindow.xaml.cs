@@ -49,6 +49,9 @@ public partial class VocalSpectrographWindow : Window
     private string _currentTooltip = string.Empty;
 
     private int _lastDataVersion = -1;
+    private long _lastCopiedFrameId = -1;
+    private long _lastMappedFrameId = -1;
+    private bool _lastReassignActive;
     private float[] _spectrogram = Array.Empty<float>();
     private float[] _displayMagnitudes = Array.Empty<float>();
     private float[] _analysisMagnitudes = Array.Empty<float>();
@@ -67,6 +70,7 @@ public partial class VocalSpectrographWindow : Window
     private float[] _spectralSlope = Array.Empty<float>();
     private float[] _spectralFlux = Array.Empty<float>();
     private float[] _binFrequencies = Array.Empty<float>();
+    private IReadOnlyList<DiscontinuityEvent> _discontinuities = Array.Empty<DiscontinuityEvent>();
     private int _bufferFrameCount;
     private int _bufferBins;
     private int _bufferAnalysisBins;
@@ -100,7 +104,6 @@ public partial class VocalSpectrographWindow : Window
         WindowFunction.Gaussian,
         WindowFunction.Kaiser
     };
-    private static readonly float[] OverlapOptions = { 0.5f, 0.75f, 0.875f };
     private static readonly FrequencyScale[] Scales =
     {
         FrequencyScale.Linear,
@@ -320,19 +323,32 @@ public partial class VocalSpectrographWindow : Window
         return false;
     }
 
-    private bool HandleKnobMouseMove(float x, float y, bool leftDown)
+    private bool HandleKnobMouseMove(float x, float y, bool leftDown, bool shiftHeld = false)
     {
         bool anyHover = false;
         bool anyDragging = false;
 
         foreach (var knob in _renderer.AllKnobs)
         {
-            knob.HandleMouseMove(x, y, leftDown);
+            knob.HandleMouseMove(x, y, leftDown, shiftHeld);
             anyHover |= knob.IsHovered;
             anyDragging |= knob.IsDragging;
         }
 
         return anyHover || anyDragging;
+    }
+
+    private bool HandleKnobDoubleClick(float x, float y)
+    {
+        foreach (var knob in _renderer.AllKnobs)
+        {
+            if (knob.HandleDoubleClick(x, y))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void HandleKnobMouseUp(MouseButton button)
@@ -440,39 +456,83 @@ public partial class VocalSpectrographWindow : Window
         long copyTicks = 0;
         long mapTicks = 0;
 
-        EnsureBuffers();
+        bool buffersResized = EnsureBuffers();
+        if (buffersResized)
+        {
+            _lastCopiedFrameId = -1;
+            _lastMappedFrameId = -1;
+        }
 
         bool dataUpdated = false;
+        bool forceFullMap = false;
+        bool reassignActive = _plugin.ReassignMode != SpectrogramReassignMode.Off;
+        if (reassignActive != _lastReassignActive)
+        {
+            _lastCopiedFrameId = -1;
+            _lastMappedFrameId = -1;
+            _lastDataVersion = -1;
+            forceFullMap = true;
+            _lastReassignActive = reassignActive;
+        }
 
         if (!_isPaused)
         {
             int dataVersion = _plugin.DataVersion;
-            if (dataVersion != _lastDataVersion)
+            if (dataVersion != _lastDataVersion || buffersResized)
             {
                 long copyStartTicks = profiling ? Stopwatch.GetTimestamp() : 0;
-                bool overlayCopied = _plugin.CopySpectrogramData(_displayMagnitudes, _pitchTrack, _pitchConfidence,
-                        _formantFrequencies, _formantBandwidths, _voicingStates, _harmonicFrequencies,
-                        _harmonicMagnitudes, _waveformMin, _waveformMax, _hnrTrack, _cppTrack, _spectralCentroid,
-                        _spectralSlope, _spectralFlux);
-                if (overlayCopied)
-                {
-                    _latestFrameId = _plugin.LatestFrameId;
-                    _availableFrames = _plugin.AvailableFrames;
-                    CullReferenceLine();
-                }
+                bool overlayCopied = _plugin.CopySpectrogramUpdates(
+                    _lastCopiedFrameId,
+                    _displayMagnitudes, _pitchTrack, _pitchConfidence, _formantFrequencies, _formantBandwidths,
+                    _voicingStates, _harmonicFrequencies, _harmonicMagnitudes, _waveformMin, _waveformMax,
+                    _hnrTrack, _cppTrack, _spectralCentroid, _spectralSlope, _spectralFlux,
+                    out long latestFrameId, out int availableFrames, out bool overlayFullCopy);
 
-                bool linearCopied = _plugin.CopyLinearMagnitudes(_analysisMagnitudes,
-                    out _, out _, out _);
+                bool linearCopied = true;
+                bool linearFullCopy = false;
+                if (!reassignActive)
+                {
+                    linearCopied = _plugin.CopyLinearMagnitudesUpdates(
+                        _lastCopiedFrameId,
+                        _analysisMagnitudes,
+                        out _, out _, out _,
+                        out long linearLatestFrameId, out int linearAvailableFrames, out linearFullCopy);
+
+                    if (!overlayCopied && linearCopied)
+                    {
+                        latestFrameId = linearLatestFrameId;
+                        availableFrames = linearAvailableFrames;
+                    }
+                }
                 if (profiling)
                 {
                     copyTicks = Stopwatch.GetTimestamp() - copyStartTicks;
                 }
 
-                bool reassignActive = _plugin.ReassignMode != SpectrogramReassignMode.Off;
-                if (overlayCopied && (reassignActive || linearCopied))
+                if (overlayCopied)
                 {
-                    _lastDataVersion = dataVersion;
-                    dataUpdated = true;
+                    _latestFrameId = latestFrameId;
+                    _availableFrames = availableFrames;
+                    CullReferenceLine();
+
+                    if (_availableFrames > 0 && _latestFrameId >= 0)
+                    {
+                        long oldestFrameId = Math.Max(0, _latestFrameId - _availableFrames + 1);
+                        _discontinuities = _plugin.GetDiscontinuities(oldestFrameId);
+                    }
+                    else
+                    {
+                        _discontinuities = Array.Empty<DiscontinuityEvent>();
+                    }
+
+                    bool ready = reassignActive || linearCopied;
+                    if (ready)
+                    {
+                        _lastDataVersion = dataVersion;
+                        dataUpdated = _latestFrameId > _lastCopiedFrameId || overlayFullCopy || linearFullCopy;
+                        _lastCopiedFrameId = _latestFrameId;
+                        forceFullMap |= overlayFullCopy || linearFullCopy || buffersResized;
+                    }
                 }
             }
 
@@ -485,18 +545,15 @@ public partial class VocalSpectrographWindow : Window
         }
 
         bool displayChanged = ConfigureDisplayPipeline(_plugin.AnalysisDescriptor);
-        if (displayChanged || dataUpdated)
+        if (displayChanged)
+        {
+            forceFullMap = true;
+        }
+
+        if (displayChanged || dataUpdated || forceFullMap)
         {
             long mapStartTicks = profiling ? Stopwatch.GetTimestamp() : 0;
-            bool reassignActive = _plugin.ReassignMode != SpectrogramReassignMode.Off;
-            if (reassignActive)
-            {
-                _displayPipeline.ProcessDisplayFrames(_displayMagnitudes, _spectrogram, _bufferFrameCount, _voicingStates);
-            }
-            else
-            {
-                _displayPipeline.ProcessFrames(_analysisMagnitudes, _spectrogram, _bufferFrameCount, _voicingStates);
-            }
+            MapUpdatedFrames(reassignActive, forceFullMap);
             if (profiling)
             {
                 mapTicks = Stopwatch.GetTimestamp() - mapStartTicks;
@@ -517,6 +574,57 @@ public partial class VocalSpectrographWindow : Window
         }
 
         InvalidateRenderSurface();
+    }
+
+    private void MapUpdatedFrames(bool reassignActive, bool forceFullMap)
+    {
+        if (_latestFrameId < 0 || _availableFrames <= 0 || _bufferFrameCount <= 0)
+        {
+            _lastMappedFrameId = -1;
+            return;
+        }
+
+        int frameCapacity = _bufferFrameCount;
+        int displayBins = _bufferBins;
+        int analysisBins = _bufferAnalysisBins;
+
+        long oldestFrameId = _latestFrameId - _availableFrames + 1;
+        long startFrameId = forceFullMap ? oldestFrameId : _lastMappedFrameId + 1;
+        if (_lastMappedFrameId < oldestFrameId - 1)
+        {
+            startFrameId = oldestFrameId;
+        }
+
+        if (startFrameId > _latestFrameId)
+        {
+            return;
+        }
+
+        for (long frameId = startFrameId; frameId <= _latestFrameId; frameId++)
+        {
+            int ringIndex = (int)(frameId % frameCapacity);
+            if (ringIndex < 0)
+            {
+                ringIndex += frameCapacity;
+            }
+
+            if (reassignActive)
+            {
+                var src = _displayMagnitudes.AsSpan(ringIndex * displayBins, displayBins);
+                var dst = _spectrogram.AsSpan(ringIndex * displayBins, displayBins);
+                byte voicing = ringIndex < _voicingStates.Length ? _voicingStates[ringIndex] : (byte)VoicingState.Silence;
+                _displayPipeline.ProcessDisplayFrame(src, dst, voicing);
+            }
+            else
+            {
+                var src = _analysisMagnitudes.AsSpan(ringIndex * analysisBins, analysisBins);
+                var dst = _spectrogram.AsSpan(ringIndex * displayBins, displayBins);
+                byte voicing = ringIndex < _voicingStates.Length ? _voicingStates[ringIndex] : (byte)VoicingState.Silence;
+                _displayPipeline.ProcessFrame(src, dst, voicing);
+            }
+        }
+
+        _lastMappedFrameId = _latestFrameId;
     }
 
     private void InvalidateRenderSurface()
@@ -624,8 +732,9 @@ public partial class VocalSpectrographWindow : Window
             && e.Modifiers == (System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.Shift | System.Windows.Forms.Keys.Alt);
     }
 
-    private void EnsureBuffers()
+    private bool EnsureBuffers()
     {
+        bool resized = false;
         int frames = Math.Max(1, _plugin.FrameCount);
         int bins = Math.Max(1, _plugin.DisplayBins);
         int analysisBins = Math.Max(1, _plugin.AnalysisBins);
@@ -643,12 +752,14 @@ public partial class VocalSpectrographWindow : Window
         {
             _spectrogram = new float[spectrogramLength];
             _lastDataVersion = -1;
+            resized = true;
         }
 
         if (_displayMagnitudes.Length != spectrogramLength)
         {
             _displayMagnitudes = new float[spectrogramLength];
             _lastDataVersion = -1;
+            resized = true;
         }
 
         int analysisLength = frames * analysisBins;
@@ -656,6 +767,7 @@ public partial class VocalSpectrographWindow : Window
         {
             _analysisMagnitudes = new float[analysisLength];
             _lastDataVersion = -1;
+            resized = true;
         }
 
         if (_pitchTrack.Length != frames)
@@ -664,6 +776,7 @@ public partial class VocalSpectrographWindow : Window
             _pitchConfidence = new float[frames];
             _voicingStates = new byte[frames];
             _lastDataVersion = -1;
+            resized = true;
         }
 
         int formantLength = frames * maxFormants;
@@ -672,6 +785,7 @@ public partial class VocalSpectrographWindow : Window
             _formantFrequencies = new float[formantLength];
             _formantBandwidths = new float[formantLength];
             _lastDataVersion = -1;
+            resized = true;
         }
 
         int harmonicLength = frames * maxHarmonics;
@@ -680,6 +794,7 @@ public partial class VocalSpectrographWindow : Window
             _harmonicFrequencies = new float[harmonicLength];
             _harmonicMagnitudes = new float[harmonicLength];
             _lastDataVersion = -1;
+            resized = true;
         }
 
         if (_waveformMin.Length != frames)
@@ -692,13 +807,17 @@ public partial class VocalSpectrographWindow : Window
             _spectralSlope = new float[frames];
             _spectralFlux = new float[frames];
             _lastDataVersion = -1;
+            resized = true;
         }
 
         if (_binFrequencies.Length != bins)
         {
             _binFrequencies = new float[bins];
             _lastDataVersion = -1;
+            resized = true;
         }
+
+        return resized;
     }
 
     private bool ConfigureDisplayPipeline(SpectrogramAnalysisDescriptor? analysis)
@@ -849,6 +968,7 @@ public partial class VocalSpectrographWindow : Window
             UiTiming: new SpectrographUiTimingSnapshot(_uiTickUs, _uiCopyUs, _uiMapUs),
             ShowPitch: _plugin.ShowPitch,
             ShowFormants: _plugin.ShowFormants,
+            ShowFormantBandwidths: _plugin.ShowFormantBandwidths,
             ShowHarmonics: _plugin.ShowHarmonics,
             HarmonicDisplayMode: _plugin.HarmonicDisplayMode,
             ShowVoicing: _plugin.ShowVoicing,
@@ -878,7 +998,8 @@ public partial class VocalSpectrographWindow : Window
             SpectralFlux: _spectralFlux,
             BinFrequencies: _binFrequencies,
             MaxFormants: _bufferMaxFormants,
-            MaxHarmonics: _bufferMaxHarmonics
+            MaxHarmonics: _bufferMaxHarmonics,
+            Discontinuities: _discontinuities
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
@@ -894,6 +1015,16 @@ public partial class VocalSpectrographWindow : Window
         var pos = e.GetPosition(_skiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Handle double-click to reset knob to default
+        if (e.ChangedButton == MouseButton.Left && e.ClickCount == 2)
+        {
+            if (HandleKnobDoubleClick(x, y))
+            {
+                e.Handled = true;
+                return;
+            }
+        }
 
         if (TryHandleKnobMouseDown(x, y, e.ChangedButton))
         {
@@ -925,7 +1056,8 @@ public partial class VocalSpectrographWindow : Window
         }
 
         var pos = e.GetPosition(_skiaCanvas);
-        HandlePointerMove((float)pos.X, (float)pos.Y, e.LeftButton == MouseButtonState.Pressed);
+        bool shiftHeld = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
+        HandlePointerMove((float)pos.X, (float)pos.Y, e.LeftButton == MouseButtonState.Pressed, shiftHeld);
     }
 
     private void SkiaCanvas_MouseLeave(object? sender, System.Windows.Input.MouseEventArgs e)
@@ -942,6 +1074,16 @@ public partial class VocalSpectrographWindow : Window
     {
         var (x, y) = ToDipPoint(e.X, e.Y);
         var button = ToWpfMouseButton(e.Button);
+
+        // Handle double-click to reset knob to default
+        if (e.Button == System.Windows.Forms.MouseButtons.Left && e.Clicks == 2)
+        {
+            if (HandleKnobDoubleClick(x, y))
+            {
+                return;
+            }
+        }
+
         if (button.HasValue && TryHandleKnobMouseDown(x, y, button.Value))
         {
             if (button == MouseButton.Left)
@@ -963,7 +1105,8 @@ public partial class VocalSpectrographWindow : Window
     {
         var (x, y) = ToDipPoint(e.X, e.Y);
         bool leftDown = (e.Button & System.Windows.Forms.MouseButtons.Left) != 0;
-        HandlePointerMove(x, y, leftDown);
+        bool shiftHeld = System.Windows.Forms.Control.ModifierKeys.HasFlag(System.Windows.Forms.Keys.Shift);
+        HandlePointerMove(x, y, leftDown, shiftHeld);
     }
 
     private void SkiaCanvas_MouseUpWinForms(object? sender, System.Windows.Forms.MouseEventArgs e)
@@ -1122,12 +1265,12 @@ public partial class VocalSpectrographWindow : Window
     [DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
-    private void HandlePointerMove(float x, float y, bool leftDown)
+    private void HandlePointerMove(float x, float y, bool leftDown, bool shiftHeld = false)
     {
         // Update tooltip hover state for controls
         _renderer.UpdateTooltipHover(x, y);
 
-        if (HandleKnobMouseMove(x, y, leftDown))
+        if (HandleKnobMouseMove(x, y, leftDown, shiftHeld))
         {
             SetTooltip(null);
             return;
@@ -1232,6 +1375,10 @@ public partial class VocalSpectrographWindow : Window
             _ => SpectrogramTransformType.Fft
         };
         _parameterCallback(VocalSpectrographPlugin.TransformTypeIndex, (float)next);
+        if (next == SpectrogramTransformType.Cqt && _plugin.PitchAlgorithm == PitchDetectorType.Swipe)
+        {
+            _parameterCallback(VocalSpectrographPlugin.PitchAlgorithmIndex, (float)PitchDetectorType.Yin);
+        }
         _presetHelper.MarkAsCustom();
     }
 
@@ -1247,9 +1394,9 @@ public partial class VocalSpectrographWindow : Window
     private void CycleOverlap()
     {
         float current = _plugin.Overlap;
-        int index = Array.IndexOf(OverlapOptions, current);
-        int nextIndex = (index + 1) % OverlapOptions.Length;
-        _parameterCallback(VocalSpectrographPlugin.OverlapIndex, OverlapOptions[nextIndex]);
+        int index = Array.IndexOf(VocalSpectrographPlugin.OverlapOptions, current);
+        int nextIndex = (index + 1) % VocalSpectrographPlugin.OverlapOptions.Length;
+        _parameterCallback(VocalSpectrographPlugin.OverlapIndex, VocalSpectrographPlugin.OverlapOptions[nextIndex]);
         _presetHelper.MarkAsCustom();
     }
 
@@ -1299,14 +1446,19 @@ public partial class VocalSpectrographWindow : Window
 
     private void CyclePitchAlgorithm()
     {
+        bool allowSwipe = _plugin.TransformType != SpectrogramTransformType.Cqt;
         PitchDetectorType next = _plugin.PitchAlgorithm switch
         {
             PitchDetectorType.Yin => PitchDetectorType.Pyin,
             PitchDetectorType.Pyin => PitchDetectorType.Autocorrelation,
             PitchDetectorType.Autocorrelation => PitchDetectorType.Cepstral,
-            PitchDetectorType.Cepstral => PitchDetectorType.Swipe,
+            PitchDetectorType.Cepstral => allowSwipe ? PitchDetectorType.Swipe : PitchDetectorType.Yin,
             _ => PitchDetectorType.Yin
         };
+        if (!allowSwipe && next == PitchDetectorType.Swipe)
+        {
+            next = PitchDetectorType.Yin;
+        }
         _parameterCallback(VocalSpectrographPlugin.PitchAlgorithmIndex, (float)next);
         _presetHelper.MarkAsCustom();
     }
@@ -1412,6 +1564,8 @@ public partial class VocalSpectrographWindow : Window
         Array.Clear(_spectralSlope, 0, _spectralSlope.Length);
         Array.Clear(_spectralFlux, 0, _spectralFlux.Length);
         _lastDataVersion = -1;
+        _lastCopiedFrameId = -1;
+        _lastMappedFrameId = -1;
         _latestFrameId = -1;
         _availableFrames = 0;
         _referenceFrameId = null;

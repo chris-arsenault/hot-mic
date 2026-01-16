@@ -19,6 +19,12 @@ public static class HarmonicPeakDetector
     public const float DefaultSnrThresholdDb = 6f;
 
     /// <summary>
+    /// Minimum absolute magnitude for fundamental to be considered valid.
+    /// If fundamental is below this, pitch detection is likely wrong.
+    /// </summary>
+    private const float MinFundamentalMagnitude = 1e-4f;
+
+    /// <summary>
     /// Finds harmonic peak frequencies and magnitudes using the analysis descriptor.
     /// Works with any transform type (FFT, ZoomFFT, CQT) by using the descriptor's frequency mapping.
     /// </summary>
@@ -49,6 +55,17 @@ public static class HarmonicPeakDetector
         // Find fundamental magnitude using descriptor's frequency lookup
         var (_, fundamentalMag, _) = descriptor.FindPeakNear(magnitudes, fundamentalHz, tolerance);
 
+        // If fundamental magnitude is too low, pitch detection is likely wrong - don't trust harmonics
+        if (fundamentalMag < MinFundamentalMagnitude)
+        {
+            for (int i = 0; i < maxHarmonics; i++)
+            {
+                harmonicFrequencies[i] = 0f;
+                harmonicMagnitudes[i] = float.MinValue;
+            }
+            return maxHarmonics;
+        }
+
         for (int h = 1; h <= maxHarmonics; h++)
         {
             float expected = fundamentalHz * h;
@@ -67,12 +84,13 @@ public static class HarmonicPeakDetector
             var (peakBin, peakMag, peakFreq) = descriptor.FindPeakNear(magnitudes, expected, tolerance);
 
             // Calculate magnitude in dB relative to fundamental
-            float relativeDb = fundamentalMag > 1e-10f
-                ? 20f * MathF.Log10(peakMag / fundamentalMag + 1e-10f)
-                : float.MinValue;
+            float relativeDb = 20f * MathF.Log10(peakMag / fundamentalMag + 1e-10f);
 
-            harmonicFrequencies[count] = peakFreq > 0f ? peakFreq : expected;
-            harmonicMagnitudes[count] = relativeDb;
+            // Only report harmonic if peak has significant absolute magnitude
+            bool isSignificant = peakMag >= MinFundamentalMagnitude * 0.1f;
+
+            harmonicFrequencies[count] = isSignificant && peakFreq > 0f ? peakFreq : 0f;
+            harmonicMagnitudes[count] = isSignificant ? relativeDb : float.MinValue;
             count++;
         }
 

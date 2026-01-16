@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace HotMic.Core.Dsp.Analysis.Formants;
 
 /// <summary>
@@ -8,6 +10,11 @@ public sealed class LpcAnalyzer
     private int _order;
     private double[] _autoCorrelation = Array.Empty<double>();
     private double[] _coefficients = Array.Empty<double>();
+    private double[] _coefficientsTemp = Array.Empty<double>();
+
+    // Diagnostics
+    private static long _lastDiagnosticTicks;
+    private static readonly long DiagnosticIntervalTicks = Stopwatch.Frequency; // 1 second
 
     public LpcAnalyzer(int order)
     {
@@ -24,6 +31,7 @@ public sealed class LpcAnalyzer
         {
             _autoCorrelation = new double[size];
             _coefficients = new double[size];
+            _coefficientsTemp = new double[size];
         }
     }
 
@@ -60,7 +68,7 @@ public sealed class LpcAnalyzer
             return false;
         }
 
-        _coefficients[0] = 1f;
+        _coefficients[0] = 1.0;
         for (int i = 1; i <= _order; i++)
         {
             double acc = _autoCorrelation[i];
@@ -70,14 +78,21 @@ public sealed class LpcAnalyzer
             }
 
             double reflection = acc / error;
-            _coefficients[i] = reflection;
 
+            // Compute new coefficients into temp buffer first (avoiding in-place corruption)
+            _coefficientsTemp[i] = reflection;
             for (int j = 1; j < i; j++)
             {
-                _coefficients[j] -= reflection * _coefficients[i - j];
+                _coefficientsTemp[j] = _coefficients[j] - reflection * _coefficients[i - j];
             }
 
-            error *= 1f - reflection * reflection;
+            // Copy back to main buffer
+            for (int j = 1; j <= i; j++)
+            {
+                _coefficients[j] = _coefficientsTemp[j];
+            }
+
+            error *= 1.0 - reflection * reflection;
             if (error <= 1e-12)
             {
                 break;
@@ -87,6 +102,15 @@ public sealed class LpcAnalyzer
         for (int i = 0; i <= _order; i++)
         {
             outputCoefficients[i] = (float)_coefficients[i];
+        }
+
+        // Diagnostics: print LPC results once per second
+        long now = Stopwatch.GetTimestamp();
+        if (now - _lastDiagnosticTicks > DiagnosticIntervalTicks)
+        {
+            _lastDiagnosticTicks = now;
+            Console.WriteLine($"[LPC] order={_order}, frameLen={n}, R0={_autoCorrelation[0]:F4}, R1={_autoCorrelation[1]:F4}");
+            Console.WriteLine($"[LPC] coeffs: a1={_coefficients[1]:F4}, a2={_coefficients[2]:F4}, a3={_coefficients[3]:F4}, a4={_coefficients[4]:F4}");
         }
 
         return true;

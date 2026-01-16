@@ -9,6 +9,7 @@ Estimate fundamental frequency and confidence for vocal analysis and harmonic pr
 - Autocorrelation: normalized ACF peak with interpolation.
 - Cepstral: log-magnitude cepstrum; CPP for confidence.
 - SWIPE-style: harmonic summation over log-spaced candidates.
+  - When Transform = CQT, SWIPE is forced to YIN (FFT magnitudes are not computed).
 
 ## Parameters and Defaults
 Common:
@@ -32,6 +33,7 @@ Algorithm-specific defaults:
 
 ## Rate
 - Pitch and CPP are evaluated every 2 analysis frames to reduce CPU cost.
+- Pitch/CPP work is skipped when Pitch, Pitch Meter, Harmonics, Voicing, and Clarity are all off.
 
 ## Real-time Considerations
 - Detectors preallocate buffers and are reconfigured on FFT size changes.

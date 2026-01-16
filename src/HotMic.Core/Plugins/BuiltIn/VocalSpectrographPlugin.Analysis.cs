@@ -239,6 +239,8 @@ public sealed partial class VocalSpectrographPlugin
 
         if (reassignEnabled)
         {
+            bool needsTimeData = _activeReassignMode.HasFlag(SpectrogramReassignMode.Time);
+            bool needsFreqData = _activeReassignMode.HasFlag(SpectrogramReassignMode.Frequency);
             _cqt.ForwardWithReassignment(
                 _analysisBufferProcessed,
                 _cqtMagnitudes,
@@ -246,7 +248,9 @@ public sealed partial class VocalSpectrographPlugin
                 _cqtImag,
                 _cqtTimeReal,
                 _cqtTimeImag,
-                _cqtPhaseDiff);
+                _cqtPhaseDiff,
+                needsTimeData,
+                needsFreqData);
         }
         else
         {
@@ -398,70 +402,154 @@ public sealed partial class VocalSpectrographPlugin
         out int formantCount, out int harmonicCount)
     {
         var pitchAlgorithm = (PitchDetectorType)Math.Clamp(Volatile.Read(ref _requestedPitchAlgorithm), 0, 4);
-        pitchFrameCounter++;
-        if (pitchFrameCounter >= 2)
+        if (_activeTransformType == SpectrogramTransformType.Cqt && pitchAlgorithm == PitchDetectorType.Swipe)
         {
-            pitchFrameCounter = 0;
-            if (pitchAlgorithm == PitchDetectorType.Yin && _yinPitchDetector is not null)
-            {
-                var pitch = _yinPitchDetector.Detect(_analysisBufferRaw);
-                lastPitch = pitch.FrequencyHz ?? 0f;
-                lastConfidence = pitch.Confidence;
-            }
-            else if (pitchAlgorithm == PitchDetectorType.Pyin && _pyinPitchDetector is not null)
-            {
-                var pitch = _pyinPitchDetector.Detect(_analysisBufferRaw);
-                lastPitch = pitch.FrequencyHz ?? 0f;
-                lastConfidence = pitch.Confidence;
-            }
-            else if (pitchAlgorithm == PitchDetectorType.Autocorrelation && _autocorrPitchDetector is not null)
-            {
-                var pitch = _autocorrPitchDetector.Detect(_analysisBufferRaw);
-                lastPitch = pitch.FrequencyHz ?? 0f;
-                lastConfidence = pitch.Confidence;
-            }
-            else if (pitchAlgorithm == PitchDetectorType.Swipe && _swipePitchDetector is not null)
-            {
-                var pitch = _swipePitchDetector.Detect(fftMagnitudes);
-                lastPitch = pitch.FrequencyHz ?? 0f;
-                lastConfidence = pitch.Confidence;
-            }
+            pitchAlgorithm = PitchDetectorType.Yin;
         }
 
-        cppFrameCounter++;
-        if (cppFrameCounter >= 2)
+        bool showPitch = Volatile.Read(ref _requestedShowPitch) != 0;
+        bool showPitchMeter = Volatile.Read(ref _requestedShowPitchMeter) != 0;
+        bool showFormants = Volatile.Read(ref _requestedShowFormants) != 0;
+        bool showVowelSpace = Volatile.Read(ref _requestedShowVowelSpace) != 0;
+        bool showHarmonics = Volatile.Read(ref _requestedShowHarmonics) != 0;
+        bool showVoicing = Volatile.Read(ref _requestedShowVoicing) != 0;
+        var clarityMode = (ClarityProcessingMode)Math.Clamp(Volatile.Read(ref _requestedClarityMode), 0, 3);
+        float clarityHarmonic = Volatile.Read(ref _requestedClarityHarmonic);
+
+        bool needsFormants = showFormants || showVowelSpace;
+        bool needsVoicing = showVoicing || needsFormants || showPitchMeter || clarityMode != ClarityProcessingMode.None;
+        bool needsPitch = showPitch || showPitchMeter || showHarmonics || needsVoicing
+            || (clarityMode == ClarityProcessingMode.Full && clarityHarmonic > 0f);
+        bool needsCpp = showPitchMeter || (pitchAlgorithm == PitchDetectorType.Cepstral && needsPitch);
+
+        if (!needsPitch)
         {
-            cppFrameCounter = 0;
-            if (_cepstralPitchDetector is not null)
+            pitchFrameCounter = 0;
+            lastPitch = 0f;
+            lastConfidence = 0f;
+        }
+        else
+        {
+            pitchFrameCounter++;
+            if (pitchFrameCounter >= 2)
             {
-                var pitch = _cepstralPitchDetector.Detect(_analysisBufferRaw);
-                lastCpp = _cepstralPitchDetector.LastCpp;
-                if (pitchAlgorithm == PitchDetectorType.Cepstral)
+                pitchFrameCounter = 0;
+                if (pitchAlgorithm == PitchDetectorType.Yin && _yinPitchDetector is not null)
                 {
+                    var pitch = _yinPitchDetector.Detect(_analysisBufferRaw);
+                    lastPitch = pitch.FrequencyHz ?? 0f;
+                    lastConfidence = pitch.Confidence;
+                }
+                else if (pitchAlgorithm == PitchDetectorType.Pyin && _pyinPitchDetector is not null)
+                {
+                    var pitch = _pyinPitchDetector.Detect(_analysisBufferRaw);
+                    lastPitch = pitch.FrequencyHz ?? 0f;
+                    lastConfidence = pitch.Confidence;
+                }
+                else if (pitchAlgorithm == PitchDetectorType.Autocorrelation && _autocorrPitchDetector is not null)
+                {
+                    var pitch = _autocorrPitchDetector.Detect(_analysisBufferRaw);
+                    lastPitch = pitch.FrequencyHz ?? 0f;
+                    lastConfidence = pitch.Confidence;
+                }
+                else if (pitchAlgorithm == PitchDetectorType.Swipe && _swipePitchDetector is not null)
+                {
+                    var pitch = _swipePitchDetector.Detect(fftMagnitudes);
                     lastPitch = pitch.FrequencyHz ?? 0f;
                     lastConfidence = pitch.Confidence;
                 }
             }
         }
 
-        voicing = _voicingDetector.Detect(_analysisBufferRaw, fftMagnitudes, lastConfidence);
+        if (!needsCpp)
+        {
+            cppFrameCounter = 0;
+            lastCpp = 0f;
+        }
+        else
+        {
+            cppFrameCounter++;
+            if (cppFrameCounter >= 2)
+            {
+                cppFrameCounter = 0;
+                if (_cepstralPitchDetector is not null)
+                {
+                    var pitch = _cepstralPitchDetector.Detect(_analysisBufferRaw);
+                    lastCpp = _cepstralPitchDetector.LastCpp;
+                    if (pitchAlgorithm == PitchDetectorType.Cepstral)
+                    {
+                        lastPitch = pitch.FrequencyHz ?? 0f;
+                        lastConfidence = pitch.Confidence;
+                    }
+                }
+            }
+        }
+
+        voicing = needsVoicing
+            ? _voicingDetector.Detect(_analysisBufferRaw, fftMagnitudes, lastConfidence)
+            : VoicingState.Silence;
 
         formantCount = 0;
-        if (Volatile.Read(ref _requestedShowFormants) != 0
-            && _lpcAnalyzer is not null
-            && _formantTracker is not null
-            && voicing == VoicingState.Voiced)
+        bool lpcOk = _lpcAnalyzer is not null;
+        bool trackerOk = _formantTracker is not null;
+        bool voiced = voicing == VoicingState.Voiced;
+
+        // Diagnostic: print formant pipeline state once per second
+        if (_formantDiagCounter++ % 100 == 0)
         {
-            if (_lpcAnalyzer.Compute(_analysisBufferProcessed, _lpcCoefficients))
+            Console.WriteLine($"[Analysis] needsFormants={needsFormants}, lpcOk={lpcOk}, trackerOk={trackerOk}, voicing={voicing}, pitch={lastPitch:F1}Hz (LPC always uses pre-emphasis)");
+        }
+
+        if (needsFormants && lpcOk && trackerOk && voiced)
+        {
+            // LPC formant analysis: downsample to 12kHz like professional tools (Praat uses 10-11kHz)
+            // This produces poles closer to unit circle with realistic bandwidths (50-400Hz vs 2000-3000Hz)
+            // Pipeline: 48kHz raw → pre-emphasis → 24kHz → 12kHz → LPC
+            int bufferLen = _analysisBufferRaw.Length;
+            int lpcLen = Math.Min(LpcWindowSamples, bufferLen);
+            int lpcStart = bufferLen - lpcLen; // Use most recent samples
+
+            // Step 1: Apply pre-emphasis to the LPC window (at original sample rate)
+            _lpcPreEmphasisFilter.Reset();
+            for (int i = 0; i < lpcLen; i++)
             {
-                formantCount = _formantTracker.Track(_lpcCoefficients, _sampleRate,
+                _lpcInputBuffer[i] = _lpcPreEmphasisFilter.Process(_analysisBufferRaw[lpcStart + i]);
+            }
+
+            // Step 2: Decimate 48kHz → 24kHz (2x)
+            _lpcDecimator1.Reset();
+            int decimated1Len = lpcLen / 2;
+            _lpcDecimator1.ProcessDownsample(_lpcInputBuffer.AsSpan(0, lpcLen), _lpcDecimateBuffer1.AsSpan(0, decimated1Len));
+
+            // Step 3: Decimate 24kHz → 12kHz (2x)
+            _lpcDecimator2.Reset();
+            int decimatedLen = decimated1Len / 2;
+            _lpcDecimator2.ProcessDownsample(_lpcDecimateBuffer1.AsSpan(0, decimated1Len), _lpcDecimatedBuffer.AsSpan(0, decimatedLen));
+
+            // Step 4: Run LPC on decimated signal at 12kHz
+            // At 12kHz, use order 10-12 for 4-5 formants (rule: order = 2*formants + 2)
+            const int LpcOrderAt12kHz = 12;
+            if (_lpcAnalyzer.Order != LpcOrderAt12kHz)
+            {
+                _lpcAnalyzer.Configure(LpcOrderAt12kHz);
+                _formantTracker.Configure(LpcOrderAt12kHz);
+            }
+
+            if (_lpcAnalyzer.Compute(_lpcDecimatedBuffer.AsSpan(0, decimatedLen), _lpcCoefficients))
+            {
+                // Pass LpcTargetSampleRate (12kHz) to formant tracker for correct frequency calculation
+                formantCount = _formantTracker.Track(_lpcCoefficients, LpcTargetSampleRate,
                     _formantFreqScratch, _formantBwScratch,
                     _activeMinFrequency, _activeMaxFrequency, MaxFormants);
+            }
+            else if (_formantDiagCounter % 100 == 1)
+            {
+                Console.WriteLine($"[Analysis] LPC.Compute returned false (decimatedLen={decimatedLen})");
             }
         }
 
         harmonicCount = 0;
-        if (Volatile.Read(ref _requestedShowHarmonics) != 0 && lastPitch > 0f)
+        if (showHarmonics && lastPitch > 0f)
         {
             var descriptor = Volatile.Read(ref _analysisDescriptor);
             if (descriptor is not null)
@@ -880,6 +968,12 @@ public sealed partial class VocalSpectrographPlugin
             _formantBandwidths[formantOffset + i] = i < formantCount ? _formantBwScratch[i] : 0f;
         }
 
+        // Diagnostic: print formant results once per second
+        if (_formantDiagCounter % 100 == 50 && formantCount > 0)
+        {
+            Console.WriteLine($"[WriteOverlay] formantCount={formantCount}: F1={_formantFreqScratch[0]:F0}Hz, F2={(formantCount > 1 ? _formantFreqScratch[1] : 0):F0}Hz, F3={(formantCount > 2 ? _formantFreqScratch[2] : 0):F0}Hz");
+        }
+
         int harmonicOffset = frameIndex * MaxHarmonics;
         for (int i = 0; i < MaxHarmonics; i++)
         {
@@ -909,6 +1003,8 @@ public sealed partial class VocalSpectrographPlugin
             Array.Clear(_hopBuffer, 0, _hopBuffer.Length);
         }
 
-        ClearVisualizationBuffers();
+        // Record dropout as discontinuity and reset analysis state (preserve display)
+        RecordDiscontinuity(DiscontinuityType.BufferDrop);
+        ResetAnalysisState();
     }
 }

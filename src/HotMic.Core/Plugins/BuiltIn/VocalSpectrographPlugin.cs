@@ -1,6 +1,7 @@
 using System.Threading;
 using HotMic.Core.Dsp;
 using HotMic.Core.Dsp.Fft;
+using HotMic.Core.Dsp.Filters;
 using HotMic.Core.Dsp.Spectrogram;
 using HotMic.Core.Threading;
 
@@ -56,6 +57,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     public const int TransformTypeIndex = 41;
     public const int CqtBinsPerOctaveIndex = 42;
     public const int HarmonicDisplayModeIndex = 43;
+    public const int ShowFormantBandwidthsIndex = 44;
 
     private const float DefaultMinFrequency = 80f;
     private const float DefaultMaxFrequency = 8000f;
@@ -68,6 +70,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private const int CaptureBufferSize = 262144;
     private const int MaxFormants = 5;
     private const int MaxHarmonics = 24;
+    private const int LpcWindowSamples = 1536; // ~32ms at 48kHz, optimal for speech formant analysis
     private const float TemporalSmoothingFactor = 0.3f;
     private const float ReassignMinDb = -60f;
     private const float MaxReassignBinShift = 0.5f;
@@ -78,7 +81,11 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private static readonly int[] ColorLevelOptions = { 16, 24, 32, 48, 64 };
 
     private static readonly int[] FftSizes = { 1024, 2048, 4096, 8192 };
-    private static readonly float[] OverlapOptions = { 0.5f, 0.75f, 0.875f };
+    /// <summary>
+    /// Overlap options: 50%, 75%, 87.5%, 93.75%, 96.875%.
+    /// Higher overlap = smoother time axis but more CPU. 93.75%+ recommended for professional look.
+    /// </summary>
+    public static readonly float[] OverlapOptions = { 0.5f, 0.75f, 0.875f, 0.9375f, 0.96875f };
     private static readonly int[] CqtBinsPerOctaveOptions = { 12, 24, 48, 96 };
 
     /// <summary>
@@ -98,6 +105,13 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private readonly SpectrographTimingCollector _timing = new();
     private OnePoleHighPass _dcHighPass = new();
     private PreEmphasisFilter _preEmphasisFilter = new();
+    private PreEmphasisFilter _lpcPreEmphasisFilter = new(); // Always-on pre-emphasis for LPC
+    private float[] _lpcInputBuffer = Array.Empty<float>(); // Scratch buffer for LPC with forced pre-emphasis
+    private readonly HalfbandResampler _lpcDecimator1 = new(); // 48kHz → 24kHz
+    private readonly HalfbandResampler _lpcDecimator2 = new(); // 24kHz → 12kHz
+    private float[] _lpcDecimateBuffer1 = Array.Empty<float>(); // Intermediate decimation buffer
+    private float[] _lpcDecimatedBuffer = Array.Empty<float>(); // Final decimated buffer for LPC (12kHz)
+    private const int LpcTargetSampleRate = 12000; // Target sample rate for LPC analysis (like Praat's 10-11kHz)
     private long _lastDroppedHops;
 
     private Thread? _analysisThread;
@@ -122,6 +136,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private long _frameCounter;
     private long _latestFrameId = -1;
     private int _availableFrames;
+    private int _formantDiagCounter;
     private int _reassignLatencyFrames;
     private int _dataVersion;
     private FastFft? _fft;
@@ -165,6 +180,11 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private float _binResolution;
     private SpectrogramAnalysisDescriptor? _analysisDescriptor;
 
+    // Discontinuity tracking for display continuity
+    private const int MaxDiscontinuityEvents = 32;
+    private readonly Queue<DiscontinuityEvent> _discontinuityEvents = new();
+    private readonly object _discontinuityLock = new();
+
     private float[] _spectrogramBuffer = Array.Empty<float>();
     private float[] _linearMagnitudeBuffer = Array.Empty<float>();
     private float[] _pitchTrack = Array.Empty<float>();
@@ -199,7 +219,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private int _analysisFilled;
     private int _requestedFftSize = 2048;
     private int _requestedWindow = (int)WindowFunction.Hann;
-    private int _requestedOverlapIndex = 1;
+    private int _requestedOverlapIndex = 2; // Default 87.5% for smoother display
     private int _requestedScale = (int)FrequencyScale.Mel;
     private float _requestedMinFrequency = DefaultMinFrequency;
     private float _requestedMaxFrequency = DefaultMaxFrequency;
@@ -211,6 +231,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private int _requestedShowFormants = 1;
     private int _requestedShowHarmonics = 1;
     private int _requestedHarmonicDisplayMode = (int)HarmonicDisplayMode.Detected;
+    private int _requestedShowFormantBandwidths = 0; // Default to dots-only (like Praat)
     private int _requestedShowVoicing = 1;
     private int _requestedPreEmphasis = 1;
     private int _requestedHighPassEnabled = 1;

@@ -323,6 +323,33 @@ public sealed class ConstantQTransform
         Span<float> timeImagOut,
         Span<float> phaseDiffOut)
     {
+        ForwardWithReassignment(input, magnitudesOut, realOut, imagOut, timeRealOut, timeImagOut, phaseDiffOut,
+            computeTime: true, computePhase: true);
+    }
+
+    /// <summary>
+    /// Compute CQT with reassignment data, optionally skipping time or phase outputs.
+    /// </summary>
+    /// <param name="input">Input samples.</param>
+    /// <param name="magnitudesOut">Output magnitude array.</param>
+    /// <param name="realOut">Output real component array.</param>
+    /// <param name="imagOut">Output imaginary component array.</param>
+    /// <param name="timeRealOut">Output real component of time-weighted transform.</param>
+    /// <param name="timeImagOut">Output imaginary component of time-weighted transform.</param>
+    /// <param name="phaseDiffOut">Output phase difference from previous frame.</param>
+    /// <param name="computeTime">Whether to compute time-weighted outputs.</param>
+    /// <param name="computePhase">Whether to compute phase differences.</param>
+    public void ForwardWithReassignment(
+        ReadOnlySpan<float> input,
+        Span<float> magnitudesOut,
+        Span<float> realOut,
+        Span<float> imagOut,
+        Span<float> timeRealOut,
+        Span<float> timeImagOut,
+        Span<float> phaseDiffOut,
+        bool computeTime,
+        bool computePhase)
+    {
         if (!_configured || _totalBins == 0)
         {
             magnitudesOut.Clear();
@@ -331,6 +358,7 @@ public sealed class ConstantQTransform
             timeRealOut.Clear();
             timeImagOut.Clear();
             phaseDiffOut.Clear();
+            _hasPrevPhase = false;
             return;
         }
 
@@ -343,6 +371,7 @@ public sealed class ConstantQTransform
             timeRealOut.Slice(0, Math.Min(timeRealOut.Length, _totalBins)).Clear();
             timeImagOut.Slice(0, Math.Min(timeImagOut.Length, _totalBins)).Clear();
             phaseDiffOut.Slice(0, Math.Min(phaseDiffOut.Length, _totalBins)).Clear();
+            _hasPrevPhase = false;
             return;
         }
 
@@ -357,6 +386,7 @@ public sealed class ConstantQTransform
             timeRealOut.Clear();
             timeImagOut.Clear();
             phaseDiffOut.Clear();
+            _hasPrevPhase = false;
             return;
         }
 
@@ -378,34 +408,53 @@ public sealed class ConstantQTransform
                 float sample = input[startIdx + n];
                 sumReal += sample * _kernelReal[kernelOffset + n];
                 sumImag += sample * _kernelImag[kernelOffset + n];
-                sumTimeReal += sample * _kernelTimeReal[kernelOffset + n];
-                sumTimeImag += sample * _kernelTimeImag[kernelOffset + n];
+                if (computeTime)
+                {
+                    sumTimeReal += sample * _kernelTimeReal[kernelOffset + n];
+                    sumTimeImag += sample * _kernelTimeImag[kernelOffset + n];
+                }
             }
 
             realOut[k] = sumReal;
             imagOut[k] = sumImag;
-            timeRealOut[k] = sumTimeReal;
-            timeImagOut[k] = sumTimeImag;
             magnitudesOut[k] = MathF.Sqrt(sumReal * sumReal + sumImag * sumImag);
 
-            // Compute phase and phase difference for frequency reassignment
-            float currentPhase = MathF.Atan2(sumImag, sumReal);
-            if (_hasPrevPhase)
+            if (computeTime)
             {
-                // Unwrap phase difference to [-π, π]
-                float diff = currentPhase - _prevPhase[k];
-                while (diff > MathF.PI) diff -= TwoPi;
-                while (diff < -MathF.PI) diff += TwoPi;
-                phaseDiffOut[k] = diff;
+                timeRealOut[k] = sumTimeReal;
+                timeImagOut[k] = sumTimeImag;
+            }
+            else
+            {
+                timeRealOut[k] = 0f;
+                timeImagOut[k] = 0f;
+            }
+
+            if (computePhase)
+            {
+                // Compute phase and phase difference for frequency reassignment
+                float currentPhase = MathF.Atan2(sumImag, sumReal);
+                if (_hasPrevPhase)
+                {
+                    // Unwrap phase difference to [-π, π]
+                    float diff = currentPhase - _prevPhase[k];
+                    while (diff > MathF.PI) diff -= TwoPi;
+                    while (diff < -MathF.PI) diff += TwoPi;
+                    phaseDiffOut[k] = diff;
+                }
+                else
+                {
+                    phaseDiffOut[k] = 0f;
+                }
+                _prevPhase[k] = currentPhase;
             }
             else
             {
                 phaseDiffOut[k] = 0f;
             }
-            _prevPhase[k] = currentPhase;
         }
 
-        _hasPrevPhase = true;
+        _hasPrevPhase = computePhase;
     }
 
     /// <summary>

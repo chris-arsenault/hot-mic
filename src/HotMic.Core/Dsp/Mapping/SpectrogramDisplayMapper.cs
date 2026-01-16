@@ -30,6 +30,26 @@ public sealed class SpectrogramDisplayMapper
     public int AnalysisBins => _analysisBins;
 
     /// <summary>
+    /// Whether the mapper has been configured.
+    /// </summary>
+    public bool IsConfigured => _configured;
+
+    /// <summary>
+    /// The frequency scale used for mapping.
+    /// </summary>
+    public FrequencyScale Scale => _scale;
+
+    /// <summary>
+    /// Minimum frequency in Hz.
+    /// </summary>
+    public float MinFrequencyHz => _displayMinHz;
+
+    /// <summary>
+    /// Maximum frequency in Hz.
+    /// </summary>
+    public float MaxFrequencyHz => _displayMaxHz;
+
+    /// <summary>
     /// Center frequencies for each display bin.
     /// </summary>
     public ReadOnlySpan<float> CenterFrequencies => _displayCenters.AsSpan(0, _displayBins);

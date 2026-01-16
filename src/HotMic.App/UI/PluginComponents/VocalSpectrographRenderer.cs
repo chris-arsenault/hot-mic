@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using HotMic.Core.Dsp;
+using HotMic.Core.Dsp.Mapping;
 using HotMic.Core.Dsp.Spectrogram;
 using HotMic.Core.Plugins.BuiltIn;
 using SkiaSharp;
@@ -84,7 +85,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         ["ColorMap"] = ("Color Map", "Color palette for magnitude visualization"),
 
         // View Options Panel - Overlays
-        ["PitchOverlay"] = ("Pitch Track", "Yellow line showing detected fundamental frequency (F0)"),
+        ["PitchOverlay"] = ("Pitch Track", "Yellow line showing detected fundamental frequency (F0). Pitch/voicing work is skipped when Pitch/Meter/Harmonics/Voicing/Clarity are all off."),
         ["FormantOverlay"] = ("Formants", "Colored lines showing F1/F2/F3 vocal resonances"),
         ["HarmonicOverlay"] = ("Harmonics", "Dots marking detected harmonic peaks"),
         ["HarmonicMode"] = ("Harmonic Mode", "D=Detected only, T=Theoretical positions, B=Both"),
@@ -100,7 +101,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
         // Other buttons
         ["VoiceRange"] = ("Voice Range", "Select Bass/Baritone/Tenor/Alto/MezzoSoprano/Soprano"),
-        ["PitchAlgo"] = ("Pitch Algorithm", "YIN=fast, PYIN=probabilistic, SWIPE=robust, Cepstral=spectral"),
+        ["PitchAlgo"] = ("Pitch Algorithm", "YIN/PYIN/Autocorr/Cepstral are time-domain; SWIPE uses FFT. With CQT, SWIPE is forced to YIN. Pitch/voicing work runs only when Pitch/Meter/Harmonics/Voicing/Clarity are enabled."),
         ["Pause"] = ("Pause/Run", "Pause or resume the spectrograph visualization"),
     };
 
@@ -144,6 +145,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private readonly SKPaint _referencePaint;
     private readonly SKPaint _bitmapPaint;
     private readonly SKPaint _pitchPaint;
+    private readonly SKPaint _pitchShadowPaint;
     private readonly SKPaint _pitchLowPaint;
     private readonly SKPaint _formantPaint1;
     private readonly SKPaint _formantPaint2;
@@ -151,6 +153,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private readonly SKPaint _formantLinePaint1;
     private readonly SKPaint _formantLinePaint2;
     private readonly SKPaint _formantLinePaint3;
+    private readonly SKPaint _overlayShadowPaint;
     private readonly SKPaint _harmonicPaint;
     private readonly SKPaint _harmonicDetectedPaint;
     private readonly SKPaint _harmonicTheoreticalPaint;
@@ -162,9 +165,11 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private readonly SKPaint _waveformEnvelopePaint;
     private readonly SKPaint _waveformZeroPaint;
     private readonly SKPaint _spectrumPaint;
+    private readonly SKPaint _spectrumFillPaint;
     private readonly SKPaint _spectrumPeakPaint;
     private readonly SKPaint _rangeBandPaint;
     private readonly SKPaint _guidePaint;
+    private readonly SKPaint _discontinuityPaint;
     private readonly SkiaTextPaint _metricPaint;
     private readonly SKPaint _vowelTrailPaint;
     private readonly SkiaTextPaint _iconPaint;
@@ -180,6 +185,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private readonly SKPath _waveformEnvelopeTop = new();
     private readonly SKPath _waveformEnvelopeBottom = new();
     private readonly SKPath _spectrumSlicePath = new();
+    private readonly SKPath _spectrumFillPath = new();
     private readonly SKPath _pitchHighPath = new();
     private readonly SKPath _pitchLowPath = new();
     private readonly SKPath _formantPath1 = new();
@@ -188,6 +194,13 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private readonly SKPath _vowelTrailPath = new();
     private readonly int[] _peakBins = new int[3];
     private readonly float[] _peakValues = new float[3];
+
+    // Spectrum slice ballistics (attack/release smoothing for professional analyzer feel)
+    private float[] _spectrumBallistics = Array.Empty<float>();
+    private long _lastBallisticsTicks;
+    private const float BallisticsAttackMs = 5f;      // Instant attack (5ms)
+    private const float BallisticsReleaseMs = 300f;   // Slow release (300ms)
+
     private long _lastSpectrogramTicks;
     private long _lastBitmapTicks;
     private long _lastOverlayTicks;
@@ -247,6 +260,10 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private int _lastAvailableFrames = -1;
     private int _lastFrameCount = -1;
     private int _lastDisplayBins = -1;
+    private int _frameCapacity;
+    private int _framePadFrames;
+    private int _frameAvailable;
+    private int _frameRingStart;
     private int[] _pixelBuffer = Array.Empty<int>();
     // Ring offset for leftmost column to avoid per-frame buffer shifts.
     private int _bitmapRingStart;
@@ -269,6 +286,18 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private bool _axisShowSpectrumCache;
     private bool _axisShowPitchMeterCache;
     private bool _axisShowVowelSpaceCache;
+
+    // Vowel space ballistics (smoothed F1/F2 that decay slowly)
+    private float _vowelF1Smoothed;
+    private float _vowelF2Smoothed;
+    private const float VowelAttackCoeff = 0.4f;   // Fast attack when new values arrive
+    private const float VowelDecayCoeff = 0.02f;   // Slow decay when silent/unvoiced
+
+    // Bloom pass for luminous highlights.
+    private readonly SKPaint _bloomAddPaint;
+    private const float BloomSigma = 12f;
+    private const float BloomIntensity = 0.35f;
+
     public VocalSpectrographRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
@@ -276,23 +305,23 @@ public sealed class VocalSpectrographRenderer : IDisposable
         _tooltip = new TooltipManager(_theme);
         _panelHeaderPaint = new SkiaTextPaint(_theme.TextMuted, 11f, SKFontStyle.Bold);
 
-        // Initialize all KnobWidgets
+        // Initialize all KnobWidgets with default values for double-click reset
         var knobStyle = KnobStyle.Compact with { ShowLabels = true };
-        MinFreqKnob = new KnobWidget(KnobRadius, 20f, 2000f, "MIN FREQ", "Hz", knobStyle, _theme) { IsLogarithmic = true, ValueFormat = "0" };
-        MaxFreqKnob = new KnobWidget(KnobRadius, 2000f, 12000f, "MAX FREQ", "Hz", knobStyle, _theme) { IsLogarithmic = true, ValueFormat = "0" };
-        MinDbKnob = new KnobWidget(KnobRadius, -120f, -20f, "MIN dB", "dB", knobStyle, _theme) { ValueFormat = "0" };
-        MaxDbKnob = new KnobWidget(KnobRadius, -40f, 0f, "MAX dB", "dB", knobStyle, _theme) { ValueFormat = "0" };
-        TimeKnob = new KnobWidget(KnobRadius, 1f, 60f, "TIME", "s", knobStyle, _theme) { ValueFormat = "0.0" };
-        HpfKnob = new KnobWidget(KnobRadius, 20f, 120f, "HPF", "Hz", knobStyle, _theme) { ValueFormat = "0" };
-        ReassignThresholdKnob = new KnobWidget(KnobRadius, -120f, -20f, "R THRESH", "dB", knobStyle, _theme) { ValueFormat = "0" };
-        ReassignSpreadKnob = new KnobWidget(KnobRadius, 0f, 100f, "R SPREAD", "%", knobStyle, _theme) { ValueFormat = "0" };
-        ClarityNoiseKnob = new KnobWidget(KnobRadius, 0f, 100f, "NOISE", "%", knobStyle, _theme) { ValueFormat = "0" };
-        ClarityHarmonicKnob = new KnobWidget(KnobRadius, 0f, 100f, "HARM", "%", knobStyle, _theme) { ValueFormat = "0" };
-        ClaritySmoothingKnob = new KnobWidget(KnobRadius, 0f, 100f, "SMOOTH", "%", knobStyle, _theme) { ValueFormat = "0" };
-        BrightnessKnob = new KnobWidget(KnobRadius, 0.5f, 2f, "BRIGHT", "x", knobStyle, _theme) { ValueFormat = "0.00" };
-        GammaKnob = new KnobWidget(KnobRadius, 0.6f, 1.2f, "GAMMA", "", knobStyle, _theme) { ValueFormat = "0.00" };
-        ContrastKnob = new KnobWidget(KnobRadius, 0.8f, 1.5f, "CONTRAST", "x", knobStyle, _theme) { ValueFormat = "0.00" };
-        LevelsKnob = new KnobWidget(KnobRadius, 16f, 64f, "LEVELS", "", knobStyle, _theme) { ValueFormat = "0" };
+        MinFreqKnob = new KnobWidget(KnobRadius, 20f, 2000f, "MIN FREQ", "Hz", knobStyle, _theme) { IsLogarithmic = true, ValueFormat = "0", DefaultValue = 80f };
+        MaxFreqKnob = new KnobWidget(KnobRadius, 2000f, 12000f, "MAX FREQ", "Hz", knobStyle, _theme) { IsLogarithmic = true, ValueFormat = "0", DefaultValue = 8000f };
+        MinDbKnob = new KnobWidget(KnobRadius, -120f, -20f, "MIN dB", "dB", knobStyle, _theme) { ValueFormat = "0", DefaultValue = -80f };
+        MaxDbKnob = new KnobWidget(KnobRadius, -40f, 0f, "MAX dB", "dB", knobStyle, _theme) { ValueFormat = "0", DefaultValue = 0f };
+        TimeKnob = new KnobWidget(KnobRadius, 1f, 60f, "TIME", "s", knobStyle, _theme) { ValueFormat = "0.0", DefaultValue = 5f };
+        HpfKnob = new KnobWidget(KnobRadius, 20f, 120f, "HPF", "Hz", knobStyle, _theme) { ValueFormat = "0", DefaultValue = 60f };
+        ReassignThresholdKnob = new KnobWidget(KnobRadius, -120f, -20f, "R THRESH", "dB", knobStyle, _theme) { ValueFormat = "0", DefaultValue = -60f };
+        ReassignSpreadKnob = new KnobWidget(KnobRadius, 0f, 100f, "R SPREAD", "%", knobStyle, _theme) { ValueFormat = "0", DefaultValue = 50f };
+        ClarityNoiseKnob = new KnobWidget(KnobRadius, 0f, 100f, "NOISE", "%", knobStyle, _theme) { ValueFormat = "0", DefaultValue = 50f };
+        ClarityHarmonicKnob = new KnobWidget(KnobRadius, 0f, 100f, "HARM", "%", knobStyle, _theme) { ValueFormat = "0", DefaultValue = 50f };
+        ClaritySmoothingKnob = new KnobWidget(KnobRadius, 0f, 100f, "SMOOTH", "%", knobStyle, _theme) { ValueFormat = "0", DefaultValue = 50f };
+        BrightnessKnob = new KnobWidget(KnobRadius, 0.5f, 2f, "BRIGHT", "x", knobStyle, _theme) { ValueFormat = "0.00", DefaultValue = 1f };
+        GammaKnob = new KnobWidget(KnobRadius, 0.6f, 1.2f, "GAMMA", "", knobStyle, _theme) { ValueFormat = "0.00", DefaultValue = 0.85f };
+        ContrastKnob = new KnobWidget(KnobRadius, 0.8f, 1.5f, "CONTRAST", "x", knobStyle, _theme) { ValueFormat = "0.00", DefaultValue = 1f };
+        LevelsKnob = new KnobWidget(KnobRadius, 16f, 64f, "LEVELS", "", knobStyle, _theme) { ValueFormat = "0", DefaultValue = 64f };
         _allKnobs = new[] { MinFreqKnob, MaxFreqKnob, MinDbKnob, MaxDbKnob, TimeKnob, HpfKnob,
             ReassignThresholdKnob, ReassignSpreadKnob, ClarityNoiseKnob, ClarityHarmonicKnob,
             ClaritySmoothingKnob, BrightnessKnob, GammaKnob, ContrastKnob, LevelsKnob };
@@ -324,8 +353,32 @@ public sealed class VocalSpectrographRenderer : IDisposable
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1.5f
         };
-        _bitmapPaint = new SKPaint { IsAntialias = false };
+        _bitmapPaint = new SKPaint
+        {
+            IsAntialias = true,
+            FilterQuality = SKFilterQuality.Medium
+        };
+
+        // Bloom: blur the image and add it back with additive blend for glow on bright regions
+        _bloomAddPaint = new SKPaint
+        {
+            IsAntialias = true,
+            BlendMode = SKBlendMode.Plus,
+            ImageFilter = SKImageFilter.CreateBlur(BloomSigma, BloomSigma),
+            ColorFilter = SKColorFilter.CreateBlendMode(
+                new SKColor(255, 255, 255, (byte)(255 * BloomIntensity)),
+                SKBlendMode.Modulate)
+        };
+
         _pitchPaint = new SKPaint { Color = new SKColor(0x00, 0xFF, 0x88), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2f };
+        _pitchShadowPaint = new SKPaint
+        {
+            Color = new SKColor(0x00, 0x00, 0x00, 0x60),
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 4f,
+            ImageFilter = SKImageFilter.CreateBlur(2f, 2f)
+        };
         _pitchLowPaint = new SKPaint
         {
             Color = new SKColor(0x00, 0xFF, 0x88, 0x80),
@@ -340,6 +393,14 @@ public sealed class VocalSpectrographRenderer : IDisposable
         _formantLinePaint1 = new SKPaint { Color = new SKColor(0xFF, 0x4B, 0x4B, 0xB0), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f };
         _formantLinePaint2 = new SKPaint { Color = new SKColor(0xFF, 0x96, 0x2A, 0xB0), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f };
         _formantLinePaint3 = new SKPaint { Color = new SKColor(0xFF, 0xD0, 0x3A, 0xB0), IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f };
+        _overlayShadowPaint = new SKPaint
+        {
+            Color = new SKColor(0x00, 0x00, 0x00, 0x50),
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 3f,
+            ImageFilter = SKImageFilter.CreateBlur(1.5f, 1.5f)
+        };
         _harmonicPaint = new SKPaint { Color = new SKColor(0xE0, 0xE0, 0xE6, 0x90), IsAntialias = true, Style = SKPaintStyle.Fill };
         _harmonicDetectedPaint = new SKPaint { Color = new SKColor(0x00, 0xD4, 0xAA, 0xD0), IsAntialias = true, Style = SKPaintStyle.Fill };
         _harmonicTheoreticalPaint = new SKPaint { Color = new SKColor(0x80, 0x80, 0x90, 0x40), IsAntialias = true, Style = SKPaintStyle.Fill };
@@ -380,6 +441,12 @@ public sealed class VocalSpectrographRenderer : IDisposable
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1.5f
         };
+        _spectrumFillPaint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+            // Shader set dynamically per-frame based on rect bounds
+        };
         _spectrumPeakPaint = new SKPaint
         {
             Color = _theme.TextPrimary,
@@ -398,6 +465,14 @@ public sealed class VocalSpectrographRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f
+        };
+        _discontinuityPaint = new SKPaint
+        {
+            Color = new SKColor(0xFF, 0xAA, 0x00, 0xA0), // Amber/orange for visibility
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 1.5f,
+            PathEffect = SKPathEffect.CreateDash(new float[] { 4f, 4f }, 0f)
         };
         _metricPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal);
         _vowelTrailPaint = new SKPaint
@@ -427,6 +502,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         canvas.Save();
         canvas.Scale(dpiScale);
         size = new SKSize(size.Width / dpiScale, size.Height / dpiScale);
+        UpdateFrameMapping(state);
 
         var outerRect = new SKRect(0, 0, size.Width, size.Height);
         canvas.DrawRoundRect(new SKRoundRect(outerRect, CornerRadius), _backgroundPaint);
@@ -520,6 +596,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
             DrawOverlays(canvas, spectrumRect, state);
         }
         DrawReferenceLine(canvas, spectrumRect, state);
+        DrawDiscontinuityMarkers(canvas, spectrumRect, state);
 
         if (profiling)
         {
@@ -1201,11 +1278,13 @@ public sealed class VocalSpectrographRenderer : IDisposable
         }
 
         int frames = Math.Min(state.FrameCount, state.WaveformMin.Length);
-        if (frames <= 1)
+        if (frames <= 1 || _frameAvailable <= 0)
         {
             return;
         }
 
+        int startFrame = _framePadFrames;
+        int endFrame = Math.Min(frames, _framePadFrames + _frameAvailable);
         int step = GetOverlayStep(rect, frames);
         float xStep = rect.Width / Math.Max(1, state.FrameCount - 1);
         float center = rect.MidY;
@@ -1214,10 +1293,15 @@ public sealed class VocalSpectrographRenderer : IDisposable
         _waveformEnvelopeBottom.Reset();
         bool envelopeStarted = false;
 
-        for (int frame = 0; frame < frames; frame += step)
+        for (int frame = startFrame; frame < endFrame; frame += step)
         {
-            float min = state.WaveformMin[frame];
-            float max = state.WaveformMax[frame];
+            if (!TryGetRingIndex(frame, out int ringIndex))
+            {
+                continue;
+            }
+
+            float min = state.WaveformMin[ringIndex];
+            float max = state.WaveformMax[ringIndex];
             float x = rect.Left + xStep * frame;
             float y1 = center - max * half;
             float y2 = center - min * half;
@@ -1286,6 +1370,50 @@ public sealed class VocalSpectrographRenderer : IDisposable
         }
     }
 
+    /// <summary>
+    /// Update spectrum slice display values with attack/release ballistics.
+    /// Attack is nearly instant, release is slow (300ms) for smooth professional animation.
+    /// </summary>
+    private void UpdateSpectrumBallistics(float[] spectrogram, int offset, int bins)
+    {
+        // Ensure buffer is sized correctly
+        if (_spectrumBallistics.Length != bins)
+        {
+            _spectrumBallistics = new float[bins];
+            _lastBallisticsTicks = Stopwatch.GetTimestamp();
+        }
+
+        // Calculate delta time
+        long currentTicks = Stopwatch.GetTimestamp();
+        float deltaMs = (float)((currentTicks - _lastBallisticsTicks) * 1000.0 / Stopwatch.Frequency);
+        _lastBallisticsTicks = currentTicks;
+
+        // Clamp delta to avoid huge jumps after pause/lag
+        deltaMs = MathF.Min(deltaMs, 100f);
+
+        // Calculate attack and release coefficients (exponential smoothing)
+        // coeff = 1 - exp(-deltaMs / timeConstant)
+        float attackCoeff = 1f - MathF.Exp(-deltaMs / BallisticsAttackMs);
+        float releaseCoeff = 1f - MathF.Exp(-deltaMs / BallisticsReleaseMs);
+
+        for (int i = 0; i < bins; i++)
+        {
+            float target = spectrogram[offset + i];
+            float current = _spectrumBallistics[i];
+
+            if (target >= current)
+            {
+                // Attack: fast response to rising signal
+                _spectrumBallistics[i] = current + (target - current) * attackCoeff;
+            }
+            else
+            {
+                // Release: slow decay for smooth falling
+                _spectrumBallistics[i] = current + (target - current) * releaseCoeff;
+            }
+        }
+    }
+
     private void DrawSpectrumSlice(SKCanvas canvas, SKRect rect, VocalSpectrographState state, int frameIndex)
     {
         canvas.DrawRoundRect(new SKRoundRect(rect, 6f), _panelPaint);
@@ -1296,12 +1424,20 @@ public sealed class VocalSpectrographRenderer : IDisposable
             return;
         }
 
+        if (!TryGetRingIndex(frameIndex, out int ringIndex))
+        {
+            return;
+        }
+
         int bins = state.DisplayBins;
-        int offset = frameIndex * bins;
+        int offset = ringIndex * bins;
         if (offset < 0 || offset + bins > state.Spectrogram.Length)
         {
             return;
         }
+
+        // Update ballistics for smooth attack/release animation
+        UpdateSpectrumBallistics(state.Spectrogram, offset, bins);
 
         float minDb = state.MinDb;
         float maxDb = state.MaxDb;
@@ -1309,7 +1445,9 @@ public sealed class VocalSpectrographRenderer : IDisposable
         float freqRange = MathF.Max(1f, state.MaxFrequency - state.MinFrequency);
 
         _spectrumSlicePath.Reset();
+        _spectrumFillPath.Reset();
         bool started = false;
+        float firstX = 0f, lastX = 0f;
         for (int i = 0; i < bins && i < state.BinFrequencies.Length; i++)
         {
             float freq = state.BinFrequencies[i];
@@ -1319,7 +1457,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
             }
 
             float normX = (freq - state.MinFrequency) / freqRange;
-            float value = state.Spectrogram[offset + i];
+            // Use ballistic-smoothed value for display
+            float value = _spectrumBallistics[i];
             float db = minDb + value * dbRange;
             float normY = (db - minDb) / dbRange;
 
@@ -1329,16 +1468,37 @@ public sealed class VocalSpectrographRenderer : IDisposable
             if (!started)
             {
                 _spectrumSlicePath.MoveTo(x, y);
+                _spectrumFillPath.MoveTo(x, rect.Bottom);
+                _spectrumFillPath.LineTo(x, y);
+                firstX = x;
                 started = true;
             }
             else
             {
                 _spectrumSlicePath.LineTo(x, y);
+                _spectrumFillPath.LineTo(x, y);
             }
+            lastX = x;
         }
 
         if (!_spectrumSlicePath.IsEmpty)
         {
+            // Close fill path and draw gradient fill
+            _spectrumFillPath.LineTo(lastX, rect.Bottom);
+            _spectrumFillPath.Close();
+
+            // Create vertical gradient from accent color (top) to transparent (bottom)
+            var gradientShader = SKShader.CreateLinearGradient(
+                new SKPoint(0, rect.Top),
+                new SKPoint(0, rect.Bottom),
+                new[] { _theme.AccentSecondary.WithAlpha(80), _theme.AccentSecondary.WithAlpha(10) },
+                new[] { 0f, 1f },
+                SKShaderTileMode.Clamp);
+            _spectrumFillPaint.Shader = gradientShader;
+            canvas.DrawPath(_spectrumFillPath, _spectrumFillPaint);
+            gradientShader.Dispose();
+
+            // Draw the stroke on top
             canvas.DrawPath(_spectrumSlicePath, _spectrumPaint);
         }
 
@@ -1431,14 +1591,28 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
         float f1 = 0f;
         float f2 = 0f;
-        if (state.FormantFrequencies is { Length: > 0 } && frameIndex >= 0)
+        if (state.FormantFrequencies is { Length: > 0 } && frameIndex >= 0 && TryGetRingIndex(frameIndex, out int ringIndex))
         {
-            int offset = frameIndex * state.MaxFormants;
+            int offset = ringIndex * state.MaxFormants;
             if (offset + 1 < state.FormantFrequencies.Length)
             {
                 f1 = state.FormantFrequencies[offset];
                 f2 = state.FormantFrequencies[offset + 1];
             }
+        }
+
+        // Apply ballistics: fast attack when new values arrive, slow decay when silent
+        if (f1 > 0f && f2 > 0f)
+        {
+            // Fast attack toward new values
+            _vowelF1Smoothed += (f1 - _vowelF1Smoothed) * VowelAttackCoeff;
+            _vowelF2Smoothed += (f2 - _vowelF2Smoothed) * VowelAttackCoeff;
+        }
+        else
+        {
+            // Slow decay toward zero when no valid formants
+            _vowelF1Smoothed *= (1f - VowelDecayCoeff);
+            _vowelF2Smoothed *= (1f - VowelDecayCoeff);
         }
 
         float f1Min = 250f;
@@ -1459,16 +1633,22 @@ public sealed class VocalSpectrographRenderer : IDisposable
             canvas.DrawText(vowel.Label, x + 3f, y - 3f, _mutedTextPaint);
         }
 
-        if (state.FormantFrequencies is { Length: > 0 } && state.MaxFormants > 1)
+        if (state.FormantFrequencies is { Length: > 0 } && state.MaxFormants > 1 && _frameAvailable > 0)
         {
             int frames = Math.Min(state.FrameCount, state.FormantFrequencies.Length / state.MaxFormants);
-            int trailFrames = Math.Min(frames, 60);
-            int start = Math.Max(0, frames - trailFrames);
+            int trailFrames = Math.Min(_frameAvailable, 60);
+            int endFrame = Math.Min(frames, _framePadFrames + _frameAvailable);
+            int start = Math.Max(_framePadFrames, endFrame - trailFrames);
             _vowelTrailPath.Reset();
             bool started = false;
-            for (int frame = start; frame < frames; frame++)
+            for (int frame = start; frame < endFrame; frame++)
             {
-                int offset = frame * state.MaxFormants;
+                if (!TryGetRingIndex(frame, out int trailRingIndex))
+                {
+                    continue;
+                }
+
+                int offset = trailRingIndex * state.MaxFormants;
                 if (offset + 1 >= state.FormantFrequencies.Length)
                 {
                     break;
@@ -1503,16 +1683,69 @@ public sealed class VocalSpectrographRenderer : IDisposable
             }
         }
 
-        if (f1 > 0f && f2 > 0f)
+        // Draw current position using smoothed values (persists longer)
+        // Only draw if smoothed values are within the display range
+        if (_vowelF1Smoothed >= f1Min && _vowelF1Smoothed <= f1Max &&
+            _vowelF2Smoothed >= f2Min && _vowelF2Smoothed <= f2Max)
         {
-            float xNorm = (f2 - f2Min) / (f2Max - f2Min);
-            float yNorm = (f1 - f1Min) / (f1Max - f1Min);
+            float xNorm = (_vowelF2Smoothed - f2Min) / (f2Max - f2Min);
+            float yNorm = (_vowelF1Smoothed - f1Min) / (f1Max - f1Min);
             float x = plotRect.Left + plotRect.Width * xNorm;
             float y = plotRect.Bottom - plotRect.Height * yNorm;
             canvas.DrawCircle(x, y, 4f, _pitchPaint);
-            canvas.DrawText($"F1 {f1:0}", plotRect.Left + 4f, plotRect.Bottom - 6f, _metricPaint);
-            canvas.DrawText($"F2 {f2:0}", plotRect.Left + 60f, plotRect.Bottom - 6f, _metricPaint);
+            // Show actual instantaneous values in text (when available)
+            if (f1 > 0f && f2 > 0f)
+            {
+                canvas.DrawText($"F1 {f1:0}", plotRect.Left + 4f, plotRect.Bottom - 6f, _metricPaint);
+                canvas.DrawText($"F2 {f2:0}", plotRect.Left + 60f, plotRect.Bottom - 6f, _metricPaint);
+            }
         }
+    }
+
+    private void UpdateFrameMapping(VocalSpectrographState state)
+    {
+        _frameCapacity = state.FrameCount;
+        if (state.AvailableFrames <= 0 || state.LatestFrameId < 0 || _frameCapacity <= 0)
+        {
+            _frameAvailable = 0;
+            _framePadFrames = Math.Max(0, _frameCapacity);
+            _frameRingStart = 0;
+            return;
+        }
+
+        _frameAvailable = Math.Min(state.AvailableFrames, _frameCapacity);
+        _framePadFrames = Math.Max(0, _frameCapacity - _frameAvailable);
+        long oldestFrameId = state.LatestFrameId - _frameAvailable + 1;
+        int ringStart = (int)(oldestFrameId % _frameCapacity);
+        if (ringStart < 0)
+        {
+            ringStart += _frameCapacity;
+        }
+
+        _frameRingStart = ringStart;
+    }
+
+    private bool TryGetRingIndex(int displayIndex, out int ringIndex)
+    {
+        ringIndex = -1;
+        if (_frameAvailable <= 0 || _frameCapacity <= 0 || displayIndex < _framePadFrames)
+        {
+            return false;
+        }
+
+        int relative = displayIndex - _framePadFrames;
+        if (relative < 0 || relative >= _frameAvailable)
+        {
+            return false;
+        }
+
+        ringIndex = _frameRingStart + relative;
+        if (ringIndex >= _frameCapacity)
+        {
+            ringIndex -= _frameCapacity;
+        }
+
+        return true;
     }
 
     private static int GetSliceFrameIndex(VocalSpectrographState state)
@@ -1537,14 +1770,24 @@ public sealed class VocalSpectrographRenderer : IDisposable
         return padFrames + Math.Max(0, state.AvailableFrames - 1);
     }
 
-    private static float GetFrameValue(float[]? values, int frameIndex)
+    private float GetFrameValue(float[]? values, int frameIndex)
     {
-        if (values is null || frameIndex < 0 || frameIndex >= values.Length)
+        if (values is null || frameIndex < 0)
         {
             return 0f;
         }
 
-        return values[frameIndex];
+        if (!TryGetRingIndex(frameIndex, out int ringIndex))
+        {
+            return 0f;
+        }
+
+        if (ringIndex < 0 || ringIndex >= values.Length)
+        {
+            return 0f;
+        }
+
+        return values[ringIndex];
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -1679,9 +1922,15 @@ public sealed class VocalSpectrographRenderer : IDisposable
             return;
         }
 
+        if (destRect.Width <= 0 || destRect.Height <= 0)
+        {
+            return;
+        }
+
         if (_bitmapRingStart <= 0 || _bitmapRingStart >= _bitmapWidth)
         {
             canvas.DrawBitmap(_spectrogramBitmap, destRect, _bitmapPaint);
+            canvas.DrawBitmap(_spectrogramBitmap, destRect, _bloomAddPaint);
             return;
         }
 
@@ -1695,15 +1944,33 @@ public sealed class VocalSpectrographRenderer : IDisposable
         var srcRight = new SKRect(0, 0, _bitmapRingStart, _bitmapHeight);
         var dstRight = new SKRect(destRect.Left + leftWidth, destRect.Top, destRect.Right, destRect.Bottom);
         canvas.DrawBitmap(_spectrogramBitmap, srcRight, dstRight, _bitmapPaint);
+
+        canvas.DrawBitmap(_spectrogramBitmap, srcLeft, dstLeft, _bloomAddPaint);
+        canvas.DrawBitmap(_spectrogramBitmap, srcRight, dstRight, _bloomAddPaint);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void RenderFullSpectrogram(VocalSpectrographState state, int width, int bins)
     {
-        int totalFrames = width;
-        for (int frame = 0; frame < totalFrames; frame++)
+        if (_pixelBuffer.Length > 0)
         {
-            int frameOffset = frame * bins;
+            Array.Clear(_pixelBuffer, 0, _pixelBuffer.Length);
+        }
+
+        if (_frameAvailable <= 0)
+        {
+            return;
+        }
+
+        int endFrame = Math.Min(width, _framePadFrames + _frameAvailable);
+        for (int frame = _framePadFrames; frame < endFrame; frame++)
+        {
+            if (!TryGetRingIndex(frame, out int ringIndex))
+            {
+                continue;
+            }
+
+            int frameOffset = ringIndex * bins;
             int column = (frame + _bitmapRingStart) % width;
             for (int bin = 0; bin < bins; bin++)
             {
@@ -1726,7 +1993,12 @@ public sealed class VocalSpectrographRenderer : IDisposable
         int startColumn = Math.Max(0, width - deltaFrames);
         for (int frame = startColumn; frame < width; frame++)
         {
-            int frameOffset = frame * bins;
+            if (!TryGetRingIndex(frame, out int ringIndex))
+            {
+                continue;
+            }
+
+            int frameOffset = ringIndex * bins;
             int column = (ringStart + frame) % width;
             for (int bin = 0; bin < bins; bin++)
             {
@@ -1850,18 +2122,30 @@ public sealed class VocalSpectrographRenderer : IDisposable
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void DrawOverlays(SKCanvas canvas, SKRect rect, VocalSpectrographState state)
     {
+        if (_frameAvailable <= 0)
+        {
+            return;
+        }
+
         if (state.PitchTrack is { Length: > 0 } && state.ShowPitch)
         {
             int frames = Math.Min(state.FrameCount, state.PitchTrack.Length);
+            int startFrame = _framePadFrames;
+            int endFrame = Math.Min(frames, _framePadFrames + _frameAvailable);
             int step = GetOverlayStep(rect, frames);
             _pitchHighPath.Reset();
             _pitchLowPath.Reset();
             bool highStarted = false;
             bool lowStarted = false;
 
-            for (int frame = 0; frame < frames; frame += step)
+            for (int frame = startFrame; frame < endFrame; frame += step)
             {
-                float pitch = state.PitchTrack[frame];
+                if (!TryGetRingIndex(frame, out int ringIndex))
+                {
+                    continue;
+                }
+
+                float pitch = state.PitchTrack[ringIndex];
                 if (pitch <= 0f)
                 {
                     highStarted = false;
@@ -1869,7 +2153,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
                     continue;
                 }
 
-                float confidence = state.PitchConfidence is { Length: > 0 } ? state.PitchConfidence[frame] : 1f;
+                float confidence = state.PitchConfidence is { Length: > 0 } ? state.PitchConfidence[ringIndex] : 1f;
                 bool high = confidence >= 0.6f;
 
                 float norm = FrequencyToNorm(state, pitch);
@@ -1904,6 +2188,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
                 }
             }
 
+            // Draw shadow first for depth effect
+            canvas.DrawPath(_pitchHighPath, _pitchShadowPaint);
             canvas.DrawPath(_pitchHighPath, _pitchPaint);
             canvas.DrawPath(_pitchLowPath, _pitchLowPaint);
         }
@@ -1914,6 +2200,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
             if (maxFormants > 0)
             {
                 int frames = Math.Min(state.FrameCount, state.FormantFrequencies.Length / maxFormants);
+                int startFrame = _framePadFrames;
+                int endFrame = Math.Min(frames, _framePadFrames + _frameAvailable);
                 int step = GetOverlayStep(rect, frames);
 
                 int trackCount = Math.Min(3, maxFormants);
@@ -1924,10 +2212,15 @@ public sealed class VocalSpectrographRenderer : IDisposable
                 bool started2 = false;
                 bool started3 = false;
 
-                for (int frame = 0; frame < frames; frame += step)
+                for (int frame = startFrame; frame < endFrame; frame += step)
                 {
+                    if (!TryGetRingIndex(frame, out int ringIndex))
+                    {
+                        continue;
+                    }
+
                     float x = rect.Left + rect.Width * frame / Math.Max(1, state.FrameCount - 1);
-                    int offset = frame * maxFormants;
+                    int offset = ringIndex * maxFormants;
 
                     if (trackCount > 0)
                     {
@@ -1999,6 +2292,21 @@ public sealed class VocalSpectrographRenderer : IDisposable
                     }
                 }
 
+                // Draw shadows first for depth effect
+                if (!_formantPath1.IsEmpty)
+                {
+                    canvas.DrawPath(_formantPath1, _overlayShadowPaint);
+                }
+                if (!_formantPath2.IsEmpty)
+                {
+                    canvas.DrawPath(_formantPath2, _overlayShadowPaint);
+                }
+                if (!_formantPath3.IsEmpty)
+                {
+                    canvas.DrawPath(_formantPath3, _overlayShadowPaint);
+                }
+
+                // Draw formant lines on top
                 if (!_formantPath1.IsEmpty)
                 {
                     canvas.DrawPath(_formantPath1, _formantLinePaint1);
@@ -2012,10 +2320,15 @@ public sealed class VocalSpectrographRenderer : IDisposable
                     canvas.DrawPath(_formantPath3, _formantLinePaint3);
                 }
 
-                for (int frame = 0; frame < frames; frame += step)
+                for (int frame = startFrame; frame < endFrame; frame += step)
                 {
+                    if (!TryGetRingIndex(frame, out int ringIndex))
+                    {
+                        continue;
+                    }
+
                     float x = rect.Left + rect.Width * frame / Math.Max(1, state.FrameCount - 1);
-                    int offset = frame * maxFormants;
+                    int offset = ringIndex * maxFormants;
                     for (int f = 0; f < maxFormants; f++)
                     {
                         float freq = state.FormantFrequencies[offset + f];
@@ -2033,13 +2346,15 @@ public sealed class VocalSpectrographRenderer : IDisposable
                         };
                         canvas.DrawCircle(x, y, 2.5f, paint);
 
-                        if (state.FormantBandwidths is { Length: > 0 })
+                        // Only draw bandwidth bars if enabled (default is dots-only like Praat)
+                        if (state.ShowFormantBandwidths && state.FormantBandwidths is { Length: > 0 })
                         {
                             float bw = state.FormantBandwidths[offset + f];
                             if (bw > 1f)
                             {
-                                float low = freq - bw * 0.5f;
-                                float high = freq + bw * 0.5f;
+                                // Clamp bandwidth extent to display range to prevent off-screen bars
+                                float low = MathF.Max(state.MinFrequency, freq - bw * 0.5f);
+                                float high = MathF.Min(state.MaxFrequency, freq + bw * 0.5f);
                                 float lowNorm = FrequencyToNorm(state, low);
                                 float highNorm = FrequencyToNorm(state, high);
                                 float y1 = rect.Bottom - lowNorm * rect.Height;
@@ -2058,6 +2373,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
             if (maxHarmonics > 0)
             {
                 int frames = Math.Min(state.FrameCount, state.HarmonicFrequencies.Length / maxHarmonics);
+                int startFrame = _framePadFrames;
+                int endFrame = Math.Min(frames, _framePadFrames + _frameAvailable);
                 int step = GetOverlayStep(rect, frames);
                 var displayMode = state.HarmonicDisplayMode;
                 bool hasMagnitudes = state.HarmonicMagnitudes is { Length: > 0 }
@@ -2066,10 +2383,15 @@ public sealed class VocalSpectrographRenderer : IDisposable
                 // Detection threshold: -40 dB relative to fundamental
                 const float DetectionThresholdDb = -40f;
 
-                for (int frame = 0; frame < frames; frame += step)
+                for (int frame = startFrame; frame < endFrame; frame += step)
                 {
+                    if (!TryGetRingIndex(frame, out int ringIndex))
+                    {
+                        continue;
+                    }
+
                     float x = rect.Left + rect.Width * frame / Math.Max(1, state.FrameCount - 1);
-                    int offset = frame * maxHarmonics;
+                    int offset = ringIndex * maxHarmonics;
                     for (int h = 0; h < maxHarmonics; h++)
                     {
                         float freq = state.HarmonicFrequencies[offset + h];
@@ -2110,14 +2432,22 @@ public sealed class VocalSpectrographRenderer : IDisposable
         {
             int frames = Math.Min(state.FrameCount, state.VoicingStates.Length);
             float laneTop = rect.Bottom - VoicingLaneHeight;
+            int startFrame = _framePadFrames;
+            int endFrame = Math.Min(frames, _framePadFrames + _frameAvailable);
             int step = GetOverlayStep(rect, frames);
             float frameWidth = rect.Width / Math.Max(1, state.FrameCount);
-            for (int frame = 0; frame < frames; frame += step)
+            for (int frame = startFrame; frame < endFrame; frame += step)
             {
-                byte stateValue = state.VoicingStates[frame];
-                for (int i = 1; i < step && frame + i < frames; i++)
+                byte stateValue = 0;
+                int segment = Math.Min(step, endFrame - frame);
+                for (int i = 0; i < segment; i++)
                 {
-                    byte next = state.VoicingStates[frame + i];
+                    if (!TryGetRingIndex(frame + i, out int ringIndex))
+                    {
+                        continue;
+                    }
+
+                    byte next = state.VoicingStates[ringIndex];
                     if (next > stateValue)
                     {
                         stateValue = next;
@@ -2130,7 +2460,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
                     _ => _silencePaint
                 };
                 float x = rect.Left + frameWidth * frame;
-                float width = frameWidth * step;
+                float width = frameWidth * segment;
                 canvas.DrawRect(new SKRect(x, laneTop, x + width, rect.Bottom), paint);
             }
         }
@@ -2159,6 +2489,42 @@ public sealed class VocalSpectrographRenderer : IDisposable
         canvas.DrawLine(x, rect.Top, x, rect.Bottom, _referencePaint);
     }
 
+    private void DrawDiscontinuityMarkers(SKCanvas canvas, SKRect rect, VocalSpectrographState state)
+    {
+        if (state.Discontinuities is not { Count: > 0 } || state.AvailableFrames <= 0 || state.FrameCount <= 1)
+        {
+            return;
+        }
+
+        long latestFrame = state.LatestFrameId;
+        int availableFrames = state.AvailableFrames;
+        int padFrames = Math.Max(0, state.FrameCount - availableFrames);
+        long oldestFrame = latestFrame - availableFrames + 1;
+
+        foreach (var evt in state.Discontinuities)
+        {
+            long offset = evt.FrameId - oldestFrame;
+            if (offset < 0 || offset >= availableFrames)
+            {
+                continue;
+            }
+
+            int columnIndex = padFrames + (int)offset;
+            float x = rect.Left + rect.Width * columnIndex / Math.Max(1, state.FrameCount - 1);
+            canvas.DrawLine(x, rect.Top, x, rect.Bottom, _discontinuityPaint);
+
+            // Draw small indicator at top with short label
+            float labelY = rect.Top + 10f;
+            using var labelFont = new SKFont(SKTypeface.Default, 9f);
+            using var labelPaint = new SKPaint
+            {
+                Color = _discontinuityPaint.Color,
+                IsAntialias = true
+            };
+            canvas.DrawText(evt.ShortLabel, x + 3f, labelY, SKTextAlign.Left, labelFont, labelPaint);
+        }
+    }
+
     private void DrawPillButton(SKCanvas canvas, SKRect rect, string label, bool active)
     {
         canvas.DrawRoundRect(new SKRoundRect(rect, rect.Height / 2f), active ? _buttonActivePaint : _buttonPaint);
@@ -2183,12 +2549,21 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
     /// <summary>
     /// Convert frequency to normalized Y position using the unified display mapping.
-    /// Requires FrequencyMapper (DisplayPipeline) to be set in state for proper alignment with spectrogram.
-    /// Returns 0 if mapper is null or not yet configured.
+    /// Falls back to scale-based calculation if mapper not yet configured.
     /// </summary>
     private static float FrequencyToNorm(VocalSpectrographState state, float frequencyHz)
     {
-        return state.FrequencyMapper?.FrequencyToNormalizedY(frequencyHz) ?? 0f;
+        var mapper = state.FrequencyMapper;
+        if (mapper is { IsConfigured: true }
+            && mapper.ConfiguredScale == state.Scale
+            && MathF.Abs(mapper.ConfiguredMinHz - state.MinFrequency) < 1f
+            && MathF.Abs(mapper.ConfiguredMaxHz - state.MaxFrequency) < 1f)
+        {
+            return mapper.FrequencyToNormalizedY(frequencyHz);
+        }
+
+        // Fallback: use frequency scale directly when mapper not configured or config mismatch
+        return FrequencyScaleUtils.Normalize(state.Scale, frequencyHz, state.MinFrequency, state.MaxFrequency);
     }
 
     private static readonly float[] AxisHzLabels = { 80f, 150f, 250f, 500f, 1000f, 2000f, 4000f, 8000f };
@@ -2392,7 +2767,9 @@ public sealed class VocalSpectrographRenderer : IDisposable
         _buttonTextPaint.Dispose();
         _referencePaint.Dispose();
         _bitmapPaint.Dispose();
+        _bloomAddPaint.Dispose();
         _pitchPaint.Dispose();
+        _pitchShadowPaint.Dispose();
         _pitchLowPaint.Dispose();
         _formantPaint1.Dispose();
         _formantPaint2.Dispose();
@@ -2400,6 +2777,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         _formantLinePaint1.Dispose();
         _formantLinePaint2.Dispose();
         _formantLinePaint3.Dispose();
+        _overlayShadowPaint.Dispose();
         _harmonicPaint.Dispose();
         _harmonicDetectedPaint.Dispose();
         _harmonicTheoreticalPaint.Dispose();
@@ -2411,9 +2789,11 @@ public sealed class VocalSpectrographRenderer : IDisposable
         _waveformEnvelopePaint.Dispose();
         _waveformZeroPaint.Dispose();
         _spectrumPaint.Dispose();
+        _spectrumFillPaint.Dispose();
         _spectrumPeakPaint.Dispose();
         _rangeBandPaint.Dispose();
         _guidePaint.Dispose();
+        _discontinuityPaint.Dispose();
         _metricPaint.Dispose();
         _vowelTrailPaint.Dispose();
         _iconPaint.Dispose();
@@ -2423,6 +2803,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         _waveformEnvelopeTop.Dispose();
         _waveformEnvelopeBottom.Dispose();
         _spectrumSlicePath.Dispose();
+        _spectrumFillPath.Dispose();
         _pitchHighPath.Dispose();
         _pitchLowPath.Dispose();
         _formantPath1.Dispose();
@@ -2530,6 +2911,7 @@ public record struct VocalSpectrographState(
     SpectrographUiTimingSnapshot UiTiming,
     bool ShowPitch,
     bool ShowFormants,
+    bool ShowFormantBandwidths,
     bool ShowHarmonics,
     HarmonicDisplayMode HarmonicDisplayMode,
     bool ShowVoicing,
@@ -2559,4 +2941,5 @@ public record struct VocalSpectrographState(
     float[]? SpectralFlux,
     float[]? BinFrequencies,
     int MaxFormants,
-    int MaxHarmonics);
+    int MaxHarmonics,
+    IReadOnlyList<DiscontinuityEvent>? Discontinuities);

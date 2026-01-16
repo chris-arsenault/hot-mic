@@ -8,6 +8,11 @@ You are working on **HotMic**, a Windows audio routing application. Keep respons
 - `docs/technical/README.md` for DSP/analysis/visualization specs and code-reference format.
 - `README.md` for product scope and user-facing requirements.
 
+## UI/Core Consistency
+
+- Never allow the UI to show a state the core layer will not execute.
+- If core enforces or clamps parameter values, update the UI immediately (auto-switch) so backend behavior matches what the user sees.
+
 ## Spec Hygiene
 
 Do not duplicate spec content here. When behavior changes, update the relevant doc under `docs/technical/` and keep its code references accurate.

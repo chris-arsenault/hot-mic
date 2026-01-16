@@ -64,6 +64,12 @@ public sealed class KnobWidget : IDisposable
     /// <summary>Drag sensitivity (default 0.004).</summary>
     public float DragSensitivity { get; set; } = 0.004f;
 
+    /// <summary>Fine-tune sensitivity multiplier when Shift is held (default 0.1).</summary>
+    public float FineTuneFactor { get; set; } = 0.1f;
+
+    /// <summary>Default value for double-click reset. If null, uses MinValue.</summary>
+    public float? DefaultValue { get; set; }
+
     /// <summary>Whether to use logarithmic scaling for value normalization.</summary>
     public bool IsLogarithmic { get; set; }
 
@@ -396,14 +402,19 @@ public sealed class KnobWidget : IDisposable
     /// <summary>
     /// Handle mouse move event. Returns true if the knob state changed.
     /// </summary>
-    public bool HandleMouseMove(float x, float y, bool isLeftButtonDown)
+    /// <param name="x">Mouse X position</param>
+    /// <param name="y">Mouse Y position</param>
+    /// <param name="isLeftButtonDown">Whether left mouse button is down</param>
+    /// <param name="isShiftHeld">Whether Shift key is held for fine-tune mode</param>
+    public bool HandleMouseMove(float x, float y, bool isLeftButtonDown, bool isShiftHeld = false)
     {
         bool stateChanged = false;
 
         if (_isDragging && isLeftButtonDown)
         {
+            float sensitivity = isShiftHeld ? DragSensitivity * FineTuneFactor : DragSensitivity;
             float deltaY = _dragStartY - y;
-            float newNormalized = Math.Clamp(_dragStartValue + deltaY * DragSensitivity, 0f, 1f);
+            float newNormalized = Math.Clamp(_dragStartValue + deltaY * sensitivity, 0f, 1f);
             float newValue = Denormalize(newNormalized);
 
             if (MathF.Abs(newValue - Value) > 0.0001f)
@@ -432,6 +443,24 @@ public sealed class KnobWidget : IDisposable
         {
             _isDragging = false;
         }
+    }
+
+    /// <summary>
+    /// Handle double-click event to reset to default value. Returns true if handled.
+    /// </summary>
+    public bool HandleDoubleClick(float x, float y)
+    {
+        if (!HitTest(x, y))
+            return false;
+
+        float resetValue = DefaultValue ?? MinValue;
+        if (MathF.Abs(Value - resetValue) > 0.0001f)
+        {
+            Value = resetValue;
+            ValueChanged?.Invoke(Value);
+        }
+
+        return true;
     }
 
     /// <summary>
