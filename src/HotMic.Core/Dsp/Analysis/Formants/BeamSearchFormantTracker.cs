@@ -39,12 +39,17 @@ public sealed class BeamSearchFormantTracker
     private const float SpacingWeight = 1.5f;        // Prefer reasonable formant spacing
 
     // Thresholds (more permissive than simple tracker)
-    private const float MinMagnitude = 0.55f;        // Lower threshold to catch F1
+    private const float MinMagnitude = 0.40f;        // Very low to catch weak F1 poles
     private const float MaxMagnitude = 0.9995f;
     private const float MinBandwidth = 10f;
     private const float MaxBandwidth = 2500f;        // Allow wider bandwidths
     private const float MinFrequency = 80f;
     private const float MaxContinuityJump = 400f;    // Max Hz jump between frames
+
+    // F1-specific constraints
+    private const float F1ExpectedMin = 200f;        // F1 rarely below 200 Hz for adults
+    private const float F1ExpectedMax = 1000f;       // F1 rarely above 1000 Hz
+    private const float F1RangePenalty = 2.0f;       // Penalty for F1 outside expected range
 
     // Diagnostic
     private int _diagCounter;
@@ -284,11 +289,40 @@ public sealed class BeamSearchFormantTracker
                     // Compute cost for this assignment
                     float cost = state.TotalCost + _candidates[c].LocalCost;
 
+                    // F1-specific: penalize candidates outside expected F1 range
+                    // This prevents F2 (typically 850-2500 Hz) from being assigned as F1
+                    if (f == 0)
+                    {
+                        float f1Freq = _candidates[c].Frequency;
+                        if (f1Freq < F1ExpectedMin)
+                        {
+                            cost += (F1ExpectedMin - f1Freq) / 100f * F1RangePenalty;
+                        }
+                        else if (f1Freq > F1ExpectedMax)
+                        {
+                            cost += (f1Freq - F1ExpectedMax) / 100f * F1RangePenalty;
+                        }
+                    }
+
                     // Add continuity cost if we have previous frame data
                     if (_hasPrevious && f < _prevFormants.Length && _prevFormants[f] > 0)
                     {
-                        float jump = MathF.Abs(_candidates[c].Frequency - _prevFormants[f]);
-                        if (jump > MaxContinuityJump)
+                        float candFreq = _candidates[c].Frequency;
+                        float prevFreq = _prevFormants[f];
+                        float jump = MathF.Abs(candFreq - prevFreq);
+
+                        // F1 recovery: if previous F1 was outside expected range but current
+                        // candidate is inside, reduce the continuity penalty to allow correction
+                        bool f1Recovery = f == 0
+                            && prevFreq > F1ExpectedMax
+                            && candFreq >= F1ExpectedMin && candFreq <= F1ExpectedMax;
+
+                        if (f1Recovery)
+                        {
+                            // Reduced penalty for F1 recovery - allow jump to correct F1 range
+                            cost += (jump / MaxContinuityJump) * 0.5f;
+                        }
+                        else if (jump > MaxContinuityJump)
                         {
                             // Large jump - high penalty but don't reject
                             cost += (jump / MaxContinuityJump) * ContinuityWeight;
