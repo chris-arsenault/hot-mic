@@ -192,7 +192,7 @@ public sealed partial class VocalSpectrographPlugin
                 Name = "LPC Order",
                 MinValue = 8f,
                 MaxValue = 24f,
-                DefaultValue = 12f,
+                DefaultValue = 10f,
                 Unit = ""
             },
             new PluginParameter
@@ -293,6 +293,16 @@ public sealed partial class VocalSpectrographPlugin
                 DefaultValue = (float)VocalRangeType.Tenor,
                 Unit = "",
                 FormatValue = value => ((VocalRangeType)Math.Clamp((int)MathF.Round(value), 0, 5)).ToString()
+            },
+            new PluginParameter
+            {
+                Index = FormantProfileIndex,
+                Name = "Formant Profile",
+                MinValue = 0f,
+                MaxValue = 2f,
+                DefaultValue = (float)FormantProfile.Male,
+                Unit = "",
+                FormatValue = value => ((FormantProfile)Math.Clamp((int)MathF.Round(value), 0, 2)).ToString()
             },
             new PluginParameter
             {
@@ -437,6 +447,61 @@ public sealed partial class VocalSpectrographPlugin
                 DefaultValue = 48f,
                 Unit = "",
                 FormatValue = value => FormatDiscrete(value, CqtBinsPerOctaveOptions, "")
+            },
+            // Speech Coach parameters
+            new PluginParameter
+            {
+                Index = SpeechCoachEnabledIndex,
+                Name = "Speech Coach",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 0f,
+                Unit = ""
+            },
+            new PluginParameter
+            {
+                Index = SpeechRateWindowIndex,
+                Name = "Rate Window",
+                MinValue = 5f,
+                MaxValue = 30f,
+                DefaultValue = 10f,
+                Unit = "s"
+            },
+            new PluginParameter
+            {
+                Index = ShowSpeechMetricsIndex,
+                Name = "Speech Metrics",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 1f,
+                Unit = ""
+            },
+            new PluginParameter
+            {
+                Index = ShowSyllableMarkersIndex,
+                Name = "Syllable Markers",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 1f,
+                Unit = ""
+            },
+            new PluginParameter
+            {
+                Index = ShowPauseOverlayIndex,
+                Name = "Pause Overlay",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 1f,
+                Unit = ""
+            },
+            new PluginParameter
+            {
+                Index = ShowFillerMarkersIndex,
+                Name = "Filler Markers",
+                MinValue = 0f,
+                MaxValue = 1f,
+                DefaultValue = 1f,
+                Unit = ""
             }
         ];
     }
@@ -539,6 +604,9 @@ public sealed partial class VocalSpectrographPlugin
     public VocalRangeType VoiceRange =>
         (VocalRangeType)Math.Clamp(Volatile.Read(ref _requestedVoiceRange), 0, 5);
 
+    public FormantProfile FormantProfile =>
+        (FormantProfile)Math.Clamp(Volatile.Read(ref _requestedFormantProfile), 0, 2);
+
     public bool ShowRange => Volatile.Read(ref _requestedShowRange) != 0;
 
     public bool ShowGuides => Volatile.Read(ref _requestedShowGuides) != 0;
@@ -605,6 +673,19 @@ public sealed partial class VocalSpectrographPlugin
     public float HighPassCutoff => Volatile.Read(ref _requestedHighPassCutoff);
 
     public int LpcOrder => Volatile.Read(ref _requestedLpcOrder);
+
+    // Speech Coach properties
+    public bool SpeechCoachEnabled => Volatile.Read(ref _requestedSpeechCoachEnabled) != 0;
+
+    public int SpeechRateWindowSeconds => Math.Clamp(Volatile.Read(ref _requestedSpeechRateWindow), 5, 30);
+
+    public bool ShowSpeechMetrics => Volatile.Read(ref _requestedShowSpeechMetrics) != 0;
+
+    public bool ShowSyllableMarkers => Volatile.Read(ref _requestedShowSyllableMarkers) != 0;
+
+    public bool ShowPauseOverlay => Volatile.Read(ref _requestedShowPauseOverlay) != 0;
+
+    public bool ShowFillerMarkers => Volatile.Read(ref _requestedShowFillerMarkers) != 0;
 
     public void SetParameter(int index, float value)
     {
@@ -724,6 +805,9 @@ public sealed partial class VocalSpectrographPlugin
             case VoiceRangeIndex:
                 Interlocked.Exchange(ref _requestedVoiceRange, Math.Clamp((int)MathF.Round(value), 0, 5));
                 break;
+            case FormantProfileIndex:
+                Interlocked.Exchange(ref _requestedFormantProfile, Math.Clamp((int)MathF.Round(value), 0, 2));
+                break;
             case ShowRangeIndex:
                 Interlocked.Exchange(ref _requestedShowRange, value >= 0.5f ? 1 : 0);
                 break;
@@ -775,12 +859,31 @@ public sealed partial class VocalSpectrographPlugin
             case CqtBinsPerOctaveIndex:
                 Interlocked.Exchange(ref _requestedCqtBinsPerOctave, SelectDiscrete(value, CqtBinsPerOctaveOptions));
                 break;
+            // Speech Coach parameters
+            case SpeechCoachEnabledIndex:
+                Interlocked.Exchange(ref _requestedSpeechCoachEnabled, value >= 0.5f ? 1 : 0);
+                break;
+            case SpeechRateWindowIndex:
+                Interlocked.Exchange(ref _requestedSpeechRateWindow, Math.Clamp((int)MathF.Round(value), 5, 30));
+                break;
+            case ShowSpeechMetricsIndex:
+                Interlocked.Exchange(ref _requestedShowSpeechMetrics, value >= 0.5f ? 1 : 0);
+                break;
+            case ShowSyllableMarkersIndex:
+                Interlocked.Exchange(ref _requestedShowSyllableMarkers, value >= 0.5f ? 1 : 0);
+                break;
+            case ShowPauseOverlayIndex:
+                Interlocked.Exchange(ref _requestedShowPauseOverlay, value >= 0.5f ? 1 : 0);
+                break;
+            case ShowFillerMarkersIndex:
+                Interlocked.Exchange(ref _requestedShowFillerMarkers, value >= 0.5f ? 1 : 0);
+                break;
         }
     }
 
     public byte[] GetState()
     {
-        var bytes = new byte[sizeof(float) * 44];
+        var bytes = new byte[sizeof(float) * 45];
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedFftSize), 0, bytes, 0, 4);
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedWindow), 0, bytes, 4, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(OverlapOptions[_requestedOverlapIndex]), 0, bytes, 8, 4);
@@ -825,6 +928,7 @@ public sealed partial class VocalSpectrographPlugin
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedTransformType), 0, bytes, 164, 4);
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedCqtBinsPerOctave), 0, bytes, 168, 4);
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedHarmonicDisplayMode), 0, bytes, 172, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedFormantProfile), 0, bytes, 176, 4);
         return bytes;
     }
 
@@ -898,6 +1002,11 @@ public sealed partial class VocalSpectrographPlugin
         if (state.Length >= sizeof(float) * 44)
         {
             SetParameter(HarmonicDisplayModeIndex, BitConverter.ToSingle(state, 172));
+        }
+
+        if (state.Length >= sizeof(float) * 45)
+        {
+            SetParameter(FormantProfileIndex, BitConverter.ToSingle(state, 176));
         }
     }
 }

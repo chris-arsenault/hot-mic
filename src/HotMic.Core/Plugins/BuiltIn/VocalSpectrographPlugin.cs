@@ -1,5 +1,6 @@
 using System.Threading;
 using HotMic.Core.Dsp;
+using HotMic.Core.Dsp.Analysis.Speech;
 using HotMic.Core.Dsp.Fft;
 using HotMic.Core.Dsp.Filters;
 using HotMic.Core.Dsp.Spectrogram;
@@ -59,6 +60,15 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     public const int HarmonicDisplayModeIndex = 43;
     public const int ShowFormantBandwidthsIndex = 44;
 
+    // Speech Coach parameters
+    public const int SpeechCoachEnabledIndex = 45;
+    public const int SpeechRateWindowIndex = 46;
+    public const int ShowSpeechMetricsIndex = 47;
+    public const int ShowSyllableMarkersIndex = 48;
+    public const int ShowPauseOverlayIndex = 49;
+    public const int ShowFillerMarkersIndex = 50;
+    public const int FormantProfileIndex = 51;
+
     private const float DefaultMinFrequency = 80f;
     private const float DefaultMaxFrequency = 8000f;
     private const float DefaultMinDb = -80f;
@@ -70,7 +80,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private const int CaptureBufferSize = 262144;
     private const int MaxFormants = 5;
     private const int MaxHarmonics = 24;
-    private const int LpcWindowSamples = 1536; // ~32ms at 48kHz, optimal for speech formant analysis
+    private const float LpcWindowSeconds = 0.025f; // Praat default
     private const float TemporalSmoothingFactor = 0.3f;
     private const float ReassignMinDb = -60f;
     private const float MaxReassignBinShift = 0.5f;
@@ -78,6 +88,9 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private const float DefaultBrightness = 1.0f;
     private const float DefaultGamma = 0.8f;
     private const float DefaultContrast = 1.2f;
+    private const float LpcGaussianEdgeAmplitude = 0.04f; // Praat: ~4% outside the effective window
+    private static readonly float LpcGaussianSigma =
+        1f / MathF.Sqrt(-2f * MathF.Log(LpcGaussianEdgeAmplitude));
     private static readonly int[] ColorLevelOptions = { 16, 24, 32, 48, 64 };
 
     private static readonly int[] FftSizes = { 1024, 2048, 4096, 8192 };
@@ -106,12 +119,19 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private OnePoleHighPass _dcHighPass = new();
     private PreEmphasisFilter _preEmphasisFilter = new();
     private PreEmphasisFilter _lpcPreEmphasisFilter = new(); // Always-on pre-emphasis for LPC
-    private float[] _lpcInputBuffer = Array.Empty<float>(); // Scratch buffer for LPC with forced pre-emphasis
+    private float[] _lpcInputBuffer = Array.Empty<float>();
+    private float[] _lpcWindowedBuffer = Array.Empty<float>();
+    private float[] _lpcWindow = Array.Empty<float>();
     private readonly HalfbandResampler _lpcDecimator1 = new(); // 48kHz → 24kHz
     private readonly HalfbandResampler _lpcDecimator2 = new(); // 24kHz → 12kHz
     private float[] _lpcDecimateBuffer1 = Array.Empty<float>(); // Intermediate decimation buffer
-    private float[] _lpcDecimatedBuffer = Array.Empty<float>(); // Final decimated buffer for LPC (12kHz)
-    private const int LpcTargetSampleRate = 12000; // Target sample rate for LPC analysis (like Praat's 10-11kHz)
+    private float[] _lpcDecimatedBuffer = Array.Empty<float>(); // Final decimated buffer for LPC
+    private int _lpcWindowSamples;
+    private int _lpcWindowLength;
+    private int _activeLpcSampleRate;
+    private int _activeLpcDecimationStages;
+    private float _activeFormantCeilingHz;
+    private FormantProfile _activeFormantProfile = FormantProfile.Male;
     private long _lastDroppedHops;
 
     private Thread? _analysisThread;
@@ -216,6 +236,17 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private float[] _harmonicScratch = new float[MaxHarmonics];
     private float[] _harmonicMagScratch = new float[MaxHarmonics];
 
+    // Speech Coach components
+    private readonly SpeechCoach _speechCoach = new();
+    private float[] _syllableRateTrack = Array.Empty<float>();
+    private float[] _articulationRateTrack = Array.Empty<float>();
+    private float[] _pauseRatioTrack = Array.Empty<float>();
+    private float[] _monotoneScoreTrack = Array.Empty<float>();
+    private float[] _clarityScoreTrack = Array.Empty<float>();
+    private float[] _intelligibilityTrack = Array.Empty<float>();
+    private byte[] _speakingStateTrack = Array.Empty<byte>();
+    private byte[] _syllableMarkers = Array.Empty<byte>();
+
     private int _analysisActive;
     private int _analysisFilled;
     private int _requestedFftSize = 2048;
@@ -237,7 +268,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private int _requestedPreEmphasis = 1;
     private int _requestedHighPassEnabled = 1;
     private float _requestedHighPassCutoff = DefaultHighPassHz;
-    private int _requestedLpcOrder = 12;
+    private int _requestedLpcOrder = 10;
     private int _requestedReassignMode;
     private float _requestedReassignThreshold = ReassignMinDb;
     private float _requestedReassignSpread = 1f;
@@ -248,6 +279,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private int _requestedPitchAlgorithm = (int)PitchDetectorType.Yin;
     private int _requestedAxisMode = (int)SpectrogramAxisMode.Hz;
     private int _requestedVoiceRange = (int)VocalRangeType.Tenor;
+    private int _requestedFormantProfile = (int)FormantProfile.Male;
     private int _requestedShowRange = 1;
     private int _requestedShowGuides = 1;
     private int _requestedShowWaveform = 1;
@@ -264,4 +296,12 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private int _requestedTransformType = (int)SpectrogramTransformType.Fft;
     private int _requestedCqtBinsPerOctave = 48;
     private SpectrogramReassignMode _activeReassignMode;
+
+    // Speech Coach requested parameters
+    private int _requestedSpeechCoachEnabled = 0;
+    private int _requestedSpeechRateWindow = 10; // seconds
+    private int _requestedShowSpeechMetrics = 1;
+    private int _requestedShowSyllableMarkers = 1;
+    private int _requestedShowPauseOverlay = 1;
+    private int _requestedShowFillerMarkers = 1;
 }

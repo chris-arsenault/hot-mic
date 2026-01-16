@@ -59,11 +59,11 @@ public sealed class FormantTracker
             return 0;
         }
 
-        // Validate LPC coefficients - check for NaN/Inf and unreasonable values
+        // Validate LPC coefficients - only guard against NaN/Inf.
         for (int i = 0; i <= _order; i++)
         {
             float c = lpcCoefficients[i];
-            if (float.IsNaN(c) || float.IsInfinity(c) || MathF.Abs(c) > 100f)
+            if (float.IsNaN(c) || float.IsInfinity(c))
             {
                 return 0;
             }
@@ -80,11 +80,9 @@ public sealed class FormantTracker
 
         int count = 0;
         float nyquist = sampleRate * 0.5f;
-        // Formant detection uses fixed voice-appropriate range (not display range)
-        // Human formants F1-F4 are typically in 150-5000 Hz range
-        // F1: ~200-800 Hz, F2: ~800-2500 Hz, F3: ~2000-3500 Hz, F4: ~3000-4500 Hz
-        float minHz = 100f;
-        float maxHz = Math.Min(5500f, nyquist * 0.8f);
+        // Formant detection uses the provided analysis range.
+        float minHz = Math.Max(0f, minFrequency);
+        float maxHz = maxFrequency > 0f ? Math.Min(maxFrequency, nyquist * 0.9f) : nyquist * 0.9f;
 
         // Diagnostic: log all poles once per second
         bool shouldLog = ++_diagCounter % 100 == 0;
@@ -114,7 +112,7 @@ public sealed class FormantTracker
                 else if (magnitude >= 0.9995) status = "mag>0.9995";
                 else if (freq < minHz) status = "freq<100";
                 else if (freq > maxHz) status = $"freq>{maxHz:F0}";
-                else if (bandwidth < 10f) status = "bw<10";
+                else if (bandwidth <= 0f) status = "bw<=0";
                 else if (bandwidth > 3500f) status = "bw>3500";
                 Console.WriteLine($"  [{i}] freq={freq:F0}Hz, mag={magnitude:F4}, bw={bandwidth:F0}Hz, {status}");
             }
@@ -126,7 +124,7 @@ public sealed class FormantTracker
             // Filter by frequency range and bandwidth
             if (freq < minHz || freq > maxHz)
                 continue;
-            if (bandwidth < 10f || bandwidth > 3500f)
+            if (bandwidth <= 0f || bandwidth > 3500f)
                 continue;
 
             _freqScratch[count] = freq;

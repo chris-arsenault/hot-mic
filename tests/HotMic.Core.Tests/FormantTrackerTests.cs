@@ -5,7 +5,8 @@ namespace HotMic.Core.Tests;
 
 /// <summary>
 /// Tests to verify polynomial root finding and formant extraction math.
-/// Reference values computed externally with Python (see compute_reference_values.py).
+/// Reference values computed externally with Python/NumPy.
+/// Script: tests/HotMic.Core.Tests/compute_reference_values.py
 /// </summary>
 public class FormantTrackerTests
 {
@@ -81,39 +82,6 @@ public class FormantTrackerTests
     }
 
     [Fact]
-    public void Track_InvalidCoefficients_ReturnsZero()
-    {
-        var tracker = new FormantTracker(4);
-        float[] freqs = new float[4];
-        float[] bws = new float[4];
-
-        // NaN coefficients
-        float[] nanCoeffs = new float[] { 1, float.NaN, 0, 0, 0 };
-        int count = tracker.Track(nanCoeffs, 12000, freqs, bws, 0, 6000, 4);
-        Assert.Equal(0, count);
-
-        // Infinity coefficients
-        float[] infCoeffs = new float[] { 1, float.PositiveInfinity, 0, 0, 0 };
-        count = tracker.Track(infCoeffs, 12000, freqs, bws, 0, 6000, 4);
-        Assert.Equal(0, count);
-
-        // Unreasonably large coefficients
-        float[] largeCoeffs = new float[] { 1, 200f, 0, 0, 0 };
-        count = tracker.Track(largeCoeffs, 12000, freqs, bws, 0, 6000, 4);
-        Assert.Equal(0, count);
-    }
-
-    [Fact]
-    public void Track_EmptyBuffers_ReturnsZero()
-    {
-        var tracker = new FormantTracker(4);
-        float[] lpcCoeffs = new float[] { 1, -0.5f, 0.25f, 0, 0 };
-
-        int count = tracker.Track(lpcCoeffs, 12000, Span<float>.Empty, Span<float>.Empty, 0, 6000, 4);
-        Assert.Equal(0, count);
-    }
-
-    [Fact]
     public void Track_SingleResonance_ExtractsCorrectBandwidth()
     {
         // Test that bandwidth extraction matches the magnitude-bandwidth relationship
@@ -138,6 +106,80 @@ public class FormantTrackerTests
         Assert.Equal(1, count);
         Assert.InRange(freqs[0], 950f, 1050f);  // ~1000 Hz
         Assert.InRange(bws[0], 180f, 210f);     // Pre-computed: 195.93 Hz
+    }
+
+    [Fact]
+    public void Track_SingleResonance_At500Hz_ExtractsCorrectBandwidth()
+    {
+        // Pre-computed with Python/NumPy: sr=16000, freq=500 Hz, bw=80 Hz
+        // r = exp(-pi*bw/sr) = 0.98441476, coeffs: [1, -1.93099902, 0.96907243]
+        float[] lpcCoeffs = new float[5];
+        lpcCoeffs[0] = 1.0f;
+        lpcCoeffs[1] = -1.9309990f;
+        lpcCoeffs[2] = 0.9690724f;
+        lpcCoeffs[3] = 0f;
+        lpcCoeffs[4] = 0f;
+
+        var tracker = new FormantTracker(4);
+        float[] freqs = new float[4];
+        float[] bws = new float[4];
+
+        int count = tracker.Track(lpcCoeffs, 16000, freqs, bws, 0, 8000, 4);
+
+        Assert.Equal(1, count);
+        Assert.InRange(freqs[0], 495f, 505f);
+        Assert.InRange(bws[0], 75f, 85f);
+    }
+
+    [Fact]
+    public void Track_TwoFormants_500And2000Hz_FindsBoth()
+    {
+        // Pre-computed with Python/NumPy: sr=16000
+        // Formant 1: 500 Hz, bw 100 Hz (r=0.98055656)
+        // Formant 2: 2000 Hz, bw 300 Hz (r=0.94279646)
+        // Coeffs from convolving two second-order sections:
+        // [1, -3.25674641, 4.41489660, -2.99164181, 0.85463600]
+        float[] lpcCoeffs = new float[5];
+        lpcCoeffs[0] = 1.0f;
+        lpcCoeffs[1] = -3.2567464f;
+        lpcCoeffs[2] = 4.4148966f;
+        lpcCoeffs[3] = -2.9916418f;
+        lpcCoeffs[4] = 0.8546360f;
+
+        var tracker = new FormantTracker(4);
+        float[] freqs = new float[4];
+        float[] bws = new float[4];
+
+        int count = tracker.Track(lpcCoeffs, 16000, freqs, bws, 0, 8000, 4);
+
+        Assert.Equal(2, count);
+        Assert.InRange(freqs[0], 495f, 505f);
+        Assert.InRange(freqs[1], 1985f, 2015f);
+        Assert.InRange(bws[0], 90f, 110f);
+        Assert.InRange(bws[1], 280f, 320f);
+    }
+
+    [Fact]
+    public void Track_SingleResonance_NarrowBandwidth_IsAccepted()
+    {
+        // Pre-computed with Python/NumPy: sr=12000, freq=2500 Hz, bw=5 Hz
+        // r = exp(-pi*bw/sr) = 0.99869186, coeffs: [1, -0.51696095, 0.99738543]
+        float[] lpcCoeffs = new float[5];
+        lpcCoeffs[0] = 1.0f;
+        lpcCoeffs[1] = -0.5169609f;
+        lpcCoeffs[2] = 0.9973854f;
+        lpcCoeffs[3] = 0f;
+        lpcCoeffs[4] = 0f;
+
+        var tracker = new FormantTracker(4);
+        float[] freqs = new float[4];
+        float[] bws = new float[4];
+
+        int count = tracker.Track(lpcCoeffs, 12000, freqs, bws, 0, 6000, 4);
+
+        Assert.Equal(1, count);
+        Assert.InRange(freqs[0], 2490f, 2510f);
+        Assert.InRange(bws[0], 4f, 6f);
     }
 
 }

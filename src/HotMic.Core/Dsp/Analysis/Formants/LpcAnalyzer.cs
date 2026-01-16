@@ -6,9 +6,10 @@ namespace HotMic.Core.Dsp.Analysis.Formants;
 public sealed class LpcAnalyzer
 {
     private int _order;
-    private double[] _autoCorrelation = Array.Empty<double>();
     private double[] _coefficients = Array.Empty<double>();
     private double[] _coefficientsTemp = Array.Empty<double>();
+    private float[] _forwardErrors = Array.Empty<float>();
+    private float[] _backwardErrors = Array.Empty<float>();
 
     public LpcAnalyzer(int order)
     {
@@ -21,9 +22,8 @@ public sealed class LpcAnalyzer
     {
         _order = Math.Clamp(order, 4, 32);
         int size = _order + 1;
-        if (_autoCorrelation.Length != size)
+        if (_coefficients.Length != size)
         {
-            _autoCorrelation = new double[size];
             _coefficients = new double[size];
             _coefficientsTemp = new double[size];
         }
@@ -45,51 +45,58 @@ public sealed class LpcAnalyzer
             return false;
         }
 
-        // Autocorrelation
-        for (int lag = 0; lag <= _order; lag++)
+        EnsureErrorBuffers(n);
+        for (int i = 0; i < n; i++)
         {
-            double sum = 0.0;
-            for (int i = 0; i < n - lag; i++)
-            {
-                sum += (double)frame[i] * frame[i + lag];
-            }
-            _autoCorrelation[lag] = sum;
+            float sample = frame[i];
+            _forwardErrors[i] = sample;
+            _backwardErrors[i] = sample;
         }
 
-        double error = _autoCorrelation[0];
-        if (error <= 1e-12)
-        {
-            return false;
-        }
-
+        Array.Clear(_coefficients);
         _coefficients[0] = 1.0;
-        for (int i = 1; i <= _order; i++)
+
+        // Burg recursion (Childers 1978; Press et al. 1992) for A(z)=1+Σa_k z^-k.
+        for (int m = 1; m <= _order; m++)
         {
-            double acc = _autoCorrelation[i];
-            for (int j = 1; j < i; j++)
+            double numerator = 0.0;
+            double denominator = 0.0;
+            for (int i = m; i < n; i++)
             {
-                acc -= _coefficients[j] * _autoCorrelation[i - j];
+                double ef = _forwardErrors[i];
+                double eb = _backwardErrors[i - 1];
+                numerator += ef * eb;
+                denominator += ef * ef + eb * eb;
             }
 
-            double reflection = acc / error;
-
-            // Compute new coefficients into temp buffer first (avoiding in-place corruption)
-            _coefficientsTemp[i] = reflection;
-            for (int j = 1; j < i; j++)
+            if (denominator <= 1e-12)
             {
-                _coefficientsTemp[j] = _coefficients[j] - reflection * _coefficients[i - j];
+                return false;
             }
 
-            // Copy back to main buffer
-            for (int j = 1; j <= i; j++)
+            double reflection = -2.0 * numerator / denominator;
+            if (reflection <= -1.0 || reflection >= 1.0)
             {
-                _coefficients[j] = _coefficientsTemp[j];
+                return false;
             }
 
-            error *= 1.0 - reflection * reflection;
-            if (error <= 1e-12)
+            _coefficientsTemp[m] = reflection;
+            for (int i = 1; i < m; i++)
             {
-                break;
+                _coefficientsTemp[i] = _coefficients[i] + reflection * _coefficients[m - i];
+            }
+
+            for (int i = 1; i <= m; i++)
+            {
+                _coefficients[i] = _coefficientsTemp[i];
+            }
+
+            for (int i = m; i < n; i++)
+            {
+                double ef = _forwardErrors[i];
+                double eb = _backwardErrors[i - 1];
+                _forwardErrors[i] = (float)(ef + reflection * eb);
+                _backwardErrors[i - 1] = (float)(eb + reflection * ef);
             }
         }
 
@@ -99,5 +106,14 @@ public sealed class LpcAnalyzer
         }
 
         return true;
+    }
+
+    private void EnsureErrorBuffers(int length)
+    {
+        if (_forwardErrors.Length < length)
+        {
+            _forwardErrors = new float[length];
+            _backwardErrors = new float[length];
+        }
     }
 }

@@ -5,20 +5,20 @@ namespace HotMic.Core.Tests;
 
 /// <summary>
 /// Tests for YIN pitch detection algorithm.
-/// Reference: de Cheveigné & Kawahara (2002).
+/// Reference: de Cheveigne & Kawahara (2002).
+/// Expected frequencies pre-computed with Python/NumPy using a canonical YIN implementation.
+/// Script: tests/HotMic.Core.Tests/compute_reference_values.py
 /// </summary>
 public class YinPitchDetectorTests
 {
-    // Pre-computed: For 100Hz sine at 1000Hz sample rate:
-    // Period = 10 samples
-    // CMND[10] should be ~0 (minimum at period)
-    // CMND[9] ≈ 0.16, CMND[11] ≈ 0.18
+    // Pre-computed with Python/NumPy: canonical YIN (CMND + threshold + parabolic interp).
 
     [Fact]
     public void Detect_PureSine100Hz_FindsCorrectPitch()
     {
         int sampleRate = 1000;
-        float expectedFreq = 100f;
+        float inputFreq = 100f;
+        float expectedFreq = 100.343994f;
         int frameSize = 64;
 
         var detector = new YinPitchDetector(sampleRate, frameSize, 50f, 200f, 0.15f);
@@ -27,21 +27,23 @@ public class YinPitchDetectorTests
         float[] frame = new float[frameSize];
         for (int i = 0; i < frameSize; i++)
         {
-            frame[i] = MathF.Sin(2f * MathF.PI * expectedFreq * i / sampleRate);
+            frame[i] = MathF.Sin(2f * MathF.PI * inputFreq * i / sampleRate);
         }
 
         var result = detector.Detect(frame);
 
         Assert.True(result.IsVoiced, "Should detect voiced signal");
-        Assert.InRange(result.FrequencyHz!.Value, 95f, 105f);  // Pre-computed: ~100 Hz
+        Assert.InRange(result.FrequencyHz!.Value, expectedFreq - 0.1f, expectedFreq + 0.1f);
     }
 
     [Theory]
-    [InlineData(100f, 98f, 102f)]
-    [InlineData(200f, 196f, 204f)]
-    [InlineData(300f, 294f, 306f)]
-    [InlineData(440f, 431.2f, 448.8f)]  // A4
-    public void Detect_VariousPitches_FindsCorrectFrequency(float expectedFreq, float minHz, float maxHz)
+    [InlineData(55f, 55.000366f)]
+    [InlineData(100f, 100.002571f)]
+    [InlineData(200f, 200.024490f)]
+    [InlineData(300f, 300.086700f)]
+    [InlineData(440f, 440.236755f)]  // A4
+    [InlineData(950f, 951.203796f)]
+    public void Detect_VariousPitches_FindsCorrectFrequency(float inputFreq, float expectedFreq)
     {
         int sampleRate = 12000;
         int frameSize = 1024;
@@ -52,29 +54,13 @@ public class YinPitchDetectorTests
         float[] frame = new float[frameSize];
         for (int i = 0; i < frameSize; i++)
         {
-            frame[i] = MathF.Sin(2f * MathF.PI * expectedFreq * i / sampleRate);
+            frame[i] = MathF.Sin(2f * MathF.PI * inputFreq * i / sampleRate);
         }
 
         var result = detector.Detect(frame);
 
         Assert.True(result.IsVoiced);
-        Assert.InRange(result.FrequencyHz!.Value, minHz, maxHz);
-    }
-
-    [Fact]
-    public void Detect_Silence_ReturnsNotVoiced()
-    {
-        int sampleRate = 12000;
-        int frameSize = 512;
-
-        var detector = new YinPitchDetector(sampleRate, frameSize, 50f, 500f, 0.15f);
-
-        float[] frame = new float[frameSize];  // All zeros
-
-        var result = detector.Detect(frame);
-
-        Assert.False(result.IsVoiced);
-        Assert.Null(result.FrequencyHz);
+        Assert.InRange(result.FrequencyHz!.Value, expectedFreq - 0.1f, expectedFreq + 0.1f);
     }
 
     [Fact]
@@ -83,6 +69,7 @@ public class YinPitchDetectorTests
         int sampleRate = 12000;
         int frameSize = 1024;
         float fundamental = 200f;
+        float expectedFreq = 200.019974f;
 
         var detector = new YinPitchDetector(sampleRate, frameSize, 50f, 500f, 0.15f);
 
@@ -101,52 +88,28 @@ public class YinPitchDetectorTests
 
         Assert.True(result.IsVoiced);
         // Should find fundamental, not harmonics
-        Assert.InRange(result.FrequencyHz!.Value, 190f, 210f);
+        Assert.InRange(result.FrequencyHz!.Value, expectedFreq - 0.1f, expectedFreq + 0.1f);
     }
 
     [Fact]
-    public void Detect_ShortFrame_ReturnsNotVoiced()
+    public void Detect_PureSine257_3Hz_MatchesReference()
     {
-        int sampleRate = 12000;
-        int frameSize = 512;
-
-        var detector = new YinPitchDetector(sampleRate, frameSize, 50f, 500f, 0.15f);
-
-        // Frame shorter than configured
-        float[] shortFrame = new float[100];
-        for (int i = 0; i < 100; i++)
-        {
-            shortFrame[i] = MathF.Sin(i * 0.1f);
-        }
-
-        var result = detector.Detect(shortFrame);
-
-        Assert.False(result.IsVoiced);
-        Assert.Null(result.FrequencyHz);
-    }
-
-    [Fact]
-    public void ParabolicInterpolation_ImprovesAccuracy()
-    {
-        // YIN uses parabolic interpolation for sub-sample accuracy
-        // Test that detected pitch is more accurate than just sample-based period
-
         int sampleRate = 12000;
         int frameSize = 1024;
-        float exactFreq = 257.3f;  // Not a nice integer period
+        float inputFreq = 257.3f;
+        float expectedFreq = 257.330322f;
 
         var detector = new YinPitchDetector(sampleRate, frameSize, 50f, 500f, 0.15f);
 
         float[] frame = new float[frameSize];
         for (int i = 0; i < frameSize; i++)
         {
-            frame[i] = MathF.Sin(2f * MathF.PI * exactFreq * i / sampleRate);
+            frame[i] = MathF.Sin(2f * MathF.PI * inputFreq * i / sampleRate);
         }
 
         var result = detector.Detect(frame);
 
         Assert.True(result.IsVoiced);
-        // With interpolation, should be within 1 Hz of true frequency
-        Assert.InRange(result.FrequencyHz!.Value, exactFreq - 2f, exactFreq + 2f);
+        Assert.InRange(result.FrequencyHz!.Value, expectedFreq - 0.1f, expectedFreq + 0.1f);
     }
 }

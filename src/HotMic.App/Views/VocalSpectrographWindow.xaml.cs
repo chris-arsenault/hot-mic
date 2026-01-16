@@ -12,6 +12,7 @@ using System.Runtime.InteropServices;
 using HotMic.App.Diagnostics;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Dsp;
+using HotMic.Core.Dsp.Analysis.Speech;
 using HotMic.Core.Dsp.Spectrogram;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Presets;
@@ -71,6 +72,17 @@ public partial class VocalSpectrographWindow : Window
     private float[] _spectralFlux = Array.Empty<float>();
     private float[] _binFrequencies = Array.Empty<float>();
     private IReadOnlyList<DiscontinuityEvent> _discontinuities = Array.Empty<DiscontinuityEvent>();
+
+    // Speech Coach buffers
+    private byte[] _speakingStateTrack = Array.Empty<byte>();
+    private byte[] _syllableMarkers = Array.Empty<byte>();
+    private float _lastSyllableRate;
+    private float _lastArticulationRate;
+    private float _lastPauseRatio;
+    private float _lastMonotoneScore;
+    private float _lastClarityScore;
+    private float _lastIntelligibilityScore;
+
     private int _bufferFrameCount;
     private int _bufferBins;
     private int _bufferAnalysisBins;
@@ -542,6 +554,21 @@ public partial class VocalSpectrographWindow : Window
                 _availableFrames = _plugin.AvailableFrames;
                 CullReferenceLine();
             }
+
+            // Copy speech metrics if enabled
+            if (_plugin.SpeechCoachEnabled)
+            {
+                var metrics = _plugin.GetCurrentSpeechMetrics();
+                _lastSyllableRate = metrics.SyllableRate;
+                _lastArticulationRate = metrics.ArticulationRate;
+                _lastPauseRatio = metrics.PauseRatio;
+                _lastMonotoneScore = metrics.MonotoneScore;
+                _lastClarityScore = metrics.OverallClarity;
+                _lastIntelligibilityScore = metrics.IntelligibilityScore;
+
+                // Copy per-frame overlay data
+                _plugin.CopySpeechOverlayData(_speakingStateTrack, _syllableMarkers);
+            }
         }
 
         bool displayChanged = ConfigureDisplayPipeline(_plugin.AnalysisDescriptor);
@@ -817,6 +844,15 @@ public partial class VocalSpectrographWindow : Window
             resized = true;
         }
 
+        // Speech Coach buffers
+        if (_speakingStateTrack.Length != frames)
+        {
+            _speakingStateTrack = new byte[frames];
+            _syllableMarkers = new byte[frames];
+            _lastDataVersion = -1;
+            resized = true;
+        }
+
         return resized;
     }
 
@@ -947,6 +983,7 @@ public partial class VocalSpectrographWindow : Window
             PitchAlgorithm: _plugin.PitchAlgorithm,
             AxisMode: _plugin.AxisMode,
             VoiceRange: _plugin.VoiceRange,
+            FormantProfile: _plugin.FormantProfile,
             ShowRange: _plugin.ShowRange,
             ShowGuides: _plugin.ShowGuides,
             ShowWaveform: _plugin.ShowWaveform,
@@ -999,7 +1036,21 @@ public partial class VocalSpectrographWindow : Window
             BinFrequencies: _binFrequencies,
             MaxFormants: _bufferMaxFormants,
             MaxHarmonics: _bufferMaxHarmonics,
-            Discontinuities: _discontinuities
+            Discontinuities: _discontinuities,
+            // Speech Coach
+            SpeechCoachEnabled: _plugin.SpeechCoachEnabled,
+            ShowSpeechMetrics: _plugin.ShowSpeechMetrics,
+            ShowSyllableMarkers: _plugin.ShowSyllableMarkers,
+            ShowPauseOverlay: _plugin.ShowPauseOverlay,
+            ShowFillerMarkers: _plugin.ShowFillerMarkers,
+            SyllableRate: _lastSyllableRate,
+            ArticulationRate: _lastArticulationRate,
+            PauseRatio: _lastPauseRatio,
+            MonotoneScore: _lastMonotoneScore,
+            ClarityScore: _lastClarityScore,
+            IntelligibilityScore: _lastIntelligibilityScore,
+            SpeakingStateTrack: _speakingStateTrack,
+            SyllableMarkers: _syllableMarkers
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
@@ -1222,6 +1273,9 @@ public partial class VocalSpectrographWindow : Window
             case SpectrographHitArea.VoiceRangeButton:
                 CycleVoiceRange();
                 return true;
+            case SpectrographHitArea.FormantProfileButton:
+                CycleFormantProfile();
+                return true;
             case SpectrographHitArea.NormalizationButton:
                 CycleNormalizationMode();
                 return true;
@@ -1239,6 +1293,25 @@ public partial class VocalSpectrographWindow : Window
                 return true;
             case SpectrographHitArea.VowelToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowVowelSpaceIndex, _plugin.ShowVowelSpace);
+                return true;
+            case SpectrographHitArea.SpeechToggle:
+                ToggleParameter(VocalSpectrographPlugin.SpeechCoachEnabledIndex, _plugin.SpeechCoachEnabled);
+                return true;
+            // Speech Coach toggles
+            case SpectrographHitArea.SpeechCoachToggle:
+                ToggleParameter(VocalSpectrographPlugin.SpeechCoachEnabledIndex, _plugin.SpeechCoachEnabled);
+                return true;
+            case SpectrographHitArea.SpeechMetricsToggle:
+                ToggleParameter(VocalSpectrographPlugin.ShowSpeechMetricsIndex, _plugin.ShowSpeechMetrics);
+                return true;
+            case SpectrographHitArea.SyllableMarkersToggle:
+                ToggleParameter(VocalSpectrographPlugin.ShowSyllableMarkersIndex, _plugin.ShowSyllableMarkers);
+                return true;
+            case SpectrographHitArea.PauseOverlayToggle:
+                ToggleParameter(VocalSpectrographPlugin.ShowPauseOverlayIndex, _plugin.ShowPauseOverlay);
+                return true;
+            case SpectrographHitArea.FillerMarkersToggle:
+                ToggleParameter(VocalSpectrographPlugin.ShowFillerMarkersIndex, _plugin.ShowFillerMarkers);
                 return true;
             case SpectrographHitArea.Spectrogram:
                 return TrySetReferenceLine(x);
@@ -1490,6 +1563,18 @@ public partial class VocalSpectrographWindow : Window
         _presetHelper.MarkAsCustom();
     }
 
+    private void CycleFormantProfile()
+    {
+        FormantProfile next = _plugin.FormantProfile switch
+        {
+            FormantProfile.Male => FormantProfile.Female,
+            FormantProfile.Female => FormantProfile.Child,
+            _ => FormantProfile.Male
+        };
+        _parameterCallback(VocalSpectrographPlugin.FormantProfileIndex, (float)next);
+        _presetHelper.MarkAsCustom();
+    }
+
     private void CycleSmoothingMode()
     {
         SpectrogramSmoothingMode next = _plugin.SmoothingMode switch
@@ -1563,6 +1648,15 @@ public partial class VocalSpectrographWindow : Window
         Array.Clear(_spectralCentroid, 0, _spectralCentroid.Length);
         Array.Clear(_spectralSlope, 0, _spectralSlope.Length);
         Array.Clear(_spectralFlux, 0, _spectralFlux.Length);
+        // Speech Coach buffers
+        Array.Clear(_speakingStateTrack, 0, _speakingStateTrack.Length);
+        Array.Clear(_syllableMarkers, 0, _syllableMarkers.Length);
+        _lastSyllableRate = 0f;
+        _lastArticulationRate = 0f;
+        _lastPauseRatio = 0f;
+        _lastMonotoneScore = 0f;
+        _lastClarityScore = 0f;
+        _lastIntelligibilityScore = 0f;
         _lastDataVersion = -1;
         _lastCopiedFrameId = -1;
         _lastMappedFrameId = -1;
@@ -1729,6 +1823,7 @@ public partial class VocalSpectrographWindow : Window
                 "Pitch Algorithm" => VocalSpectrographPlugin.PitchAlgorithmIndex,
                 "Axis Mode" => VocalSpectrographPlugin.AxisModeIndex,
                 "Voice Range" => VocalSpectrographPlugin.VoiceRangeIndex,
+                "Formant Profile" => VocalSpectrographPlugin.FormantProfileIndex,
                 "Range Overlay" => VocalSpectrographPlugin.ShowRangeIndex,
                 "Guides" => VocalSpectrographPlugin.ShowGuidesIndex,
                 "Waveform View" => VocalSpectrographPlugin.ShowWaveformIndex,
@@ -1786,6 +1881,7 @@ public partial class VocalSpectrographWindow : Window
             ["Pitch Algorithm"] = (float)_plugin.PitchAlgorithm,
             ["Axis Mode"] = (float)_plugin.AxisMode,
             ["Voice Range"] = (float)_plugin.VoiceRange,
+            ["Formant Profile"] = (float)_plugin.FormantProfile,
             ["Range Overlay"] = _plugin.ShowRange ? 1f : 0f,
             ["Guides"] = _plugin.ShowGuides ? 1f : 0f,
             ["Waveform View"] = _plugin.ShowWaveform ? 1f : 0f,

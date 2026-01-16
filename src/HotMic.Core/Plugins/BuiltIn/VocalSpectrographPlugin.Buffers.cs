@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Threading;
 using HotMic.Core.Dsp.Analysis.Formants;
+using HotMic.Core.Dsp.Analysis.Speech;
 using HotMic.Core.Dsp.Fft;
 using HotMic.Core.Dsp.Spectrogram;
 
@@ -268,6 +269,197 @@ public sealed partial class VocalSpectrographPlugin
                 }
 
                 CopyRing(_linearMagnitudeBuffer, magnitudes, availableFrames, analysisBins, startIndex, padFrames);
+            }
+
+            int versionEnd = Volatile.Read(ref _dataVersion);
+            if (versionStart == versionEnd && (versionEnd & 1) == 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Copy speech coach metrics for the current time window.
+    /// </summary>
+    /// <param name="syllableRate">Output: syllable rate per frame.</param>
+    /// <param name="articulationRate">Output: articulation rate per frame.</param>
+    /// <param name="pauseRatio">Output: pause ratio per frame.</param>
+    /// <param name="monotoneScore">Output: monotone score per frame.</param>
+    /// <param name="clarityScore">Output: clarity score per frame.</param>
+    /// <param name="intelligibility">Output: intelligibility score per frame.</param>
+    /// <param name="speakingState">Output: speaking state per frame.</param>
+    /// <param name="syllableMarkers">Output: syllable markers per frame.</param>
+    /// <returns>True if copy succeeded.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public bool CopySpeechMetrics(
+        float[] syllableRate,
+        float[] articulationRate,
+        float[] pauseRatio,
+        float[] monotoneScore,
+        float[] clarityScore,
+        float[] intelligibility,
+        byte[] speakingState,
+        byte[] syllableMarkers)
+    {
+        int frames = Volatile.Read(ref _activeFrameCapacity);
+        if (frames <= 0)
+        {
+            return false;
+        }
+
+        if (syllableRate.Length < frames
+            || articulationRate.Length < frames
+            || pauseRatio.Length < frames
+            || monotoneScore.Length < frames
+            || clarityScore.Length < frames
+            || intelligibility.Length < frames
+            || speakingState.Length < frames
+            || syllableMarkers.Length < frames)
+        {
+            return false;
+        }
+
+        if (_syllableRateTrack.Length != frames)
+        {
+            return false;
+        }
+
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            int versionStart = Volatile.Read(ref _dataVersion);
+            if ((versionStart & 1) != 0)
+            {
+                Thread.Yield();
+                continue;
+            }
+
+            long latestFrameId = Volatile.Read(ref _latestFrameId);
+            int availableFrames = Volatile.Read(ref _availableFrames);
+            if (availableFrames <= 0 || latestFrameId < 0)
+            {
+                Array.Clear(syllableRate, 0, frames);
+                Array.Clear(articulationRate, 0, frames);
+                Array.Clear(pauseRatio, 0, frames);
+                Array.Clear(monotoneScore, 0, frames);
+                Array.Clear(clarityScore, 0, frames);
+                Array.Clear(intelligibility, 0, frames);
+                Array.Clear(speakingState, 0, frames);
+                Array.Clear(syllableMarkers, 0, frames);
+            }
+            else
+            {
+                long oldestFrameId = latestFrameId - availableFrames + 1;
+                int startIndex = (int)(oldestFrameId % frames);
+                int padFrames = Math.Max(0, frames - availableFrames);
+
+                if (padFrames > 0)
+                {
+                    Array.Clear(syllableRate, 0, padFrames);
+                    Array.Clear(articulationRate, 0, padFrames);
+                    Array.Clear(pauseRatio, 0, padFrames);
+                    Array.Clear(monotoneScore, 0, padFrames);
+                    Array.Clear(clarityScore, 0, padFrames);
+                    Array.Clear(intelligibility, 0, padFrames);
+                    Array.Clear(speakingState, 0, padFrames);
+                    Array.Clear(syllableMarkers, 0, padFrames);
+                }
+
+                CopyRing(_syllableRateTrack, syllableRate, availableFrames, 1, startIndex, padFrames);
+                CopyRing(_articulationRateTrack, articulationRate, availableFrames, 1, startIndex, padFrames);
+                CopyRing(_pauseRatioTrack, pauseRatio, availableFrames, 1, startIndex, padFrames);
+                CopyRing(_monotoneScoreTrack, monotoneScore, availableFrames, 1, startIndex, padFrames);
+                CopyRing(_clarityScoreTrack, clarityScore, availableFrames, 1, startIndex, padFrames);
+                CopyRing(_intelligibilityTrack, intelligibility, availableFrames, 1, startIndex, padFrames);
+                CopyRing(_speakingStateTrack, speakingState, availableFrames, startIndex, padFrames);
+                CopyRing(_syllableMarkers, syllableMarkers, availableFrames, startIndex, padFrames);
+            }
+
+            int versionEnd = Volatile.Read(ref _dataVersion);
+            if (versionStart == versionEnd && (versionEnd & 1) == 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Get the current speech coach aggregate metrics.
+    /// </summary>
+    public SpeechMetrics GetCurrentSpeechMetrics()
+    {
+        return _speechCoach.CurrentMetrics;
+    }
+
+    /// <summary>
+    /// Copy speaking state and syllable marker arrays for overlay rendering.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public bool CopySpeechOverlayData(byte[] speakingState, byte[] syllableMarkers)
+    {
+        int frames = Volatile.Read(ref _activeFrameCapacity);
+        if (frames <= 0)
+        {
+            return false;
+        }
+
+        if (speakingState.Length < frames || syllableMarkers.Length < frames)
+        {
+            return false;
+        }
+
+        var stateBuffer = _speakingStateTrack;
+        var markerBuffer = _syllableMarkers;
+
+        if (stateBuffer.Length != frames || markerBuffer.Length != frames)
+        {
+            return false;
+        }
+
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            int versionStart = Volatile.Read(ref _dataVersion);
+            if ((versionStart & 1) != 0)
+            {
+                Thread.Yield();
+                continue;
+            }
+
+            long latestFrameId = Volatile.Read(ref _latestFrameId);
+            int availableFrames = Volatile.Read(ref _availableFrames);
+            if (availableFrames <= 0 || latestFrameId < 0)
+            {
+                Array.Clear(speakingState, 0, frames);
+                Array.Clear(syllableMarkers, 0, frames);
+            }
+            else
+            {
+                long oldestFrameId = latestFrameId - availableFrames + 1;
+                int startIndex = (int)(oldestFrameId % frames);
+                int padFrames = Math.Max(0, frames - availableFrames);
+
+                if (padFrames > 0)
+                {
+                    Array.Clear(speakingState, 0, padFrames);
+                    Array.Clear(syllableMarkers, 0, padFrames);
+                }
+
+                int copyCount = availableFrames;
+                int dstOffset = padFrames;
+                int srcOffset = startIndex;
+                int firstChunk = Math.Min(copyCount, frames - srcOffset);
+                Array.Copy(stateBuffer, srcOffset, speakingState, dstOffset, firstChunk);
+                Array.Copy(markerBuffer, srcOffset, syllableMarkers, dstOffset, firstChunk);
+                if (firstChunk < copyCount)
+                {
+                    int remaining = copyCount - firstChunk;
+                    Array.Copy(stateBuffer, 0, speakingState, dstOffset + firstChunk, remaining);
+                    Array.Copy(markerBuffer, 0, syllableMarkers, dstOffset + firstChunk, remaining);
+                }
             }
 
             int versionEnd = Volatile.Read(ref _dataVersion);
@@ -582,13 +774,22 @@ public sealed partial class VocalSpectrographPlugin
         float minHz = Volatile.Read(ref _requestedMinFrequency);
         float maxHz = Volatile.Read(ref _requestedMaxFrequency);
         float timeWindow = Volatile.Read(ref _requestedTimeWindow);
-        // LPC order minimum is 12 for decimated analysis at 12kHz (even if user sets lower)
-        int lpcOrder = Math.Clamp(Volatile.Read(ref _requestedLpcOrder), 12, 24);
+        FormantProfile formantProfile = (FormantProfile)Math.Clamp(Volatile.Read(ref _requestedFormantProfile), 0, 2);
+        int minLpcOrder = Math.Max(2 * MaxFormants, 8);
+        int lpcOrder = Math.Clamp(Volatile.Read(ref _requestedLpcOrder), minLpcOrder, 24);
         float hpfCutoff = Volatile.Read(ref _requestedHighPassCutoff);
         bool hpfEnabled = Volatile.Read(ref _requestedHighPassEnabled) != 0;
         bool preEmphasisEnabled = Volatile.Read(ref _requestedPreEmphasis) != 0;
         var transformType = (SpectrogramTransformType)Math.Clamp(Volatile.Read(ref _requestedTransformType), 0, 2);
         int cqtBinsPerOctave = SelectDiscrete(Volatile.Read(ref _requestedCqtBinsPerOctave), CqtBinsPerOctaveOptions);
+        float formantCeilingHz = FormantProfileInfo.GetFormantCeilingHz(formantProfile);
+        int lpcDecimationStages = GetLpcDecimationStages(_sampleRate, formantCeilingHz);
+        int lpcSampleRate = _sampleRate;
+        for (int i = 0; i < lpcDecimationStages; i++)
+        {
+            lpcSampleRate /= 2;
+        }
+        int recommendedLpcOrder = FormantProfileInfo.GetRecommendedLpcOrder(formantProfile, MaxFormants);
 
         // Detect what changed (excluding force - that's handled separately)
         bool fftSizeChanged = !force && fftSize != _activeFftSize;
@@ -605,10 +806,19 @@ public sealed partial class VocalSpectrographPlugin
         bool filterChanged = !force && (MathF.Abs(hpfCutoff - _activeHighPassCutoff) > 1e-3f
             || hpfEnabled != _activeHighPassEnabled
             || preEmphasisEnabled != _activePreEmphasisEnabled);
-        bool lpcChanged = force || _lpcAnalyzer is null || lpcOrder != _lpcAnalyzer.Order;
+        bool formantProfileChanged = force || formantProfile != _activeFormantProfile;
+        if (formantProfileChanged)
+        {
+            Interlocked.Exchange(ref _requestedLpcOrder, recommendedLpcOrder);
+            lpcOrder = recommendedLpcOrder;
+        }
+        int desiredLpcWindowSamples = ComputeLpcWindowSamples(_sampleRate, lpcOrder, fftSize);
+        bool lpcChanged = force || _lpcAnalyzer is null || lpcOrder != _lpcAnalyzer.Order
+            || lpcSampleRate != _activeLpcSampleRate || formantProfileChanged;
         bool reassignChanged = !force && reassignMode != _activeReassignMode;
         bool transformChanged = !force && transformType != _activeTransformType;
         bool cqtChanged = !force && cqtBinsPerOctave != _activeCqtBinsPerOctave;
+        bool lpcWindowChanged = desiredLpcWindowSamples != _lpcWindowSamples;
 
         // Track discontinuity type and whether buffers need reallocation
         var discontinuity = DiscontinuityType.None;
@@ -630,9 +840,13 @@ public sealed partial class VocalSpectrographPlugin
             _fft = new FastFft(_activeFftSize);
             _analysisBufferRaw = new float[_activeFftSize];
             _analysisBufferProcessed = new float[_activeFftSize];
-            _lpcInputBuffer = new float[_activeFftSize]; // LPC always uses pre-emphasis
-            _lpcDecimateBuffer1 = new float[LpcWindowSamples / 2]; // 48kHz→24kHz intermediate
-            _lpcDecimatedBuffer = new float[LpcWindowSamples / 4]; // Final 12kHz buffer
+            _lpcWindowSamples = desiredLpcWindowSamples;
+            _lpcInputBuffer = new float[_lpcWindowSamples];
+            _lpcDecimateBuffer1 = new float[Math.Max(1, _lpcWindowSamples / 2)];
+            _lpcDecimatedBuffer = new float[_lpcWindowSamples];
+            _lpcWindowedBuffer = new float[_lpcWindowSamples];
+            _lpcWindow = new float[_lpcWindowSamples];
+            _lpcWindowLength = 0;
             _hopBuffer = new float[_activeHopSize];
             _fftReal = new float[_activeFftSize];
             _fftImag = new float[_activeFftSize];
@@ -671,10 +885,43 @@ public sealed partial class VocalSpectrographPlugin
             _harmonicFrequencies = ResizePreserveStrided(_harmonicFrequencies, _activeFrameCapacity, MaxHarmonics, framesToCopy);
             _harmonicMagnitudes = ResizePreserveStrided(_harmonicMagnitudes, _activeFrameCapacity, MaxHarmonics, framesToCopy);
 
+            // Speech Coach buffers
+            _syllableRateTrack = ResizePreserve(_syllableRateTrack, _activeFrameCapacity, framesToCopy);
+            _articulationRateTrack = ResizePreserve(_articulationRateTrack, _activeFrameCapacity, framesToCopy);
+            _pauseRatioTrack = ResizePreserve(_pauseRatioTrack, _activeFrameCapacity, framesToCopy);
+            _monotoneScoreTrack = ResizePreserve(_monotoneScoreTrack, _activeFrameCapacity, framesToCopy);
+            _clarityScoreTrack = ResizePreserve(_clarityScoreTrack, _activeFrameCapacity, framesToCopy);
+            _intelligibilityTrack = ResizePreserve(_intelligibilityTrack, _activeFrameCapacity, framesToCopy);
+            _speakingStateTrack = ResizePreserve(_speakingStateTrack, _activeFrameCapacity, framesToCopy);
+            _syllableMarkers = ResizePreserve(_syllableMarkers, _activeFrameCapacity, framesToCopy);
+
             // Don't set reallocateBuffers - let spectrogram buffer logic preserve data
             if (fftSizeChanged) discontinuity |= DiscontinuityType.ResolutionChange;
             if (overlapChanged) discontinuity |= DiscontinuityType.OverlapChange;
             if (timeWindowChanged) discontinuity |= DiscontinuityType.TimeWindowChange;
+        }
+
+        if (!sizeChanged && lpcWindowChanged)
+        {
+            _lpcWindowSamples = desiredLpcWindowSamples;
+            _lpcInputBuffer = new float[_lpcWindowSamples];
+            _lpcDecimateBuffer1 = new float[Math.Max(1, _lpcWindowSamples / 2)];
+            _lpcDecimatedBuffer = new float[_lpcWindowSamples];
+            _lpcWindowedBuffer = new float[_lpcWindowSamples];
+            _lpcWindow = new float[_lpcWindowSamples];
+            _lpcWindowLength = 0;
+        }
+
+        if (formantProfileChanged
+            || lpcSampleRate != _activeLpcSampleRate
+            || lpcDecimationStages != _activeLpcDecimationStages
+            || MathF.Abs(formantCeilingHz - _activeFormantCeilingHz) > 1e-3f)
+        {
+            _activeFormantProfile = formantProfile;
+            _activeFormantCeilingHz = formantCeilingHz;
+            _activeLpcSampleRate = lpcSampleRate;
+            _activeLpcDecimationStages = lpcDecimationStages;
+            _lpcWindowLength = 0;
         }
 
         // Refill the window buffer when size changes to avoid zeroed FFT input.
@@ -926,6 +1173,14 @@ public sealed partial class VocalSpectrographPlugin
             _lpcCoefficients = new float[lpcOrder + 1];
         }
 
+        // Configure speech coach when hop size changes
+        if (sizeChanged || force)
+        {
+            _speechCoach.Configure(_activeHopSize, _sampleRate);
+            int speechWindow = Math.Clamp(Volatile.Read(ref _requestedSpeechRateWindow), 5, 30);
+            _speechCoach.WindowSeconds = speechWindow;
+        }
+
         // Apply changes based on what's needed
         if (reallocateBuffers)
         {
@@ -1029,6 +1284,17 @@ public sealed partial class VocalSpectrographPlugin
         Array.Clear(_displayProcessed, 0, _displayProcessed.Length);
         Array.Clear(_displaySmoothed, 0, _displaySmoothed.Length);
         Array.Clear(_displayGain, 0, _displayGain.Length);
+
+        // Speech Coach buffers
+        Array.Clear(_syllableRateTrack, 0, _syllableRateTrack.Length);
+        Array.Clear(_articulationRateTrack, 0, _articulationRateTrack.Length);
+        Array.Clear(_pauseRatioTrack, 0, _pauseRatioTrack.Length);
+        Array.Clear(_monotoneScoreTrack, 0, _monotoneScoreTrack.Length);
+        Array.Clear(_clarityScoreTrack, 0, _clarityScoreTrack.Length);
+        Array.Clear(_intelligibilityTrack, 0, _intelligibilityTrack.Length);
+        Array.Clear(_speakingStateTrack, 0, _speakingStateTrack.Length);
+        Array.Clear(_syllableMarkers, 0, _syllableMarkers.Length);
+        _speechCoach.Reset();
 
         _noiseReducer.Reset();
         _hpssProcessor.Reset();
@@ -1325,6 +1591,33 @@ public sealed partial class VocalSpectrographPlugin
         {
             Array.Copy(source, 0, destination, 0, remainingFrames);
         }
+    }
+
+    private static int ComputeLpcWindowSamples(int sampleRate, int lpcOrder, int maxWindowSamples)
+    {
+        int desired = (int)MathF.Round(LpcWindowSeconds * sampleRate);
+        int maxWindow = Math.Max(1, maxWindowSamples);
+        int minWindow = Math.Min(maxWindow, Math.Max(lpcOrder + 1, 128));
+        return Math.Clamp(desired, minWindow, maxWindow);
+    }
+
+    private static int GetLpcDecimationStages(int sampleRate, float formantCeilingHz)
+    {
+        if (sampleRate <= 0 || formantCeilingHz <= 0f)
+        {
+            return 0;
+        }
+
+        float requiredRate = formantCeilingHz * 2f;
+        int stages = 0;
+        float currentRate = sampleRate;
+        while (stages < 2 && currentRate / 2f >= requiredRate)
+        {
+            currentRate /= 2f;
+            stages++;
+        }
+
+        return stages;
     }
 
     /// <summary>

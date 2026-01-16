@@ -34,22 +34,14 @@ public sealed class BeamSearchFormantTracker
 
     // Cost function weights
     private const float MagnitudeWeight = 2.0f;      // Prefer poles closer to unit circle
-    private const float BandwidthWeight = 1.0f;      // Prefer narrower bandwidths
+    private const float BandwidthWeight = 3.0f;      // Strongly prefer narrower bandwidths
     private const float ContinuityWeight = 3.0f;     // Strongly prefer smooth trajectories
-    private const float SpacingWeight = 1.5f;        // Prefer reasonable formant spacing
 
-    // Thresholds (more permissive than simple tracker)
-    private const float MinMagnitude = 0.40f;        // Very low to catch weak F1 poles
+    // Thresholds - balance between catching formants and avoiding huge bandwidths
     private const float MaxMagnitude = 0.9995f;
-    private const float MinBandwidth = 10f;
-    private const float MaxBandwidth = 2500f;        // Allow wider bandwidths
-    private const float MinFrequency = 80f;
+    private const float MinBandwidth = 1f;
+    private const float MaxBandwidth = 1000f;        // Typical speech formants are a few hundred Hz wide
     private const float MaxContinuityJump = 400f;    // Max Hz jump between frames
-
-    // F1-specific constraints
-    private const float F1ExpectedMin = 200f;        // F1 rarely below 200 Hz for adults
-    private const float F1ExpectedMax = 1000f;       // F1 rarely above 1000 Hz
-    private const float F1RangePenalty = 2.0f;       // Penalty for F1 outside expected range
 
     // Diagnostic
     private int _diagCounter;
@@ -105,7 +97,7 @@ public sealed class BeamSearchFormantTracker
     /// </summary>
     public int Track(ReadOnlySpan<float> lpcCoefficients, int sampleRate,
         Span<float> formantFrequencies, Span<float> formantBandwidths,
-        float minDisplayFreq, float maxDisplayFreq, int maxOutput)
+        float minFormantHz, float maxFormantHz, int maxOutput)
     {
         if (lpcCoefficients.Length < _order + 1 || formantFrequencies.IsEmpty)
             return 0;
@@ -115,11 +107,11 @@ public sealed class BeamSearchFormantTracker
         if (maxOutput <= 0)
             return 0;
 
-        // Validate coefficients
+        // Validate coefficients - only guard against NaN/Inf.
         for (int i = 0; i <= _order; i++)
         {
             float c = lpcCoefficients[i];
-            if (float.IsNaN(c) || float.IsInfinity(c) || MathF.Abs(c) > 100f)
+            if (float.IsNaN(c) || float.IsInfinity(c))
                 return 0;
         }
 
@@ -131,7 +123,7 @@ public sealed class BeamSearchFormantTracker
         SolveRootsAberth();
 
         // Extract candidates from roots
-        ExtractCandidates(sampleRate);
+        ExtractCandidates(sampleRate, minFormantHz, maxFormantHz);
 
         if (_candidateCount == 0)
         {
@@ -184,11 +176,12 @@ public sealed class BeamSearchFormantTracker
         return 0;
     }
 
-    private void ExtractCandidates(int sampleRate)
+    private void ExtractCandidates(int sampleRate, float minFormantHz, float maxFormantHz)
     {
         _candidateCount = 0;
         float nyquist = sampleRate * 0.5f;
-        float maxHz = Math.Min(5500f, nyquist * 0.9f);
+        float minHz = Math.Max(0f, minFormantHz);
+        float maxHz = maxFormantHz > 0f ? Math.Min(maxFormantHz, nyquist * 0.9f) : nyquist * 0.9f;
 
         for (int i = 0; i < _roots.Length; i++)
         {
@@ -199,14 +192,15 @@ public sealed class BeamSearchFormantTracker
                 continue;
 
             double magnitude = root.Magnitude;
-            if (magnitude <= MinMagnitude || magnitude >= MaxMagnitude)
-                continue;
-
             double angle = Math.Atan2(root.Imaginary, root.Real);
             float freq = (float)(angle * sampleRate / (2.0 * Math.PI));
             float bandwidth = (float)(-sampleRate / Math.PI * Math.Log(magnitude));
 
-            if (freq < MinFrequency || freq > maxHz)
+            // Frequency range check
+            if (freq < minHz || freq > maxHz)
+                continue;
+
+            if (magnitude >= MaxMagnitude)
                 continue;
             if (bandwidth < MinBandwidth || bandwidth > MaxBandwidth)
                 continue;
@@ -223,6 +217,17 @@ public sealed class BeamSearchFormantTracker
         // Sort candidates by frequency
         Array.Sort(_candidates, 0, _candidateCount,
             Comparer<FormantCandidate>.Create((a, b) => a.Frequency.CompareTo(b.Frequency)));
+
+        // Diagnostic: log candidates once per second
+        if (++_diagCounter % 100 == 50)
+        {
+            var parts = new string[_candidateCount];
+            for (int i = 0; i < _candidateCount; i++)
+            {
+                parts[i] = $"{_candidates[i].Frequency:F0}Hz(bw={_candidates[i].Bandwidth:F0},mag={_candidates[i].Magnitude:F2})";
+            }
+            Console.WriteLine($"[BeamSearch] {_candidateCount} candidates: {string.Join(", ", parts)}");
+        }
     }
 
     private float ComputeLocalCost(float freq, float bandwidth, float magnitude)
@@ -231,8 +236,9 @@ public sealed class BeamSearchFormantTracker
         // Prefer poles close to unit circle (high magnitude)
         float magCost = (1f - magnitude) * MagnitudeWeight;
 
-        // Prefer narrow bandwidths (but not too narrow)
-        float bwNorm = Math.Clamp(bandwidth / 500f, 0f, 2f);
+        // Strongly prefer narrow bandwidths - typical formants are 50-400Hz
+        // Scale so 400Hz bandwidth = cost of 1.0, 800Hz = cost of 2.0
+        float bwNorm = Math.Clamp(bandwidth / 400f, 0f, 2f);
         float bwCost = bwNorm * BandwidthWeight;
 
         return magCost + bwCost;
@@ -289,21 +295,6 @@ public sealed class BeamSearchFormantTracker
                     // Compute cost for this assignment
                     float cost = state.TotalCost + _candidates[c].LocalCost;
 
-                    // F1-specific: penalize candidates outside expected F1 range
-                    // This prevents F2 (typically 850-2500 Hz) from being assigned as F1
-                    if (f == 0)
-                    {
-                        float f1Freq = _candidates[c].Frequency;
-                        if (f1Freq < F1ExpectedMin)
-                        {
-                            cost += (F1ExpectedMin - f1Freq) / 100f * F1RangePenalty;
-                        }
-                        else if (f1Freq > F1ExpectedMax)
-                        {
-                            cost += (f1Freq - F1ExpectedMax) / 100f * F1RangePenalty;
-                        }
-                    }
-
                     // Add continuity cost if we have previous frame data
                     if (_hasPrevious && f < _prevFormants.Length && _prevFormants[f] > 0)
                     {
@@ -311,18 +302,7 @@ public sealed class BeamSearchFormantTracker
                         float prevFreq = _prevFormants[f];
                         float jump = MathF.Abs(candFreq - prevFreq);
 
-                        // F1 recovery: if previous F1 was outside expected range but current
-                        // candidate is inside, reduce the continuity penalty to allow correction
-                        bool f1Recovery = f == 0
-                            && prevFreq > F1ExpectedMax
-                            && candFreq >= F1ExpectedMin && candFreq <= F1ExpectedMax;
-
-                        if (f1Recovery)
-                        {
-                            // Reduced penalty for F1 recovery - allow jump to correct F1 range
-                            cost += (jump / MaxContinuityJump) * 0.5f;
-                        }
-                        else if (jump > MaxContinuityJump)
+                        if (jump > MaxContinuityJump)
                         {
                             // Large jump - high penalty but don't reject
                             cost += (jump / MaxContinuityJump) * ContinuityWeight;

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using HotMic.Core.Dsp.Analysis.Speech;
 using HotMic.Core.Dsp.Mapping;
 using HotMic.Core.Dsp.Spectrogram;
 
@@ -496,48 +497,77 @@ public sealed partial class VocalSpectrographPlugin
 
         _formantDiagCounter++;
 
+#if HOTMIC_SPECTROGRAPH_DIAGNOSTICS
+        if (_formantDiagCounter % 100 == 0 && needsFormants)
+        {
+            float rms = ComputeRms(_analysisBufferRaw);
+            float energyDb = DspUtils.LinearToDb(rms);
+            float zcr = ComputeZeroCrossingRate(_analysisBufferRaw);
+            float flatness = ComputeSpectralFlatness(fftMagnitudes);
+            Console.WriteLine($"[FormantGate] voiced={voicing}, pitchConf={lastConfidence:F2}, energyDb={energyDb:F1}, zcr={zcr:F3}, flat={flatness:F3}, lpcOk={lpcOk}, beamOk={beamTrackerOk}, preEmp={_activePreEmphasisEnabled}, hpf={_activeHighPassEnabled}, transform={_activeTransformType}");
+        }
+#endif
+
         if (needsFormants && lpcOk && beamTrackerOk && voiced)
         {
-            // LPC formant analysis: downsample to 12kHz like professional tools (Praat uses 10-11kHz)
-            // This produces poles closer to unit circle with realistic bandwidths (50-400Hz vs 2000-3000Hz)
-            // Pipeline: 48kHz raw → 24kHz → 12kHz → LPC → Beam-Search Tracking
+            // LPC formant analysis (Praat/Burg reference):
+            // 1) Decimate to >= 2 * formant ceiling
+            // 2) Pre-emphasis from 50 Hz
+            // 3) Gaussian window (effective length 25ms)
+            // 4) Burg LPC + root extraction + beam search
             int bufferLen = _analysisBufferRaw.Length;
-            int lpcLen = Math.Min(LpcWindowSamples, bufferLen);
+            int lpcLen = Math.Min(_lpcWindowSamples, bufferLen);
             int lpcStart = bufferLen - lpcLen; // Use most recent samples
 
             // Step 1: Copy raw samples to input buffer
             _analysisBufferRaw.AsSpan(lpcStart, lpcLen).CopyTo(_lpcInputBuffer.AsSpan(0, lpcLen));
 
-            // Step 2: Decimate 48kHz → 24kHz (2x)
-            _lpcDecimator1.Reset();
-            int decimated1Len = lpcLen / 2;
-            _lpcDecimator1.ProcessDownsample(_lpcInputBuffer.AsSpan(0, lpcLen), _lpcDecimateBuffer1.AsSpan(0, decimated1Len));
-
-            // Step 3: Decimate 24kHz → 12kHz (2x)
-            _lpcDecimator2.Reset();
-            int decimatedLen = decimated1Len / 2;
-            _lpcDecimator2.ProcessDownsample(_lpcDecimateBuffer1.AsSpan(0, decimated1Len), _lpcDecimatedBuffer.AsSpan(0, decimatedLen));
-
-            // Note: No pre-emphasis for LPC at 12kHz - the decimated signal's natural
-            // spectral balance is better for formant extraction. Pre-emphasis at 0.97
-            // was causing low-frequency poles to have very low magnitudes (0.6-0.7)
-            // which got filtered out, missing F1 entirely.
-
-            // Step 4: Run LPC on decimated signal at 12kHz
-            // At 12kHz, use order 10-12 for 4-5 formants (rule: order = 2*formants + 2)
-            const int LpcOrderAt12kHz = 12;
-            if (_lpcAnalyzer.Order != LpcOrderAt12kHz)
+            int decimatedLen = lpcLen;
+            if (_activeLpcDecimationStages >= 1)
             {
-                _lpcAnalyzer.Configure(LpcOrderAt12kHz);
-                _beamFormantTracker.Configure(LpcOrderAt12kHz, MaxFormants, beamWidth: 8);
+                _lpcDecimator1.Reset();
+                int decimated1Len = lpcLen / 2;
+                _lpcDecimator1.ProcessDownsample(_lpcInputBuffer.AsSpan(0, lpcLen), _lpcDecimateBuffer1.AsSpan(0, decimated1Len));
+
+                if (_activeLpcDecimationStages == 2)
+                {
+                    _lpcDecimator2.Reset();
+                    decimatedLen = decimated1Len / 2;
+                    _lpcDecimator2.ProcessDownsample(_lpcDecimateBuffer1.AsSpan(0, decimated1Len), _lpcDecimatedBuffer.AsSpan(0, decimatedLen));
+                }
+                else
+                {
+                    decimatedLen = decimated1Len;
+                    _lpcDecimateBuffer1.AsSpan(0, decimatedLen).CopyTo(_lpcDecimatedBuffer.AsSpan(0, decimatedLen));
+                }
+            }
+            else
+            {
+                _lpcInputBuffer.AsSpan(0, lpcLen).CopyTo(_lpcDecimatedBuffer.AsSpan(0, lpcLen));
             }
 
-            if (_lpcAnalyzer.Compute(_lpcDecimatedBuffer.AsSpan(0, decimatedLen), _lpcCoefficients))
+            float preEmphasisAlpha = ComputePreEmphasisAlpha(FormantProfileInfo.DefaultPreEmphasisHz, _activeLpcSampleRate);
+            _lpcPreEmphasisFilter.Configure(preEmphasisAlpha);
+            _lpcPreEmphasisFilter.Reset();
+
+            if (_lpcWindowLength != decimatedLen)
+            {
+                WindowFunctions.FillGaussian(_lpcWindow.AsSpan(0, decimatedLen), LpcGaussianSigma);
+                _lpcWindowLength = decimatedLen;
+            }
+
+            for (int i = 0; i < decimatedLen; i++)
+            {
+                float emphasized = _lpcPreEmphasisFilter.Process(_lpcDecimatedBuffer[i]);
+                _lpcWindowedBuffer[i] = emphasized * _lpcWindow[i];
+            }
+
+            if (_lpcAnalyzer.Compute(_lpcWindowedBuffer.AsSpan(0, decimatedLen), _lpcCoefficients))
             {
                 // Use beam-search tracker (V2) for better continuity and lower dropout
-                formantCount = _beamFormantTracker.Track(_lpcCoefficients, LpcTargetSampleRate,
+                formantCount = _beamFormantTracker.Track(_lpcCoefficients, _activeLpcSampleRate,
                     _formantFreqScratch, _formantBwScratch,
-                    _activeMinFrequency, _activeMaxFrequency, MaxFormants);
+                    50f, _activeFormantCeilingHz, MaxFormants);
             }
         }
         else if (beamTrackerOk && !voiced)
@@ -645,6 +675,16 @@ public sealed partial class VocalSpectrographPlugin
         }
 
         return lastHnr;
+    }
+
+    private static float ComputePreEmphasisAlpha(float cutoffHz, int sampleRate)
+    {
+        if (cutoffHz <= 0f || sampleRate <= 0)
+        {
+            return 0f;
+        }
+
+        return MathF.Exp(-2f * MathF.PI * cutoffHz / sampleRate);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -959,6 +999,44 @@ public sealed partial class VocalSpectrographPlugin
         _pitchConfidence[frameIndex] = lastConfidence;
         _voicingStates[frameIndex] = Volatile.Read(ref _requestedShowVoicing) != 0 ? (byte)voicing : (byte)VoicingState.Silence;
 
+        // Speech Coach processing
+        if (Volatile.Read(ref _requestedSpeechCoachEnabled) != 0)
+        {
+            // Compute energy from waveform peak
+            float peakAmplitude = MathF.Max(MathF.Abs(waveformMin), MathF.Abs(waveformMax));
+            float energyDb = peakAmplitude > 1e-8f ? 20f * MathF.Log10(peakAmplitude) : -80f;
+
+            // Get F1 and F2 from formant data
+            float f1Hz = formantCount > 0 ? _formantFreqScratch[0] : 0f;
+            float f2Hz = formantCount > 1 ? _formantFreqScratch[1] : 0f;
+
+            // Compute spectral flatness from magnitudes (reuse existing calculation approach)
+            float spectralFlatness = ComputeSpectralFlatness(_fftMagnitudes);
+
+            var metrics = _speechCoach.Process(
+                energyDb,
+                lastPitch,
+                lastConfidence,
+                voicing,
+                spectralFlatness,
+                flux,
+                slope,
+                lastHnr,
+                f1Hz,
+                f2Hz,
+                frameId);
+
+            // Write speech metrics to tracking buffers
+            _syllableRateTrack[frameIndex] = metrics.SyllableRate;
+            _articulationRateTrack[frameIndex] = metrics.ArticulationRate;
+            _pauseRatioTrack[frameIndex] = metrics.PauseRatio;
+            _monotoneScoreTrack[frameIndex] = metrics.MonotoneScore;
+            _clarityScoreTrack[frameIndex] = metrics.OverallClarity;
+            _intelligibilityTrack[frameIndex] = metrics.IntelligibilityScore;
+            _speakingStateTrack[frameIndex] = (byte)metrics.CurrentState;
+            _syllableMarkers[frameIndex] = metrics.SyllableDetected ? (byte)1 : (byte)0;
+        }
+
         int formantOffset = frameIndex * MaxFormants;
         for (int i = 0; i < MaxFormants; i++)
         {
@@ -1007,4 +1085,67 @@ public sealed partial class VocalSpectrographPlugin
         RecordDiscontinuity(DiscontinuityType.BufferDrop);
         ResetAnalysisState();
     }
+
+    private static float ComputeSpectralFlatness(ReadOnlySpan<float> magnitudes)
+    {
+        if (magnitudes.IsEmpty)
+        {
+            return 1f;
+        }
+
+        float logSum = 0f;
+        float linSum = 0f;
+        int count = magnitudes.Length;
+        for (int i = 0; i < count; i++)
+        {
+            float mag = MathF.Max(magnitudes[i], 1e-12f);
+            logSum += MathF.Log(mag);
+            linSum += mag;
+        }
+
+        float geometric = MathF.Exp(logSum / count);
+        float arithmetic = linSum / count;
+        return arithmetic > 1e-12f ? geometric / arithmetic : 1f;
+    }
+
+#if HOTMIC_SPECTROGRAPH_DIAGNOSTICS
+    private static float ComputeRms(ReadOnlySpan<float> frame)
+    {
+        if (frame.IsEmpty)
+        {
+            return 0f;
+        }
+
+        double sum = 0.0;
+        for (int i = 0; i < frame.Length; i++)
+        {
+            float v = frame[i];
+            sum += v * v;
+        }
+
+        return (float)Math.Sqrt(sum / frame.Length);
+    }
+
+    private static float ComputeZeroCrossingRate(ReadOnlySpan<float> frame)
+    {
+        if (frame.Length <= 1)
+        {
+            return 0f;
+        }
+
+        int crossings = 0;
+        float prev = frame[0];
+        for (int i = 1; i < frame.Length; i++)
+        {
+            float current = frame[i];
+            if ((prev >= 0f && current < 0f) || (prev < 0f && current >= 0f))
+            {
+                crossings++;
+            }
+            prev = current;
+        }
+
+        return crossings / MathF.Max(1f, frame.Length - 1);
+    }
+#endif
 }
