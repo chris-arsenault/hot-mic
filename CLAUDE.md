@@ -16,3 +16,12 @@ You are working on **HotMic**, a Windows audio routing application. Keep respons
 ## Spec Hygiene
 
 Do not duplicate spec content here. When behavior changes, update the relevant doc under `docs/technical/` and keep its code references accurate.
+
+## Testing
+
+See `AGENTS.md` Testing Policy for full guidance. Key points:
+
+- **No long-term behavior tests** - Don't rely on unit tests to control behavior
+- **Math verification allowed** - Testing DSP algorithms against pre-computed reference values is encouraged
+- **Pre-computed, not re-implemented** - Expected values must come from external tools (Python/NumPy), not from re-implementing the formula in the test
+- **Deterministic and specific** - Use fixed inputs and assert against concrete expected values, not just presence checks

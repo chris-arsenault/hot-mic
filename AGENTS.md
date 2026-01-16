@@ -397,6 +397,57 @@ Temporary, isolated verification tests are allowed (for example, DSP math or FFT
 
 Still document complex DSP or UI behavior with concise inline comments near the relevant code so intent and assumptions are captured in context.
 
+### Mathematical Accuracy Tests
+
+Testing for mathematical accuracy via **independent verification** is acceptable and encouraged for DSP algorithms. These tests validate that implementations match known-correct reference values.
+
+**Requirements for math verification tests:**
+
+1. **Pre-computed reference values** - Expected values must be computed externally (Python/NumPy, Wolfram Alpha, textbook examples) and hardcoded in tests. Document the source.
+   ```csharp
+   // Pre-computed with Python: mag = exp(-bw * π / sr)
+   // At sr=12000: bw=1000Hz -> mag=0.769665
+   [InlineData(0.769665, 1000)]
+   ```
+
+2. **Deterministic inputs** - Use fixed seeds for RNG, specific input signals, or pre-computed coefficient arrays. Same test input must always produce same output.
+   ```csharp
+   // Pre-computed LPC coefficients for resonance at 300Hz, mag 0.95
+   float[] lpcCoeffs = { 1.0f, -3.1494001f, 4.1010318f, -2.6687473f, 0.731025f };
+   ```
+
+3. **Specific expected values** - Assert against concrete numbers, not just presence or non-null. Use tight tolerances appropriate for the math.
+   ```csharp
+   // Expected frequency: 125 Hz (pre-computed: θ×fs/2π)
+   Assert.InRange(freqs[0], 120f, 130f);
+   ```
+
+4. **Never re-implement the algorithm** - Tests must not compute expected values using the same formula being tested. This is invalid:
+   ```csharp
+   // BAD: Re-implements the formula being tested
+   double expected = -sampleRate / Math.PI * Math.Log(magnitude);
+   Assert.Equal(expected, actual);
+
+   // GOOD: Uses pre-computed reference value
+   Assert.InRange(actual, 195.0, 197.0);  // Pre-computed: 195.93 Hz
+   ```
+
+5. **Document reference source** - Include comments noting how values were computed (tool, formula, textbook reference).
+
+**Example test structure:**
+```csharp
+[Theory]
+[InlineData(0.974160, 100)]   // Python: exp(-100*π/12000)
+[InlineData(0.877306, 500)]   // Python: exp(-500*π/12000)
+[InlineData(0.769665, 1000)]  // Python: exp(-1000*π/12000)
+public void MagnitudeToBandwidth_MatchesReference(double mag, double expectedBw)
+{
+    // Formula: bw = -sr/π × ln(mag), verified against Python/NumPy
+    double actual = ComputeBandwidth(mag, sampleRate: 12000);
+    Assert.InRange(actual, expectedBw - 0.5, expectedBw + 0.5);
+}
+```
+
 ---
 
 ## Error Handling
