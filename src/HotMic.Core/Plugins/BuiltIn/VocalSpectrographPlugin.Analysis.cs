@@ -494,11 +494,7 @@ public sealed partial class VocalSpectrographPlugin
         bool trackerOk = _formantTracker is not null;
         bool voiced = voicing == VoicingState.Voiced;
 
-        // Diagnostic: print formant pipeline state once per second
-        if (_formantDiagCounter++ % 100 == 0)
-        {
-            Console.WriteLine($"[Analysis] needsFormants={needsFormants}, lpcOk={lpcOk}, trackerOk={trackerOk}, voicing={voicing}, pitch={lastPitch:F1}Hz (LPC always uses pre-emphasis)");
-        }
+        _formantDiagCounter++;
 
         if (needsFormants && lpcOk && trackerOk && voiced)
         {
@@ -541,10 +537,6 @@ public sealed partial class VocalSpectrographPlugin
                 formantCount = _formantTracker.Track(_lpcCoefficients, LpcTargetSampleRate,
                     _formantFreqScratch, _formantBwScratch,
                     _activeMinFrequency, _activeMaxFrequency, MaxFormants);
-            }
-            else if (_formantDiagCounter % 100 == 1)
-            {
-                Console.WriteLine($"[Analysis] LPC.Compute returned false (decimatedLen={decimatedLen})");
             }
         }
 

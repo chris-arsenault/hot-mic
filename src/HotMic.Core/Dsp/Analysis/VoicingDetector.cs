@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace HotMic.Core.Dsp.Analysis;
 
 /// <summary>
@@ -22,10 +20,6 @@ public sealed class VoicingDetector
     public float AutocorrThreshold { get; set; } = 0.3f;
     public float SpectralFlatnessThreshold { get; set; } = 0.5f;
 
-    // Diagnostics
-    private static long _lastDiagnosticTicks;
-    private static readonly long DiagnosticIntervalTicks = Stopwatch.Frequency; // 1 second
-
     /// <summary>
     /// Detect voicing state for the given frame and spectrum.
     /// </summary>
@@ -39,16 +33,8 @@ public sealed class VoicingDetector
         float rms = ComputeRms(frame);
         float energyDb = DspUtils.LinearToDb(rms);
 
-        // Diagnostics
-        long now = Stopwatch.GetTimestamp();
-        bool shouldLog = now - _lastDiagnosticTicks > DiagnosticIntervalTicks;
-        if (shouldLog) _lastDiagnosticTicks = now;
-
         if (energyDb < EnergyThresholdDb)
-        {
-            if (shouldLog) Console.WriteLine($"[Voicing] SILENCE: energyDb={energyDb:F1} < threshold={EnergyThresholdDb}");
             return VoicingState.Silence;
-        }
 
         float zcr = ComputeZeroCrossingRate(frame);
         float flatness = ComputeSpectralFlatness(magnitudes);
@@ -56,12 +42,6 @@ public sealed class VoicingDetector
         bool voiced = pitchConfidence >= AutocorrThreshold
                       && zcr < ZcrThreshold
                       && flatness < SpectralFlatnessThreshold;
-
-        if (shouldLog)
-        {
-            Console.WriteLine($"[Voicing] energyDb={energyDb:F1}, zcr={zcr:F3}(<{ZcrThreshold}?), flat={flatness:F3}(<{SpectralFlatnessThreshold}?), conf={pitchConfidence:F2}(>={AutocorrThreshold}?)");
-            Console.WriteLine($"[Voicing] result={(!voiced ? (zcr > ZcrThreshold || flatness > SpectralFlatnessThreshold ? "Unvoiced" : (pitchConfidence >= AutocorrThreshold ? "Voiced" : "Unvoiced")) : "Voiced")}");
-        }
 
         if (voiced)
         {

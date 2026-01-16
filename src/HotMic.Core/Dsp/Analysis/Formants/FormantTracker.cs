@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Numerics;
 
 namespace HotMic.Core.Dsp.Analysis.Formants;
@@ -15,10 +14,6 @@ public sealed class FormantTracker
     private Complex[] _newRoots = Array.Empty<Complex>(); // Work buffer for iteration
     private float[] _freqScratch = Array.Empty<float>();
     private float[] _bwScratch = Array.Empty<float>();
-
-    // Diagnostics
-    private static long _lastDiagnosticTicks;
-    private static readonly long DiagnosticIntervalTicks = Stopwatch.Frequency; // 1 second
 
     public FormantTracker(int order)
     {
@@ -90,68 +85,35 @@ public sealed class FormantTracker
         float minHz = 100f;
         float maxHz = Math.Min(5500f, nyquist * 0.8f);
 
-        // Diagnostics
-        long now = Stopwatch.GetTimestamp();
-        bool shouldLog = now - _lastDiagnosticTicks > DiagnosticIntervalTicks;
-        if (shouldLog) _lastDiagnosticTicks = now;
-
-        int skippedNegImag = 0, skippedMagLow = 0, skippedMagHigh = 0;
-        int skippedFreqLow = 0, skippedFreqHigh = 0, skippedBwLow = 0, skippedBwHigh = 0;
-
         for (int i = 0; i < _roots.Length; i++)
         {
             Complex root = _roots[i];
 
             // Only consider roots with positive imaginary part (conjugate pairs)
             if (root.Imaginary <= 0.001)
-            {
-                skippedNegImag++;
                 continue;
-            }
 
             double magnitude = root.Magnitude;
 
             // Formant poles should be reasonably close to unit circle
-            // At 48kHz with LPC order 24, poles typically have magnitude 0.8-0.95
-            // Magnitude 0.80 = ~3410Hz bw, 0.85 = ~2484Hz, 0.88 = ~1955Hz, 0.90 = ~1610Hz
+            // At 12kHz with LPC order 12, poles typically have magnitude 0.85-0.98
             // Use 0.80 threshold to accept typical LPC poles; bandwidth filter handles the rest
-            if (magnitude <= 0.80)
-            {
-                skippedMagLow++;
+            if (magnitude <= 0.80 || magnitude >= 0.9995)
                 continue;
-            }
-            if (magnitude >= 0.9995)
-            {
-                skippedMagHigh++;
-                continue;
-            }
 
             double angle = Math.Atan2(root.Imaginary, root.Real);
             float freq = (float)(angle * sampleRate / (2.0 * Math.PI));
             float bandwidth = (float)(-sampleRate / Math.PI * Math.Log(magnitude));
 
-            // Log first few roots with positive imaginary for debugging
-            if (shouldLog && i < 6)
-            {
-                Console.WriteLine($"[Formant] root[{i}]: re={root.Real:F4}, im={root.Imaginary:F4}, mag={magnitude:F4}, freq={freq:F1}Hz, bw={bandwidth:F1}Hz");
-            }
-
             // Filter by frequency range and bandwidth
-            // With magnitude > 0.80 filter, max bandwidth is ~3400 Hz
-            if (freq < minHz) { skippedFreqLow++; continue; }
-            if (freq > maxHz) { skippedFreqHigh++; continue; }
-            if (bandwidth < 10f) { skippedBwLow++; continue; }
-            if (bandwidth > 3500f) { skippedBwHigh++; continue; }
+            if (freq < minHz || freq > maxHz)
+                continue;
+            if (bandwidth < 10f || bandwidth > 3500f)
+                continue;
 
             _freqScratch[count] = freq;
             _bwScratch[count] = bandwidth;
             count++;
-        }
-
-        if (shouldLog)
-        {
-            Console.WriteLine($"[Formant] filters: negImag={skippedNegImag}, magLow={skippedMagLow}, magHigh={skippedMagHigh}, freqLo={skippedFreqLow}, freqHi={skippedFreqHigh}, bwLo={skippedBwLow}, bwHi={skippedBwHigh}");
-            Console.WriteLine($"[Formant] passed={count}, minHz={minHz}, maxHz={maxHz}, sr={sampleRate}");
         }
 
         if (count == 0)
@@ -278,32 +240,5 @@ public sealed class FormantTracker
             }
         }
 
-        // Diagnostic: print some roots
-        long now = Stopwatch.GetTimestamp();
-        if (now - _lastDiagnosticTicks > DiagnosticIntervalTicks)
-        {
-            Console.WriteLine($"[RootSolver] Sample roots after Aberth iteration:");
-            int printed = 0;
-            for (int i = 0; i < n && printed < 6; i++)
-            {
-                var r = _roots[i];
-                if (r.Imaginary > 0.01) // Only show positive imaginary
-                {
-                    double freq = Math.Atan2(r.Imaginary, r.Real) * 48000 / (2 * Math.PI);
-                    Console.WriteLine($"  root[{i}]: re={r.Real:F4}, im={r.Imaginary:F4}, mag={r.Magnitude:F4}, ~freq={freq:F0}Hz");
-                    printed++;
-                }
-            }
-            if (printed == 0)
-            {
-                Console.WriteLine("  (no roots with positive imaginary part found)");
-                // Print first few anyway
-                for (int i = 0; i < Math.Min(4, n); i++)
-                {
-                    var r = _roots[i];
-                    Console.WriteLine($"  root[{i}]: re={r.Real:F4}, im={r.Imaginary:F4}, mag={r.Magnitude:F4}");
-                }
-            }
-        }
     }
 }

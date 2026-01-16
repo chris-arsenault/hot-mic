@@ -291,6 +291,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private float _vowelF1Smoothed;
     private float _vowelF2Smoothed;
     private float _vowelOpacity;
+    private int _vowelDiagCounter;
     private const float VowelAttackCoeff = 0.4f;   // Fast attack when new values arrive
     private const float VowelOpacityDecay = 0.015f; // Opacity fade rate when silent
 
@@ -1605,6 +1606,14 @@ public sealed class VocalSpectrographRenderer : IDisposable
         // Apply ballistics: fast attack when new values arrive, fade opacity when silent
         // Only update if F1/F2 are in valid vowel ranges (F1: 200-1200, F2: 500-3000)
         bool validF1F2 = f1 >= 200f && f1 <= 1200f && f2 >= 500f && f2 <= 3000f;
+
+        // Diagnostic: log vowel space input once per second (~60 frames)
+        bool shouldLog = ++_vowelDiagCounter % 60 == 0;
+        if (shouldLog)
+        {
+            Console.WriteLine($"[VowelSpace] raw F1={f1:F0}, F2={f2:F0}, valid={validF1F2}, frameIndex={frameIndex}");
+        }
+
         if (validF1F2)
         {
             // Fast attack toward new values, full opacity
@@ -1616,6 +1625,11 @@ public sealed class VocalSpectrographRenderer : IDisposable
         {
             // Keep position, fade opacity
             _vowelOpacity = Math.Max(0f, _vowelOpacity - VowelOpacityDecay);
+        }
+
+        if (shouldLog)
+        {
+            Console.WriteLine($"[VowelSpace] smoothed F1={_vowelF1Smoothed:F0}, F2={_vowelF2Smoothed:F0}, opacity={_vowelOpacity:F2}");
         }
 
         // Standard vowel space ranges (IPA vowel quadrilateral)
@@ -1694,7 +1708,8 @@ public sealed class VocalSpectrographRenderer : IDisposable
         }
 
         // Draw current position using smoothed values with opacity fade
-        if (_vowelOpacity > 0.05f && _vowelF1Smoothed >= f1Min * 0.5f && _vowelF2Smoothed >= f2Min * 0.5f)
+        bool canDraw = _vowelOpacity > 0.05f && _vowelF1Smoothed >= f1Min * 0.5f && _vowelF2Smoothed >= f2Min * 0.5f;
+        if (canDraw)
         {
             float xNorm = Math.Clamp((_vowelF2Smoothed - f2Min) / (f2Max - f2Min), 0f, 1f);
             float yNorm = Math.Clamp((_vowelF1Smoothed - f1Min) / (f1Max - f1Min), 0f, 1f);
@@ -1704,6 +1719,15 @@ public sealed class VocalSpectrographRenderer : IDisposable
             using var fadedPaint = _pitchPaint.Clone();
             fadedPaint.Color = fadedPaint.Color.WithAlpha(alpha);
             canvas.DrawCircle(x, y, 4f, fadedPaint);
+
+            if (shouldLog)
+            {
+                Console.WriteLine($"[VowelSpace] DRAW: xNorm={xNorm:F2}, yNorm={yNorm:F2}, x={x:F0}, y={y:F0}, alpha={alpha}");
+            }
+        }
+        else if (shouldLog)
+        {
+            Console.WriteLine($"[VowelSpace] SKIP: opacity={_vowelOpacity:F2}, smoothF1={_vowelF1Smoothed:F0}, smoothF2={_vowelF2Smoothed:F0}");
         }
 
         canvas.Restore();
