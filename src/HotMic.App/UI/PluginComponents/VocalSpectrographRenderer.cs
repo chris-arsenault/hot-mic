@@ -287,11 +287,12 @@ public sealed class VocalSpectrographRenderer : IDisposable
     private bool _axisShowPitchMeterCache;
     private bool _axisShowVowelSpaceCache;
 
-    // Vowel space ballistics (smoothed F1/F2 that decay slowly)
+    // Vowel space ballistics (smoothed F1/F2 with opacity fade)
     private float _vowelF1Smoothed;
     private float _vowelF2Smoothed;
+    private float _vowelOpacity;
     private const float VowelAttackCoeff = 0.4f;   // Fast attack when new values arrive
-    private const float VowelDecayCoeff = 0.02f;   // Slow decay when silent/unvoiced
+    private const float VowelOpacityDecay = 0.015f; // Opacity fade rate when silent
 
     // Bloom pass for luminous highlights.
     private readonly SKPaint _bloomAddPaint;
@@ -1601,20 +1602,20 @@ public sealed class VocalSpectrographRenderer : IDisposable
             }
         }
 
-        // Apply ballistics: fast attack when new values arrive, slow decay when silent
+        // Apply ballistics: fast attack when new values arrive, fade opacity when silent
         // Only update if F1/F2 are in valid vowel ranges (F1: 200-1200, F2: 500-3000)
         bool validF1F2 = f1 >= 200f && f1 <= 1200f && f2 >= 500f && f2 <= 3000f;
         if (validF1F2)
         {
-            // Fast attack toward new values
+            // Fast attack toward new values, full opacity
             _vowelF1Smoothed += (f1 - _vowelF1Smoothed) * VowelAttackCoeff;
             _vowelF2Smoothed += (f2 - _vowelF2Smoothed) * VowelAttackCoeff;
+            _vowelOpacity = 1f;
         }
         else
         {
-            // Slow decay toward zero when no valid formants
-            _vowelF1Smoothed *= (1f - VowelDecayCoeff);
-            _vowelF2Smoothed *= (1f - VowelDecayCoeff);
+            // Keep position, fade opacity
+            _vowelOpacity = Math.Max(0f, _vowelOpacity - VowelOpacityDecay);
         }
 
         // Standard vowel space ranges (IPA vowel quadrilateral)
@@ -1692,14 +1693,17 @@ public sealed class VocalSpectrographRenderer : IDisposable
             }
         }
 
-        // Draw current position using smoothed values (persists longer)
-        if (_vowelF1Smoothed >= f1Min * 0.9f && _vowelF2Smoothed >= f2Min * 0.9f)
+        // Draw current position using smoothed values with opacity fade
+        if (_vowelOpacity > 0.05f && _vowelF1Smoothed >= f1Min * 0.5f && _vowelF2Smoothed >= f2Min * 0.5f)
         {
             float xNorm = Math.Clamp((_vowelF2Smoothed - f2Min) / (f2Max - f2Min), 0f, 1f);
             float yNorm = Math.Clamp((_vowelF1Smoothed - f1Min) / (f1Max - f1Min), 0f, 1f);
             float x = plotRect.Left + plotRect.Width * xNorm;
             float y = plotRect.Bottom - plotRect.Height * yNorm;
-            canvas.DrawCircle(x, y, 4f, _pitchPaint);
+            byte alpha = (byte)(255 * _vowelOpacity);
+            using var fadedPaint = _pitchPaint.Clone();
+            fadedPaint.Color = fadedPaint.Color.WithAlpha(alpha);
+            canvas.DrawCircle(x, y, 4f, fadedPaint);
         }
 
         canvas.Restore();
