@@ -50,6 +50,26 @@ public sealed class SpectrogramDynamicRangeTracker
             _scratch[i] = DspUtils.LinearToDb(magnitudes[i]);
         }
 
+        return UpdateFromScratch(bins, adaptRate);
+    }
+
+    /// <summary>
+    /// Update the floor estimate from pre-computed dB values.
+    /// </summary>
+    public float UpdateDb(ReadOnlySpan<float> magnitudesDb, float adaptRate)
+    {
+        int bins = Math.Min(magnitudesDb.Length, _scratch.Length);
+        if (bins == 0)
+        {
+            return _floorDb;
+        }
+
+        magnitudesDb.Slice(0, bins).CopyTo(_scratch);
+        return UpdateFromScratch(bins, adaptRate);
+    }
+
+    private float UpdateFromScratch(int bins, float adaptRate)
+    {
         Array.Sort(_scratch, 0, bins);
         int index = Math.Clamp((int)MathF.Floor((bins - 1) * Percentile), 0, bins - 1);
         float target = _scratch[index];

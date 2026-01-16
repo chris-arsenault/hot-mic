@@ -966,11 +966,13 @@ public sealed partial class VocalSpectrographPlugin
             _formantBandwidths[formantOffset + i] = i < formantCount ? _formantBwScratch[i] : 0f;
         }
 
-        // Diagnostic: print formant results once per second
+#if HOTMIC_SPECTROGRAPH_DIAGNOSTICS
+        // Diagnostic: print formant results once per second.
         if (_formantDiagCounter % 100 == 50 && formantCount > 0)
         {
             Console.WriteLine($"[WriteOverlay] formantCount={formantCount}: F1={_formantFreqScratch[0]:F0}Hz, F2={(formantCount > 1 ? _formantFreqScratch[1] : 0):F0}Hz, F3={(formantCount > 2 ? _formantFreqScratch[2] : 0):F0}Hz");
         }
+#endif
 
         int harmonicOffset = frameIndex * MaxHarmonics;
         for (int i = 0; i < MaxHarmonics; i++)

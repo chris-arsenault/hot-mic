@@ -16,12 +16,19 @@ public sealed class DisplayPipeline
     private readonly SpectrogramDisplayMapper _mapper = new();
     private readonly SpectrogramDynamicRangeTracker _dynamicRangeTracker = new();
     private float[] _mappedBuffer = Array.Empty<float>();
+    private float[] _dbScratch = Array.Empty<float>();
     private int _displayBins;
     private int _analysisBins;
     private float _minDb;
     private float _maxDb;
     private SpectrogramDynamicRangeMode _dynamicRangeMode;
     private bool _configured;
+
+    private const int Log2LutBits = 10;
+    private const int Log2LutSize = 1 << Log2LutBits;
+    private const int Log2LutShift = 23 - Log2LutBits;
+    private const float Log2ToDb = 6.0205999f;
+    private static readonly float[] Log2MantissaLut = BuildLog2MantissaLut();
 
     /// <summary>
     /// Number of display bins.
@@ -219,10 +226,23 @@ public sealed class DisplayPipeline
             return;
         }
 
-        _dynamicRangeTracker.EnsureCapacity(_displayBins);
-
         float floorDb = _minDb;
         float ceilingDb = _maxDb;
+        bool useNoiseFloor = _dynamicRangeMode == SpectrogramDynamicRangeMode.NoiseFloor;
+        if (useNoiseFloor)
+        {
+            _dynamicRangeTracker.EnsureCapacity(_displayBins);
+            if (_dbScratch.Length < _displayBins)
+            {
+                _dbScratch = new float[_displayBins];
+            }
+
+            for (int i = 0; i < _displayBins; i++)
+            {
+                _dbScratch[i] = LinearToDbFast(magnitudes[i]);
+            }
+        }
+
         switch (_dynamicRangeMode)
         {
             case SpectrogramDynamicRangeMode.Full:
@@ -240,7 +260,7 @@ public sealed class DisplayPipeline
             case SpectrogramDynamicRangeMode.NoiseFloor:
             {
                 float adaptRate = voicingState == (byte)VoicingState.Silence ? 0.2f : 0.05f;
-                float adaptiveFloor = _dynamicRangeTracker.Update(magnitudes, adaptRate);
+                float adaptiveFloor = _dynamicRangeTracker.UpdateDb(_dbScratch.AsSpan(0, _displayBins), adaptRate);
                 floorDb = Math.Clamp(adaptiveFloor, _minDb, _maxDb - 1f);
                 ceilingDb = _maxDb;
                 break;
@@ -250,10 +270,54 @@ public sealed class DisplayPipeline
         floorDb = Math.Min(floorDb, ceilingDb - 1f);
         float range = MathF.Max(1f, ceilingDb - floorDb);
 
-        for (int i = 0; i < _displayBins; i++)
+        if (useNoiseFloor)
         {
-            float db = DspUtils.LinearToDb(magnitudes[i]);
-            normalizedOutput[i] = Math.Clamp((db - floorDb) / range, 0f, 1f);
+            for (int i = 0; i < _displayBins; i++)
+            {
+                normalizedOutput[i] = Math.Clamp((_dbScratch[i] - floorDb) / range, 0f, 1f);
+            }
         }
+        else
+        {
+            for (int i = 0; i < _displayBins; i++)
+            {
+                float db = LinearToDbFast(magnitudes[i]);
+                normalizedOutput[i] = Math.Clamp((db - floorDb) / range, 0f, 1f);
+            }
+        }
+    }
+
+    private static float[] BuildLog2MantissaLut()
+    {
+        var lut = new float[Log2LutSize];
+        float invSize = 1f / Log2LutSize;
+        for (int i = 0; i < Log2LutSize; i++)
+        {
+            float mantissa = 1f + (i + 0.5f) * invSize;
+            lut[i] = MathF.Log2(mantissa);
+        }
+
+        return lut;
+    }
+
+    // Fast log2-based dB conversion for UI visualization. Error is small and stable.
+    private static float LinearToDbFast(float linear)
+    {
+        if (!float.IsFinite(linear))
+        {
+            return DspUtils.LinearToDb(linear);
+        }
+
+        if (linear < 1e-10f)
+        {
+            linear = 1e-10f;
+        }
+
+        int bits = BitConverter.SingleToInt32Bits(linear);
+        int exponent = ((bits >> 23) & 0xFF) - 127;
+        int mantissa = bits & 0x7FFFFF;
+        int index = mantissa >> Log2LutShift;
+        float log2 = exponent + Log2MantissaLut[index];
+        return log2 * Log2ToDb;
     }
 }
