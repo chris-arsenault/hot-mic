@@ -500,17 +500,14 @@ public sealed partial class VocalSpectrographPlugin
         {
             // LPC formant analysis: downsample to 12kHz like professional tools (Praat uses 10-11kHz)
             // This produces poles closer to unit circle with realistic bandwidths (50-400Hz vs 2000-3000Hz)
-            // Pipeline: 48kHz raw → pre-emphasis → 24kHz → 12kHz → LPC
+            // Pipeline: 48kHz raw → 24kHz → 12kHz → pre-emphasis → LPC
+            // Pre-emphasis AFTER decimation to avoid over-boosting highs relative to 0-6kHz range
             int bufferLen = _analysisBufferRaw.Length;
             int lpcLen = Math.Min(LpcWindowSamples, bufferLen);
             int lpcStart = bufferLen - lpcLen; // Use most recent samples
 
-            // Step 1: Apply pre-emphasis to the LPC window (at original sample rate)
-            _lpcPreEmphasisFilter.Reset();
-            for (int i = 0; i < lpcLen; i++)
-            {
-                _lpcInputBuffer[i] = _lpcPreEmphasisFilter.Process(_analysisBufferRaw[lpcStart + i]);
-            }
+            // Step 1: Copy raw samples to input buffer
+            _analysisBufferRaw.AsSpan(lpcStart, lpcLen).CopyTo(_lpcInputBuffer.AsSpan(0, lpcLen));
 
             // Step 2: Decimate 48kHz → 24kHz (2x)
             _lpcDecimator1.Reset();
@@ -522,7 +519,14 @@ public sealed partial class VocalSpectrographPlugin
             int decimatedLen = decimated1Len / 2;
             _lpcDecimator2.ProcessDownsample(_lpcDecimateBuffer1.AsSpan(0, decimated1Len), _lpcDecimatedBuffer.AsSpan(0, decimatedLen));
 
-            // Step 4: Run LPC on decimated signal at 12kHz
+            // Step 4: Apply pre-emphasis at 12kHz (after decimation for proper spectral balance)
+            _lpcPreEmphasisFilter.Reset();
+            for (int i = 0; i < decimatedLen; i++)
+            {
+                _lpcDecimatedBuffer[i] = _lpcPreEmphasisFilter.Process(_lpcDecimatedBuffer[i]);
+            }
+
+            // Step 5: Run LPC on decimated signal at 12kHz
             // At 12kHz, use order 10-12 for 4-5 formants (rule: order = 2*formants + 2)
             const int LpcOrderAt12kHz = 12;
             if (_lpcAnalyzer.Order != LpcOrderAt12kHz)
