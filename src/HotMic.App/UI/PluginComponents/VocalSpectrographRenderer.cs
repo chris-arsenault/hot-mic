@@ -1602,7 +1602,9 @@ public sealed class VocalSpectrographRenderer : IDisposable
         }
 
         // Apply ballistics: fast attack when new values arrive, slow decay when silent
-        if (f1 > 0f && f2 > 0f)
+        // Only update if F1/F2 are in valid vowel ranges (F1: 200-1200, F2: 500-3000)
+        bool validF1F2 = f1 >= 200f && f1 <= 1200f && f2 >= 500f && f2 <= 3000f;
+        if (validF1F2)
         {
             // Fast attack toward new values
             _vowelF1Smoothed += (f1 - _vowelF1Smoothed) * VowelAttackCoeff;
@@ -1615,13 +1617,18 @@ public sealed class VocalSpectrographRenderer : IDisposable
             _vowelF2Smoothed *= (1f - VowelDecayCoeff);
         }
 
-        float f1Min = 250f;
+        // Standard vowel space ranges (IPA vowel quadrilateral)
+        float f1Min = 200f;
         float f1Max = 1000f;
-        float f2Min = 700f;
-        float f2Max = 2500f;
+        float f2Min = 600f;
+        float f2Max = 2800f;
 
         var plotRect = new SKRect(rect.Left + 8f, rect.Top + 20f, rect.Right - 8f, rect.Bottom - 8f);
         canvas.DrawRect(plotRect, _guidePaint);
+
+        // Clip all drawing to the plot area to prevent overflow
+        canvas.Save();
+        canvas.ClipRect(plotRect);
 
         foreach (var vowel in VowelReferencePoints)
         {
@@ -1656,14 +1663,16 @@ public sealed class VocalSpectrographRenderer : IDisposable
 
                 float tf1 = state.FormantFrequencies[offset];
                 float tf2 = state.FormantFrequencies[offset + 1];
-                if (tf1 <= 0f || tf2 <= 0f)
+
+                // Skip invalid or out-of-range formants
+                if (tf1 < 150f || tf1 > 1200f || tf2 < 400f || tf2 > 3200f)
                 {
                     started = false;
                     continue;
                 }
 
-                float xNorm = (tf2 - f2Min) / (f2Max - f2Min);
-                float yNorm = (tf1 - f1Min) / (f1Max - f1Min);
+                float xNorm = Math.Clamp((tf2 - f2Min) / (f2Max - f2Min), 0f, 1f);
+                float yNorm = Math.Clamp((tf1 - f1Min) / (f1Max - f1Min), 0f, 1f);
                 float x = plotRect.Left + plotRect.Width * xNorm;
                 float y = plotRect.Bottom - plotRect.Height * yNorm;
                 if (!started)
@@ -1684,21 +1693,22 @@ public sealed class VocalSpectrographRenderer : IDisposable
         }
 
         // Draw current position using smoothed values (persists longer)
-        // Only draw if smoothed values are within the display range
-        if (_vowelF1Smoothed >= f1Min && _vowelF1Smoothed <= f1Max &&
-            _vowelF2Smoothed >= f2Min && _vowelF2Smoothed <= f2Max)
+        if (_vowelF1Smoothed >= f1Min * 0.9f && _vowelF2Smoothed >= f2Min * 0.9f)
         {
-            float xNorm = (_vowelF2Smoothed - f2Min) / (f2Max - f2Min);
-            float yNorm = (_vowelF1Smoothed - f1Min) / (f1Max - f1Min);
+            float xNorm = Math.Clamp((_vowelF2Smoothed - f2Min) / (f2Max - f2Min), 0f, 1f);
+            float yNorm = Math.Clamp((_vowelF1Smoothed - f1Min) / (f1Max - f1Min), 0f, 1f);
             float x = plotRect.Left + plotRect.Width * xNorm;
             float y = plotRect.Bottom - plotRect.Height * yNorm;
             canvas.DrawCircle(x, y, 4f, _pitchPaint);
-            // Show actual instantaneous values in text (when available)
-            if (f1 > 0f && f2 > 0f)
-            {
-                canvas.DrawText($"F1 {f1:0}", plotRect.Left + 4f, plotRect.Bottom - 6f, _metricPaint);
-                canvas.DrawText($"F2 {f2:0}", plotRect.Left + 60f, plotRect.Bottom - 6f, _metricPaint);
-            }
+        }
+
+        canvas.Restore();
+
+        // Show F1/F2 values outside clipping region (at bottom of panel)
+        if (f1 > 0f && f2 > 0f)
+        {
+            canvas.DrawText($"F1 {f1:0}", plotRect.Left + 4f, rect.Bottom - 4f, _metricPaint);
+            canvas.DrawText($"F2 {f2:0}", plotRect.Left + 60f, rect.Bottom - 4f, _metricPaint);
         }
     }
 
