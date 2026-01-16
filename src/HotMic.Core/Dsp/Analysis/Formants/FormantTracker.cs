@@ -9,6 +9,7 @@ namespace HotMic.Core.Dsp.Analysis.Formants;
 public sealed class FormantTracker
 {
     private int _order;
+    private int _diagCounter;
     private Complex[] _roots = Array.Empty<Complex>();
     private double[] _polyCoefficients = Array.Empty<double>();
     private Complex[] _newRoots = Array.Empty<Complex>(); // Work buffer for iteration
@@ -85,6 +86,13 @@ public sealed class FormantTracker
         float minHz = 100f;
         float maxHz = Math.Min(5500f, nyquist * 0.8f);
 
+        // Diagnostic: log all poles once per second
+        bool shouldLog = ++_diagCounter % 100 == 0;
+        if (shouldLog)
+        {
+            Console.WriteLine($"[FormantTracker] All poles (sr={sampleRate}):");
+        }
+
         for (int i = 0; i < _roots.Length; i++)
         {
             Complex root = _roots[i];
@@ -94,16 +102,26 @@ public sealed class FormantTracker
                 continue;
 
             double magnitude = root.Magnitude;
-
-            // Formant poles should be reasonably close to unit circle
-            // At 12kHz with LPC order 12, poles typically have magnitude 0.85-0.98
-            // Use 0.80 threshold to accept typical LPC poles; bandwidth filter handles the rest
-            if (magnitude <= 0.80 || magnitude >= 0.9995)
-                continue;
-
             double angle = Math.Atan2(root.Imaginary, root.Real);
             float freq = (float)(angle * sampleRate / (2.0 * Math.PI));
             float bandwidth = (float)(-sampleRate / Math.PI * Math.Log(magnitude));
+
+            // Log all poles with positive imaginary part
+            if (shouldLog)
+            {
+                string status = "PASS";
+                if (magnitude <= 0.80) status = "mag<0.80";
+                else if (magnitude >= 0.9995) status = "mag>0.9995";
+                else if (freq < minHz) status = "freq<100";
+                else if (freq > maxHz) status = $"freq>{maxHz:F0}";
+                else if (bandwidth < 10f) status = "bw<10";
+                else if (bandwidth > 3500f) status = "bw>3500";
+                Console.WriteLine($"  [{i}] freq={freq:F0}Hz, mag={magnitude:F4}, bw={bandwidth:F0}Hz, {status}");
+            }
+
+            // Formant poles should be reasonably close to unit circle
+            if (magnitude <= 0.80 || magnitude >= 0.9995)
+                continue;
 
             // Filter by frequency range and bandwidth
             if (freq < minHz || freq > maxHz)
