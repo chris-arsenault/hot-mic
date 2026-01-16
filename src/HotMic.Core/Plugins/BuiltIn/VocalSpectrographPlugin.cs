@@ -209,6 +209,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private SwipePitchDetector? _swipePitchDetector;
     private LpcAnalyzer? _lpcAnalyzer;
     private FormantTracker? _formantTracker;
+    private BeamSearchFormantTracker? _beamFormantTracker;
     private float[] _lpcCoefficients = Array.Empty<float>();
     private float[] _formantFreqScratch = new float[MaxFormants];
     private float[] _formantBwScratch = new float[MaxFormants];

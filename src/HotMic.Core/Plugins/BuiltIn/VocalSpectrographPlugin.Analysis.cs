@@ -491,17 +491,16 @@ public sealed partial class VocalSpectrographPlugin
 
         formantCount = 0;
         bool lpcOk = _lpcAnalyzer is not null;
-        bool trackerOk = _formantTracker is not null;
+        bool beamTrackerOk = _beamFormantTracker is not null;
         bool voiced = voicing == VoicingState.Voiced;
 
         _formantDiagCounter++;
 
-        if (needsFormants && lpcOk && trackerOk && voiced)
+        if (needsFormants && lpcOk && beamTrackerOk && voiced)
         {
             // LPC formant analysis: downsample to 12kHz like professional tools (Praat uses 10-11kHz)
             // This produces poles closer to unit circle with realistic bandwidths (50-400Hz vs 2000-3000Hz)
-            // Pipeline: 48kHz raw → 24kHz → 12kHz → pre-emphasis → LPC
-            // Pre-emphasis AFTER decimation to avoid over-boosting highs relative to 0-6kHz range
+            // Pipeline: 48kHz raw → 24kHz → 12kHz → LPC → Beam-Search Tracking
             int bufferLen = _analysisBufferRaw.Length;
             int lpcLen = Math.Min(LpcWindowSamples, bufferLen);
             int lpcStart = bufferLen - lpcLen; // Use most recent samples
@@ -530,16 +529,21 @@ public sealed partial class VocalSpectrographPlugin
             if (_lpcAnalyzer.Order != LpcOrderAt12kHz)
             {
                 _lpcAnalyzer.Configure(LpcOrderAt12kHz);
-                _formantTracker.Configure(LpcOrderAt12kHz);
+                _beamFormantTracker.Configure(LpcOrderAt12kHz, MaxFormants, beamWidth: 8);
             }
 
             if (_lpcAnalyzer.Compute(_lpcDecimatedBuffer.AsSpan(0, decimatedLen), _lpcCoefficients))
             {
-                // Pass LpcTargetSampleRate (12kHz) to formant tracker for correct frequency calculation
-                formantCount = _formantTracker.Track(_lpcCoefficients, LpcTargetSampleRate,
+                // Use beam-search tracker (V2) for better continuity and lower dropout
+                formantCount = _beamFormantTracker.Track(_lpcCoefficients, LpcTargetSampleRate,
                     _formantFreqScratch, _formantBwScratch,
                     _activeMinFrequency, _activeMaxFrequency, MaxFormants);
             }
+        }
+        else if (beamTrackerOk && !voiced)
+        {
+            // Reset beam tracker state when not voiced to avoid stale continuity
+            _beamFormantTracker.Reset();
         }
 
         harmonicCount = 0;

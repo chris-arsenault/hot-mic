@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Threading;
+using HotMic.Core.Dsp.Analysis.Formants;
 using HotMic.Core.Dsp.Fft;
 using HotMic.Core.Dsp.Spectrogram;
 
@@ -910,6 +911,16 @@ public sealed partial class VocalSpectrographPlugin
             else
             {
                 _formantTracker.Configure(lpcOrder);
+            }
+
+            // Initialize beam-search tracker (V2)
+            if (_beamFormantTracker is null)
+            {
+                _beamFormantTracker = new BeamSearchFormantTracker(lpcOrder, MaxFormants, beamWidth: 8);
+            }
+            else
+            {
+                _beamFormantTracker.Configure(lpcOrder, MaxFormants, beamWidth: 8);
             }
 
             _lpcCoefficients = new float[lpcOrder + 1];
