@@ -111,7 +111,7 @@ public partial class MainWindow : Window
 
         if (_renderer.HitTestVisualizerButton(x, y))
         {
-            ShowVisualizerMenu(viewModel);
+            viewModel.OpenAnalyzerWindow();
             e.Handled = true;
             return;
         }
@@ -663,42 +663,4 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ShowVisualizerMenu(MainViewModel viewModel)
-    {
-        var menu = new ContextMenu();
-
-        // Spectrogram with overlays (composite view)
-        var spectrogramItem = new MenuItem { Header = "Spectrogram (with overlays)" };
-        spectrogramItem.Click += (_, _) => viewModel.OpenSpectrogramWindow();
-        menu.Items.Add(spectrogramItem);
-
-        menu.Items.Add(new Separator());
-
-        // Individual visualizers
-        var waveformItem = new MenuItem { Header = "Waveform" };
-        waveformItem.Click += (_, _) => viewModel.OpenWaveformWindow();
-        menu.Items.Add(waveformItem);
-
-        var pitchMeterItem = new MenuItem { Header = "Pitch Meter" };
-        pitchMeterItem.Click += (_, _) => viewModel.OpenPitchMeterWindow();
-        menu.Items.Add(pitchMeterItem);
-
-        var vowelSpaceItem = new MenuItem { Header = "Vowel Space (F1/F2)" };
-        vowelSpaceItem.Click += (_, _) => viewModel.OpenVowelSpaceWindow();
-        menu.Items.Add(vowelSpaceItem);
-
-        menu.Items.Add(new Separator());
-
-        // Coach visualizers
-        var speechCoachItem = new MenuItem { Header = "Speech Coach" };
-        speechCoachItem.Click += (_, _) => viewModel.OpenSpeechCoachWindow();
-        menu.Items.Add(speechCoachItem);
-
-        var singingCoachItem = new MenuItem { Header = "Singing Coach" };
-        singingCoachItem.Click += (_, _) => viewModel.OpenSingingCoachWindow();
-        menu.Items.Add(singingCoachItem);
-
-        menu.PlacementTarget = SkiaCanvas;
-        menu.IsOpen = true;
-    }
 }
