@@ -27,6 +27,9 @@ public sealed class AnalysisOrchestrator : IDisposable
     private const int ZoomFftZoomFactor = 8;
     private const float MaxReassignFrameShift = 0.5f;
     private const float MaxReassignBinShift = 0.5f;
+    private const float VowelEnergyMinHz = 200f;
+    private const float VowelEnergyMaxHz = 1000f;
+    private const float VowelEnergyRatioThreshold = 0.15f;
 
     private readonly AnalysisResultStore _resultStore = new();
     private readonly VisualizerSyncHub _syncHub = new();
@@ -84,13 +87,13 @@ public sealed class AnalysisOrchestrator : IDisposable
     private readonly SpectrogramHarmonicComb _harmonicComb = new();
     private readonly SpectralFeatureExtractor _featureExtractor = new();
 
-    // Filters
-    private readonly OnePoleHighPass _dcHighPass = new();
-    private readonly BiquadFilter _rumbleHighPass = new();
-    private readonly PreEmphasisFilter _preEmphasisFilter = new();
-    private readonly DecimatingFilter _lpcDecimator1 = new();
-    private readonly DecimatingFilter _lpcDecimator2 = new();
-    private readonly PreEmphasisFilter _lpcPreEmphasisFilter = new();
+    // Filters (not readonly - these are mutable structs)
+    private OnePoleHighPass _dcHighPass = new();
+    private BiquadFilter _rumbleHighPass = new();
+    private PreEmphasisFilter _preEmphasisFilter = new();
+    private DecimatingFilter _lpcDecimator1 = new();
+    private DecimatingFilter _lpcDecimator2 = new();
+    private PreEmphasisFilter _lpcPreEmphasisFilter = new();
 
     // Pitch detection
     private YinPitchDetector? _yinPitchDetector;
@@ -136,6 +139,7 @@ public sealed class AnalysisOrchestrator : IDisposable
     private SpectrogramTransformType _activeTransformType;
     private SpectrogramReassignMode _activeReassignMode;
     private FormantProfile _activeFormantProfile;
+    private FormantTrackingPreset _activeFormantPreset;
     private float _activeFormantCeilingHz;
     private int _activeLpcSampleRate;
     private int _activeLpcDecimationStages;
@@ -151,6 +155,57 @@ public sealed class AnalysisOrchestrator : IDisposable
     private long _frameCounter;
     private long _lastDroppedHops;
 
+    // Debug counters
+    private long _debugEnqueueCalls;
+    private long _debugEnqueueSkippedChannel;
+    private long _debugEnqueueSkippedEmpty;
+    private long _debugEnqueueWritten;
+    private long _debugEnqueueSamplesWritten;
+    private long _debugLoopIterations;
+    private long _debugLoopNoConsumers;
+    private long _debugLoopNotEnoughData;
+    private long _debugLoopFramesProcessed;
+    private long _debugLoopFramesWritten;
+    private float _debugLastHopMax;
+    private float _debugLastFftMax;
+    private float _debugLastDisplayMax;
+    private float _debugLastAnalysisBufMax;
+    private float _debugLastWindowMax;
+    private float _debugLastFftRealMax;
+    private bool _debugFftNull;
+    private int _debugTransformPath; // 0=FFT, 1=CQT, 2=ZoomFFT
+    private float _debugLastProcessedMax;
+    private int _debugAnalysisFilled;
+
+    public long DebugEnqueueCalls => Interlocked.Read(ref _debugEnqueueCalls);
+    public long DebugEnqueueSkippedChannel => Interlocked.Read(ref _debugEnqueueSkippedChannel);
+    public long DebugEnqueueSkippedEmpty => Interlocked.Read(ref _debugEnqueueSkippedEmpty);
+    public long DebugEnqueueWritten => Interlocked.Read(ref _debugEnqueueWritten);
+    public long DebugEnqueueSamplesWritten => Interlocked.Read(ref _debugEnqueueSamplesWritten);
+    public long DebugLoopIterations => Interlocked.Read(ref _debugLoopIterations);
+    public long DebugLoopNoConsumers => Interlocked.Read(ref _debugLoopNoConsumers);
+    public long DebugLoopNotEnoughData => Interlocked.Read(ref _debugLoopNotEnoughData);
+    public long DebugLoopFramesProcessed => Interlocked.Read(ref _debugLoopFramesProcessed);
+    public long DebugLoopFramesWritten => Interlocked.Read(ref _debugLoopFramesWritten);
+    public int DebugCaptureBufferAvailable => _captureBuffer.AvailableRead;
+    public int DebugActiveHopSize => Volatile.Read(ref _activeHopSize);
+    public int DebugActiveFrameCapacity => Volatile.Read(ref _activeFrameCapacity);
+    public int DebugActiveDisplayBins => Volatile.Read(ref _activeDisplayBins);
+    public int DebugActiveAnalysisBins => Volatile.Read(ref _activeAnalysisBins);
+    public int DebugConsumerCount => Volatile.Read(ref _consumerCount);
+    public float DebugLastHopMax => Volatile.Read(ref _debugLastHopMax);
+    public float DebugLastFftMax => Volatile.Read(ref _debugLastFftMax);
+    public float DebugLastDisplayMax => Volatile.Read(ref _debugLastDisplayMax);
+    public float DebugLastAnalysisBufMax => Volatile.Read(ref _debugLastAnalysisBufMax);
+    public float DebugLastWindowMax => Volatile.Read(ref _debugLastWindowMax);
+    public float DebugLastFftRealMax => Volatile.Read(ref _debugLastFftRealMax);
+    public bool DebugFftNull => Volatile.Read(ref _debugFftNull);
+    public int DebugTransformPath => Volatile.Read(ref _debugTransformPath);
+    public float DebugLastProcessedMax => Volatile.Read(ref _debugLastProcessedMax);
+    public int DebugAnalysisFilled => Volatile.Read(ref _debugAnalysisFilled);
+
+    public AnalysisTap? DebugTap { get; set; }
+
     public IAnalysisResultStore Results => _resultStore;
     public VisualizerSyncHub SyncHub => _syncHub;
     public AnalysisConfiguration Config => _config;
@@ -165,10 +220,23 @@ public sealed class AnalysisOrchestrator : IDisposable
 
     public void EnqueueAudio(ReadOnlySpan<float> buffer, int channelIndex)
     {
-        // For now, only capture channel 0
-        if (channelIndex != 0 || buffer.IsEmpty)
-            return;
+        Interlocked.Increment(ref _debugEnqueueCalls);
 
+        // For now, only capture channel 0
+        if (channelIndex != 0)
+        {
+            Interlocked.Increment(ref _debugEnqueueSkippedChannel);
+            return;
+        }
+
+        if (buffer.IsEmpty)
+        {
+            Interlocked.Increment(ref _debugEnqueueSkippedEmpty);
+            return;
+        }
+
+        Interlocked.Increment(ref _debugEnqueueWritten);
+        Interlocked.Add(ref _debugEnqueueSamplesWritten, buffer.Length);
         _captureBuffer.Write(buffer);
     }
 
@@ -262,8 +330,11 @@ public sealed class AnalysisOrchestrator : IDisposable
 
         while (!token.IsCancellationRequested)
         {
+            Interlocked.Increment(ref _debugLoopIterations);
+
             if (!HasActiveConsumers)
             {
+                Interlocked.Increment(ref _debugLoopNoConsumers);
                 Thread.Sleep(20);
                 continue;
             }
@@ -282,6 +353,7 @@ public sealed class AnalysisOrchestrator : IDisposable
 
             if (_captureBuffer.AvailableRead < _activeHopSize)
             {
+                Interlocked.Increment(ref _debugLoopNotEnoughData);
                 Thread.Sleep(1);
                 continue;
             }
@@ -289,14 +361,26 @@ public sealed class AnalysisOrchestrator : IDisposable
             int read = _captureBuffer.Read(_hopBuffer);
             if (read < _activeHopSize)
             {
+                Interlocked.Increment(ref _debugLoopNotEnoughData);
                 Thread.Sleep(1);
                 continue;
             }
 
+            // Track max hop buffer value for debugging
+            float hopMax = 0f;
+            for (int i = 0; i < read; i++)
+                hopMax = MathF.Max(hopMax, MathF.Abs(_hopBuffer[i]));
+            Volatile.Write(ref _debugLastHopMax, hopMax);
+
             var capabilities = GetActiveCapabilities();
             bool ready = ProcessHopBuffer(out float waveformMin, out float waveformMax);
             if (!ready)
+            {
+                Interlocked.Increment(ref _debugLoopFramesProcessed);
                 continue;
+            }
+
+            Interlocked.Increment(ref _debugLoopFramesProcessed);
 
             // Compute transform
             var transformType = _activeTransformType;
@@ -306,15 +390,18 @@ public sealed class AnalysisOrchestrator : IDisposable
 
             if (transformType == SpectrogramTransformType.Cqt && _cqt is not null)
             {
+                Volatile.Write(ref _debugTransformPath, 1);
                 clarityBins = ComputeCqtTransform(reassignEnabled);
             }
             else if (transformType == SpectrogramTransformType.ZoomFft && _zoomFft is not null)
             {
+                Volatile.Write(ref _debugTransformPath, 2);
                 clarityBins = ComputeZoomFftTransform(reassignEnabled);
                 displayMagnitudes = _fftDisplayMagnitudes;
             }
             else
             {
+                Volatile.Write(ref _debugTransformPath, 0);
                 ComputeFftTransform(reassignEnabled);
                 displayMagnitudes = NormalizeFftMagnitudes();
             }
@@ -391,6 +478,7 @@ public sealed class AnalysisOrchestrator : IDisposable
 
             _resultStore.EndWriteFrame(frameId);
             _frameCounter++;
+            Interlocked.Increment(ref _debugLoopFramesWritten);
 
             // Update sync hub
             _syncHub.UpdateViewRange(frameId, _activeFrameCapacity, _sampleRate, _activeHopSize);
@@ -412,6 +500,7 @@ public sealed class AnalysisOrchestrator : IDisposable
         bool preEmphasis = _config.PreEmphasis;
         bool hpfEnabled = _config.HighPassEnabled;
 
+        float processedMax = 0f;
         for (int i = 0; i < shift; i++)
         {
             float sample = _hopBuffer[i];
@@ -421,20 +510,29 @@ public sealed class AnalysisOrchestrator : IDisposable
 
             _analysisBufferRaw[tail + i] = filtered;
             _analysisBufferProcessed[tail + i] = emphasized;
+            processedMax = MathF.Max(processedMax, MathF.Abs(emphasized));
 
             if (filtered < waveformMin) waveformMin = filtered;
             if (filtered > waveformMax) waveformMax = filtered;
         }
+        Volatile.Write(ref _debugLastProcessedMax, processedMax);
 
         int filled = Volatile.Read(ref _analysisFilled);
         filled = Math.Min(analysisSize, filled + shift);
         Volatile.Write(ref _analysisFilled, filled);
+        Volatile.Write(ref _debugAnalysisFilled, filled);
         return filled >= analysisSize;
     }
 
     private int ComputeCqtTransform(bool reassignEnabled)
     {
         int clarityBins = Math.Min(_cqt!.BinCount, _activeAnalysisBins);
+
+        // Track analysis buffer max for CQT path
+        float analysisBufMax = 0f;
+        for (int i = 0; i < _activeFftSize && i < _analysisBufferProcessed.Length; i++)
+            analysisBufMax = MathF.Max(analysisBufMax, MathF.Abs(_analysisBufferProcessed[i]));
+        Volatile.Write(ref _debugLastAnalysisBufMax, analysisBufMax);
 
         if (reassignEnabled)
         {
@@ -449,6 +547,12 @@ public sealed class AnalysisOrchestrator : IDisposable
             _cqt.Forward(_analysisBufferProcessed, _cqtMagnitudes);
         }
 
+        // Track CQT output max
+        float cqtMax = 0f;
+        for (int i = 0; i < clarityBins; i++)
+            cqtMax = MathF.Max(cqtMax, MathF.Abs(_cqtMagnitudes[i]));
+        Volatile.Write(ref _debugLastFftMax, cqtMax);
+
         Array.Copy(_cqtMagnitudes, _spectrumScratch, clarityBins);
         if (clarityBins < _activeAnalysisBins)
             Array.Clear(_spectrumScratch, clarityBins, _activeAnalysisBins - clarityBins);
@@ -462,6 +566,12 @@ public sealed class AnalysisOrchestrator : IDisposable
         int clarityBins = Math.Min(zoomBins, _activeAnalysisBins);
         Span<float> zoomMagnitudes = _fftDisplayMagnitudes.AsSpan(0, zoomBins);
 
+        // Track analysis buffer max for ZoomFFT path
+        float analysisBufMax = 0f;
+        for (int i = 0; i < _activeFftSize && i < _analysisBufferProcessed.Length; i++)
+            analysisBufMax = MathF.Max(analysisBufMax, MathF.Abs(_analysisBufferProcessed[i]));
+        Volatile.Write(ref _debugLastAnalysisBufMax, analysisBufMax);
+
         bool needsTimeData = reassignEnabled && _activeReassignMode.HasFlag(SpectrogramReassignMode.Time);
         bool needsFreqData = reassignEnabled && _activeReassignMode.HasFlag(SpectrogramReassignMode.Frequency);
 
@@ -474,6 +584,12 @@ public sealed class AnalysisOrchestrator : IDisposable
         {
             _zoomFft.Forward(_analysisBufferProcessed, zoomMagnitudes);
         }
+
+        // Track ZoomFFT output max
+        float zoomMax = 0f;
+        for (int i = 0; i < clarityBins; i++)
+            zoomMax = MathF.Max(zoomMax, MathF.Abs(zoomMagnitudes[i]));
+        Volatile.Write(ref _debugLastFftMax, zoomMax);
 
         zoomMagnitudes.Slice(0, clarityBins).CopyTo(_spectrumScratch);
         if (clarityBins < _activeAnalysisBins)
@@ -503,23 +619,37 @@ public sealed class AnalysisOrchestrator : IDisposable
         }
         else
         {
+            float analysisBufMax = 0f, windowMax = 0f, fftRealMax = 0f;
             for (int i = 0; i < _activeFftSize; i++)
             {
-                _fftReal[i] = _analysisBufferProcessed[i] * _fftWindow[i];
+                float sample = _analysisBufferProcessed[i];
+                float win = _fftWindow[i];
+                _fftReal[i] = sample * win;
                 _fftImag[i] = 0f;
+                analysisBufMax = MathF.Max(analysisBufMax, MathF.Abs(sample));
+                windowMax = MathF.Max(windowMax, MathF.Abs(win));
+                fftRealMax = MathF.Max(fftRealMax, MathF.Abs(_fftReal[i]));
             }
+            Volatile.Write(ref _debugLastAnalysisBufMax, analysisBufMax);
+            Volatile.Write(ref _debugLastWindowMax, windowMax);
+            Volatile.Write(ref _debugLastFftRealMax, fftRealMax);
+            Volatile.Write(ref _debugFftNull, _fft is null);
 
             _fft?.Forward(_fftReal, _fftImag);
         }
 
         float normalization = _fftNormalization;
         int half = _activeFftSize / 2;
+        float fftMax = 0f;
         for (int i = 0; i < half; i++)
         {
             float re = _fftReal[i];
             float im = _fftImag[i];
-            _fftMagnitudes[i] = MathF.Sqrt(re * re + im * im) * normalization;
+            float mag = MathF.Sqrt(re * re + im * im) * normalization;
+            _fftMagnitudes[i] = mag;
+            fftMax = MathF.Max(fftMax, mag);
         }
+        Volatile.Write(ref _debugLastFftMax, fftMax);
     }
 
     private ReadOnlySpan<float> NormalizeFftMagnitudes()
@@ -638,14 +768,22 @@ public sealed class AnalysisOrchestrator : IDisposable
         formantCount = 0;
         harmonicCount = 0;
 
-        if (needsFormants && voicing == VoicingState.Voiced &&
+        bool vowelLike = false;
+        if (needsFormants && voicing == VoicingState.Voiced)
+        {
+            float ratio = DspUtils.ComputeBandEnergyRatio(fftMagnitudes, _binResolution,
+                VowelEnergyMinHz, VowelEnergyMaxHz);
+            vowelLike = ratio >= VowelEnergyRatioThreshold;
+        }
+
+        if (needsFormants && voicing == VoicingState.Voiced && vowelLike &&
             _lpcAnalyzer is not null && _beamFormantTracker is not null)
         {
             formantCount = ExtractFormants();
         }
-        else if (_beamFormantTracker is not null && voicing != VoicingState.Voiced)
+        else if (_beamFormantTracker is not null && needsFormants)
         {
-            _beamFormantTracker.Reset();
+            _beamFormantTracker.MarkNoUpdate();
         }
 
         if (needsHarmonics && lastPitch > 0f)
@@ -754,6 +892,7 @@ public sealed class AnalysisOrchestrator : IDisposable
                 50f, _activeFormantCeilingHz, AnalysisConfiguration.MaxFormants);
         }
 
+        _beamFormantTracker?.MarkNoUpdate();
         return 0;
     }
 
@@ -805,6 +944,12 @@ public sealed class AnalysisOrchestrator : IDisposable
                 Array.Copy(_displayProcessed, _displaySmoothed, clarityBins);
             }
         }
+
+        // Track max display value for debugging
+        float displayMax = 0f;
+        for (int i = 0; i < clarityBins; i++)
+            displayMax = MathF.Max(displayMax, MathF.Abs(_displaySmoothed[i]));
+        Volatile.Write(ref _debugLastDisplayMax, displayMax);
 
         return lastHnr;
     }
@@ -880,16 +1025,23 @@ public sealed class AnalysisOrchestrator : IDisposable
         bool preEmphasis = _config.PreEmphasis;
         int cqtBinsPerOctave = _config.CqtBinsPerOctave;
 
-        float formantCeilingHz = FormantProfileInfo.GetFormantCeilingHz(formantProfile);
+        FormantTrackingPreset formantPreset = FormantProfileInfo.GetTrackingPreset(formantProfile);
+        float formantCeilingHz = formantPreset.FormantCeilingHz;
         int lpcDecimationStages = GetLpcDecimationStages(_sampleRate, formantCeilingHz);
         int lpcSampleRate = _sampleRate;
         for (int i = 0; i < lpcDecimationStages; i++)
             lpcSampleRate /= 2;
 
-        int recommendedLpcOrder = FormantProfileInfo.GetRecommendedLpcOrder(formantProfile, AnalysisConfiguration.MaxFormants);
+        int recommendedLpcOrder = formantPreset.LpcOrder;
 
         bool sizeChanged = force || fftSize != _activeFftSize || overlapIndex != _activeOverlapIndex ||
                            MathF.Abs(timeWindow - _activeTimeWindow) > 1e-3f;
+
+        // Compute transform reconfiguration flags BEFORE active values are updated
+        bool transformChanged = transformType != _activeTransformType;
+        bool freqRangeChanged = MathF.Abs(minHz - _activeMinFrequency) > 1e-3f ||
+                                MathF.Abs(maxHz - _activeMaxFrequency) > 1e-3f;
+        bool needsTransformConfig = force || transformChanged || freqRangeChanged || sizeChanged;
 
         if (sizeChanged)
         {
@@ -960,60 +1112,66 @@ public sealed class AnalysisOrchestrator : IDisposable
                 : 0;
         }
 
-        // Configure transforms
+        // Configure transforms (only when parameters change)
         if (transformType == SpectrogramTransformType.ZoomFft)
         {
             _zoomFft ??= new ZoomFft();
-            _zoomFft.Configure(_sampleRate, fftSize, minHz, maxHz, ZoomFftZoomFactor, window);
-
-            int requiredSize = _zoomFft.RequiredInputSize;
-            if (requiredSize > _analysisBufferRaw.Length)
+            if (needsTransformConfig)
             {
-                _analysisBufferRaw = new float[requiredSize];
-                _analysisBufferProcessed = new float[requiredSize];
-                _lpcInputBuffer = new float[requiredSize];
-                _analysisFilled = 0;
-            }
-            _activeAnalysisSize = requiredSize;
+                _zoomFft.Configure(_sampleRate, fftSize, minHz, maxHz, ZoomFftZoomFactor, window);
 
-            int zoomBins = _zoomFft.OutputBins;
-            if (_zoomReal.Length < zoomBins)
-            {
-                _zoomReal = new float[zoomBins];
-                _zoomImag = new float[zoomBins];
-                _zoomTimeReal = new float[zoomBins];
-                _zoomTimeImag = new float[zoomBins];
-                _zoomDerivReal = new float[zoomBins];
-                _zoomDerivImag = new float[zoomBins];
+                int requiredSize = _zoomFft.RequiredInputSize;
+                if (requiredSize > _analysisBufferRaw.Length)
+                {
+                    _analysisBufferRaw = new float[requiredSize];
+                    _analysisBufferProcessed = new float[requiredSize];
+                    _lpcInputBuffer = new float[requiredSize];
+                    _analysisFilled = 0;
+                }
+                _activeAnalysisSize = requiredSize;
+
+                int zoomBins = _zoomFft.OutputBins;
+                if (_zoomReal.Length < zoomBins)
+                {
+                    _zoomReal = new float[zoomBins];
+                    _zoomImag = new float[zoomBins];
+                    _zoomTimeReal = new float[zoomBins];
+                    _zoomTimeImag = new float[zoomBins];
+                    _zoomDerivReal = new float[zoomBins];
+                    _zoomDerivImag = new float[zoomBins];
+                }
             }
         }
 
         if (transformType == SpectrogramTransformType.Cqt)
         {
             _cqt ??= new ConstantQTransform();
-            _cqt.Configure(_sampleRate, minHz, maxHz, cqtBinsPerOctave);
-
-            int requiredSize = _cqt.MaxWindowLength;
-            if (requiredSize > _analysisBufferRaw.Length)
+            if (needsTransformConfig)
             {
-                _analysisBufferRaw = new float[requiredSize];
-                _analysisBufferProcessed = new float[requiredSize];
-                _lpcInputBuffer = new float[requiredSize];
-                _analysisFilled = 0;
-            }
-            _activeAnalysisSize = requiredSize;
+                _cqt.Configure(_sampleRate, minHz, maxHz, cqtBinsPerOctave);
 
-            if (_cqtMagnitudes.Length < _cqt.BinCount)
-            {
-                _cqtMagnitudes = new float[_cqt.BinCount];
-                _cqtReal = new float[_cqt.BinCount];
-                _cqtImag = new float[_cqt.BinCount];
-                _cqtTimeReal = new float[_cqt.BinCount];
-                _cqtTimeImag = new float[_cqt.BinCount];
-                _cqtPhaseDiff = new float[_cqt.BinCount];
-            }
+                int requiredSize = _cqt.MaxWindowLength;
+                if (requiredSize > _analysisBufferRaw.Length)
+                {
+                    _analysisBufferRaw = new float[requiredSize];
+                    _analysisBufferProcessed = new float[requiredSize];
+                    _lpcInputBuffer = new float[requiredSize];
+                    _analysisFilled = 0;
+                }
+                _activeAnalysisSize = requiredSize;
 
-            _activeCqtBinsPerOctave = cqtBinsPerOctave;
+                if (_cqtMagnitudes.Length < _cqt.BinCount)
+                {
+                    _cqtMagnitudes = new float[_cqt.BinCount];
+                    _cqtReal = new float[_cqt.BinCount];
+                    _cqtImag = new float[_cqt.BinCount];
+                    _cqtTimeReal = new float[_cqt.BinCount];
+                    _cqtTimeImag = new float[_cqt.BinCount];
+                    _cqtPhaseDiff = new float[_cqt.BinCount];
+                }
+
+                _activeCqtBinsPerOctave = cqtBinsPerOctave;
+            }
         }
 
         if (transformType == SpectrogramTransformType.Fft && _activeAnalysisSize != fftSize)
@@ -1054,16 +1212,31 @@ public sealed class AnalysisOrchestrator : IDisposable
         _activeTransformType = transformType;
 
         // Formant analysis
-        if (force || formantProfile != _activeFormantProfile || lpcSampleRate != _activeLpcSampleRate)
+        bool lpcOrderChanged = _lpcAnalyzer is null || _lpcAnalyzer.Order != recommendedLpcOrder;
+        bool formantProfileChanged = formantProfile != _activeFormantProfile;
+        bool lpcSampleRateChanged = lpcSampleRate != _activeLpcSampleRate;
+        bool formantConfigChanged = force || formantProfileChanged || lpcSampleRateChanged || lpcOrderChanged;
+
+        if (formantConfigChanged)
         {
             _activeFormantProfile = formantProfile;
+            _activeFormantPreset = formantPreset;
             _activeFormantCeilingHz = formantCeilingHz;
             _activeLpcSampleRate = lpcSampleRate;
             _activeLpcDecimationStages = lpcDecimationStages;
             _lpcWindowLength = 0;
+            ConfigureLpcAnalyzers(recommendedLpcOrder, formantPreset);
+        }
+        else
+        {
+            _beamFormantTracker?.UpdatePreset(formantPreset);
         }
 
-        ConfigureLpcAnalyzers(recommendedLpcOrder);
+        if (sizeChanged || force)
+        {
+            float frameSeconds = _activeHopSize / (float)Math.Max(1, _sampleRate);
+            _beamFormantTracker?.UpdateFrameSeconds(frameSeconds);
+        }
 
         // Filters
         if (sizeChanged || force || MathF.Abs(hpfCutoff - _activeHighPassCutoff) > 1e-3f ||
@@ -1086,11 +1259,30 @@ public sealed class AnalysisOrchestrator : IDisposable
             _speechCoach.Configure(_activeHopSize, _sampleRate);
         }
 
-        // Update result store
-        if (sizeChanged || force || analysisBinsChanged)
-        {
-            UpdateAnalysisDescriptor(transformType);
+        // Update result store - only reconfigure when display dimensions change
+        // Record discontinuity when analysis parameters change (preserves display buffer)
+        UpdateAnalysisDescriptor(transformType);
 
+        if (sizeChanged || force)
+        {
+            // Display dimensions changed - must reconfigure (clears buffers)
+            _resultStore.Configure(_sampleRate, _activeFrameCapacity, _activeDisplayBins,
+                _activeAnalysisBins, _binResolution, transformType, _config);
+        }
+        else if (analysisBinsChanged || transformChanged)
+        {
+            // Only analysis parameters changed - record discontinuity but preserve display
+            var discontinuity = DiscontinuityType.None;
+            if (transformChanged)
+                discontinuity |= DiscontinuityType.TransformChange;
+            if (analysisBinsChanged)
+                discontinuity |= DiscontinuityType.ResolutionChange;
+            if (freqRangeChanged)
+                discontinuity |= DiscontinuityType.FrequencyRangeChange;
+
+            _resultStore.RecordDiscontinuity(discontinuity);
+
+            // Still need to update config for the store (but it won't clear display now)
             _resultStore.Configure(_sampleRate, _activeFrameCapacity, _activeDisplayBins,
                 _activeAnalysisBins, _binResolution, transformType, _config);
         }
@@ -1114,7 +1306,7 @@ public sealed class AnalysisOrchestrator : IDisposable
         _swipePitchDetector.Configure(_sampleRate, _activeFftSize, _activeMinFrequency, _activeMaxFrequency);
     }
 
-    private void ConfigureLpcAnalyzers(int lpcOrder)
+    private void ConfigureLpcAnalyzers(int lpcOrder, FormantTrackingPreset preset)
     {
         _lpcAnalyzer ??= new LpcAnalyzer(lpcOrder);
         _lpcAnalyzer.Configure(lpcOrder);
@@ -1122,8 +1314,9 @@ public sealed class AnalysisOrchestrator : IDisposable
         _formantTracker ??= new FormantTracker(lpcOrder);
         _formantTracker.Configure(lpcOrder);
 
-        _beamFormantTracker ??= new BeamSearchFormantTracker(lpcOrder, AnalysisConfiguration.MaxFormants, beamWidth: 8);
-        _beamFormantTracker.Configure(lpcOrder, AnalysisConfiguration.MaxFormants, beamWidth: 8);
+        float frameSeconds = _activeHopSize / (float)Math.Max(1, _sampleRate);
+        _beamFormantTracker ??= new BeamSearchFormantTracker(lpcOrder, preset, frameSeconds, beamWidth: 5);
+        _beamFormantTracker.Configure(lpcOrder, preset, frameSeconds, beamWidth: 5);
 
         _lpcCoefficients = new float[lpcOrder + 1];
     }

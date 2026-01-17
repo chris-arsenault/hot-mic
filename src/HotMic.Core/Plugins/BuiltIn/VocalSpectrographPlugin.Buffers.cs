@@ -4,6 +4,7 @@ using HotMic.Core.Dsp.Analysis.Formants;
 using HotMic.Core.Dsp.Analysis.Speech;
 using HotMic.Core.Dsp.Fft;
 using HotMic.Core.Dsp.Spectrogram;
+using HotMic.Core.Dsp.Voice;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
@@ -774,22 +775,23 @@ public sealed partial class VocalSpectrographPlugin
         float minHz = Volatile.Read(ref _requestedMinFrequency);
         float maxHz = Volatile.Read(ref _requestedMaxFrequency);
         float timeWindow = Volatile.Read(ref _requestedTimeWindow);
-        FormantProfile formantProfile = (FormantProfile)Math.Clamp(Volatile.Read(ref _requestedFormantProfile), 0, 2);
-        int minLpcOrder = Math.Max(2 * MaxFormants, 8);
+        FormantProfile formantProfile = (FormantProfile)Math.Clamp(Volatile.Read(ref _requestedFormantProfile), 0, 3);
+        int minLpcOrder = 8;
         int lpcOrder = Math.Clamp(Volatile.Read(ref _requestedLpcOrder), minLpcOrder, 24);
         float hpfCutoff = Volatile.Read(ref _requestedHighPassCutoff);
         bool hpfEnabled = Volatile.Read(ref _requestedHighPassEnabled) != 0;
         bool preEmphasisEnabled = Volatile.Read(ref _requestedPreEmphasis) != 0;
         var transformType = (SpectrogramTransformType)Math.Clamp(Volatile.Read(ref _requestedTransformType), 0, 2);
         int cqtBinsPerOctave = SelectDiscrete(Volatile.Read(ref _requestedCqtBinsPerOctave), CqtBinsPerOctaveOptions);
-        float formantCeilingHz = FormantProfileInfo.GetFormantCeilingHz(formantProfile);
+        FormantTrackingPreset formantPreset = FormantProfileInfo.GetTrackingPreset(formantProfile);
+        float formantCeilingHz = formantPreset.FormantCeilingHz;
         int lpcDecimationStages = GetLpcDecimationStages(_sampleRate, formantCeilingHz);
         int lpcSampleRate = _sampleRate;
         for (int i = 0; i < lpcDecimationStages; i++)
         {
             lpcSampleRate /= 2;
         }
-        int recommendedLpcOrder = FormantProfileInfo.GetRecommendedLpcOrder(formantProfile, MaxFormants);
+        int recommendedLpcOrder = formantPreset.LpcOrder;
 
         // Detect what changed (excluding force - that's handled separately)
         bool fftSizeChanged = !force && fftSize != _activeFftSize;
@@ -918,6 +920,7 @@ public sealed partial class VocalSpectrographPlugin
             || MathF.Abs(formantCeilingHz - _activeFormantCeilingHz) > 1e-3f)
         {
             _activeFormantProfile = formantProfile;
+            _activeFormantPreset = formantPreset;
             _activeFormantCeilingHz = formantCeilingHz;
             _activeLpcSampleRate = lpcSampleRate;
             _activeLpcDecimationStages = lpcDecimationStages;
@@ -1163,11 +1166,11 @@ public sealed partial class VocalSpectrographPlugin
             // Initialize beam-search tracker (V2)
             if (_beamFormantTracker is null)
             {
-                _beamFormantTracker = new BeamSearchFormantTracker(lpcOrder, MaxFormants, beamWidth: 8);
+                _beamFormantTracker = new BeamSearchFormantTracker(lpcOrder, beamWidth: 8);
             }
             else
             {
-                _beamFormantTracker.Configure(lpcOrder, MaxFormants, beamWidth: 8);
+                _beamFormantTracker.Configure(lpcOrder, FormantProfileInfo.GetTrackingPreset(FormantProfile.Tenor), beamWidth: 8);
             }
 
             _lpcCoefficients = new float[lpcOrder + 1];
