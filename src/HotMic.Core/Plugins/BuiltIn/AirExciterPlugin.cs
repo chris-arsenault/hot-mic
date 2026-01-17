@@ -47,6 +47,11 @@ public sealed class AirExciterPlugin : IContextualPlugin, ISidechainConsumer, IP
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
+    public float Drive => _drive;
+    public float Mix => _mix;
+    public float CutoffHz => _cutoffHz;
+    public int SampleRate => _sampleRate;
+
     public void SetSidechainAvailable(bool available)
     {
         Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);

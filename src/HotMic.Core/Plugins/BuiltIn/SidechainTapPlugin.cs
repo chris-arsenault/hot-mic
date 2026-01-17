@@ -46,8 +46,15 @@ public sealed class SidechainTapPlugin : IContextualPlugin, ISidechainProducer
 
     public SidechainSignalMask ProducedSignals => _signalMask;
 
+    public bool SpeechPresenceEnabled => _speechEnabled >= 0.5f;
+    public bool VoicedProbabilityEnabled => _voicedEnabled >= 0.5f;
+    public bool UnvoicedEnergyEnabled => _unvoicedEnabled >= 0.5f;
+    public bool SibilanceEnergyEnabled => _sibilanceEnabled >= 0.5f;
+    public int SampleRate { get; private set; }
+
     public void Initialize(int sampleRate, int blockSize)
     {
+        SampleRate = sampleRate;
         _processor.Configure(sampleRate, blockSize);
     }
 

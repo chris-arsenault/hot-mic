@@ -50,6 +50,11 @@ public sealed class ConsonantTransientPlugin : IContextualPlugin, ISidechainCons
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
+    public float Amount => _amount;
+    public float Threshold => _threshold;
+    public float HighCutHz => _highCutHz;
+    public int SampleRate => _sampleRate;
+
     public void SetSidechainAvailable(bool available)
     {
         Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);

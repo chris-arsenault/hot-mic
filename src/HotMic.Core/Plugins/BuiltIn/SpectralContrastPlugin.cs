@@ -29,6 +29,7 @@ public sealed class SpectralContrastPlugin : IContextualPlugin, ISidechainConsum
     private FastFft? _fft;
     private int _inputIndex;
     private int _hopCounter;
+    private int _sampleRate;
     private string _statusMessage = string.Empty;
 
     // Metering - store spectrum for UI
@@ -62,6 +63,11 @@ public sealed class SpectralContrastPlugin : IContextualPlugin, ISidechainConsum
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
+    public float StrengthPct => _strength * 100f;
+    public float MixPct => _mix * 100f;
+    public float GateStrength => _gateStrength;
+    public int SampleRate => _sampleRate;
+
     public void SetSidechainAvailable(bool available)
     {
         Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);
@@ -69,6 +75,7 @@ public sealed class SpectralContrastPlugin : IContextualPlugin, ISidechainConsum
 
     public void Initialize(int sampleRate, int blockSize)
     {
+        _sampleRate = sampleRate;
         _fft = new FastFft(FftSize);
         _inputRing = new float[FftSize];
         _outputRing = new float[FftSize];

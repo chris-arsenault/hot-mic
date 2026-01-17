@@ -81,6 +81,15 @@ public sealed class UpwardExpanderPlugin : IContextualPlugin, ISidechainConsumer
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
+    public float AmountPct => _amountPct;
+    public float ThresholdDb => _thresholdDb;
+    public float LowSplitHz => _lowSplitHz;
+    public float HighSplitHz => _highSplitHz;
+    public float AttackMs => _attackMs;
+    public float ReleaseMs => _releaseMs;
+    public float GateStrength => _gateStrength;
+    public int SampleRate => _sampleRate;
+
     public void SetSidechainAvailable(bool available)
     {
         Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);

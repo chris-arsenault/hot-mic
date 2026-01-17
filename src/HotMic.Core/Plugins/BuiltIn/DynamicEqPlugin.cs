@@ -61,6 +61,11 @@ public sealed class DynamicEqPlugin : IContextualPlugin, ISidechainConsumer, IPl
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
+    public float LowBoostDb => _lowBoostDb;
+    public float HighBoostDb => _highBoostDb;
+    public float SmoothingMs => _smoothingMs;
+    public int SampleRate => _sampleRate;
+
     public void SetSidechainAvailable(bool available)
     {
         Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);

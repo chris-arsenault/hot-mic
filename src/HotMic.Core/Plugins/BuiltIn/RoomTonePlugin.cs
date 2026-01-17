@@ -53,6 +53,11 @@ public sealed class RoomTonePlugin : IContextualPlugin, ISidechainConsumer, IPlu
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
+    public float LevelDb => _levelDb;
+    public float DuckStrength => _duckStrength;
+    public float ToneHz => _toneHz;
+    public int SampleRate => _sampleRate;
+
     public void SetSidechainAvailable(bool available)
     {
         Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);

@@ -21,6 +21,7 @@ namespace HotMic.App.ViewModels;
 
 public partial class MainViewModel : ObservableObject, IDisposable
 {
+    private const string ContainerChoiceId = "ui:container";
     private readonly ConfigManager _configManager = new();
     private readonly DeviceManager _deviceManager = new();
     private AudioEngine _audioEngine;
@@ -29,6 +30,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer _meterTimer;
     private AppConfig _config;
     private readonly PluginPresetManager _presetManager = PluginPresetManager.Default;
+    private readonly Dictionary<int, int> _channel1PluginIndexMap = new();
+    private readonly Dictionary<int, int> _channel2PluginIndexMap = new();
+    private readonly Dictionary<(int ChannelIndex, int ContainerId), PluginContainerWindow> _containerWindows = new();
     private long _lastMeterUpdateTicks;
     private long _nextDebugUpdateTicks;
     private static readonly long DebugUpdateIntervalTicks = Math.Max(1, Stopwatch.Frequency / 4);
@@ -49,9 +53,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Connect analysis orchestrator to audio engine tap
         _analysisOrchestrator.Initialize(_config.AudioSettings.SampleRate);
         _audioEngine.AnalysisTap.Orchestrator = _analysisOrchestrator;
+        _analysisOrchestrator.DebugTap = _audioEngine.AnalysisTap;
 
-        Channel1 = new ChannelStripViewModel(0, "Channel 1", EnqueueParameterChange, slot => HandlePluginAction(0, slot), slot => RemovePlugin(0, slot), (from, to) => ReorderPlugins(0, from, to), (index, token, value) => UpdatePluginBypassConfig(0, index, token, value));
-        Channel2 = new ChannelStripViewModel(1, "Channel 2", EnqueueParameterChange, slot => HandlePluginAction(1, slot), slot => RemovePlugin(1, slot), (from, to) => ReorderPlugins(1, from, to), (index, token, value) => UpdatePluginBypassConfig(1, index, token, value));
+        Channel1 = new ChannelStripViewModel(
+            0,
+            "Channel 1",
+            EnqueueParameterChange,
+            (instanceId, slotIndex) => HandlePluginAction(0, instanceId, slotIndex),
+            instanceId => RemovePlugin(0, instanceId),
+            (instanceId, toIndex) => ReorderPlugins(0, instanceId, toIndex),
+            (instanceId, value) => UpdatePluginBypassConfig(0, instanceId, value),
+            containerId => HandleContainerAction(0, containerId),
+            containerId => RemoveContainer(0, containerId),
+            (containerId, bypass) => SetContainerBypass(0, containerId, bypass));
+        Channel2 = new ChannelStripViewModel(
+            1,
+            "Channel 2",
+            EnqueueParameterChange,
+            (instanceId, slotIndex) => HandlePluginAction(1, instanceId, slotIndex),
+            instanceId => RemovePlugin(1, instanceId),
+            (instanceId, toIndex) => ReorderPlugins(1, instanceId, toIndex),
+            (instanceId, value) => UpdatePluginBypassConfig(1, instanceId, value),
+            containerId => HandleContainerAction(1, containerId),
+            containerId => RemoveContainer(1, containerId),
+            (containerId, bypass) => SetContainerBypass(1, containerId, bypass));
         Channel1.PropertyChanged += (_, e) => UpdateChannelConfig(0, Channel1, e.PropertyName);
         Channel2.PropertyChanged += (_, e) => UpdateChannelConfig(1, Channel2, e.PropertyName);
 
@@ -137,21 +162,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 channel.IsMuted = value >= 0.5f;
                 break;
             case "plugin" when parts.Length >= 4:
-                if (int.TryParse(parts[2], out int pluginIndex) &&
+                if (int.TryParse(parts[2], out int pluginInstanceId) &&
                     int.TryParse(parts[3], out int paramIndex))
                 {
-                    int slotToken = 0;
-                    if (pluginIndex < channel.PluginSlots.Count - 1)
+                    int resolvedInstanceId = ResolvePluginInstanceId(channel, pluginInstanceId);
+                    if (resolvedInstanceId <= 0)
                     {
-                        slotToken = channel.PluginSlots[pluginIndex].SlotToken;
+                        return;
                     }
 
-                    ApplyPluginParameter(channelIndex, pluginIndex, slotToken, paramIndex, "midi", value);
+                    ApplyPluginParameter(channelIndex, resolvedInstanceId, paramIndex, "midi", value);
 
                     // Update the UI knob (slot indices in PluginSlots are 1-based, +1 for add placeholder)
-                    if (pluginIndex < channel.PluginSlots.Count - 1)
+                    int slotIndex = FindPluginSlotIndex(channel, resolvedInstanceId);
+                    if (slotIndex >= 0 && slotIndex < channel.PluginSlots.Count - 1)
                     {
-                        var slot = channel.PluginSlots[pluginIndex];
+                        var slot = channel.PluginSlots[slotIndex];
                         if (slot.ElevatedParams is { } elevParams)
                         {
                             // Find which elevated index matches this parameter index
@@ -168,6 +194,37 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 }
                 break;
         }
+    }
+
+    private static int ResolvePluginInstanceId(ChannelStripViewModel channel, int legacyOrInstanceId)
+    {
+        int index = FindPluginSlotIndex(channel, legacyOrInstanceId);
+        if (index >= 0)
+        {
+            return legacyOrInstanceId;
+        }
+
+        // Legacy path: treat value as slot index and map to current instance ID.
+        if (legacyOrInstanceId >= 0 && legacyOrInstanceId < channel.PluginSlots.Count - 1)
+        {
+            return channel.PluginSlots[legacyOrInstanceId].InstanceId;
+        }
+
+        return 0;
+    }
+
+    private static int FindPluginSlotIndex(ChannelStripViewModel channel, int instanceId)
+    {
+        int count = Math.Max(0, channel.PluginSlots.Count - 1);
+        for (int i = 0; i < count; i++)
+        {
+            if (channel.PluginSlots[i].InstanceId == instanceId)
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     public void StartMidiLearn(string targetPath, Action<int, int>? onLearned = null)
@@ -353,27 +410,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Calculate width based on the longest plugin chain (including +1 add placeholder)
-        int channel1PluginCount = 0;
-        int channel2PluginCount = 0;
+        // Calculate width based on longest visible chain (containers or plugins + add placeholder).
+        int channel1Slots = GetVisibleSlotCount(0);
+        int channel2Slots = GetVisibleSlotCount(1);
+        int maxSlots = Math.Max(channel1Slots, channel2Slots);
 
-        if (_audioEngine.Channels.Count > 0)
-        {
-            channel1PluginCount = _audioEngine.Channels[0].PluginChain.Count;
-        }
-        if (_audioEngine.Channels.Count > 1)
-        {
-            channel2PluginCount = _audioEngine.Channels[1].PluginChain.Count;
-        }
-
-        // +1 for the add placeholder slot
-        int maxPlugins = Math.Max(channel1PluginCount, channel2PluginCount) + 1;
-
-        double pluginAreaWidth = maxPlugins * PluginSlotWidthWithSpacing;
+        double pluginAreaWidth = maxSlots * PluginSlotWidthWithSpacing;
         double calculatedWidth = FullViewBaseWidth + pluginAreaWidth;
 
         WindowWidth = Math.Clamp(calculatedWidth, MinFullViewWidth, MaxFullViewWidth);
         WindowHeight = FullViewHeight;
+    }
+
+    private int GetVisibleSlotCount(int channelIndex)
+    {
+        if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
+        {
+            return 1;
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        if (config.Containers.Count > 0)
+        {
+            return Math.Max(1, config.Containers.Count + 1);
+        }
+
+        return Math.Max(1, _audioEngine.Channels[channelIndex].PluginChain.Count + 1);
     }
 
     partial void OnInput1IsStereoChanged(bool value)
@@ -637,9 +699,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         RefreshPluginViewModels(1);
     }
 
-    private IPlugin?[][] CapturePluginSnapshots()
+    private PluginSlot?[][] CapturePluginSnapshots()
     {
-        var snapshots = new IPlugin?[_audioEngine.Channels.Count][];
+        var snapshots = new PluginSlot?[_audioEngine.Channels.Count][];
         for (int i = 0; i < _audioEngine.Channels.Count; i++)
         {
             snapshots[i] = _audioEngine.Channels[i].PluginChain.DetachAll();
@@ -648,23 +710,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return snapshots;
     }
 
-    private void RestorePluginsFromSnapshots(IPlugin?[][] snapshots, AudioQualityProfile profile)
+    private void RestorePluginsFromSnapshots(PluginSlot?[][] snapshots, AudioQualityProfile profile)
     {
         for (int channelIndex = 0; channelIndex < _audioEngine.Channels.Count; channelIndex++)
         {
             var strip = _audioEngine.Channels[channelIndex];
             var snapshot = channelIndex < snapshots.Length ? snapshots[channelIndex] : [];
-            var pluginList = new List<IPlugin>();
+            var pluginList = new List<PluginSlot>();
 
-            foreach (var plugin in snapshot)
+            foreach (var slot in snapshot)
             {
-                if (plugin is null)
+                if (slot is null)
                 {
                     continue;
                 }
 
-                ReinitializePluginForQuality(plugin, profile);
-                pluginList.Add(plugin);
+                ReinitializePluginForQuality(slot.Plugin, profile);
+                pluginList.Add(slot);
             }
 
             var oldSlots = strip.PluginChain.GetSnapshot();
@@ -814,11 +876,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var strip = _audioEngine.Channels[channelIndex];
-        var pluginList = new List<IPlugin>();
+        var pluginSlots = new List<PluginSlot>();
         var profile = GetQualityProfile();
+        bool assignedInstanceIds = false;
+        int nextInstanceId = 0;
+        HashSet<int> bypassedByContainer = new();
 
         if (config is not null)
         {
+            for (int i = 0; i < config.Containers.Count; i++)
+            {
+                var container = config.Containers[i];
+                if (!container.IsBypassed)
+                {
+                    continue;
+                }
+
+                for (int j = 0; j < container.PluginInstanceIds.Count; j++)
+                {
+                    bypassedByContainer.Add(container.PluginInstanceIds[j]);
+                }
+            }
+
+            for (int i = 0; i < config.Plugins.Count; i++)
+            {
+                if (config.Plugins[i].InstanceId > nextInstanceId)
+                {
+                    nextInstanceId = config.Plugins[i].InstanceId;
+                }
+            }
+
             for (int i = 0; i < config.Plugins.Count; i++)
             {
                 var pluginConfig = config.Plugins[i];
@@ -852,7 +939,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 }
 
                 plugin.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
-                plugin.IsBypassed = pluginConfig.IsBypassed;
+                bool containerBypass = pluginConfig.InstanceId > 0 && bypassedByContainer.Contains(pluginConfig.InstanceId);
+                plugin.IsBypassed = pluginConfig.IsBypassed || containerBypass;
+                if (containerBypass)
+                {
+                    pluginConfig.IsBypassed = true;
+                }
 
                 bool appliedPreset = false;
                 if (pluginConfig.Parameters.Count == 0 &&
@@ -880,15 +972,35 @@ public partial class MainViewModel : ObservableObject, IDisposable
                     plugin.SetState(pluginConfig.State);
                 }
 
-                pluginList.Add(plugin);
+                if (pluginConfig.InstanceId <= 0)
+                {
+                    pluginConfig.InstanceId = ++nextInstanceId;
+                    assignedInstanceIds = true;
+                }
+
+                pluginSlots.Add(new PluginSlot(pluginConfig.InstanceId, plugin, _audioEngine.SampleRate));
             }
         }
 
         var oldSlots = strip.PluginChain.GetSnapshot();
-        var newSlots = pluginList.ToArray();
+        var newSlots = pluginSlots.ToArray();
         strip.PluginChain.ReplaceAll(newSlots);
         QueueRemovedPlugins(oldSlots, newSlots);
         RefreshPluginViewModels(channelIndex);
+
+        if (config is not null)
+        {
+            RebuildPluginIndexMap(config, GetPluginIndexMap(channelIndex));
+            bool containersChanged = NormalizeContainers(config, newSlots);
+            if (assignedInstanceIds || containersChanged)
+            {
+                _configManager.Save(_config);
+            }
+            if (containersChanged)
+            {
+                RefreshPluginViewModels(channelIndex);
+            }
+        }
     }
 
     private static bool IsCustomPreset(string? presetName)
@@ -937,8 +1049,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var strip = _audioEngine.Channels[channelIndex];
         var profile = GetQualityProfile();
-        var pluginList = new List<IPlugin>(chainPreset.Entries.Count);
+        var pluginSlots = new List<PluginSlot>(chainPreset.Entries.Count);
         var pluginConfigs = new List<PluginConfig>(chainPreset.Entries.Count);
+        int nextInstanceId = 0;
 
         foreach (var entry in chainPreset.Entries)
         {
@@ -962,9 +1075,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             var parameterMap = ApplyPresetParameters(plugin, preset);
 
-            pluginList.Add(plugin);
+            int instanceId = ++nextInstanceId;
+            pluginSlots.Add(new PluginSlot(instanceId, plugin, _audioEngine.SampleRate));
             pluginConfigs.Add(new PluginConfig
             {
+                InstanceId = instanceId,
                 Type = plugin.Id,
                 IsBypassed = plugin.IsBypassed,
                 PresetName = entry.PresetName,
@@ -973,8 +1088,72 @@ public partial class MainViewModel : ObservableObject, IDisposable
             });
         }
 
+        var containerConfigs = new List<PluginContainerConfig>();
+        if (chainPreset.Containers.Count > 0)
+        {
+            int nextContainerId = 0;
+            for (int i = 0; i < chainPreset.Containers.Count; i++)
+            {
+                var container = chainPreset.Containers[i];
+                var ids = new List<int>();
+                for (int j = 0; j < container.PluginIndices.Count; j++)
+                {
+                    int index = container.PluginIndices[j];
+                    if ((uint)index < (uint)pluginConfigs.Count)
+                    {
+                        ids.Add(pluginConfigs[index].InstanceId);
+                    }
+                }
+
+                containerConfigs.Add(new PluginContainerConfig
+                {
+                    Id = ++nextContainerId,
+                    Name = container.Name,
+                    IsBypassed = container.IsBypassed,
+                    PluginInstanceIds = ids
+                });
+            }
+        }
+
+        if (containerConfigs.Count > 0)
+        {
+            var bypassed = new HashSet<int>();
+            for (int i = 0; i < containerConfigs.Count; i++)
+            {
+                if (!containerConfigs[i].IsBypassed)
+                {
+                    continue;
+                }
+
+                for (int j = 0; j < containerConfigs[i].PluginInstanceIds.Count; j++)
+                {
+                    bypassed.Add(containerConfigs[i].PluginInstanceIds[j]);
+                }
+            }
+
+            if (bypassed.Count > 0)
+            {
+                for (int i = 0; i < pluginSlots.Count; i++)
+                {
+                    var slot = pluginSlots[i];
+                    if (bypassed.Contains(slot.InstanceId))
+                    {
+                        slot.Plugin.IsBypassed = true;
+                    }
+                }
+
+                for (int i = 0; i < pluginConfigs.Count; i++)
+                {
+                    if (bypassed.Contains(pluginConfigs[i].InstanceId))
+                    {
+                        pluginConfigs[i].IsBypassed = true;
+                    }
+                }
+            }
+        }
+
         var oldSlots = strip.PluginChain.GetSnapshot();
-        var newSlots = pluginList.ToArray();
+        var newSlots = pluginSlots.ToArray();
         strip.PluginChain.ReplaceAll(newSlots);
         QueueRemovedPlugins(oldSlots, newSlots);
         RefreshPluginViewModels(channelIndex);
@@ -982,6 +1161,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         config.PresetName = chainPreset.Name;
         config.Plugins = pluginConfigs;
+        config.Containers = containerConfigs;
+        RebuildPluginIndexMap(config, GetPluginIndexMap(channelIndex));
+        NormalizeContainers(config, newSlots);
         _configManager.Save(_config);
     }
 
@@ -1053,6 +1235,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         UpdatePluginMeters(Channel1, channel1);
         UpdatePluginMeters(Channel2, channel2);
+        UpdateContainerMeters(Channel1, channel1);
+        UpdateContainerMeters(Channel2, channel2);
+        UpdateContainerWindowMeters(0, channel1);
+        UpdateContainerWindowMeters(1, channel2);
 
         // Update hotbar stats and diagnostics
         Diagnostics = _audioEngine.GetDiagnosticsSnapshot();
@@ -1093,24 +1279,38 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private static void UpdatePluginMeters(ChannelStripViewModel viewModel, ChannelStrip channel)
     {
-        var meters = channel.PluginChain.GetMeterSnapshot();
-        var deltas = channel.PluginChain.GetDeltaSnapshot();
+        var slots = channel.PluginChain.GetSnapshot();
         int pluginSlots = Math.Max(0, viewModel.PluginSlots.Count - 1);
-        int meterCount = Math.Min(pluginSlots, meters.Length);
-        int deltaCount = Math.Min(pluginSlots, deltas.Length);
+        int slotCount = Math.Min(pluginSlots, slots.Length);
 
-        for (int i = 0; i < meterCount; i++)
+        for (int i = 0; i < slotCount; i++)
         {
             var slot = viewModel.PluginSlots[i];
-            slot.OutputPeakLevel = meters[i].GetPeakLevel();
-            slot.OutputRmsLevel = meters[i].GetRmsLevel();
+            var chainSlot = slots[i];
+            if (chainSlot is not null)
+            {
+                slot.OutputPeakLevel = chainSlot.Meter.GetPeakLevel();
+                slot.OutputRmsLevel = chainSlot.Meter.GetRmsLevel();
+            }
+            else
+            {
+                slot.OutputPeakLevel = 0f;
+                slot.OutputRmsLevel = 0f;
+            }
         }
 
         // Update spectral delta data and sync display mode
-        for (int i = 0; i < deltaCount; i++)
+        for (int i = 0; i < slotCount; i++)
         {
             var slot = viewModel.PluginSlots[i];
-            var delta = deltas[i];
+            var chainSlot = slots[i];
+            if (chainSlot is null)
+            {
+                slot.SpectralDelta = null;
+                continue;
+            }
+
+            var delta = chainSlot.Delta;
 
             // Sync display mode from ViewModel to processor (so V/F toggle works)
             if (delta.DisplayMode != slot.DeltaDisplayMode)
@@ -1124,12 +1324,99 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
-        for (int i = meterCount; i < pluginSlots; i++)
+        for (int i = slotCount; i < pluginSlots; i++)
         {
             var slot = viewModel.PluginSlots[i];
             slot.OutputPeakLevel = 0f;
             slot.OutputRmsLevel = 0f;
             slot.SpectralDelta = null;
+        }
+    }
+
+    private static void UpdateContainerMeters(ChannelStripViewModel viewModel, ChannelStrip channel)
+    {
+        if (viewModel.Containers.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < viewModel.Containers.Count; i++)
+        {
+            var container = viewModel.Containers[i];
+            if (container.ContainerId <= 0)
+            {
+                container.OutputPeakLevel = 0f;
+                container.OutputRmsLevel = 0f;
+                continue;
+            }
+
+            var pluginIds = container.PluginInstanceIds;
+            container.IsEmpty = pluginIds.Count == 0;
+            if (pluginIds.Count == 0)
+            {
+                container.OutputPeakLevel = 0f;
+                container.OutputRmsLevel = 0f;
+                continue;
+            }
+
+            int lastInstanceId = pluginIds[^1];
+            if (lastInstanceId > 0 &&
+                channel.PluginChain.TryGetSlotById(lastInstanceId, out var slot, out _) &&
+                slot is not null)
+            {
+                container.OutputPeakLevel = slot.Meter.GetPeakLevel();
+                container.OutputRmsLevel = slot.Meter.GetRmsLevel();
+            }
+            else
+            {
+                container.OutputPeakLevel = 0f;
+                container.OutputRmsLevel = 0f;
+            }
+        }
+    }
+
+    private void UpdateContainerWindowMeters(int channelIndex, ChannelStrip channel)
+    {
+        if (_containerWindows.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var entry in _containerWindows)
+        {
+            if (entry.Key.ChannelIndex != channelIndex)
+            {
+                continue;
+            }
+
+            if (entry.Value.DataContext is not PluginContainerWindowViewModel viewModel)
+            {
+                continue;
+            }
+
+            int lastPluginIndex = viewModel.PluginSlots.Count - 2;
+            if (lastPluginIndex < 0)
+            {
+                continue;
+            }
+
+            for (int i = 0; i <= lastPluginIndex; i++)
+            {
+                var slotVm = viewModel.PluginSlots[i];
+                if (slotVm.InstanceId > 0 &&
+                    channel.PluginChain.TryGetSlotById(slotVm.InstanceId, out var slot, out _) &&
+                    slot is not null)
+                {
+                    slotVm.OutputPeakLevel = slot.Meter.GetPeakLevel();
+                    slotVm.OutputRmsLevel = slot.Meter.GetRmsLevel();
+                    slotVm.IsBypassed = slot.Plugin.IsBypassed;
+                }
+                else
+                {
+                    slotVm.OutputPeakLevel = 0f;
+                    slotVm.OutputRmsLevel = 0f;
+                }
+            }
         }
     }
 
@@ -1222,7 +1509,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _configManager.Save(_config);
     }
 
-    private void HandlePluginAction(int channelIndex, int slotIndex)
+    private void HandlePluginAction(int channelIndex, int pluginInstanceId, int slotIndex)
     {
         if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
         {
@@ -1230,17 +1517,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var strip = _audioEngine.Channels[channelIndex];
-        var slots = strip.PluginChain.GetSnapshot();
-
-        // If clicking on the "+1" add placeholder (slotIndex == slots.Length)
-        bool isAddPlaceholder = slotIndex == slots.Length;
-        var plugin = isAddPlaceholder ? null : (slotIndex < slots.Length ? slots[slotIndex] : null);
-
-        if (plugin is null)
+        bool isAddPlaceholder = pluginInstanceId <= 0;
+        if (isAddPlaceholder)
         {
             var choice = ShowPluginBrowser();
             if (choice is null)
             {
+                return;
+            }
+
+            if (choice.Id == ContainerChoiceId)
+            {
+                CreateContainer(channelIndex, openWindow: true);
                 return;
             }
 
@@ -1260,40 +1548,133 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             newPlugin.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
 
-            if (isAddPlaceholder)
+            int insertIndex = slotIndex;
+            int chainCount = strip.PluginChain.Count;
+            if (insertIndex < 0)
             {
-                // Add new slot at the end
-                strip.PluginChain.AddSlot(newPlugin);
-                UpdatePluginConfig(channelIndex, slots.Length, newPlugin);
+                insertIndex = 0;
             }
-            else
+            else if (insertIndex > chainCount)
             {
-                // Replace existing slot
-                var oldPlugin = slots[slotIndex];
-                strip.PluginChain.SetSlot(slotIndex, newPlugin);
-                UpdatePluginConfig(channelIndex, slotIndex, newPlugin);
-                if (oldPlugin is not null && !ReferenceEquals(oldPlugin, newPlugin))
-                {
-                    _audioEngine.QueuePluginDisposal(oldPlugin);
-                }
+                insertIndex = chainCount;
             }
+
+            int instanceId = strip.PluginChain.InsertSlot(insertIndex, newPlugin);
+            UpdatePluginConfig(channelIndex, insertIndex, instanceId, newPlugin);
+            AssignPluginToContainer(channelIndex, instanceId);
             RefreshPluginViewModels(channelIndex);
             UpdateDynamicWindowWidth();
+            return;
         }
-        else
-        {
-            if (plugin is Vst3PluginWrapper vst3)
-            {
-                ShowVst3Editor(vst3);
-                return;
-            }
 
-            int slotToken = GetSlotToken(channelIndex, slotIndex);
-            ShowPluginParameters(channelIndex, slotIndex, slotToken, plugin);
+        if (!strip.PluginChain.TryGetSlotById(pluginInstanceId, out var slot, out _)
+            || slot is null)
+        {
+            return;
         }
+
+        if (slot.Plugin is Vst3PluginWrapper vst3)
+        {
+            ShowVst3Editor(vst3);
+            return;
+        }
+
+        ShowPluginParameters(channelIndex, pluginInstanceId, slot.Plugin);
     }
 
-    private void RemovePlugin(int channelIndex, int slotIndex)
+    private void HandleContainerAction(int channelIndex, int containerId)
+    {
+        if (containerId <= 0)
+        {
+            CreateContainer(channelIndex, openWindow: true);
+            return;
+        }
+
+        OpenContainerWindow(channelIndex, containerId);
+    }
+
+    private void HandleContainerPluginAction(int channelIndex, int containerId, int pluginInstanceId, int insertIndex)
+    {
+        if (pluginInstanceId > 0)
+        {
+            HandlePluginAction(channelIndex, pluginInstanceId, insertIndex);
+            return;
+        }
+
+        if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
+        {
+            return;
+        }
+
+        var strip = _audioEngine.Channels[channelIndex];
+        var choice = ShowPluginBrowser();
+        if (choice is null)
+        {
+            return;
+        }
+
+        if (choice.Id == ContainerChoiceId)
+        {
+            CreateContainer(channelIndex, openWindow: true);
+            return;
+        }
+
+        IPlugin? newPlugin = choice.IsVst3
+            ? new Vst3PluginWrapper(new Vst3PluginInfo { Name = choice.Name, Path = choice.Path, Format = choice.Format })
+            : PluginFactory.Create(choice.Id);
+
+        if (newPlugin is null)
+        {
+            return;
+        }
+
+        if (newPlugin is IQualityConfigurablePlugin qualityPlugin)
+        {
+            qualityPlugin.ApplyQuality(GetQualityProfile());
+        }
+
+        newPlugin.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
+
+        int chainCount = strip.PluginChain.Count;
+        if (insertIndex < 0)
+        {
+            insertIndex = 0;
+        }
+        else if (insertIndex > chainCount)
+        {
+            insertIndex = chainCount;
+        }
+
+        int instanceId = strip.PluginChain.InsertSlot(insertIndex, newPlugin);
+        UpdatePluginConfig(channelIndex, insertIndex, instanceId, newPlugin);
+        AssignPluginToContainer(channelIndex, instanceId, containerId);
+        RefreshPluginViewModels(channelIndex);
+        UpdateDynamicWindowWidth();
+    }
+
+    private void RemovePlugin(int channelIndex, int pluginInstanceId)
+    {
+        if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
+        {
+            return;
+        }
+
+        var strip = _audioEngine.Channels[channelIndex];
+        if (!strip.PluginChain.TryGetSlotById(pluginInstanceId, out var slot, out int slotIndex)
+            || slot is null)
+        {
+            return;
+        }
+
+        strip.PluginChain.RemoveSlot(slotIndex);
+        _audioEngine.QueuePluginDisposal(slot.Plugin);
+        RemovePluginConfig(channelIndex, pluginInstanceId);
+        RemovePluginFromContainers(channelIndex, pluginInstanceId);
+        RefreshPluginViewModels(channelIndex);
+        UpdateDynamicWindowWidth();
+    }
+
+    private void ReorderPlugins(int channelIndex, int pluginInstanceId, int toIndex)
     {
         if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
         {
@@ -1302,34 +1683,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var strip = _audioEngine.Channels[channelIndex];
         var slots = strip.PluginChain.GetSnapshot();
-        if ((uint)slotIndex >= (uint)slots.Length)
+        if (slots.Length == 0)
         {
             return;
         }
 
-        var removedPlugin = slots[slotIndex];
-        if (removedPlugin is null)
-        {
-            return;
-        }
-
-        strip.PluginChain.RemoveSlot(slotIndex);
-        _audioEngine.QueuePluginDisposal(removedPlugin);
-        RemovePluginConfig(channelIndex, slotIndex);
-        RefreshPluginViewModels(channelIndex);
-        UpdateDynamicWindowWidth();
-    }
-
-    private void ReorderPlugins(int channelIndex, int fromIndex, int toIndex)
-    {
-        if (fromIndex == toIndex || (uint)channelIndex >= (uint)_audioEngine.Channels.Count)
-        {
-            return;
-        }
-
-        var strip = _audioEngine.Channels[channelIndex];
-        var slots = strip.PluginChain.GetSnapshot();
-        if (slots.Length == 0 || (uint)fromIndex >= (uint)slots.Length)
+        if (!strip.PluginChain.TryGetSlotById(pluginInstanceId, out var slot, out int fromIndex)
+            || slot is null)
         {
             return;
         }
@@ -1348,7 +1708,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var newSlots = new List<IPlugin?>(slots);
+        var newSlots = new List<PluginSlot?>(slots);
         var item = newSlots[fromIndex];
         newSlots.RemoveAt(fromIndex);
         newSlots.Insert(toIndex, item);
@@ -1356,11 +1716,254 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var newSlotsArray = newSlots.ToArray();
         strip.PluginChain.ReplaceAll(newSlotsArray);
         QueueRemovedPlugins(slots, newSlotsArray);
-        MovePluginConfig(channelIndex, fromIndex, toIndex);
+        MovePluginConfig(channelIndex, pluginInstanceId, toIndex);
+        var config = GetOrCreateChannelConfig(channelIndex);
+        if (NormalizeContainers(config, newSlotsArray))
+        {
+            _configManager.Save(_config);
+        }
         RefreshPluginViewModels(channelIndex);
     }
 
-    private void QueueRemovedPlugins(IPlugin?[] oldSlots, IPlugin?[] newSlots)
+    private void CreateContainer(int channelIndex, bool openWindow)
+    {
+        var config = GetOrCreateChannelConfig(channelIndex);
+        int nextId = 1;
+        for (int i = 0; i < config.Containers.Count; i++)
+        {
+            if (config.Containers[i].Id >= nextId)
+            {
+                nextId = config.Containers[i].Id + 1;
+            }
+        }
+
+        var container = new PluginContainerConfig
+        {
+            Id = nextId,
+            Name = $"Container {nextId}",
+            IsBypassed = false
+        };
+
+        if (config.Containers.Count == 0)
+        {
+            var slots = _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot();
+            for (int i = 0; i < slots.Length; i++)
+            {
+                if (slots[i] is { } slot)
+                {
+                    container.PluginInstanceIds.Add(slot.InstanceId);
+                }
+            }
+        }
+
+        config.Containers.Add(container);
+        NormalizeContainers(config, _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot());
+        MarkChannelPresetCustom(config);
+        _configManager.Save(_config);
+        RefreshPluginViewModels(channelIndex);
+        UpdateDynamicWindowWidth();
+
+        if (openWindow)
+        {
+            OpenContainerWindow(channelIndex, container.Id);
+        }
+    }
+
+    private void RemoveContainer(int channelIndex, int containerId)
+    {
+        var config = GetOrCreateChannelConfig(channelIndex);
+        int index = config.Containers.FindIndex(c => c.Id == containerId);
+        if (index < 0)
+        {
+            return;
+        }
+
+        var removed = config.Containers[index];
+        config.Containers.RemoveAt(index);
+
+        if (config.Containers.Count > 0 && removed.PluginInstanceIds.Count > 0)
+        {
+            int targetIndex = Math.Clamp(index - 1, 0, config.Containers.Count - 1);
+            var target = config.Containers[targetIndex];
+            for (int i = 0; i < removed.PluginInstanceIds.Count; i++)
+            {
+                int instanceId = removed.PluginInstanceIds[i];
+                if (!target.PluginInstanceIds.Contains(instanceId))
+                {
+                    target.PluginInstanceIds.Add(instanceId);
+                }
+            }
+        }
+
+        NormalizeContainers(config, _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot());
+        MarkChannelPresetCustom(config);
+        _configManager.Save(_config);
+        CloseContainerWindow(channelIndex, containerId);
+        RefreshPluginViewModels(channelIndex);
+        UpdateDynamicWindowWidth();
+    }
+
+    private void SetContainerBypass(int channelIndex, int containerId, bool bypassed)
+    {
+        var config = GetOrCreateChannelConfig(channelIndex);
+        var container = config.Containers.FirstOrDefault(c => c.Id == containerId);
+        if (container is null)
+        {
+            return;
+        }
+
+        container.IsBypassed = bypassed;
+        for (int i = 0; i < container.PluginInstanceIds.Count; i++)
+        {
+            SetPluginBypass(channelIndex, container.PluginInstanceIds[i], bypassed);
+        }
+
+        MarkChannelPresetCustom(config);
+        _configManager.Save(_config);
+    }
+
+    private void OpenContainerWindow(int channelIndex, int containerId)
+    {
+        if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
+        {
+            return;
+        }
+
+        var key = (channelIndex, containerId);
+        if (_containerWindows.TryGetValue(key, out var existing))
+        {
+            existing.Activate();
+            return;
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        var container = config.Containers.FirstOrDefault(c => c.Id == containerId);
+        if (container is null)
+        {
+            return;
+        }
+
+        var viewModel = new PluginContainerWindowViewModel(
+            channelIndex,
+            containerId,
+            container.Name,
+            (instanceId, insertIndex) => HandleContainerPluginAction(channelIndex, containerId, instanceId, insertIndex),
+            instanceId => RemovePlugin(channelIndex, instanceId),
+            (instanceId, toIndex) => ReorderPlugins(channelIndex, instanceId, toIndex),
+            EnqueueParameterChange,
+            (instanceId, bypass) => UpdatePluginBypassConfig(channelIndex, instanceId, bypass));
+
+        UpdateContainerWindowViewModel(viewModel, channelIndex, container);
+
+        var window = new PluginContainerWindow(viewModel)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Closed += (_, _) => _containerWindows.Remove(key);
+        _containerWindows[key] = window;
+        window.Show();
+    }
+
+    private void CloseContainerWindow(int channelIndex, int containerId)
+    {
+        var key = (channelIndex, containerId);
+        if (_containerWindows.TryGetValue(key, out var window))
+        {
+            _containerWindows.Remove(key);
+            window.Close();
+        }
+    }
+
+    private void UpdateContainerWindowViewModel(PluginContainerWindowViewModel viewModel, int channelIndex, PluginContainerConfig container)
+    {
+        var strip = _audioEngine.Channels[channelIndex];
+        var slots = strip.PluginChain.GetSnapshot();
+        var slotInfos = new List<PluginSlotInfo>(slots.Length);
+        for (int i = 0; i < slots.Length; i++)
+        {
+            var slot = slots[i];
+            float latencyMs = 0f;
+            string pluginId = string.Empty;
+            float[] elevatedValues = [];
+            int instanceId = slot?.InstanceId ?? 0;
+
+            if (slot is not null)
+            {
+                var plugin = slot.Plugin;
+                pluginId = plugin.Id;
+                if (_audioEngine.SampleRate > 0)
+                {
+                    latencyMs = plugin.LatencySamples * 1000f / _audioEngine.SampleRate;
+                }
+
+                var elevDefs = ElevatedParameterDefinitions.GetElevations(pluginId);
+                if (elevDefs is not null)
+                {
+                    elevatedValues = new float[elevDefs.Length];
+                    var state = plugin.GetState();
+                    for (int j = 0; j < elevDefs.Length; j++)
+                    {
+                        var param = plugin.Parameters.FirstOrDefault(p => p.Index == elevDefs[j].Index);
+                        if (param is not null && state.Length >= (elevDefs[j].Index + 1) * sizeof(float))
+                        {
+                            elevatedValues[j] = BitConverter.ToSingle(state, elevDefs[j].Index * sizeof(float));
+                        }
+                        else
+                        {
+                            elevatedValues[j] = elevDefs[j].Default;
+                        }
+                    }
+                }
+            }
+
+            slotInfos.Add(new PluginSlotInfo
+            {
+                PluginId = pluginId,
+                Name = slot?.Plugin.Name ?? string.Empty,
+                IsBypassed = slot?.Plugin.IsBypassed ?? false,
+                LatencyMs = latencyMs,
+                InstanceId = instanceId,
+                ElevatedParamValues = elevatedValues
+            });
+        }
+
+        viewModel.UpdateName(container.Name);
+        viewModel.UpdatePlugins(slotInfos, container.PluginInstanceIds);
+    }
+
+    private void UpdateOpenContainerWindows(int channelIndex, IReadOnlyList<PluginSlotInfo> slotInfos)
+    {
+        if (_containerWindows.Count == 0)
+        {
+            return;
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        var keys = _containerWindows.Keys.ToArray();
+        for (int i = 0; i < keys.Length; i++)
+        {
+            var key = keys[i];
+            if (key.ChannelIndex != channelIndex)
+            {
+                continue;
+            }
+
+            var container = config.Containers.FirstOrDefault(c => c.Id == key.ContainerId);
+            if (container is null)
+            {
+                CloseContainerWindow(key.ChannelIndex, key.ContainerId);
+                continue;
+            }
+
+            if (_containerWindows.TryGetValue(key, out var window) && window.DataContext is PluginContainerWindowViewModel viewModel)
+            {
+                viewModel.UpdateName(container.Name);
+                viewModel.UpdatePlugins(slotInfos, container.PluginInstanceIds);
+            }
+        }
+    }
+
+    private void QueueRemovedPlugins(PluginSlot?[] oldSlots, PluginSlot?[] newSlots)
     {
         if (oldSlots.Length == 0)
         {
@@ -1370,17 +1973,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var newSet = new HashSet<IPlugin>(ReferenceEqualityComparer.Instance);
         for (int i = 0; i < newSlots.Length; i++)
         {
-            if (newSlots[i] is { } plugin)
+            if (newSlots[i] is { } slot)
             {
-                newSet.Add(plugin);
+                newSet.Add(slot.Plugin);
             }
         }
 
         for (int i = 0; i < oldSlots.Length; i++)
         {
-            if (oldSlots[i] is { } plugin && !newSet.Contains(plugin))
+            if (oldSlots[i] is { } slot && !newSet.Contains(slot.Plugin))
             {
-                _audioEngine.QueuePluginDisposal(plugin);
+                _audioEngine.QueuePluginDisposal(slot.Plugin);
             }
         }
     }
@@ -1389,16 +1992,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var choices = new List<PluginChoice>
         {
+            new() { Id = ContainerChoiceId, Name = "Plugin Container", IsVst3 = false, Category = PluginCategory.Utility, Description = "Create a visual container to group plugins on the main strip" },
             // Dynamics
             new() { Id = "builtin:gain", Name = "Gain", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Simple gain and phase control" },
             new() { Id = "builtin:compressor", Name = "Compressor", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Dynamic range compression with soft knee" },
             new() { Id = "builtin:noisegate", Name = "Noise Gate", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Removes audio below threshold" },
             new() { Id = "builtin:deesser", Name = "De-Esser", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Tames sibilance in the high band" },
             new() { Id = "builtin:limiter", Name = "Limiter", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Brick-wall peak control" },
+            new() { Id = "builtin:upward-expander", Name = "Upward Expander", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Restores micro-dynamics across bands" },
+            new() { Id = "builtin:consonant-transient", Name = "Consonant Transient", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Emphasizes consonant transients without harshness" },
 
             // EQ
             new() { Id = "builtin:hpf", Name = "High-Pass Filter", IsVst3 = false, Category = PluginCategory.Eq, Description = "Fast rumble and plosive removal" },
             new() { Id = "builtin:eq3", Name = "5-Band EQ", IsVst3 = false, Category = PluginCategory.Eq, Description = "HPF + shelves + dual mid bands" },
+            new() { Id = "builtin:dynamic-eq", Name = "Dynamic EQ", IsVst3 = false, Category = PluginCategory.Eq, Description = "Voiced/unvoiced keyed tonal movement" },
 
             // Noise Reduction
             new() { Id = "builtin:fft-noise", Name = "FFT Noise Removal", IsVst3 = false, Category = PluginCategory.NoiseReduction, Description = "Learns and removes background noise" },
@@ -1407,6 +2014,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             new() { Id = "builtin:freq-analyzer", Name = "Frequency Analyzer", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Real-time spectrum view with tunable bins" },
             new() { Id = "builtin:vocal-spectrograph", Name = "Vocal Spectrograph", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Vocal-focused spectrogram with overlays" },
             new() { Id = "builtin:signal-generator", Name = "Signal Generator", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Test tones, noise, and sample playback" },
+            new() { Id = "builtin:sidechain-tap", Name = "Sidechain Tap", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Sidechain signal source for downstream plugins" },
 
             // AI/ML
             new() { Id = "builtin:rnnoise", Name = "RNNoise", IsVst3 = false, Category = PluginCategory.AiMl, Description = "Neural network noise suppression" },
@@ -1415,7 +2023,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             // Effects
             new() { Id = "builtin:saturation", Name = "Saturation", IsVst3 = false, Category = PluginCategory.Effects, Description = "Soft clipping harmonic warmth" },
-            new() { Id = "builtin:reverb", Name = "Reverb", IsVst3 = false, Category = PluginCategory.Effects, Description = "Convolution reverb with IR presets" }
+            new() { Id = "builtin:reverb", Name = "Reverb", IsVst3 = false, Category = PluginCategory.Effects, Description = "Convolution reverb with IR presets" },
+            new() { Id = "builtin:spectral-contrast", Name = "Spectral Contrast", IsVst3 = false, Category = PluginCategory.Effects, Description = "Enhances spectral detail via lateral inhibition" },
+            new() { Id = "builtin:air-exciter", Name = "Air Exciter", IsVst3 = false, Category = PluginCategory.Effects, Description = "Keyed high-frequency excitation" },
+            new() { Id = "builtin:bass-enhancer", Name = "Bass Enhancer", IsVst3 = false, Category = PluginCategory.Effects, Description = "Psychoacoustic low-end harmonics" },
+            new() { Id = "builtin:room-tone", Name = "Room Tone", IsVst3 = false, Category = PluginCategory.Effects, Description = "Controlled ambience bed with ducking" },
+            new() { Id = "builtin:formant-enhance", Name = "Formant Enhancer", IsVst3 = false, Category = PluginCategory.Effects, Description = "Formant-aware enhancement for vowels" }
         };
 
         if (_config.EnableVstPlugins)
@@ -1447,128 +2060,191 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return window.ShowDialog() == true ? viewModel.SelectedChoice : null;
     }
 
-    private void ShowPluginParameters(int channelIndex, int slotIndex, int slotToken, IPlugin plugin)
+    private void ShowPluginParameters(int channelIndex, int pluginInstanceId, IPlugin plugin)
     {
         // Use specialized window for noise gate
         if (plugin is NoiseGatePlugin noiseGate)
         {
-            ShowNoiseGateWindow(channelIndex, slotIndex, slotToken, noiseGate);
+            ShowNoiseGateWindow(channelIndex, pluginInstanceId, noiseGate);
             return;
         }
 
         // Use specialized window for compressor
         if (plugin is CompressorPlugin compressor)
         {
-            ShowCompressorWindow(channelIndex, slotIndex, slotToken, compressor);
+            ShowCompressorWindow(channelIndex, pluginInstanceId, compressor);
             return;
         }
 
         // Use specialized window for signal generator
         if (plugin is SignalGeneratorPlugin signalGen)
         {
-            ShowSignalGeneratorWindow(channelIndex, slotIndex, slotToken, signalGen);
+            ShowSignalGeneratorWindow(channelIndex, pluginInstanceId, signalGen);
             return;
         }
 
         // Use specialized window for gain
         if (plugin is GainPlugin gain)
         {
-            ShowGainWindow(channelIndex, slotIndex, slotToken, gain);
+            ShowGainWindow(channelIndex, pluginInstanceId, gain);
             return;
         }
 
         // Use specialized window for 5-band EQ
         if (plugin is FiveBandEqPlugin eq)
         {
-            ShowEqWindow(channelIndex, slotIndex, slotToken, eq);
+            ShowEqWindow(channelIndex, pluginInstanceId, eq);
             return;
         }
 
         // Use specialized window for FFT noise removal
         if (plugin is FFTNoiseRemovalPlugin fftNoise)
         {
-            ShowFFTNoiseWindow(channelIndex, slotIndex, slotToken, fftNoise);
+            ShowFFTNoiseWindow(channelIndex, pluginInstanceId, fftNoise);
             return;
         }
 
         // Use specialized window for Frequency Analyzer
         if (plugin is FrequencyAnalyzerPlugin analyzer)
         {
-            ShowFrequencyAnalyzerWindow(channelIndex, slotIndex, slotToken, analyzer);
+            ShowFrequencyAnalyzerWindow(channelIndex, pluginInstanceId, analyzer);
             return;
         }
 
         // Use specialized window for Vocal Spectrograph
         if (plugin is VocalSpectrographPlugin spectrograph)
         {
-            ShowVocalSpectrographWindow(channelIndex, slotIndex, slotToken, spectrograph);
+            ShowVocalSpectrographWindow(channelIndex, pluginInstanceId, spectrograph);
             return;
         }
 
         // Use specialized window for Voice Gate (Silero VAD)
         if (plugin is SileroVoiceGatePlugin silero)
         {
-            ShowVoiceGateWindow(channelIndex, slotIndex, slotToken, silero);
+            ShowVoiceGateWindow(channelIndex, pluginInstanceId, silero);
             return;
         }
 
         // Use specialized window for RNNoise
         if (plugin is RNNoisePlugin rnnoise)
         {
-            ShowRNNoiseWindow(channelIndex, slotIndex, slotToken, rnnoise);
+            ShowRNNoiseWindow(channelIndex, pluginInstanceId, rnnoise);
             return;
         }
 
         // Use specialized window for Speech Denoiser
         if (plugin is SpeechDenoiserPlugin speechDenoiser)
         {
-            ShowSpeechDenoiserWindow(channelIndex, slotIndex, slotToken, speechDenoiser);
+            ShowSpeechDenoiserWindow(channelIndex, pluginInstanceId, speechDenoiser);
             return;
         }
 
         // Use specialized window for Reverb
         if (plugin is ConvolutionReverbPlugin reverb)
         {
-            ShowReverbWindow(channelIndex, slotIndex, slotToken, reverb);
+            ShowReverbWindow(channelIndex, pluginInstanceId, reverb);
             return;
         }
 
         // Use specialized window for Limiter
         if (plugin is LimiterPlugin limiter)
         {
-            ShowLimiterWindow(channelIndex, slotIndex, slotToken, limiter);
+            ShowLimiterWindow(channelIndex, pluginInstanceId, limiter);
             return;
         }
 
         // Use specialized window for De-Esser
         if (plugin is DeEsserPlugin deesser)
         {
-            ShowDeEsserWindow(channelIndex, slotIndex, slotToken, deesser);
+            ShowDeEsserWindow(channelIndex, pluginInstanceId, deesser);
             return;
         }
 
         // Use specialized window for High-Pass Filter
         if (plugin is HighPassFilterPlugin hpf)
         {
-            ShowHighPassFilterWindow(channelIndex, slotIndex, slotToken, hpf);
+            ShowHighPassFilterWindow(channelIndex, pluginInstanceId, hpf);
             return;
         }
 
         // Use specialized window for Saturation
         if (plugin is SaturationPlugin saturation)
         {
-            ShowSaturationWindow(channelIndex, slotIndex, slotToken, saturation);
+            ShowSaturationWindow(channelIndex, pluginInstanceId, saturation);
+            return;
+        }
+
+        // Use specialized window for Air Exciter
+        if (plugin is AirExciterPlugin airExciter)
+        {
+            ShowAirExciterWindow(channelIndex, pluginInstanceId, airExciter);
+            return;
+        }
+
+        // Use specialized window for Bass Enhancer
+        if (plugin is BassEnhancerPlugin bassEnhancer)
+        {
+            ShowBassEnhancerWindow(channelIndex, pluginInstanceId, bassEnhancer);
+            return;
+        }
+
+        // Use specialized window for Consonant Transient
+        if (plugin is ConsonantTransientPlugin consonantTransient)
+        {
+            ShowConsonantTransientWindow(channelIndex, pluginInstanceId, consonantTransient);
+            return;
+        }
+
+        // Use specialized window for Dynamic EQ
+        if (plugin is DynamicEqPlugin dynamicEq)
+        {
+            ShowDynamicEqWindow(channelIndex, pluginInstanceId, dynamicEq);
+            return;
+        }
+
+        // Use specialized window for Formant Enhancer
+        if (plugin is FormantEnhancerPlugin formantEnhancer)
+        {
+            ShowFormantEnhancerWindow(channelIndex, pluginInstanceId, formantEnhancer);
+            return;
+        }
+
+        // Use specialized window for Room Tone
+        if (plugin is RoomTonePlugin roomTone)
+        {
+            ShowRoomToneWindow(channelIndex, pluginInstanceId, roomTone);
+            return;
+        }
+
+        // Use specialized window for Sidechain Tap
+        if (plugin is SidechainTapPlugin sidechainTap)
+        {
+            ShowSidechainTapWindow(channelIndex, pluginInstanceId, sidechainTap);
+            return;
+        }
+
+        // Use specialized window for Spectral Contrast
+        if (plugin is SpectralContrastPlugin spectralContrast)
+        {
+            ShowSpectralContrastWindow(channelIndex, pluginInstanceId, spectralContrast);
+            return;
+        }
+
+        // Use specialized window for Upward Expander
+        if (plugin is UpwardExpanderPlugin upwardExpander)
+        {
+            ShowUpwardExpanderWindow(channelIndex, pluginInstanceId, upwardExpander);
             return;
         }
 
         var parameterViewModels = plugin.Parameters.Select(parameter =>
         {
-            float currentValue = GetPluginParameterValue(channelIndex, slotIndex, parameter.Name, parameter.DefaultValue);
+            float currentValue = GetPluginParameterValue(channelIndex, pluginInstanceId, parameter.Name, parameter.DefaultValue);
             return new PluginParameterViewModel(parameter.Index, parameter.Name, parameter.MinValue, parameter.MaxValue, currentValue, parameter.Unit,
-                value => ApplyPluginParameter(channelIndex, slotIndex, slotToken, parameter.Index, parameter.Name, value));
+                value => ApplyPluginParameter(channelIndex, pluginInstanceId, parameter.Index, parameter.Name, value));
         }).ToList();
 
-        Action? learnNoiseAction = plugin is FFTNoiseRemovalPlugin ? () => RequestNoiseLearn(channelIndex, slotIndex, slotToken) : null;
+        Action? learnNoiseAction = plugin is FFTNoiseRemovalPlugin ? () => RequestNoiseLearn(channelIndex, pluginInstanceId) : null;
         Func<float>? vadProvider = plugin switch
         {
             RNNoisePlugin rnn => () => rnn.VadProbability,
@@ -1588,286 +2264,390 @@ public partial class MainViewModel : ObservableObject, IDisposable
         window.Show();
     }
 
-    private void ShowNoiseGateWindow(int channelIndex, int slotIndex, int slotToken, NoiseGatePlugin plugin)
+    private void ShowNoiseGateWindow(int channelIndex, int pluginInstanceId, NoiseGatePlugin plugin)
     {
         var window = new NoiseGateWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowCompressorWindow(int channelIndex, int slotIndex, int slotToken, CompressorPlugin plugin)
+    private void ShowCompressorWindow(int channelIndex, int pluginInstanceId, CompressorPlugin plugin)
     {
         var window = new CompressorWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowSignalGeneratorWindow(int channelIndex, int slotIndex, int slotToken, SignalGeneratorPlugin plugin)
+    private void ShowSignalGeneratorWindow(int channelIndex, int pluginInstanceId, SignalGeneratorPlugin plugin)
     {
         var window = new SignalGeneratorWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters.FirstOrDefault(p => p.Index == paramIndex)?.Name ?? "";
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowGainWindow(int channelIndex, int slotIndex, int slotToken, GainPlugin plugin)
+    private void ShowGainWindow(int channelIndex, int pluginInstanceId, GainPlugin plugin)
     {
         var window = new GainWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowEqWindow(int channelIndex, int slotIndex, int slotToken, FiveBandEqPlugin plugin)
+    private void ShowEqWindow(int channelIndex, int pluginInstanceId, FiveBandEqPlugin plugin)
     {
         var window = new EqWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowFFTNoiseWindow(int channelIndex, int slotIndex, int slotToken, FFTNoiseRemovalPlugin plugin)
+    private void ShowFFTNoiseWindow(int channelIndex, int pluginInstanceId, FFTNoiseRemovalPlugin plugin)
     {
         var window = new FFTNoiseWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed),
-            () => RequestNoiseLearn(channelIndex, slotIndex, slotToken))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed),
+            () => RequestNoiseLearn(channelIndex, pluginInstanceId))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowFrequencyAnalyzerWindow(int channelIndex, int slotIndex, int slotToken, FrequencyAnalyzerPlugin plugin)
+    private void ShowFrequencyAnalyzerWindow(int channelIndex, int pluginInstanceId, FrequencyAnalyzerPlugin plugin)
     {
         var window = new FrequencyAnalyzerWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowVocalSpectrographWindow(int channelIndex, int slotIndex, int slotToken, VocalSpectrographPlugin plugin)
+    private void ShowVocalSpectrographWindow(int channelIndex, int pluginInstanceId, VocalSpectrographPlugin plugin)
     {
         var window = new VocalSpectrographWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowVoiceGateWindow(int channelIndex, int slotIndex, int slotToken, SileroVoiceGatePlugin plugin)
+    private void ShowVoiceGateWindow(int channelIndex, int pluginInstanceId, SileroVoiceGatePlugin plugin)
     {
         var window = new VoiceGateWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowRNNoiseWindow(int channelIndex, int slotIndex, int slotToken, RNNoisePlugin plugin)
+    private void ShowRNNoiseWindow(int channelIndex, int pluginInstanceId, RNNoisePlugin plugin)
     {
         var window = new RNNoiseWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowSpeechDenoiserWindow(int channelIndex, int slotIndex, int slotToken, SpeechDenoiserPlugin plugin)
+    private void ShowSpeechDenoiserWindow(int channelIndex, int pluginInstanceId, SpeechDenoiserPlugin plugin)
     {
         var window = new SpeechDenoiserWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowReverbWindow(int channelIndex, int slotIndex, int slotToken, ConvolutionReverbPlugin plugin)
+    private void ShowReverbWindow(int channelIndex, int pluginInstanceId, ConvolutionReverbPlugin plugin)
     {
         var window = new ReverbWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowLimiterWindow(int channelIndex, int slotIndex, int slotToken, LimiterPlugin plugin)
+    private void ShowLimiterWindow(int channelIndex, int pluginInstanceId, LimiterPlugin plugin)
     {
         var window = new LimiterWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowDeEsserWindow(int channelIndex, int slotIndex, int slotToken, DeEsserPlugin plugin)
+    private void ShowDeEsserWindow(int channelIndex, int pluginInstanceId, DeEsserPlugin plugin)
     {
         var window = new DeEsserWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowHighPassFilterWindow(int channelIndex, int slotIndex, int slotToken, HighPassFilterPlugin plugin)
+    private void ShowHighPassFilterWindow(int channelIndex, int pluginInstanceId, HighPassFilterPlugin plugin)
     {
         var window = new HighPassFilterWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void ShowSaturationWindow(int channelIndex, int slotIndex, int slotToken, SaturationPlugin plugin)
+    private void ShowSaturationWindow(int channelIndex, int pluginInstanceId, SaturationPlugin plugin)
     {
         var window = new SaturationWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
-                ApplyPluginParameter(channelIndex, slotIndex, slotToken, paramIndex, paramName, value);
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => SetPluginBypass(channelIndex, slotIndex, slotToken, bypassed))
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
     }
 
-    private void SetPluginBypass(int channelIndex, int slotIndex, int slotToken, bool bypassed)
+    private void ShowAirExciterWindow(int channelIndex, int pluginInstanceId, AirExciterPlugin plugin)
     {
-        if (!IsSlotTokenMatch(channelIndex, slotIndex, slotToken))
+        var window = new AirExciterWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
-            return;
-        }
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
 
+    private void ShowBassEnhancerWindow(int channelIndex, int pluginInstanceId, BassEnhancerPlugin plugin)
+    {
+        var window = new BassEnhancerWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowConsonantTransientWindow(int channelIndex, int pluginInstanceId, ConsonantTransientPlugin plugin)
+    {
+        var window = new ConsonantTransientWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowDynamicEqWindow(int channelIndex, int pluginInstanceId, DynamicEqPlugin plugin)
+    {
+        var window = new DynamicEqWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowFormantEnhancerWindow(int channelIndex, int pluginInstanceId, FormantEnhancerPlugin plugin)
+    {
+        var window = new FormantEnhancerWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowRoomToneWindow(int channelIndex, int pluginInstanceId, RoomTonePlugin plugin)
+    {
+        var window = new RoomToneWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowSidechainTapWindow(int channelIndex, int pluginInstanceId, SidechainTapPlugin plugin)
+    {
+        var window = new SidechainTapWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowSpectralContrastWindow(int channelIndex, int pluginInstanceId, SpectralContrastPlugin plugin)
+    {
+        var window = new SpectralContrastWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowUpwardExpanderWindow(int channelIndex, int pluginInstanceId, UpwardExpanderPlugin plugin)
+    {
+        var window = new UpwardExpanderWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void SetPluginBypass(int channelIndex, int pluginInstanceId, bool bypassed)
+    {
         var channel = channelIndex == 0 ? Channel1 : Channel2;
-        if (slotIndex < channel.PluginSlots.Count && channel.PluginSlots[slotIndex].SlotToken == slotToken)
+        int slotIndex = FindPluginSlotIndex(channel, pluginInstanceId);
+        if (slotIndex >= 0 && slotIndex < channel.PluginSlots.Count)
         {
             channel.PluginSlots[slotIndex].IsBypassed = bypassed;
         }
-    }
-
-    private int GetSlotToken(int channelIndex, int slotIndex)
-    {
-        if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
-        {
-            return 0;
-        }
-
-        var tokens = _audioEngine.Channels[channelIndex].PluginChain.GetSlotTokenSnapshot();
-        return (uint)slotIndex < (uint)tokens.Length ? tokens[slotIndex] : 0;
-    }
-
-    private bool IsSlotTokenMatch(int channelIndex, int slotIndex, int slotToken)
-    {
-        if (slotToken == 0)
-        {
-            return true;
-        }
-
-        if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
-        {
-            return false;
-        }
-
-        var tokens = _audioEngine.Channels[channelIndex].PluginChain.GetSlotTokenSnapshot();
-        return (uint)slotIndex < (uint)tokens.Length && tokens[slotIndex] == slotToken;
     }
 
     private static void ShowVst3Editor(Vst3PluginWrapper plugin)
@@ -1880,60 +2660,48 @@ public partial class MainViewModel : ObservableObject, IDisposable
         window.Show();
     }
 
-    private void RequestNoiseLearn(int channelIndex, int slotIndex, int slotToken)
+    private void RequestNoiseLearn(int channelIndex, int pluginInstanceId)
     {
-        if (!IsSlotTokenMatch(channelIndex, slotIndex, slotToken))
-        {
-            return;
-        }
-
         _audioEngine.EnqueueParameterChange(new ParameterChange
         {
             ChannelId = channelIndex,
             Type = ParameterType.PluginCommand,
-            PluginIndex = slotIndex,
-            SlotToken = slotToken,
+            PluginInstanceId = pluginInstanceId,
             Command = PluginCommandType.ToggleNoiseLearn
         });
     }
 
-    private void ApplyPluginParameter(int channelIndex, int slotIndex, int slotToken, int parameterIndex, string parameterName, float value, bool markPresetDirty = true)
+    private void ApplyPluginParameter(int channelIndex, int pluginInstanceId, int parameterIndex, string parameterName, float value, bool markPresetDirty = true)
     {
-        if (!IsSlotTokenMatch(channelIndex, slotIndex, slotToken))
-        {
-            return;
-        }
-
         _audioEngine.EnqueueParameterChange(new ParameterChange
         {
             ChannelId = channelIndex,
             Type = ParameterType.PluginParameter,
-            PluginIndex = slotIndex,
-            SlotToken = slotToken,
+            PluginInstanceId = pluginInstanceId,
             ParameterIndex = parameterIndex,
             Value = value
         });
 
-        UpdatePluginParameterConfig(channelIndex, slotIndex, parameterName, value, markPresetDirty);
-        UpdatePluginStateConfig(channelIndex, slotIndex);
+        UpdatePluginParameterConfig(channelIndex, pluginInstanceId, parameterName, value, markPresetDirty);
+        UpdatePluginStateConfig(channelIndex, pluginInstanceId);
     }
 
     private void RefreshPluginViewModels(int channelIndex)
     {
         var strip = _audioEngine.Channels[channelIndex];
         var slots = strip.PluginChain.GetSnapshot();
-        var tokens = strip.PluginChain.GetSlotTokenSnapshot();
         var slotInfos = new List<PluginSlotInfo>(slots.Length);
         for (int i = 0; i < slots.Length; i++)
         {
-            var plugin = slots[i];
+            var slot = slots[i];
             float latencyMs = 0f;
             string pluginId = string.Empty;
             float[] elevatedValues = [];
-            int slotToken = i < tokens.Length ? tokens[i] : 0;
+            int instanceId = slot?.InstanceId ?? 0;
 
-            if (plugin is not null)
+            if (slot is not null)
             {
+                var plugin = slot.Plugin;
                 pluginId = plugin.Id;
                 if (_audioEngine.SampleRate > 0)
                 {
@@ -1965,21 +2733,54 @@ public partial class MainViewModel : ObservableObject, IDisposable
             slotInfos.Add(new PluginSlotInfo
             {
                 PluginId = pluginId,
-                Name = plugin?.Name ?? string.Empty,
-                IsBypassed = plugin?.IsBypassed ?? false,
+                Name = slot?.Plugin.Name ?? string.Empty,
+                IsBypassed = slot?.Plugin.IsBypassed ?? false,
                 LatencyMs = latencyMs,
-                SlotToken = slotToken,
+                InstanceId = instanceId,
                 ElevatedParamValues = elevatedValues
             });
         }
         if (channelIndex == 0)
         {
             Channel1.UpdatePlugins(slotInfos);
+            Channel1.UpdateContainers(BuildContainerInfos(channelIndex, slots));
         }
         else
         {
             Channel2.UpdatePlugins(slotInfos);
+            Channel2.UpdateContainers(BuildContainerInfos(channelIndex, slots));
         }
+
+        UpdateOpenContainerWindows(channelIndex, slotInfos);
+    }
+
+    private IReadOnlyList<PluginContainerInfo> BuildContainerInfos(int channelIndex, PluginSlot?[] slots)
+    {
+        if (channelIndex >= _config.Channels.Count)
+        {
+            return Array.Empty<PluginContainerInfo>();
+        }
+
+        var config = _config.Channels[channelIndex];
+        if (config.Containers.Count == 0)
+        {
+            return Array.Empty<PluginContainerInfo>();
+        }
+
+        var list = new List<PluginContainerInfo>(config.Containers.Count);
+        for (int i = 0; i < config.Containers.Count; i++)
+        {
+            var container = config.Containers[i];
+            list.Add(new PluginContainerInfo
+            {
+                ContainerId = container.Id,
+                Name = container.Name,
+                IsBypassed = container.IsBypassed,
+                PluginInstanceIds = container.PluginInstanceIds.ToArray()
+            });
+        }
+
+        return list;
     }
 
     private static int GetChainLatencySamples(ChannelStrip channel)
@@ -1988,13 +2789,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         int latency = 0;
         for (int i = 0; i < slots.Length; i++)
         {
-            var plugin = slots[i];
-            if (plugin is null || plugin.IsBypassed)
+            var slot = slots[i];
+            if (slot is null || slot.Plugin.IsBypassed)
             {
                 continue;
             }
 
-            latency += Math.Max(0, plugin.LatencySamples);
+            latency += Math.Max(0, slot.Plugin.LatencySamples);
         }
 
         return latency;
@@ -2018,13 +2819,217 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void UpdatePluginConfig(int channelIndex, int slotIndex, IPlugin plugin)
+    private Dictionary<int, int> GetPluginIndexMap(int channelIndex)
+    {
+        return channelIndex == 0 ? _channel1PluginIndexMap : _channel2PluginIndexMap;
+    }
+
+    private int GetPluginConfigIndex(int channelIndex, int instanceId)
+    {
+        if (instanceId <= 0)
+        {
+            return -1;
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        var map = GetPluginIndexMap(channelIndex);
+        if (map.TryGetValue(instanceId, out int index) &&
+            index >= 0 &&
+            index < config.Plugins.Count &&
+            config.Plugins[index].InstanceId == instanceId)
+        {
+            return index;
+        }
+
+        RebuildPluginIndexMap(config, map);
+        return map.TryGetValue(instanceId, out index) ? index : -1;
+    }
+
+    private static void RebuildPluginIndexMap(ChannelConfig config, Dictionary<int, int> map)
+    {
+        map.Clear();
+        for (int i = 0; i < config.Plugins.Count; i++)
+        {
+            int instanceId = config.Plugins[i].InstanceId;
+            if (instanceId > 0 && !map.ContainsKey(instanceId))
+            {
+                map[instanceId] = i;
+            }
+        }
+    }
+
+    private bool NormalizeContainers(ChannelConfig config, PluginSlot?[] slots)
+    {
+        bool changed = false;
+        var indexMap = new Dictionary<int, int>(slots.Length);
+        for (int i = 0; i < slots.Length; i++)
+        {
+            if (slots[i] is { } slot)
+            {
+                indexMap[slot.InstanceId] = i;
+            }
+        }
+
+        int nextContainerId = 0;
+        for (int i = 0; i < config.Containers.Count; i++)
+        {
+            var container = config.Containers[i];
+            if (container.Id > nextContainerId)
+            {
+                nextContainerId = container.Id;
+            }
+        }
+
+        var assigned = new HashSet<int>();
+        for (int i = 0; i < config.Containers.Count; i++)
+        {
+            var container = config.Containers[i];
+            if (container.Id <= 0)
+            {
+                container.Id = ++nextContainerId;
+                changed = true;
+            }
+
+            var ordered = new List<int>();
+            for (int j = 0; j < container.PluginInstanceIds.Count; j++)
+            {
+                int instanceId = container.PluginInstanceIds[j];
+                if (!indexMap.ContainsKey(instanceId))
+                {
+                    changed = true;
+                    continue;
+                }
+                if (!assigned.Add(instanceId))
+                {
+                    changed = true;
+                    continue;
+                }
+
+                ordered.Add(instanceId);
+            }
+
+            ordered.Sort((a, b) => indexMap[a].CompareTo(indexMap[b]));
+
+            if (!ordered.SequenceEqual(container.PluginInstanceIds))
+            {
+                container.PluginInstanceIds.Clear();
+                container.PluginInstanceIds.AddRange(ordered);
+                changed = true;
+            }
+        }
+
+        if (config.Containers.Count > 0)
+        {
+            var target = config.Containers[^1];
+            bool appended = false;
+            for (int i = 0; i < slots.Length; i++)
+            {
+                if (slots[i] is not { } slot)
+                {
+                    continue;
+                }
+
+                if (assigned.Add(slot.InstanceId))
+                {
+                    target.PluginInstanceIds.Add(slot.InstanceId);
+                    appended = true;
+                }
+            }
+
+            if (appended)
+            {
+                target.PluginInstanceIds.Sort((a, b) => indexMap[a].CompareTo(indexMap[b]));
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    private void AssignPluginToContainer(int channelIndex, int instanceId)
+    {
+        if (instanceId <= 0)
+        {
+            return;
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        if (config.Containers.Count == 0)
+        {
+            return;
+        }
+
+        var container = config.Containers[^1];
+        if (!container.PluginInstanceIds.Contains(instanceId))
+        {
+            container.PluginInstanceIds.Add(instanceId);
+            NormalizeContainers(config, _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot());
+            MarkChannelPresetCustom(config);
+            _configManager.Save(_config);
+        }
+    }
+
+    private void AssignPluginToContainer(int channelIndex, int instanceId, int containerId)
+    {
+        if (instanceId <= 0 || containerId <= 0)
+        {
+            return;
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        var container = config.Containers.FirstOrDefault(c => c.Id == containerId);
+        if (container is null)
+        {
+            return;
+        }
+
+        if (!container.PluginInstanceIds.Contains(instanceId))
+        {
+            container.PluginInstanceIds.Add(instanceId);
+            NormalizeContainers(config, _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot());
+            MarkChannelPresetCustom(config);
+            _configManager.Save(_config);
+        }
+    }
+
+    private void RemovePluginFromContainers(int channelIndex, int instanceId)
+    {
+        if (instanceId <= 0)
+        {
+            return;
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        if (config.Containers.Count == 0)
+        {
+            return;
+        }
+
+        bool changed = false;
+        for (int i = 0; i < config.Containers.Count; i++)
+        {
+            var container = config.Containers[i];
+            if (container.PluginInstanceIds.Remove(instanceId))
+            {
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            NormalizeContainers(config, _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot());
+            MarkChannelPresetCustom(config);
+            _configManager.Save(_config);
+        }
+    }
+
+    private void UpdatePluginConfig(int channelIndex, int slotIndex, int instanceId, IPlugin plugin)
     {
         var config = GetOrCreateChannelConfig(channelIndex);
-        EnsurePluginListCapacity(config, slotIndex + 1);
 
         var pluginConfig = new PluginConfig
         {
+            InstanceId = instanceId,
             Type = plugin.Id,
             IsBypassed = plugin.IsBypassed,
             PresetName = PluginPresetManager.CustomPresetName,
@@ -2032,25 +3037,42 @@ public partial class MainViewModel : ObservableObject, IDisposable
             State = plugin.GetState()
         };
 
-        config.Plugins[slotIndex] = pluginConfig;
+        if (slotIndex < 0)
+        {
+            slotIndex = 0;
+        }
+
+        if (slotIndex >= config.Plugins.Count)
+        {
+            EnsurePluginListCapacity(config, slotIndex + 1);
+            config.Plugins[slotIndex] = pluginConfig;
+        }
+        else
+        {
+            config.Plugins.Insert(slotIndex, pluginConfig);
+        }
+        RebuildPluginIndexMap(config, GetPluginIndexMap(channelIndex));
         MarkChannelPresetCustom(config);
         _configManager.Save(_config);
     }
 
-    private void RemovePluginConfig(int channelIndex, int slotIndex)
+    private void RemovePluginConfig(int channelIndex, int instanceId)
     {
         var config = GetOrCreateChannelConfig(channelIndex);
+        int slotIndex = GetPluginConfigIndex(channelIndex, instanceId);
         if (slotIndex >= 0 && slotIndex < config.Plugins.Count)
         {
             config.Plugins.RemoveAt(slotIndex);
         }
+        RebuildPluginIndexMap(config, GetPluginIndexMap(channelIndex));
         MarkChannelPresetCustom(config);
         _configManager.Save(_config);
     }
 
-    private void MovePluginConfig(int channelIndex, int fromIndex, int toIndex)
+    private void MovePluginConfig(int channelIndex, int instanceId, int toIndex)
     {
         var config = GetOrCreateChannelConfig(channelIndex);
+        int fromIndex = GetPluginConfigIndex(channelIndex, instanceId);
         if ((uint)fromIndex >= (uint)config.Plugins.Count)
         {
             return;
@@ -2073,13 +3095,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var item = config.Plugins[fromIndex];
         config.Plugins.RemoveAt(fromIndex);
         config.Plugins.Insert(toIndex, item);
+        RebuildPluginIndexMap(config, GetPluginIndexMap(channelIndex));
         MarkChannelPresetCustom(config);
         _configManager.Save(_config);
     }
 
-    private void UpdatePluginParameterConfig(int channelIndex, int slotIndex, string parameterName, float value, bool markPresetDirty)
+    private void UpdatePluginParameterConfig(int channelIndex, int instanceId, string parameterName, float value, bool markPresetDirty)
     {
         var config = GetOrCreateChannelConfig(channelIndex);
+        int slotIndex = GetPluginConfigIndex(channelIndex, instanceId);
         if (slotIndex < 0 || slotIndex >= config.Plugins.Count)
         {
             return;
@@ -2098,7 +3122,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _configManager.Save(_config);
     }
 
-    private void UpdatePluginStateConfig(int channelIndex, int slotIndex)
+    private void UpdatePluginStateConfig(int channelIndex, int instanceId)
     {
         if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
         {
@@ -2106,35 +3130,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var strip = _audioEngine.Channels[channelIndex];
-        var slots = strip.PluginChain.GetSnapshot();
-        if ((uint)slotIndex >= (uint)slots.Length)
-        {
-            return;
-        }
-
-        var plugin = slots[slotIndex];
-        if (plugin is null)
+        if (!strip.PluginChain.TryGetSlotById(instanceId, out var slot, out _)
+            || slot is null)
         {
             return;
         }
 
         var config = GetOrCreateChannelConfig(channelIndex);
+        int slotIndex = GetPluginConfigIndex(channelIndex, instanceId);
         if (slotIndex >= config.Plugins.Count)
         {
             return;
         }
-        config.Plugins[slotIndex].State = plugin.GetState();
+        config.Plugins[slotIndex].State = slot.Plugin.GetState();
         _configManager.Save(_config);
     }
 
-    private void UpdatePluginBypassConfig(int channelIndex, int slotIndex, int slotToken, bool bypass)
+    private void UpdatePluginBypassConfig(int channelIndex, int instanceId, bool bypass)
     {
-        if (!IsSlotTokenMatch(channelIndex, slotIndex, slotToken))
-        {
-            return;
-        }
-
         var config = GetOrCreateChannelConfig(channelIndex);
+        int slotIndex = GetPluginConfigIndex(channelIndex, instanceId);
         if (slotIndex < 0 || slotIndex >= config.Plugins.Count)
         {
             return;
@@ -2172,9 +3187,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
         window.Show();
     }
 
+    public void AddContainer(int channelIndex)
+    {
+        CreateContainer(channelIndex, openWindow: true);
+    }
+
     public void Dispose()
     {
         _meterTimer.Stop();
+        foreach (var window in _containerWindows.Values)
+        {
+            window.Close();
+        }
+        _containerWindows.Clear();
         _midiManager?.Dispose();
         _audioEngine.Dispose();
         _analysisOrchestrator.Dispose();
@@ -2250,6 +3275,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var config = GetOrCreateChannelConfig(channelIndex);
         var plugins = new List<(string pluginId, Dictionary<string, float> parameters)>();
+        var containers = new List<ChainPresetContainer>();
 
         foreach (var pluginConfig in config.Plugins)
         {
@@ -2262,7 +3288,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
             plugins.Add((pluginConfig.Type, parameters));
         }
 
-        if (_presetManager.SaveChainPreset(presetName, plugins))
+        if (config.Containers.Count > 0)
+        {
+            var indexMap = new Dictionary<int, int>();
+            for (int i = 0; i < config.Plugins.Count; i++)
+            {
+                int instanceId = config.Plugins[i].InstanceId;
+                if (instanceId > 0 && !indexMap.ContainsKey(instanceId))
+                {
+                    indexMap[instanceId] = i;
+                }
+            }
+
+            foreach (var container in config.Containers)
+            {
+                var indices = new List<int>();
+                foreach (var instanceId in container.PluginInstanceIds)
+                {
+                    if (indexMap.TryGetValue(instanceId, out int index))
+                    {
+                        indices.Add(index);
+                    }
+                }
+
+                containers.Add(new ChainPresetContainer(container.Name, indices, container.IsBypassed));
+            }
+        }
+
+        if (_presetManager.SaveChainPreset(presetName, plugins, containers))
         {
             config.PresetName = presetName;
             _configManager.Save(_config);
@@ -2333,7 +3386,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private float GetPluginParameterValue(int channelIndex, int slotIndex, string parameterName, float fallback)
+    private float GetPluginParameterValue(int channelIndex, int instanceId, string parameterName, float fallback)
     {
         if (channelIndex >= _config.Channels.Count)
         {
@@ -2341,7 +3394,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var channel = _config.Channels[channelIndex];
-        if (slotIndex >= channel.Plugins.Count)
+        int slotIndex = GetPluginConfigIndex(channelIndex, instanceId);
+        if (slotIndex < 0 || slotIndex >= channel.Plugins.Count)
         {
             return fallback;
         }

@@ -52,6 +52,12 @@ public sealed class BassEnhancerPlugin : IContextualPlugin, ISidechainConsumer, 
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
+    public float Amount => _amount;
+    public float Drive => _drive;
+    public float Mix => _mix;
+    public float CenterHz => _centerHz;
+    public int SampleRate => _sampleRate;
+
     public void SetSidechainAvailable(bool available)
     {
         Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);
