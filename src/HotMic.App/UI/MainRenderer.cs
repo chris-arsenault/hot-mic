@@ -73,6 +73,7 @@ public sealed class MainRenderer
     private SKRect _preset1DropdownRect;
     private SKRect _preset2DropdownRect;
     private SKRect _masterMeterRect;
+    private SKRect _visualizerButtonRect;
 
     public MainRenderer()
     {
@@ -735,6 +736,11 @@ public sealed class MainRenderer
         DrawToggleButton(canvas, muteRect, "M", viewModel.MasterMuted, _mutePaint);
         _toggleRects.Add(new ToggleRect(-1, ToggleType.MasterMute, muteRect));
 
+        // Visualizer button
+        float vizY = muteY + toggleSpacing;
+        _visualizerButtonRect = new SKRect(toggleX, vizY, toggleX + ToggleSize, vizY + ToggleSize);
+        DrawVisualizerButton(canvas, _visualizerButtonRect);
+
         // Readings at bottom
         float dbY = y + height - 8f;
         string leftLabel = $"{leftReadout:0.0}";
@@ -1054,6 +1060,35 @@ public sealed class MainRenderer
         canvas.DrawText(label, rect.MidX, rect.MidY + 3f, textPaint);
     }
 
+    private void DrawVisualizerButton(SKCanvas canvas, SKRect rect)
+    {
+        var roundRect = new SKRoundRect(rect, 3f);
+        canvas.DrawRoundRect(roundRect, _buttonPaint);
+        canvas.DrawRoundRect(roundRect, _borderPaint);
+
+        // Draw a small waveform icon
+        float midY = rect.MidY;
+        float left = rect.Left + 3f;
+        float right = rect.Right - 3f;
+        float amp = rect.Height * 0.25f;
+
+        using var path = new SKPath();
+        path.MoveTo(left, midY);
+        path.LineTo(left + 3f, midY - amp);
+        path.LineTo(left + 6f, midY + amp);
+        path.LineTo(left + 9f, midY - amp * 0.5f);
+        path.LineTo(right, midY);
+
+        using var iconPaint = new SKPaint
+        {
+            Color = _theme.Accent,
+            StrokeWidth = 1.5f,
+            Style = SKPaintStyle.Stroke,
+            IsAntialias = true
+        };
+        canvas.DrawPath(path, iconPaint);
+    }
+
     private void DrawMinimal(SKCanvas canvas, SKSize size, MainViewModel viewModel)
     {
         float y = TitleBarHeight + Padding;
@@ -1228,6 +1263,8 @@ public sealed class MainRenderer
     }
 
     public bool HitTestMasterMeter(float x, float y) => _masterMeterRect.Contains(x, y);
+
+    public bool HitTestVisualizerButton(float x, float y) => _visualizerButtonRect.Contains(x, y);
 
     public bool HitTestMeterScaleToggle(float x, float y) => _meterScaleToggleRect.Contains(x, y);
 

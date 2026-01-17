@@ -571,9 +571,14 @@ public sealed class SignalGeneratorPlugin : IPlugin
         s.SamplePlayer.SetTrimEnd(s.SampleTrimEnd);
     }
 
-    #region Sample Loading
+    #region Sample Loading and Persistence
 
     private record SampleLoadRequest(int SlotIndex, float[] Samples, int SampleRate);
+
+    /// <summary>
+    /// Event raised when a sample is loaded or captured, for UI to trigger auto-save.
+    /// </summary>
+    public event Action<int>? SampleLoaded;
 
     /// <summary>
     /// Queue a sample file for loading into a slot (call from UI thread).
@@ -584,6 +589,36 @@ public sealed class SignalGeneratorPlugin : IPlugin
         _loadQueue.Enqueue(new SampleLoadRequest(slotIndex, samples, sampleRate));
     }
 
+    /// <summary>
+    /// Get sample data for persistence (call from UI thread).
+    /// Returns null if no sample loaded.
+    /// </summary>
+    public (float[] Samples, int SampleRate)? GetSampleData(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= SlotCount) return null;
+        var buffer = _sampleBuffers[slotIndex];
+        if (!buffer.IsLoaded) return null;
+        return (buffer.ExportSamples(), buffer.SampleRate);
+    }
+
+    /// <summary>
+    /// Check if a sample is loaded in the specified slot.
+    /// </summary>
+    public bool HasSample(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= SlotCount) return false;
+        return _sampleBuffers[slotIndex].IsLoaded;
+    }
+
+    /// <summary>
+    /// Reset sample playback position to start.
+    /// </summary>
+    public void ResetSamplePlayback(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= SlotCount) return;
+        _slots[slotIndex].SamplePlayer.Reset();
+    }
+
     private void ProcessLoadQueue()
     {
         while (_loadQueue.TryDequeue(out var request))
@@ -592,6 +627,7 @@ public sealed class SignalGeneratorPlugin : IPlugin
             {
                 _sampleBuffers[request.SlotIndex].Load(request.Samples, request.SampleRate);
                 _slots[request.SlotIndex].SamplePlayer.Reset();
+                SampleLoaded?.Invoke(request.SlotIndex);
             }
         }
     }
@@ -679,6 +715,7 @@ public sealed class SignalGeneratorPlugin : IPlugin
         {
             _sampleBuffers[slotIndex].Load(temp.AsSpan(0, read), _sampleRate);
             _slots[slotIndex].SamplePlayer.Reset();
+            SampleLoaded?.Invoke(slotIndex);
         }
     }
 

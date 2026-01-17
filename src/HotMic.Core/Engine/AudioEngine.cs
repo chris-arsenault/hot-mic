@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using HotMic.Common.Configuration;
+using HotMic.Core.Analysis;
 using HotMic.Core.Metering;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Threading;
@@ -70,6 +71,8 @@ public sealed class AudioEngine : IDisposable
     private int _isRecovering;
     private int _isStopping;
 
+    private readonly AnalysisTap _analysisTap = new();
+
     public event EventHandler<DeviceDisconnectedEventArgs>? DeviceDisconnected;
     public event EventHandler<DeviceRecoveredEventArgs>? DeviceRecovered;
 
@@ -100,6 +103,11 @@ public sealed class AudioEngine : IDisposable
     public int SampleRate => _sampleRate;
 
     public int BlockSize => _blockSize;
+
+    /// <summary>
+    /// Gets the analysis tap for attaching visualizers.
+    /// </summary>
+    public AnalysisTap AnalysisTap => _analysisTap;
 
     /// <summary>
     /// K-weighted LUFS meter for the master left output channel.
@@ -154,6 +162,7 @@ public sealed class AudioEngine : IDisposable
             () => (OutputRoutingMode)Volatile.Read(ref _outputRoutingMode),
             _masterLufsLeft,
             _masterLufsRight,
+            _analysisTap,
             outputFormat);
 
         _output = new WasapiOut(outputDevice, AudioClientShareMode.Shared, true, _latencyMs);
@@ -754,6 +763,7 @@ public sealed class AudioEngine : IDisposable
         private int _masterMuted;
         private readonly LufsMeterProcessor _masterLufsLeft;
         private readonly LufsMeterProcessor _masterLufsRight;
+        private readonly AnalysisTap _analysisTap;
 
         private readonly Action<int> _reportOutput;
         private readonly Action<int> _reportUnderflow1;
@@ -772,6 +782,7 @@ public sealed class AudioEngine : IDisposable
             Func<OutputRoutingMode> getRoutingMode,
             LufsMeterProcessor masterLufsLeft,
             LufsMeterProcessor masterLufsRight,
+            AnalysisTap analysisTap,
             WaveFormat waveFormat)
         {
             _channels = channels;
@@ -785,6 +796,7 @@ public sealed class AudioEngine : IDisposable
             _getRoutingMode = getRoutingMode;
             _masterLufsLeft = masterLufsLeft;
             _masterLufsRight = masterLufsRight;
+            _analysisTap = analysisTap;
             WaveFormat = waveFormat;
             _channel1Buffer = new float[blockSize];
             _channel2Buffer = new float[blockSize];
@@ -825,6 +837,10 @@ public sealed class AudioEngine : IDisposable
                 bool soloActive = _channels[0].IsSoloed || _channels[1].IsSoloed;
                 _channels[0].Process(ch1Span, soloActive && !_channels[0].IsSoloed);
                 _channels[1].Process(ch2Span, soloActive && !_channels[1].IsSoloed);
+
+                // Capture post-chain audio for visualizers (zero overhead when no consumers)
+                _analysisTap.Capture(ch1Span, 0);
+                _analysisTap.Capture(ch2Span, 1);
 
                 var outputSlice = output.Slice(processed * 2, chunk * 2);
                 bool muted = Volatile.Read(ref _masterMuted) != 0;

@@ -381,8 +381,7 @@ public sealed class VocalSpectrographRenderer : IDisposable
         };
         _bitmapPaint = new SKPaint
         {
-            IsAntialias = true,
-            FilterQuality = SKFilterQuality.Medium
+            IsAntialias = true
         };
 
         // Bloom: blur the image and add it back with additive blend for glow on bright regions

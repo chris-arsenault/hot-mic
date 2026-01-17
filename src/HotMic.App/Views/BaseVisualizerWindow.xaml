@@ -1,0 +1,11 @@
+<Window x:Class="HotMic.App.Views.BaseVisualizerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Visualizer"
+        Width="800" Height="500"
+        WindowStyle="None"
+        Background="#FF0A0D12"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner">
+  <Grid x:Name="SkiaHost" />
+</Window>

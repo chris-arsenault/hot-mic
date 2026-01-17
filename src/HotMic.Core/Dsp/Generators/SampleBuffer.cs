@@ -79,6 +79,17 @@ public sealed class SampleBuffer
     /// Get the underlying sample array for direct access.
     /// </summary>
     public ReadOnlySpan<float> Samples => new ReadOnlySpan<float>(_samples, 0, _length);
+
+    /// <summary>
+    /// Export sample data as a new array (for persistence).
+    /// </summary>
+    public float[] ExportSamples()
+    {
+        if (_length == 0) return Array.Empty<float>();
+        var result = new float[_length];
+        Array.Copy(_samples, 0, result, 0, _length);
+        return result;
+    }
 }
 
 /// <summary>

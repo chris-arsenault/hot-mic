@@ -1,74 +1,72 @@
-﻿VowelSpace] SKIP: opacity=0.00, smoothF1=573, smoothF2=1661
-[WriteOverlay] formantCount=3: F1=177Hz, F2=1740Hz, F3=2608Hz
-[BeamSearch] Found 5 formants: F1=141Hz, F2=1756Hz, F3=2580Hz, F4=3440Hz, F5=4824Hz
-[VowelSpace] raw F1=266, F2=1791, valid=True, frameIndex=1235
-[VowelSpace] DRAW: xNorm=0.54, yNorm=0.12, x=1321, y=209, alpha=255
-[BeamSearch] Found 5 formants: F1=272Hz, F2=1781Hz, F3=2607Hz, F4=3417Hz, F5=4852Hz
-[WriteOverlay] formantCount=5: F1=325Hz, F2=1788Hz, F3=2599Hz
-[BeamSearch] Found 5 formants: F1=350Hz, F2=1739Hz, F3=2576Hz, F4=3369Hz, F5=4877Hz
-[BeamSearch] Found 5 formants: F1=285Hz, F2=1858Hz, F3=2570Hz, F4=3646Hz, F5=4921Hz
-[VowelSpace] raw F1=216, F2=889, valid=True, frameIndex=1235
-[VowelSpace] DRAW: xNorm=0.16, yNorm=0.03, x=1258, y=224, alpha=255
-[BeamSearch] Found 3 formants: F1=215Hz, F2=911Hz, F3=2463Hz
-[BeamSearch] Found 3 formants: F1=253Hz, F2=855Hz, F3=2640Hz
-[WriteOverlay] formantCount=4: F1=243Hz, F2=872Hz, F3=2643Hz
-[BeamSearch] Found 5 formants: F1=221Hz, F2=881Hz, F3=2633Hz, F4=3653Hz, F5=4756Hz
-[BeamSearch] Found 5 formants: F1=202Hz, F2=850Hz, F3=2550Hz, F4=3706Hz, F5=4803Hz
-[WriteOverlay] formantCount=3: F1=224Hz, F2=901Hz, F3=2438Hz
-[VowelSpace] raw F1=212, F2=836, valid=True, frameIndex=1235
-[VowelSpace] DRAW: xNorm=0.11, yNorm=0.01, x=1250, y=226, alpha=255
-[BeamSearch] Found 3 formants: F1=219Hz, F2=703Hz, F3=2400Hz
-[BeamSearch] Found 4 formants: F1=255Hz, F2=2625Hz, F3=3430Hz, F4=5042Hz
-[BeamSearch] Found 5 formants: F1=244Hz, F2=1692Hz, F3=2597Hz, F4=3396Hz, F5=5228Hz
-[WriteOverlay] formantCount=5: F1=243Hz, F2=1435Hz, F3=2510Hz
-[BeamSearch] Found 5 formants: F1=241Hz, F2=1331Hz, F3=2590Hz, F4=3503Hz, F5=4804Hz
-[VowelSpace] raw F1=241, F2=1396, valid=True, frameIndex=1235
-[VowelSpace] DRAW: xNorm=0.44, yNorm=0.06, x=1304, y=219, alpha=255
-[BeamSearch] Found 5 formants: F1=282Hz, F2=1945Hz, F3=2647Hz, F4=3820Hz, F5=5327Hz
+﻿[FormantGate] voiced=Voiced, pitchConf=0.88, energyDb=-37.7, zcr=0.018, flat=0.126, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantLpc] bufferLen=1024, lpcLen=1024, windowSamples=1024
+[FormantLpc] decimatedLen=256, lpcSr=12000, decim=2
+[FormantGate] voiced=Silence, pitchConf=0.92, energyDb=-49.6, zcr=0.038, flat=0.156, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantGate] voiced=Silence, pitchConf=0.86, energyDb=-46.5, zcr=0.047, flat=0.140, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantGate] voiced=Silence, pitchConf=0.87, energyDb=-44.1, zcr=0.015, flat=0.136, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
 [VowelSpace] raw F1=0, F2=0, valid=False, frameIndex=1235
-[VowelSpace] DRAW: xNorm=0.51, yNorm=0.32, x=1315, y=180, alpha=90
+[VowelSpace] SKIP: opacity=0.00, smoothF1=0, smoothF2=0
+[FormantGate] voiced=Silence, pitchConf=0.88, energyDb=-48.5, zcr=0.062, flat=0.172, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantGate] voiced=Silence, pitchConf=0.94, energyDb=-46.8, zcr=0.028, flat=0.142, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantGate] voiced=Silence, pitchConf=0.89, energyDb=-45.2, zcr=0.048, flat=0.131, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
 [VowelSpace] raw F1=0, F2=0, valid=False, frameIndex=1235
-[VowelSpace] SKIP: opacity=0.00, smoothF1=453, smoothF2=1714
+[VowelSpace] SKIP: opacity=0.00, smoothF1=0, smoothF2=0
+[BeamSearch] Found 5 formants: F1=339Hz, F2=997Hz, F3=1597Hz, F4=2088Hz, F5=2417Hz
+[FormantGate] voiced=Voiced, pitchConf=0.99, energyDb=-20.9, zcr=0.019, flat=0.050, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantLpc] bufferLen=1024, lpcLen=1024, windowSamples=1024
+[FormantLpc] decimatedLen=256, lpcSr=12000, decim=2
+[BeamSearch] Found 5 formants: F1=264Hz, F2=777Hz, F3=1235Hz, F4=1603Hz, F5=1842Hz
+[BeamSearch] Found 5 formants: F1=254Hz, F2=757Hz, F3=1197Hz, F4=1556Hz, F5=1787Hz
+[FormantGate] voiced=Voiced, pitchConf=1.00, energyDb=-20.0, zcr=0.011, flat=0.055, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantLpc] bufferLen=1024, lpcLen=1024, windowSamples=1024
+[FormantLpc] decimatedLen=256, lpcSr=12000, decim=2
+[BeamSearch] Found 5 formants: F1=244Hz, F2=717Hz, F3=1141Hz, F4=1477Hz, F5=1694Hz
+[BeamSearch] Found 2 formants: F1=660Hz, F2=1147Hz
+[FormantGate] voiced=Voiced, pitchConf=1.00, energyDb=-22.2, zcr=0.017, flat=0.054, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantLpc] bufferLen=1024, lpcLen=1024, windowSamples=1024
+[FormantLpc] decimatedLen=256, lpcSr=12000, decim=2
+[VowelSpace] raw F1=297, F2=454, valid=False, frameIndex=1235
+[VowelSpace] DRAW: xNorm=0.80, yNorm=0.74, x=1563, y=115, alpha=251
+[BeamSearch] Found 5 formants: F1=240Hz, F2=561Hz, F3=959Hz, F4=1203Hz, F5=1392Hz
+[FormantGate] voiced=Voiced, pitchConf=1.00, energyDb=-21.4, zcr=0.012, flat=0.031, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantLpc] bufferLen=1024, lpcLen=1024, windowSamples=1024
+[FormantLpc] decimatedLen=256, lpcSr=12000, decim=2
+[BeamSearch] Found 2 formants: F1=564Hz, F2=971Hz
+[BeamSearch] Found 3 formants: F1=348Hz, F2=932Hz, F3=1184Hz
+[FormantGate] voiced=Voiced, pitchConf=1.00, energyDb=-20.6, zcr=0.012, flat=0.035, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantLpc] bufferLen=1024, lpcLen=1024, windowSamples=1024
+[FormantLpc] decimatedLen=256, lpcSr=12000, decim=2
+[BeamSearch] Found 5 formants: F1=198Hz, F2=606Hz, F3=946Hz, F4=1232Hz, F5=1405Hz
+[BeamSearch] Found 5 formants: F1=399Hz, F2=1179Hz, F3=1901Hz, F4=2509Hz, F5=2927Hz
+[FormantGate] voiced=Voiced, pitchConf=0.99, energyDb=-22.3, zcr=0.037, flat=0.052, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantLpc] bufferLen=1024, lpcLen=1024, windowSamples=1024
+[FormantLpc] decimatedLen=256, lpcSr=12000, decim=2
+[BeamSearch] Found 5 formants: F1=387Hz, F2=1142Hz, F3=1837Hz, F4=2419Hz, F5=2817Hz
+[VowelSpace] raw F1=358, F2=1054, valid=True, frameIndex=1235
+[VowelSpace] DRAW: xNorm=0.65, yNorm=0.76, x=1538, y=112, alpha=255
+[BeamSearch] Found 5 formants: F1=382Hz, F2=1127Hz, F3=1812Hz, F4=2384Hz, F5=2774Hz
+[FormantGate] voiced=Voiced, pitchConf=0.98, energyDb=-24.9, zcr=0.054, flat=0.069, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantLpc] bufferLen=1024, lpcLen=1024, windowSamples=1024
+[FormantLpc] decimatedLen=256, lpcSr=12000, decim=2
+[BeamSearch] Found 5 formants: F1=563Hz, F2=1686Hz, F3=2801Hz, F4=3892Hz, F5=4887Hz
+[FormantGate] voiced=Voiced, pitchConf=1.00, energyDb=-15.5, zcr=0.016, flat=0.080, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantLpc] bufferLen=1024, lpcLen=1024, windowSamples=1024
+[FormantLpc] decimatedLen=256, lpcSr=12000, decim=2
+[BeamSearch] 5 candidates: 498Hz(bw=444,mag=0.89), 1483Hz(bw=409,mag=0.90), 2427Hz(bw=336,mag=0.92), 3279Hz(bw=220,mag=0.94), 3925Hz(bw=77,mag=0.98)
+[BeamSearch] 5 candidates: 544Hz(bw=668,mag=0.84), 1626Hz(bw=632,mag=0.85), 2688Hz(bw=551,mag=0.87), 3698Hz(bw=407,mag=0.90), 4545Hz(bw=175,mag=0.96)
+[FormantGate] voiced=Voiced, pitchConf=1.00, energyDb=-19.9, zcr=0.014, flat=0.066, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantLpc] bufferLen=1024, lpcLen=1024, windowSamples=1024
+[FormantLpc] decimatedLen=256, lpcSr=12000, decim=2
+[BeamSearch] 5 candidates: 438Hz(bw=295,mag=0.93), 1299Hz(bw=266,mag=0.93), 2105Hz(bw=207,mag=0.95), 2799Hz(bw=124,mag=0.97), 3290Hz(bw=39,mag=0.99)
+[BeamSearch] 5 candidates: 545Hz(bw=679,mag=0.84), 1630Hz(bw=642,mag=0.85), 2696Hz(bw=562,mag=0.86), 3711Hz(bw=417,mag=0.90), 4567Hz(bw=181,mag=0.95)
+[FormantGate] voiced=Silence, pitchConf=0.88, energyDb=-44.9, zcr=0.028, flat=0.123, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
 [VowelSpace] raw F1=0, F2=0, valid=False, frameIndex=1235
-[VowelSpace] SKIP: opacity=0.00, smoothF1=453, smoothF2=1714
+[VowelSpace] DRAW: xNorm=0.47, yNorm=0.62, x=1509, y=134, alpha=224
+[FormantGate] voiced=Silence, pitchConf=0.00, energyDb=-47.4, zcr=0.034, flat=0.134, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantGate] voiced=Silence, pitchConf=0.94, energyDb=-49.5, zcr=0.031, flat=0.144, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantGate] voiced=Silence, pitchConf=0.89, energyDb=-44.7, zcr=0.019, flat=0.125, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantGate] voiced=Silence, pitchConf=0.00, energyDb=-49.2, zcr=0.028, flat=0.153, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
 [VowelSpace] raw F1=0, F2=0, valid=False, frameIndex=1235
-[VowelSpace] SKIP: opacity=0.00, smoothF1=453, smoothF2=1714
-[VowelSpace] raw F1=0, F2=0, valid=False, frameIndex=1235
-[VowelSpace] SKIP: opacity=0.00, smoothF1=453, smoothF2=1714
-[VowelSpace] raw F1=0, F2=0, valid=False, frameIndex=1235
-[VowelSpace] SKIP: opacity=0.00, smoothF1=453, smoothF2=1714
-[VowelSpace] raw F1=0, F2=0, valid=False, frameIndex=1235
-[VowelSpace] SKIP: opacity=0.00, smoothF1=453, smoothF2=1714
-[BeamSearch] Found 5 formants: F1=346Hz, F2=1775Hz, F3=2623Hz, F4=3521Hz, F5=4723Hz
-[WriteOverlay] formantCount=5: F1=346Hz, F2=1775Hz, F3=2623Hz
-[VowelSpace] raw F1=318, F2=1753, valid=True, frameIndex=1235
-[VowelSpace] DRAW: xNorm=0.53, yNorm=0.12, x=1318, y=209, alpha=255
-[BeamSearch] Found 4 formants: F1=340Hz, F2=1755Hz, F3=2532Hz, F4=3518Hz
-[BeamSearch] Found 5 formants: F1=331Hz, F2=1764Hz, F3=2570Hz, F4=3352Hz, F5=4681Hz
-[WriteOverlay] formantCount=5: F1=331Hz, F2=1764Hz, F3=2570Hz
-[BeamSearch] Found 5 formants: F1=343Hz, F2=1738Hz, F3=2641Hz, F4=3682Hz, F5=4911Hz
-[BeamSearch] Found 4 formants: F1=232Hz, F2=1023Hz, F3=2574Hz, F4=4297Hz
-[WriteOverlay] formantCount=4: F1=232Hz, F2=1023Hz, F3=2574Hz
-[VowelSpace] raw F1=243, F2=909, valid=True, frameIndex=1235
-[VowelSpace] DRAW: xNorm=0.14, yNorm=0.04, x=1256, y=222, alpha=255
-[BeamSearch] Found 5 formants: F1=233Hz, F2=888Hz, F3=2511Hz, F4=3580Hz, F5=4842Hz
-[BeamSearch] Found 3 formants: F1=231Hz, F2=945Hz, F3=2380Hz
-[WriteOverlay] formantCount=3: F1=231Hz, F2=945Hz, F3=2380Hz
-[BeamSearch] Found 3 formants: F1=238Hz, F2=896Hz, F3=2566Hz
-[BeamSearch] Found 5 formants: F1=246Hz, F2=917Hz, F3=2549Hz, F4=3798Hz, F5=4872Hz
-[WriteOverlay] formantCount=5: F1=246Hz, F2=917Hz, F3=2549Hz
-[VowelSpace] raw F1=348, F2=1468, valid=True, frameIndex=1235
-[VowelSpace] DRAW: xNorm=0.25, yNorm=0.11, x=1273, y=211, alpha=255
-[BeamSearch] Found 5 formants: F1=238Hz, F2=2110Hz, F3=2673Hz, F4=3417Hz, F5=5249Hz
-[BeamSearch] Found 4 formants: F1=237Hz, F2=1513Hz, F3=2580Hz, F4=4779Hz
-[WriteOverlay] formantCount=4: F1=237Hz, F2=1513Hz, F3=2580Hz
-[BeamSearch] Found 4 formants: F1=260Hz, F2=2618Hz, F3=3539Hz, F4=5315Hz
-[BeamSearch] Found 5 formants: F1=246Hz, F2=1573Hz, F3=2641Hz, F4=3752Hz, F5=4911Hz
-[WriteOverlay] formantCount=5: F1=246Hz, F2=1573Hz, F3=2641Hz
-[BeamSearch] Found 5 formants: F1=234Hz, F2=1597Hz, F3=2626Hz, F4=3722Hz, F5=4905Hz
-[VowelSpace] raw F1=204, F2=1849, valid=True, frameIndex=1235
-[VowelSpace] DRAW: xNorm=0.50, yNorm=0.02, x=1314, y=225, alpha=255
-[VowelSpace] raw F1=0, F2=0, valid=False, frameIndex=1235
-[VowelSpace] DRAW: xNorm=0.50, yNorm=0.02, x=1314, y=225, alpha=25
-[VowelSpace] raw F1=0, F2=0, valid=False, frameIndex=1235
-[VowelSpace] SKIP: opacity=0.00, smoothF1=216, smoothF2=1696
+[VowelSpace] DRAW: xNorm=0.47, yNorm=0.62, x=1509, y=134, alpha=86
+[FormantGate] voiced=Silence, pitchConf=0.88, energyDb=-45.3, zcr=0.022, flat=0.118, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft
+[FormantGate] voiced=Silence, pitchConf=0.87, energyDb=-46.4, zcr=0.015, flat=0.145, lpcOk=True, beamOk=True, lpcOrder=10, lpcSr=12000, decim=2, ceiling=5000, profile=Male, preEmp=False, hpf=False, transform=Fft

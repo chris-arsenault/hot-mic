@@ -225,6 +225,36 @@ def main():
     signal = np.sin(2 * np.pi * 300 * t) + 0.25 * lcg_gaussian(5678, n)
     print("LPC Burg sine+noise, seed=5678:", fmt(burg_coeffs(signal, order)))
 
+    # Halfband resampler references (mixed-sine input, 32 samples)
+    taps = np.array(
+        [
+            -0.003651454,
+            0.0,
+            0.016179254,
+            0.0,
+            -0.068411775,
+            0.0,
+            0.304947525,
+            0.5018729,
+            0.304947525,
+            0.0,
+            -0.068411775,
+            0.0,
+            0.016179254,
+            0.0,
+            -0.003651454,
+        ],
+        dtype=np.float64,
+    )
+    n = 32
+    idx = np.arange(n, dtype=np.float64)
+    x = np.sin(2 * np.pi * 0.07 * idx) + 0.5 * np.sin(2 * np.pi * 0.21 * idx)
+    stage1 = np.convolve(x, taps, mode="full")[:n][::2]
+    stage2 = np.convolve(stage1, taps, mode="full")[: len(stage1)][::2]
+    print("Halfband input (mixed sine, n=32):", x.tolist())
+    print("Halfband downsample stage1:", stage1.tolist())
+    print("Halfband downsample stage2:", stage2.tolist())
+
 
 if __name__ == "__main__":
     main()

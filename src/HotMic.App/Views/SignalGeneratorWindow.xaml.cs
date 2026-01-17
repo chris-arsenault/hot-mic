@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -23,6 +24,11 @@ public partial class SignalGeneratorWindow : Window
     private float _smoothedOutputLevel;
     private readonly float[] _smoothedSlotLevels = new float[3];
 
+    // Sample persistence
+    private readonly string _sampleStoragePath;
+    private int _lastSavedSlot = -1;
+    private int _lastSavedSampleRate;
+
     public SignalGeneratorWindow(SignalGeneratorPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
         InitializeComponent();
@@ -36,6 +42,16 @@ public partial class SignalGeneratorWindow : Window
             PluginPresetManager.Default,
             ApplyPreset,
             GetCurrentParameters);
+
+        // Initialize sample storage path
+        var basePath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        _sampleStoragePath = Path.Combine(basePath, "HotMic", "signal-generator-sample.raw");
+
+        // Subscribe to sample loaded events for auto-save
+        _plugin.SampleLoaded += OnSampleLoaded;
+
+        // Try to load persisted sample on startup
+        TryLoadPersistedSample();
 
         var preferredSize = SignalGeneratorRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -51,6 +67,7 @@ public partial class SignalGeneratorWindow : Window
         {
             _renderTimer.Stop();
             _renderer.Dispose();
+            _plugin.SampleLoaded -= OnSampleLoaded;
         };
     }
 
@@ -191,7 +208,8 @@ public partial class SignalGeneratorWindow : Window
                 TrimStart = slotState.TrimStart,
                 TrimEnd = slotState.TrimEnd,
                 Level = _smoothedSlotLevels[i],
-                IsRecording = recordingSlot == i
+                IsRecording = recordingSlot == i,
+                HasSample = _plugin.HasSample(i)
             };
         }
 
@@ -284,6 +302,16 @@ public partial class SignalGeneratorWindow : Window
 
             case SignalGeneratorHitArea.LoadSampleButton:
                 LoadSampleFile(hit.SlotIndex);
+                e.Handled = true;
+                break;
+
+            case SignalGeneratorHitArea.SaveSampleButton:
+                SaveSampleToFile(hit.SlotIndex);
+                e.Handled = true;
+                break;
+
+            case SignalGeneratorHitArea.ReloadSampleButton:
+                ReloadPersistedSample(hit.SlotIndex);
                 e.Handled = true;
                 break;
         }
@@ -768,4 +796,152 @@ public partial class SignalGeneratorWindow : Window
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
     }
+
+    #region Sample Persistence
+
+    /// <summary>
+    /// Called when a sample is loaded or captured - auto-save to config location.
+    /// </summary>
+    private void OnSampleLoaded(int slotIndex)
+    {
+        // Dispatch to UI thread for safety
+        Dispatcher.BeginInvoke(() => AutoSaveSample(slotIndex));
+    }
+
+    private void AutoSaveSample(int slotIndex)
+    {
+        var data = _plugin.GetSampleData(slotIndex);
+        if (data == null) return;
+
+        try
+        {
+            var dir = Path.GetDirectoryName(_sampleStoragePath);
+            if (!string.IsNullOrWhiteSpace(dir))
+                Directory.CreateDirectory(dir);
+
+            using var fs = new FileStream(_sampleStoragePath, FileMode.Create, FileAccess.Write);
+            using var bw = new BinaryWriter(fs);
+
+            // Header: slot index, sample rate, sample count
+            bw.Write(slotIndex);
+            bw.Write(data.Value.SampleRate);
+            bw.Write(data.Value.Samples.Length);
+
+            // Sample data
+            foreach (var sample in data.Value.Samples)
+                bw.Write(sample);
+
+            _lastSavedSlot = slotIndex;
+            _lastSavedSampleRate = data.Value.SampleRate;
+        }
+        catch
+        {
+            // Silently ignore save errors
+        }
+    }
+
+    private void TryLoadPersistedSample()
+    {
+        if (!File.Exists(_sampleStoragePath)) return;
+
+        try
+        {
+            using var fs = new FileStream(_sampleStoragePath, FileMode.Open, FileAccess.Read);
+            using var br = new BinaryReader(fs);
+
+            int slotIndex = br.ReadInt32();
+            int sampleRate = br.ReadInt32();
+            int sampleCount = br.ReadInt32();
+
+            if (slotIndex < 0 || slotIndex >= 3 || sampleCount <= 0 || sampleCount > 480000)
+                return;
+
+            var samples = new float[sampleCount];
+            for (int i = 0; i < sampleCount; i++)
+                samples[i] = br.ReadSingle();
+
+            _plugin.LoadSampleAsync(slotIndex, samples, sampleRate);
+            _lastSavedSlot = slotIndex;
+            _lastSavedSampleRate = sampleRate;
+        }
+        catch
+        {
+            // Silently ignore load errors
+        }
+    }
+
+    private void SaveSampleToFile(int slotIndex)
+    {
+        var data = _plugin.GetSampleData(slotIndex);
+        if (data == null)
+        {
+            System.Windows.MessageBox.Show($"No sample loaded in Slot {slotIndex + 1}.", "Save Sample", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Filter = "WAV files (*.wav)|*.wav",
+            Title = $"Save Sample from Slot {slotIndex + 1}",
+            FileName = $"sample_slot{slotIndex + 1}.wav"
+        };
+
+        if (dialog.ShowDialog() != true)
+            return;
+
+        try
+        {
+            // Create 32-bit float WAV file (IEEE float format)
+            var format = WaveFormat.CreateIeeeFloatWaveFormat(data.Value.SampleRate, 1);
+            using var writer = new WaveFileWriter(dialog.FileName, format);
+            writer.WriteSamples(data.Value.Samples, 0, data.Value.Samples.Length);
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show($"Failed to save sample: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void ReloadPersistedSample(int slotIndex)
+    {
+        if (!File.Exists(_sampleStoragePath))
+        {
+            System.Windows.MessageBox.Show("No persisted sample found.", "Reload Sample", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            using var fs = new FileStream(_sampleStoragePath, FileMode.Open, FileAccess.Read);
+            using var br = new BinaryReader(fs);
+
+            int savedSlot = br.ReadInt32();
+            int sampleRate = br.ReadInt32();
+            int sampleCount = br.ReadInt32();
+
+            if (sampleCount <= 0 || sampleCount > 480000)
+            {
+                System.Windows.MessageBox.Show("Invalid persisted sample data.", "Reload Sample", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var samples = new float[sampleCount];
+            for (int i = 0; i < sampleCount; i++)
+                samples[i] = br.ReadSingle();
+
+            // Load into the requested slot (not necessarily the original slot)
+            _plugin.LoadSampleAsync(slotIndex, samples, sampleRate);
+
+            // Switch slot to sample type
+            int typeIndex = slotIndex * 20 + SignalGeneratorPlugin.TypeIndex;
+            _parameterCallback(typeIndex, (float)GeneratorType.Sample);
+            _presetHelper.MarkAsCustom();
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show($"Failed to reload sample: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    #endregion
 }

@@ -7,12 +7,14 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using HotMic.Common.Configuration;
 using HotMic.Common.Models;
+using HotMic.Core.Analysis;
 using HotMic.Core.Engine;
 using HotMic.Core.Midi;
 using HotMic.Core.Plugins;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Presets;
 using HotMic.App.Models;
+using HotMic.App.Views;
 using HotMic.App.Views;
 using HotMic.Vst3;
 
@@ -23,6 +25,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly ConfigManager _configManager = new();
     private readonly DeviceManager _deviceManager = new();
     private AudioEngine _audioEngine;
+    private readonly AnalysisOrchestrator _analysisOrchestrator = new();
     private MidiManager? _midiManager;
     private readonly DispatcherTimer _meterTimer;
     private AppConfig _config;
@@ -43,6 +46,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _config = _configManager.LoadOrDefault();
         _audioEngine = new AudioEngine(_config.AudioSettings);
+
+        // Connect analysis orchestrator to audio engine tap
+        _analysisOrchestrator.Initialize(_config.AudioSettings.SampleRate);
+        _audioEngine.AnalysisTap.Orchestrator = _analysisOrchestrator;
 
         Channel1 = new ChannelStripViewModel(0, "Channel 1", EnqueueParameterChange, slot => HandlePluginAction(0, slot), slot => RemovePlugin(0, slot), (from, to) => ReorderPlugins(0, from, to), (index, value) => UpdatePluginBypassConfig(0, index, value));
         Channel2 = new ChannelStripViewModel(1, "Channel 2", EnqueueParameterChange, slot => HandlePluginAction(1, slot), slot => RemovePlugin(1, slot), (from, to) => ReorderPlugins(1, from, to), (index, value) => UpdatePluginBypassConfig(1, index, value));
@@ -583,6 +590,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _audioEngine.Stop();
         _audioEngine.Dispose();
         _audioEngine = new AudioEngine(_config.AudioSettings);
+
+        // Reconnect analysis orchestrator to new engine
+        _analysisOrchestrator.Initialize(_config.AudioSettings.SampleRate);
+        _analysisOrchestrator.Reset();
+        _audioEngine.AnalysisTap.Orchestrator = _analysisOrchestrator;
 
         if (SelectedOutputDevice is null)
         {
@@ -2049,11 +2061,67 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _configManager.Save(_config);
     }
 
+    // Visualizer Window Methods
+    public void OpenSpectrogramWindow()
+    {
+        var window = new SpectrogramWindow(_analysisOrchestrator)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    public void OpenWaveformWindow()
+    {
+        var window = new WaveformWindow(_analysisOrchestrator)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    public void OpenPitchMeterWindow()
+    {
+        var window = new PitchMeterWindow(_analysisOrchestrator)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    public void OpenVowelSpaceWindow()
+    {
+        var window = new VowelSpaceWindow(_analysisOrchestrator)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    public void OpenSpeechCoachWindow()
+    {
+        var window = new SpeechCoachWindow(_analysisOrchestrator)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    public void OpenSingingCoachWindow()
+    {
+        var window = new SingingCoachWindow(_analysisOrchestrator)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
     public void Dispose()
     {
         _meterTimer.Stop();
         _midiManager?.Dispose();
         _audioEngine.Stop();
+        _analysisOrchestrator.Dispose();
     }
 
     public void AddMidiBinding(string targetPath, int ccNumber, int? channel, float minValue, float maxValue)

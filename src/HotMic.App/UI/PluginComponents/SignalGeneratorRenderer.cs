@@ -64,6 +64,9 @@ public sealed class SignalGeneratorRenderer : IDisposable
     private readonly SKRect[] _slotSweepToggleRects = new SKRect[3];
     private readonly SKRect[] _slotLoopModeRects = new SKRect[3];
     private readonly SKRect[] _slotRecordRects = new SKRect[3];
+    private readonly SKRect[] _slotSaveSampleRects = new SKRect[3];
+    private readonly SKRect[] _slotLoadSampleRects = new SKRect[3];
+    private readonly SKRect[] _slotReloadSampleRects = new SKRect[3];
     private SKRect _masterHeadroomRect;
 
     public SignalGeneratorRenderer(PluginComponentTheme? theme = null)
@@ -334,6 +337,9 @@ public sealed class SignalGeneratorRenderer : IDisposable
         SlotTrimEndKnobs[slotIndex].Center = offScreen;
         _slotSweepToggleRects[slotIndex] = SKRect.Empty;
         _slotLoopModeRects[slotIndex] = SKRect.Empty;
+        _slotSaveSampleRects[slotIndex] = SKRect.Empty;
+        _slotLoadSampleRects[slotIndex] = SKRect.Empty;
+        _slotReloadSampleRects[slotIndex] = SKRect.Empty;
 
         switch (slot.Type)
         {
@@ -465,7 +471,39 @@ public sealed class SignalGeneratorRenderer : IDisposable
             _ => "Loop"
         };
         canvas.DrawText(loopLabel, _slotLoopModeRects[slotIndex].MidX, centerY + 3, _valuePaint);
-        x += loopWidth + 6;
+        x += loopWidth + 4;
+
+        // Sample action buttons (Save/Load/Reload) - compact row
+        float btnWidth = 18f;
+        float btnHeight = 14f;
+        float btnY = centerY - btnHeight / 2;
+
+        // Save button
+        _slotSaveSampleRects[slotIndex] = new SKRect(x, btnY, x + btnWidth, btnY + btnHeight);
+        var saveRound = new SKRoundRect(_slotSaveSampleRects[slotIndex], 2f);
+        canvas.DrawRoundRect(saveRound, slot.HasSample ? _toggleOnPaint : _toggleOffPaint);
+        canvas.DrawRoundRect(saveRound, _borderPaint);
+        using (var savePaint = new SkiaTextPaint(slot.HasSample ? _theme.TextPrimary : _theme.TextMuted, 7f, SKFontStyle.Bold, SKTextAlign.Center))
+            canvas.DrawText("S", _slotSaveSampleRects[slotIndex].MidX, _slotSaveSampleRects[slotIndex].MidY + 2.5f, savePaint);
+        x += btnWidth + 2;
+
+        // Load button
+        _slotLoadSampleRects[slotIndex] = new SKRect(x, btnY, x + btnWidth, btnY + btnHeight);
+        var loadRound = new SKRoundRect(_slotLoadSampleRects[slotIndex], 2f);
+        canvas.DrawRoundRect(loadRound, _dropdownPaint);
+        canvas.DrawRoundRect(loadRound, _borderPaint);
+        using (var loadPaint = new SkiaTextPaint(_theme.TextSecondary, 7f, SKFontStyle.Bold, SKTextAlign.Center))
+            canvas.DrawText("L", _slotLoadSampleRects[slotIndex].MidX, _slotLoadSampleRects[slotIndex].MidY + 2.5f, loadPaint);
+        x += btnWidth + 2;
+
+        // Reload button
+        _slotReloadSampleRects[slotIndex] = new SKRect(x, btnY, x + btnWidth, btnY + btnHeight);
+        var reloadRound = new SKRoundRect(_slotReloadSampleRects[slotIndex], 2f);
+        canvas.DrawRoundRect(reloadRound, _dropdownPaint);
+        canvas.DrawRoundRect(reloadRound, _borderPaint);
+        using (var reloadPaint = new SkiaTextPaint(_theme.TextSecondary, 7f, SKFontStyle.Bold, SKTextAlign.Center))
+            canvas.DrawText("R", _slotReloadSampleRects[slotIndex].MidX, _slotReloadSampleRects[slotIndex].MidY + 2.5f, reloadPaint);
+        x += btnWidth + 4;
 
         // Speed knob
         SlotSpeedKnobs[slotIndex].Center = new SKPoint(x + TinyKnobRadius, centerY);
@@ -606,6 +644,15 @@ public sealed class SignalGeneratorRenderer : IDisposable
             if (_slotLoopModeRects[i].Contains(x, y))
                 return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotLoopModeDropdown, i);
 
+            if (_slotSaveSampleRects[i].Contains(x, y))
+                return new SignalGeneratorHitTest(SignalGeneratorHitArea.SaveSampleButton, i);
+
+            if (_slotLoadSampleRects[i].Contains(x, y))
+                return new SignalGeneratorHitTest(SignalGeneratorHitArea.LoadSampleButton, i);
+
+            if (_slotReloadSampleRects[i].Contains(x, y))
+                return new SignalGeneratorHitTest(SignalGeneratorHitArea.ReloadSampleButton, i);
+
             if (SlotSpeedKnobs[i].HitTest(x, y))
                 return new SignalGeneratorHitTest(SignalGeneratorHitArea.SlotSpeedKnob, i);
 
@@ -703,6 +750,7 @@ public struct SlotRenderState
     public float TrimEnd;
     public float Level;
     public bool IsRecording;
+    public bool HasSample;
 }
 
 public enum SignalGeneratorHitArea
@@ -733,7 +781,9 @@ public enum SignalGeneratorHitArea
     MasterGainKnob,
     MasterHeadroomDropdown,
     RecordButton,
-    LoadSampleButton
+    LoadSampleButton,
+    SaveSampleButton,
+    ReloadSampleButton
 }
 
 public record struct SignalGeneratorHitTest(SignalGeneratorHitArea Area, int SlotIndex);

@@ -4,6 +4,7 @@ using System.Threading;
 using HotMic.Core.Dsp.Analysis.Speech;
 using HotMic.Core.Dsp.Mapping;
 using HotMic.Core.Dsp.Spectrogram;
+using HotMic.Core.Dsp.Voice;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
@@ -12,7 +13,9 @@ public sealed partial class VocalSpectrographPlugin
     public void Initialize(int sampleRate, int blockSize)
     {
         _sampleRate = sampleRate;
-        _requestedLpcOrder = Math.Clamp(sampleRate / 1000 + 4, 8, 24);
+        _requestedLpcOrder = FormantProfileInfo.GetRecommendedLpcOrder(
+            (FormantProfile)Math.Clamp(_requestedFormantProfile, 0, 2),
+            MaxFormants);
         ConfigureAnalysis(force: true);
         EnsureAnalysisThread();
     }
@@ -497,16 +500,15 @@ public sealed partial class VocalSpectrographPlugin
 
         _formantDiagCounter++;
 
-#if HOTMIC_SPECTROGRAPH_DIAGNOSTICS
         if (_formantDiagCounter % 100 == 0 && needsFormants)
         {
             float rms = ComputeRms(_analysisBufferRaw);
             float energyDb = DspUtils.LinearToDb(rms);
             float zcr = ComputeZeroCrossingRate(_analysisBufferRaw);
             float flatness = ComputeSpectralFlatness(fftMagnitudes);
-            Console.WriteLine($"[FormantGate] voiced={voicing}, pitchConf={lastConfidence:F2}, energyDb={energyDb:F1}, zcr={zcr:F3}, flat={flatness:F3}, lpcOk={lpcOk}, beamOk={beamTrackerOk}, preEmp={_activePreEmphasisEnabled}, hpf={_activeHighPassEnabled}, transform={_activeTransformType}");
+            int lpcOrder = _lpcAnalyzer?.Order ?? 0;
+            Console.WriteLine($"[FormantGate] voiced={voicing}, pitchConf={lastConfidence:F2}, energyDb={energyDb:F1}, zcr={zcr:F3}, flat={flatness:F3}, lpcOk={lpcOk}, beamOk={beamTrackerOk}, lpcOrder={lpcOrder}, lpcSr={_activeLpcSampleRate}, decim={_activeLpcDecimationStages}, ceiling={_activeFormantCeilingHz:F0}, profile={_activeFormantProfile}, preEmp={_activePreEmphasisEnabled}, hpf={_activeHighPassEnabled}, transform={_activeTransformType}");
         }
-#endif
 
         if (needsFormants && lpcOk && beamTrackerOk && voiced)
         {
@@ -518,6 +520,10 @@ public sealed partial class VocalSpectrographPlugin
             int bufferLen = _analysisBufferRaw.Length;
             int lpcLen = Math.Min(_lpcWindowSamples, bufferLen);
             int lpcStart = bufferLen - lpcLen; // Use most recent samples
+            if (_formantDiagCounter % 100 == 0)
+            {
+                Console.WriteLine($"[FormantLpc] bufferLen={bufferLen}, lpcLen={lpcLen}, windowSamples={_lpcWindowSamples}");
+            }
 
             // Step 1: Copy raw samples to input buffer
             _analysisBufferRaw.AsSpan(lpcStart, lpcLen).CopyTo(_lpcInputBuffer.AsSpan(0, lpcLen));
@@ -544,6 +550,10 @@ public sealed partial class VocalSpectrographPlugin
             else
             {
                 _lpcInputBuffer.AsSpan(0, lpcLen).CopyTo(_lpcDecimatedBuffer.AsSpan(0, lpcLen));
+            }
+            if (_formantDiagCounter % 100 == 0)
+            {
+                Console.WriteLine($"[FormantLpc] decimatedLen={decimatedLen}, lpcSr={_activeLpcSampleRate}, decim={_activeLpcDecimationStages}");
             }
 
             float preEmphasisAlpha = ComputePreEmphasisAlpha(FormantProfileInfo.DefaultPreEmphasisHz, _activeLpcSampleRate);
@@ -1108,7 +1118,6 @@ public sealed partial class VocalSpectrographPlugin
         return arithmetic > 1e-12f ? geometric / arithmetic : 1f;
     }
 
-#if HOTMIC_SPECTROGRAPH_DIAGNOSTICS
     private static float ComputeRms(ReadOnlySpan<float> frame)
     {
         if (frame.IsEmpty)
@@ -1147,5 +1156,4 @@ public sealed partial class VocalSpectrographPlugin
 
         return crossings / MathF.Max(1f, frame.Length - 1);
     }
-#endif
 }
