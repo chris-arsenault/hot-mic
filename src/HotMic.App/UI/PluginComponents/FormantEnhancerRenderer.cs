@@ -38,6 +38,7 @@ public sealed class FormantEnhancerRenderer : IDisposable
     private readonly SkiaTextPaint _labelPaint;
     private readonly SkiaTextPaint _freqValuePaint;
     private readonly SkiaTextPaint _latencyPaint;
+    private readonly SkiaTextPaint _statusPaint;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
@@ -153,6 +154,7 @@ public sealed class FormantEnhancerRenderer : IDisposable
         _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
         _freqValuePaint = new SkiaTextPaint(_theme.TextPrimary, 11f, SKFontStyle.Bold, SKTextAlign.Right);
         _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
+        _statusPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
     }
 
     public void Render(SKCanvas canvas, SKSize size, float dpiScale, FormantEnhancerState state)
@@ -169,6 +171,14 @@ public sealed class FormantEnhancerRenderer : IDisposable
         DrawTitleBar(canvas, size, state);
 
         float y = TitleBarHeight + Padding;
+
+        // Status message if any
+        if (!string.IsNullOrEmpty(state.StatusMessage))
+        {
+            _statusPaint.Color = new SKColor(0xFF, 0xA0, 0x40);
+            canvas.DrawText(state.StatusMessage, size.Width / 2, y + 10, _statusPaint);
+            y += 24;
+        }
 
         // Speech presence LED
         float ledX = Padding + 15f;
@@ -371,6 +381,7 @@ public sealed class FormantEnhancerRenderer : IDisposable
         _labelPaint.Dispose();
         _freqValuePaint.Dispose();
         _latencyPaint.Dispose();
+        _statusPaint.Dispose();
     }
 }
 
@@ -384,6 +395,7 @@ public record struct FormantEnhancerState(
     float SpeechPresence,
     float LatencyMs,
     bool IsBypassed,
+    string StatusMessage = "",
     string PresetName = "Custom");
 
 public enum FormantEnhancerHitArea

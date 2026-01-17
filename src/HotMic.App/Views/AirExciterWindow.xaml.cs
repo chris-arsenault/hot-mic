@@ -96,6 +96,7 @@ public partial class AirExciterWindow : Window
             SaturationAmount: _smoothedSaturation,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
+            StatusMessage: _plugin.StatusMessage,
             PresetName: _presetHelper.CurrentPresetName
         );
 

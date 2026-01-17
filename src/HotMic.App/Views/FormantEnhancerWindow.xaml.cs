@@ -100,6 +100,7 @@ public partial class FormantEnhancerWindow : Window
             SpeechPresence: _smoothedSpeech,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
+            StatusMessage: _plugin.StatusMessage,
             PresetName: _presetHelper.CurrentPresetName
         );
 
