@@ -203,10 +203,10 @@ public partial class PluginContainerWindow : Window, IDisposable
 
         if (drag.IsDragging)
         {
-            var target = _renderer.HitTestPluginSlot(x, y, out _);
-            if (target.HasValue && target.Value.SlotIndex != drag.SlotIndex)
+            int targetIndex = ResolveDropTarget(viewModel, x, y, drag.SlotIndex);
+            if (targetIndex >= 0)
             {
-                viewModel.MovePlugin(drag.PluginInstanceId, target.Value.SlotIndex);
+                viewModel.MovePlugin(drag.PluginInstanceId, targetIndex);
             }
         }
         else
@@ -298,6 +298,59 @@ public partial class PluginContainerWindow : Window, IDisposable
         }
 
         return -1;
+    }
+
+    private int ResolveDropTarget(PluginContainerWindowViewModel viewModel, float x, float y, int sourceSlot)
+    {
+        var hit = _renderer.HitTestPluginSlot(x, y, out _, out var rect);
+        if (!hit.HasValue || hit.Value.SlotIndex == sourceSlot)
+        {
+            return -1;
+        }
+
+        bool insertBefore = x < rect.MidX;
+        int dropIndex = hit.Value.SlotIndex + (insertBefore ? 0 : 1);
+        return ResolvePluginInsertIndex(viewModel, sourceSlot, dropIndex);
+    }
+
+    private static int ResolvePluginInsertIndex(PluginContainerWindowViewModel viewModel, int sourceIndex, int dropIndex)
+    {
+        int lastPluginIndex = viewModel.PluginSlots.Count - 2;
+        if (lastPluginIndex < 0)
+        {
+            return -1;
+        }
+
+        int maxInsertIndex = lastPluginIndex + 1;
+        if (dropIndex < 0)
+        {
+            dropIndex = 0;
+        }
+        else if (dropIndex > maxInsertIndex)
+        {
+            dropIndex = maxInsertIndex;
+        }
+
+        if (dropIndex > sourceIndex)
+        {
+            dropIndex--;
+        }
+
+        if (dropIndex < 0)
+        {
+            dropIndex = 0;
+        }
+        else if (dropIndex > lastPluginIndex)
+        {
+            dropIndex = lastPluginIndex;
+        }
+
+        if (dropIndex == sourceIndex)
+        {
+            return -1;
+        }
+
+        return dropIndex;
     }
 
     private DropTarget? ComputeDropTarget(PluginContainerWindowViewModel viewModel, float x, float y, int sourceSlot)

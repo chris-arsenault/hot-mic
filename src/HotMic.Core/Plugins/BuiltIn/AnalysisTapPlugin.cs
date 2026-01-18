@@ -101,10 +101,10 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
             return;
         }
 
-        AnalysisSignalMask generatedMask = _generatedMask & context.RequestedSignals;
-        if (generatedMask != AnalysisSignalMask.None)
+        AnalysisSignalMask computeMask = _generatedMask;
+        if (computeMask != AnalysisSignalMask.None)
         {
-            _processor.ProcessBlock(buffer, context.SampleTime, context.AnalysisSignalWriter, generatedMask);
+            _processor.ProcessBlock(buffer, context.SampleTime, context.AnalysisSignalWriter, computeMask);
         }
 
         int lastIndex = buffer.Length - 1;
@@ -118,10 +118,11 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
             Volatile.Write(ref _meterValues[i], value);
         }
 
+        AnalysisSignalMask producedMask = _generatedMask & context.RequestedSignals;
         context.CopyAnalysisSignalProducers(_producerSnapshot);
-        if (generatedMask != AnalysisSignalMask.None)
+        if (producedMask != AnalysisSignalMask.None)
         {
-            UpdateProducerSnapshot(_producerSnapshot, generatedMask, context.SlotIndex);
+            UpdateProducerSnapshot(_producerSnapshot, producedMask, context.SlotIndex);
         }
         if (_blockedMask != AnalysisSignalMask.None)
         {

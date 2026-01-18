@@ -151,6 +151,11 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
         }
 
         float vad = VadProbability;
+        if (!float.IsFinite(vad))
+        {
+            vad = 0f;
+        }
+        vad = Math.Clamp(vad, 0f, 1f);
         var span = _speechBuffer.AsSpan(0, buffer.Length);
         span.Fill(vad);
         long writeTime = context.SampleTime - LatencySamples;
@@ -251,6 +256,11 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
         _frameSignal?.Set();
 
         float vad = VadProbability;
+        if (!float.IsFinite(vad))
+        {
+            vad = 0f;
+        }
+        vad = Math.Clamp(vad, 0f, 1f);
         bool detected = vad >= _threshold;
         int holdLeft = detected ? _holdSamples : _holdSamplesLeft;
         float gate = _gate;

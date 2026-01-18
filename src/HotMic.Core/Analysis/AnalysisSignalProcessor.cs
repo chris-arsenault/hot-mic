@@ -908,6 +908,7 @@ public sealed class AnalysisSignalProcessor
             return;
         }
 
+        value = SanitizeSignalValue(signal, value);
         Volatile.Write(ref _lastValues[index], value);
     }
 
@@ -927,6 +928,48 @@ public sealed class AnalysisSignalProcessor
             AnalysisSignalMask.HnrDb;
 
         return (requestedSignals & frameSignals) != 0;
+    }
+
+    private static float SanitizeSignalValue(AnalysisSignalId signal, float value)
+    {
+        if (!float.IsFinite(value))
+        {
+            return 0f;
+        }
+
+        return signal switch
+        {
+            AnalysisSignalId.SpeechPresence => Clamp01(value),
+            AnalysisSignalId.VoicingScore => Clamp01(value),
+            AnalysisSignalId.VoicingState => Math.Clamp(value, 0f, 2f),
+            AnalysisSignalId.FricativeActivity => Clamp01(value),
+            AnalysisSignalId.SibilanceEnergy => Clamp01(value),
+            AnalysisSignalId.OnsetFluxHigh => MathF.Max(0f, value),
+            AnalysisSignalId.PitchHz => MathF.Max(0f, value),
+            AnalysisSignalId.PitchConfidence => Clamp01(value),
+            AnalysisSignalId.FormantF1Hz => MathF.Max(0f, value),
+            AnalysisSignalId.FormantF2Hz => MathF.Max(0f, value),
+            AnalysisSignalId.FormantF3Hz => MathF.Max(0f, value),
+            AnalysisSignalId.FormantConfidence => Clamp01(value),
+            AnalysisSignalId.SpectralFlux => MathF.Max(0f, value),
+            AnalysisSignalId.HnrDb => Math.Clamp(value, -120f, 120f),
+            _ => value
+        };
+    }
+
+    private static float Clamp01(float value)
+    {
+        if (value <= 0f)
+        {
+            return 0f;
+        }
+
+        if (value >= 1f)
+        {
+            return 1f;
+        }
+
+        return value;
     }
 
     private static int NextPowerOfTwo(int value)

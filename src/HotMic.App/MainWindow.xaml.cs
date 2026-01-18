@@ -329,13 +329,13 @@ public partial class MainWindow : Window, IDisposable
 
             if (pluginDrag.IsDragging)
             {
-                var target = _renderer.HitTestPluginSlot(x, y, out _);
-                if (target.HasValue && !(target.Value.ChannelIndex == pluginDrag.ChannelIndex && target.Value.SlotIndex == pluginDrag.SlotIndex))
+                int targetIndex = ResolvePluginDropTarget(viewModel, pluginDrag.ChannelIndex, pluginDrag.SlotIndex, x, y);
+                if (targetIndex >= 0)
                 {
                     var channel = GetChannel(viewModel, pluginDrag.ChannelIndex);
                     if (channel is not null)
                     {
-                        channel.MovePlugin(pluginDrag.PluginInstanceId, target.Value.SlotIndex);
+                        channel.MovePlugin(pluginDrag.PluginInstanceId, targetIndex);
                     }
                 }
             }
@@ -648,6 +648,7 @@ public partial class MainWindow : Window, IDisposable
         string displayName = slot.DisplayName ?? $"Plugin {slotIndex + 1}";
 
         _uiState.PluginDrag = new PluginDragState(hit.ChannelIndex, slot.InstanceId, slotIndex, x, y, x, y, false, sourceRect, displayName);
+        SkiaCanvas.CaptureMouse();
     }
 
     private void HandleRoutingSlotClick(MainViewModel viewModel, RoutingSlotHit hit, RoutingSlotRegion region, float x, float y)
@@ -999,6 +1000,89 @@ public partial class MainWindow : Window, IDisposable
         }
 
         return -1;
+    }
+
+    private int ResolvePluginDropTarget(MainViewModel viewModel, int channelIndex, int sourceSlot, float x, float y)
+    {
+        int areaChannel = _renderer.HitTestPluginArea(x, y);
+        if (areaChannel < 0 || areaChannel != channelIndex)
+        {
+            return -1;
+        }
+
+        var channel = GetChannel(viewModel, channelIndex);
+        if (channel is null)
+        {
+            return -1;
+        }
+
+        var pluginHit = _renderer.HitTestPluginSlot(x, y, out _, out var pluginRect);
+        if (pluginHit.HasValue)
+        {
+            if (pluginHit.Value.SlotIndex == sourceSlot)
+            {
+                return -1;
+            }
+
+            bool insertBefore = x < pluginRect.MidX;
+            int dropIndex = pluginHit.Value.SlotIndex + (insertBefore ? 0 : 1);
+            return ResolvePluginInsertIndex(channel, sourceSlot, dropIndex);
+        }
+
+        var routingHit = _renderer.HitTestRoutingSlot(x, y, out _, out var routingRect);
+        if (routingHit.HasValue)
+        {
+            if (routingHit.Value.SlotIndex == sourceSlot)
+            {
+                return -1;
+            }
+
+            bool insertBefore = x < routingRect.MidX;
+            int dropIndex = routingHit.Value.SlotIndex + (insertBefore ? 0 : 1);
+            return ResolvePluginInsertIndex(channel, sourceSlot, dropIndex);
+        }
+
+        return -1;
+    }
+
+    private static int ResolvePluginInsertIndex(ChannelStripViewModel channel, int sourceIndex, int dropIndex)
+    {
+        int lastPluginIndex = channel.PluginSlots.Count - 2;
+        if (lastPluginIndex < 0)
+        {
+            return -1;
+        }
+
+        int maxInsertIndex = lastPluginIndex + 1;
+        if (dropIndex < 0)
+        {
+            dropIndex = 0;
+        }
+        else if (dropIndex > maxInsertIndex)
+        {
+            dropIndex = maxInsertIndex;
+        }
+
+        if (dropIndex > sourceIndex)
+        {
+            dropIndex--;
+        }
+
+        if (dropIndex < 0)
+        {
+            dropIndex = 0;
+        }
+        else if (dropIndex > lastPluginIndex)
+        {
+            dropIndex = lastPluginIndex;
+        }
+
+        if (dropIndex == sourceIndex)
+        {
+            return -1;
+        }
+
+        return dropIndex;
     }
 
     private static int GetContainerInsertIndex(ChannelStripViewModel channel, int containerSlotIndex, bool after)

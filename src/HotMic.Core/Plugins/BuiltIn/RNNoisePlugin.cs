@@ -134,6 +134,11 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
         }
 
         float vad = VadProbability;
+        if (!float.IsFinite(vad))
+        {
+            vad = 0f;
+        }
+        vad = Math.Clamp(vad, 0f, 1f);
         var span = _speechBuffer.AsSpan(0, buffer.Length);
         span.Fill(vad);
         long writeTime = context.SampleTime - LatencySamples;
