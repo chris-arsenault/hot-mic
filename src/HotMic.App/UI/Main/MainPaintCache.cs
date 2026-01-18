@@ -2,8 +2,9 @@ using SkiaSharp;
 
 namespace HotMic.App.UI;
 
-internal sealed class MainPaintCache
+internal sealed class MainPaintCache : IDisposable
 {
+    private bool _disposed;
     public MainPaintCache()
     {
         Theme = HotMicTheme.Default;
@@ -54,4 +55,36 @@ internal sealed class MainPaintCache
     public SKPaint SoloPaint { get; }
     public SKPaint ButtonPaint { get; }
     public SKPaint BridgePaint { get; }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        BackgroundPaint.Dispose();
+        TitleBarPaint.Dispose();
+        HotbarPaint.Dispose();
+        BorderPaint.Dispose();
+        SectionPaint.Dispose();
+        PluginSlotEmptyPaint.Dispose();
+        PluginSlotFilledPaint.Dispose();
+        PluginSlotBypassedPaint.Dispose();
+        AccentPaint.Dispose();
+        TextPaint.Dispose();
+        TextSecondaryPaint.Dispose();
+        TextMutedPaint.Dispose();
+        TitlePaint.Dispose();
+        SmallTextPaint.Dispose();
+        TinyTextPaint.Dispose();
+        MeterBackgroundPaint.Dispose();
+        MeterSegmentOffPaint.Dispose();
+        IconPaint.Dispose();
+        MutePaint.Dispose();
+        SoloPaint.Dispose();
+        ButtonPaint.Dispose();
+        BridgePaint.Dispose();
+    }
 }

@@ -8,7 +8,7 @@ namespace HotMic.App.UI;
 /// - Ghost element following cursor
 /// - Drop target highlighting with insertion line
 /// </summary>
-internal sealed class MainDragOverlayRenderer
+internal sealed class MainDragOverlayRenderer : IDisposable
 {
     private static readonly float[] DashPattern = [4f, 3f];
 
@@ -24,6 +24,7 @@ internal sealed class MainDragOverlayRenderer
     private readonly SKPaint _insertLinePaint;
     private readonly SKPaint _insertCaretPaint;
     private readonly SkiaTextPaint _ghostTextPaint;
+    private bool _disposed;
 
     public MainDragOverlayRenderer()
     {
@@ -226,5 +227,24 @@ internal sealed class MainDragOverlayRenderer
             float textY = ghostRect.MidY + 3f;
             canvas.DrawText(displayName, ghostRect.MidX, textY, _ghostTextPaint);
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _sourceDimPaint.Dispose();
+        _sourceDashedBorderPaint.Dispose();
+        _ghostFillPaint.Dispose();
+        _ghostBorderValidPaint.Dispose();
+        _ghostBorderInvalidPaint.Dispose();
+        _targetGlowPaint.Dispose();
+        _insertLinePaint.Dispose();
+        _insertCaretPaint.Dispose();
+        _ghostTextPaint.Dispose();
     }
 }

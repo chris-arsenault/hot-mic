@@ -22,7 +22,7 @@ public partial class ConsonantTransientWindow : Window, IDisposable
     private readonly PluginPresetHelper _presetHelper;
     private bool _disposed;
 
-    private float _smoothedUnvoicedGate;
+    private float _smoothedFricativeGate;
     private float _smoothedFastEnvelope;
     private float _smoothedSlowEnvelope;
 
@@ -67,11 +67,11 @@ public partial class ConsonantTransientWindow : Window, IDisposable
 
     private void OnRenderTick(object? sender, EventArgs e)
     {
-        float rawGate = _plugin.GetUnvoicedGate();
+        float rawGate = _plugin.GetFricativeGate();
         float rawFast = _plugin.GetFastEnvelope();
         float rawSlow = _plugin.GetSlowEnvelope();
 
-        _smoothedUnvoicedGate = _smoothedUnvoicedGate * 0.7f + rawGate * 0.3f;
+        _smoothedFricativeGate = _smoothedFricativeGate * 0.7f + rawGate * 0.3f;
         _smoothedFastEnvelope = _smoothedFastEnvelope * 0.6f + rawFast * 0.4f;
         _smoothedSlowEnvelope = _smoothedSlowEnvelope * 0.6f + rawSlow * 0.4f;
 
@@ -88,7 +88,7 @@ public partial class ConsonantTransientWindow : Window, IDisposable
             Amount: _plugin.Amount,
             Threshold: _plugin.Threshold,
             HighCutHz: _plugin.HighCutHz,
-            UnvoicedGate: _smoothedUnvoicedGate,
+            FricativeGate: _smoothedFricativeGate,
             FastEnvelope: _smoothedFastEnvelope,
             SlowEnvelope: _smoothedSlowEnvelope,
             TransientDetected: _plugin.GetTransientDetected(),

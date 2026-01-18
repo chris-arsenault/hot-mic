@@ -14,13 +14,14 @@ using MenuItem = System.Windows.Controls.MenuItem;
 
 namespace HotMic.App;
 
-public partial class MainWindow : Window
+public partial class MainWindow : Window, IDisposable
 {
     private const float DragThreshold = 6f;
 
     private readonly MainRenderer _renderer = new();
     private readonly MainUiState _uiState = new();
     private readonly DispatcherTimer _renderTimer;
+    private bool _disposed;
 
     public MainWindow()
     {
@@ -29,7 +30,7 @@ public partial class MainWindow : Window
         Loaded += OnLoaded;
         LocationChanged += (_, _) => UpdateWindowPosition();
         SizeChanged += (_, _) => UpdateWindowSize();
-        Closed += (_, _) => DisposeViewModel();
+        Closed += (_, _) => Dispose();
 
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += (_, _) => SkiaCanvas.InvalidateVisual();
@@ -1190,6 +1191,19 @@ public partial class MainWindow : Window
         {
             viewModel.Dispose();
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        DisposeViewModel();
+        _renderer.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     private void ShowPresetDropdownMenu(MainViewModel viewModel)

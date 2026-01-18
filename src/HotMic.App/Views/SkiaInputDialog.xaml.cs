@@ -6,11 +6,11 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class SkiaInputDialog : Window
+public partial class SkiaInputDialog : Window, IDisposable
 {
     private const float CornerRadius = 8f;
     private const float TitleBarHeight = 32f;
-    private const float Padding = 16f;
+    private const float LayoutPadding = 16f;
     private const float ButtonWidth = 75f;
     private const float ButtonHeight = 28f;
     private const float ButtonSpacing = 8f;
@@ -36,6 +36,7 @@ public partial class SkiaInputDialog : Window
 
     private readonly string _title;
     private readonly string _prompt;
+    private bool _disposed;
 
     public string InputValue => InputTextBox.Text;
 
@@ -65,6 +66,7 @@ public partial class SkiaInputDialog : Window
             InputTextBox.SelectAll();
             InputTextBox.Focus();
         };
+        Closed += (_, _) => Dispose();
     }
 
     private void SkiaCanvas_PaintSurface(object sender, SKPaintSurfaceEventArgs e)
@@ -94,15 +96,15 @@ public partial class SkiaInputDialog : Window
         canvas.DrawLine(0, TitleBarHeight, width, TitleBarHeight, _borderPaint);
 
         // Title text
-        canvas.DrawText(_title, Padding, TitleBarHeight / 2f + 4f, _titlePaint);
+        canvas.DrawText(_title, LayoutPadding, TitleBarHeight / 2f + 4f, _titlePaint);
 
         // Prompt text
         float promptY = TitleBarHeight + 14f;
-        canvas.DrawText(_prompt, Padding, promptY, _promptPaint);
+        canvas.DrawText(_prompt, LayoutPadding, promptY, _promptPaint);
 
         // Buttons at bottom
-        float buttonY = height - Padding - ButtonHeight;
-        float cancelX = width - Padding - ButtonWidth;
+        float buttonY = height - LayoutPadding - ButtonHeight;
+        float cancelX = width - LayoutPadding - ButtonWidth;
         float okX = cancelX - ButtonSpacing - ButtonWidth;
 
         // OK button (accent)
@@ -184,5 +186,27 @@ public partial class SkiaInputDialog : Window
             Close();
             e.Handled = true;
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _backgroundPaint.Dispose();
+        _titleBarPaint.Dispose();
+        _borderPaint.Dispose();
+        _buttonPaint.Dispose();
+        _buttonHoverPaint.Dispose();
+        _buttonAccentPaint.Dispose();
+        _buttonAccentHoverPaint.Dispose();
+        _titlePaint.Dispose();
+        _promptPaint.Dispose();
+        _buttonTextPaint.Dispose();
+        _buttonTextMutedPaint.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

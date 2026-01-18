@@ -192,10 +192,10 @@ public sealed class ConsonantTransientRenderer : IDisposable
             y += 24;
         }
 
-        // Unvoiced gate LED + transient indicator
+        // Fricative gate LED + transient indicator
         float gateX = Padding + 20f;
         float gateY = y + 20f;
-        bool gateOpen = state.UnvoicedGate > 0.3f;
+        bool gateOpen = state.FricativeGate > 0.3f;
 
         if (gateOpen)
         {
@@ -206,7 +206,7 @@ public sealed class ConsonantTransientRenderer : IDisposable
         {
             canvas.DrawCircle(gateX, gateY, 6f, _gateLedOffPaint);
         }
-        canvas.DrawText("UNVOICED", gateX, gateY + 18f, _labelPaint);
+        canvas.DrawText("FRIC", gateX, gateY + 18f, _labelPaint);
 
         // Transient indicator
         float transX = gateX + 60f;
@@ -417,7 +417,7 @@ public record struct ConsonantTransientState(
     float Amount,
     float Threshold,
     float HighCutHz,
-    float UnvoicedGate,
+    float FricativeGate,
     float FastEnvelope,
     float SlowEnvelope,
     float TransientDetected,

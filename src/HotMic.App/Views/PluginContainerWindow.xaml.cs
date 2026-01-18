@@ -10,13 +10,14 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class PluginContainerWindow : Window
+public partial class PluginContainerWindow : Window, IDisposable
 {
     private const float DragThreshold = 6f;
     private readonly PluginContainerRenderer _renderer = new();
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginStripUiState _uiState = new();
     private KnobDragState? _knobDrag;
+    private bool _disposed;
 
     public PluginContainerWindow(PluginContainerWindowViewModel viewModel)
     {
@@ -26,7 +27,7 @@ public partial class PluginContainerWindow : Window
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += (_, _) => SkiaCanvas.InvalidateVisual();
         Loaded += (_, _) => _renderTimer.Start();
-        Closed += (_, _) => _renderTimer.Stop();
+        Closed += (_, _) => Dispose();
     }
 
     private void SkiaCanvas_PaintSurface(object sender, SKPaintSurfaceEventArgs e)
@@ -319,5 +320,18 @@ public partial class PluginContainerWindow : Window
         float lineX = insertBefore ? rect.Left - 2f : rect.Right + 2f;
 
         return new DropTarget(true, rect, lineX, rect.Top, rect.Bottom);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _renderer.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

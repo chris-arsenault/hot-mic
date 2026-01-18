@@ -21,8 +21,8 @@ public partial class DynamicEqWindow : Window, IDisposable
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
 
-    private float _smoothedVoicedLevel;
-    private float _smoothedUnvoicedLevel;
+    private float _smoothedVoicingLevel;
+    private float _smoothedFricativeLevel;
     private float _smoothedLowGain;
     private float _smoothedHighGain;
     private bool _disposed;
@@ -68,13 +68,13 @@ public partial class DynamicEqWindow : Window, IDisposable
 
     private void OnRenderTick(object? sender, EventArgs e)
     {
-        float rawVoiced = _plugin.GetVoicedLevel();
-        float rawUnvoiced = _plugin.GetUnvoicedLevel();
+        float rawVoicing = _plugin.GetVoicingLevel();
+        float rawFricative = _plugin.GetFricativeLevel();
         float rawLow = _plugin.GetLowGainDb();
         float rawHigh = _plugin.GetHighGainDb();
 
-        _smoothedVoicedLevel = _smoothedVoicedLevel * 0.7f + rawVoiced * 0.3f;
-        _smoothedUnvoicedLevel = _smoothedUnvoicedLevel * 0.7f + rawUnvoiced * 0.3f;
+        _smoothedVoicingLevel = _smoothedVoicingLevel * 0.7f + rawVoicing * 0.3f;
+        _smoothedFricativeLevel = _smoothedFricativeLevel * 0.7f + rawFricative * 0.3f;
         _smoothedLowGain = _smoothedLowGain * 0.8f + rawLow * 0.2f;
         _smoothedHighGain = _smoothedHighGain * 0.8f + rawHigh * 0.2f;
 
@@ -91,8 +91,8 @@ public partial class DynamicEqWindow : Window, IDisposable
             LowBoostDb: _plugin.LowBoostDb,
             HighBoostDb: _plugin.HighBoostDb,
             SmoothingMs: _plugin.SmoothingMs,
-            VoicedLevel: _smoothedVoicedLevel,
-            UnvoicedLevel: _smoothedUnvoicedLevel,
+            VoicingLevel: _smoothedVoicingLevel,
+            FricativeLevel: _smoothedFricativeLevel,
             LowGainDb: _smoothedLowGain,
             HighGainDb: _smoothedHighGain,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,

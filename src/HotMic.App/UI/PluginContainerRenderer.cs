@@ -3,7 +3,7 @@ using SkiaSharp;
 
 namespace HotMic.App.UI;
 
-public sealed class PluginContainerRenderer
+public sealed class PluginContainerRenderer : IDisposable
 {
     private const float CornerRadius = 8f;
     private const float TitleBarHeight = 28f;
@@ -18,6 +18,7 @@ public sealed class PluginContainerRenderer
     private readonly SkiaTextPaint _titlePaint;
     private readonly MainRenderer _pluginRenderer = new();
     private readonly MainDragOverlayRenderer _dragOverlayRenderer = new();
+    private bool _disposed;
 
     private SKRect _titleBarRect;
     private SKRect _closeRect;
@@ -125,4 +126,22 @@ public sealed class PluginContainerRenderer
 
     private static SkiaTextPaint CreateTextPaint(SKColor color, float size, SKFontStyle? style = null) =>
         new(color, size, style, SKTextAlign.Left);
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _backgroundPaint.Dispose();
+        _titleBarPaint.Dispose();
+        _borderPaint.Dispose();
+        _iconPaint.Dispose();
+        _titlePaint.Dispose();
+        _dragOverlayRenderer.Dispose();
+        _pluginRenderer.Dispose();
+        GC.SuppressFinalize(this);
+    }
 }

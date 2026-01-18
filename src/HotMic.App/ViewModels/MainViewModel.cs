@@ -381,7 +381,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _containerWindowManager.CloseAll();
         _midiCoordinator.Dispose();
         _audioEngine.Dispose();
-        _audioEngineCoordinator.AnalysisOrchestrator.Dispose();
+        _audioEngineCoordinator.Dispose();
         GC.SuppressFinalize(this);
     }
 

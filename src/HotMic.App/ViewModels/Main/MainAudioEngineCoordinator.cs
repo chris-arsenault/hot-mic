@@ -11,7 +11,7 @@ using HotMic.Vst3;
 
 namespace HotMic.App.ViewModels;
 
-internal sealed class MainAudioEngineCoordinator
+internal sealed class MainAudioEngineCoordinator : IDisposable
 {
     private readonly MainViewModel _viewModel;
     private readonly ConfigManager _configManager;
@@ -27,6 +27,7 @@ internal sealed class MainAudioEngineCoordinator
     private AnalysisSignalMask[] _analysisTapRequestedSignals = Array.Empty<AnalysisSignalMask>();
     private AnalysisSignalMask _analysisVisualRequestedSignals;
     private bool _analysisRequestedSubscribed;
+    private bool _disposed;
     private long _lastMeterUpdateTicks;
     private long _nextDebugUpdateTicks;
     private static readonly long DebugUpdateIntervalTicks = Math.Max(1, Stopwatch.Frequency / 4);
@@ -811,5 +812,23 @@ internal sealed class MainAudioEngineCoordinator
 
         _analysisVisualRequestedSignals = _analysisOrchestrator.RequestedSignals;
         UpdateVisualRequestedSignals();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        if (_analysisRequestedSubscribed)
+        {
+            _analysisOrchestrator.RequestedSignalsChanged -= HandleRequestedSignalsChanged;
+            _analysisRequestedSubscribed = false;
+        }
+
+        _analysisOrchestrator.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

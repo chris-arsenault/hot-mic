@@ -177,10 +177,10 @@ public sealed class DynamicEqRenderer : IDisposable
         float meterWidth = 24f;
         float meterHeight = EqDisplayHeight;
         var voicedRect = new SKRect(Padding, y, Padding + meterWidth, y + meterHeight);
-        DrawVoiceMeter(canvas, voicedRect, state.VoicedLevel, "V", _voicedMeterPaint);
+        DrawVoiceMeter(canvas, voicedRect, state.VoicingLevel, "V", _voicedMeterPaint);
 
         var unvoicedRect = new SKRect(voicedRect.Right + 6, y, voicedRect.Right + 6 + meterWidth, y + meterHeight);
-        DrawVoiceMeter(canvas, unvoicedRect, state.UnvoicedLevel, "UV", _unvoicedMeterPaint);
+        DrawVoiceMeter(canvas, unvoicedRect, state.FricativeLevel, "FR", _unvoicedMeterPaint);
 
         // EQ curve display
         float eqX = unvoicedRect.Right + 12f;
@@ -401,8 +401,8 @@ public record struct DynamicEqState(
     float LowBoostDb,
     float HighBoostDb,
     float SmoothingMs,
-    float VoicedLevel,
-    float UnvoicedLevel,
+    float VoicingLevel,
+    float FricativeLevel,
     float LowGainDb,
     float HighGainDb,
     float LatencyMs,

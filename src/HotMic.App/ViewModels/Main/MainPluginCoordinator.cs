@@ -43,7 +43,6 @@ internal sealed class MainPluginCoordinator
     private PluginGraph[] _pluginGraphs = Array.Empty<PluginGraph>();
     private readonly Dictionary<(int ChannelIndex, int InstanceId), AnalysisSignalMask> _analysisTapRequests = new();
     private Action<int, AnalysisSignalMask>? _analysisTapSignalHandler;
-    private bool _suppressPresetUpdates;
 
     public int GraphCount => _pluginGraphs.Length;
 
@@ -1674,11 +1673,6 @@ internal sealed class MainPluginCoordinator
 
     public void MarkChannelPresetCustom(ChannelConfig config)
     {
-        if (_suppressPresetUpdates)
-        {
-            return;
-        }
-
         if (!IsCustomPreset(config.PresetName))
         {
             config.PresetName = PluginPresetManager.CustomPresetName;
@@ -1693,11 +1687,6 @@ internal sealed class MainPluginCoordinator
 
     public void MarkPluginPresetCustom(int channelIndex, int instanceId)
     {
-        if (_suppressPresetUpdates)
-        {
-            return;
-        }
-
         var config = _getOrCreateChannelConfig(channelIndex);
         var graph = GetGraph(channelIndex);
         if (graph is not null && graph.TryGetPluginConfig(instanceId, out var pluginConfig))

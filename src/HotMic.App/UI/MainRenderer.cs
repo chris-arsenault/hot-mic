@@ -3,7 +3,7 @@ using SkiaSharp;
 
 namespace HotMic.App.UI;
 
-public sealed class MainRenderer
+public sealed class MainRenderer : IDisposable
 {
     private readonly MainPaintCache _paints = new();
     private readonly MainRenderPrimitives _primitives;
@@ -23,6 +23,7 @@ public sealed class MainRenderer
     private readonly MainDebugOverlayRenderer _debugOverlayRenderer;
     private readonly MainPluginStripRenderer _pluginStripRenderer;
     private readonly MainDragOverlayRenderer _dragOverlayRenderer = new();
+    private bool _disposed;
 
     public MainRenderer()
     {
@@ -146,5 +147,18 @@ public sealed class MainRenderer
         _hitTargets.Clear();
         _pluginShellRenderer.ClearHitTargets();
         _routingSlotRenderer.ClearHitTargets();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _dragOverlayRenderer.Dispose();
+        _paints.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

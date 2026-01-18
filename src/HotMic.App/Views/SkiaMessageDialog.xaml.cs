@@ -13,11 +13,11 @@ public enum SkiaMessageType
     Error
 }
 
-public partial class SkiaMessageDialog : Window
+public partial class SkiaMessageDialog : Window, IDisposable
 {
     private const float CornerRadius = 8f;
     private const float TitleBarHeight = 32f;
-    private const float Padding = 16f;
+    private const float LayoutPadding = 16f;
     private const float ButtonWidth = 75f;
     private const float ButtonHeight = 28f;
     private const float IconSize = 24f;
@@ -40,6 +40,7 @@ public partial class SkiaMessageDialog : Window
     private readonly string _title;
     private readonly string _message;
     private readonly SkiaMessageType _messageType;
+    private bool _disposed;
 
     public SkiaMessageDialog(string title, string message, SkiaMessageType messageType = SkiaMessageType.Information)
     {
@@ -67,6 +68,7 @@ public partial class SkiaMessageDialog : Window
             _ => _theme.Accent
         };
         _iconPaint = new SKPaint { Color = iconColor, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2f };
+        Closed += (_, _) => Dispose();
     }
 
     public static void Show(Window owner, string message, string title, SkiaMessageType messageType = SkiaMessageType.Information)
@@ -120,21 +122,21 @@ public partial class SkiaMessageDialog : Window
         canvas.DrawLine(0, TitleBarHeight, width, TitleBarHeight, _borderPaint);
 
         // Title text
-        canvas.DrawText(_title, Padding, TitleBarHeight / 2f + 4f, _titlePaint);
+        canvas.DrawText(_title, LayoutPadding, TitleBarHeight / 2f + 4f, _titlePaint);
 
         // Icon
-        float iconX = Padding;
-        float iconY = TitleBarHeight + Padding;
+        float iconX = LayoutPadding;
+        float iconY = TitleBarHeight + LayoutPadding;
         DrawIcon(canvas, iconX, iconY);
 
         // Message text (with word wrap)
         float messageX = iconX + IconSize + 12f;
         float messageY = iconY + 4f;
-        float maxWidth = width - messageX - Padding;
+        float maxWidth = width - messageX - LayoutPadding;
         DrawWrappedText(canvas, _message, messageX, messageY, maxWidth);
 
         // OK button at bottom center
-        float buttonY = height - Padding - ButtonHeight;
+        float buttonY = height - LayoutPadding - ButtonHeight;
         float buttonX = (width - ButtonWidth) / 2f;
 
         _okButtonRect = new SKRect(buttonX, buttonY, buttonX + ButtonWidth, buttonY + ButtonHeight);
@@ -262,5 +264,25 @@ public partial class SkiaMessageDialog : Window
             Close();
             e.Handled = true;
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _backgroundPaint.Dispose();
+        _titleBarPaint.Dispose();
+        _borderPaint.Dispose();
+        _buttonPaint.Dispose();
+        _buttonHoverPaint.Dispose();
+        _iconPaint.Dispose();
+        _titlePaint.Dispose();
+        _messagePaint.Dispose();
+        _buttonTextPaint.Dispose();
+        GC.SuppressFinalize(this);
     }
 }
