@@ -20,4 +20,37 @@ public static class DspUtils
         float timeSeconds = MathF.Max(0.0001f, timeMs * 0.001f);
         return 1f - MathF.Exp(-1f / (timeSeconds * sampleRate));
     }
+
+    public static float ComputeBandEnergyRatio(ReadOnlySpan<float> magnitudes, float binResolutionHz, float minHz, float maxHz)
+    {
+        if (magnitudes.IsEmpty || binResolutionHz <= 0f || maxHz <= minHz)
+        {
+            return 0f;
+        }
+
+        int startBin = (int)MathF.Floor(minHz / binResolutionHz);
+        int endBin = (int)MathF.Ceiling(maxHz / binResolutionHz);
+        startBin = Math.Clamp(startBin, 0, magnitudes.Length - 1);
+        endBin = Math.Clamp(endBin, startBin, magnitudes.Length - 1);
+
+        double band = 0.0;
+        double total = 0.0;
+        for (int i = 0; i < magnitudes.Length; i++)
+        {
+            float mag = magnitudes[i];
+            double energy = mag * mag;
+            total += energy;
+            if (i >= startBin && i <= endBin)
+            {
+                band += energy;
+            }
+        }
+
+        if (total <= 1e-12)
+        {
+            return 0f;
+        }
+
+        return (float)(band / total);
+    }
 }

@@ -247,7 +247,6 @@ public sealed class BeamSearchFormantTracker
             {
                 Frequency = freq,
                 Bandwidth = bandwidth,
-                Magnitude = (float)magnitude,
                 QualityCost = ComputeCandidateCost((float)magnitude, bandwidth)
             };
 
@@ -488,7 +487,6 @@ public sealed class BeamSearchFormantTracker
     {
         public float Frequency;
         public float Bandwidth;
-        public float Magnitude;
         public float QualityCost;
     }
 

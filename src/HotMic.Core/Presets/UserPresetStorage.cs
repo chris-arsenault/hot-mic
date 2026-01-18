@@ -10,12 +10,20 @@ public sealed class StoredChainPreset
 {
     public string Name { get; set; } = string.Empty;
     public List<StoredChainEntry> Plugins { get; set; } = new();
+    public List<StoredChainContainer> Containers { get; set; } = new();
 }
 
 public sealed class StoredChainEntry
 {
     public string PluginId { get; set; } = string.Empty;
     public Dictionary<string, float> Parameters { get; set; } = new();
+}
+
+public sealed class StoredChainContainer
+{
+    public string Name { get; set; } = string.Empty;
+    public bool IsBypassed { get; set; }
+    public List<int> PluginIndices { get; set; } = new();
 }
 
 /// <summary>

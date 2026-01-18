@@ -24,6 +24,20 @@ public static class PluginFactory
             "builtin:voice-gate" => new SileroVoiceGatePlugin(),
             "builtin:reverb" => new ConvolutionReverbPlugin(),
             "builtin:signal-generator" => new SignalGeneratorPlugin(),
+            "builtin:sidechain-tap" => new SidechainTapPlugin(),
+            "builtin:upward-expander" => new UpwardExpanderPlugin(),
+            "builtin:spectral-contrast" => new SpectralContrastPlugin(),
+            "builtin:dynamic-eq" => new DynamicEqPlugin(),
+            "builtin:room-tone" => new RoomTonePlugin(),
+            "builtin:air-exciter" => new AirExciterPlugin(),
+            "builtin:bass-enhancer" => new BassEnhancerPlugin(),
+            "builtin:consonant-transient" => new ConsonantTransientPlugin(),
+            "builtin:formant-enhance" => new FormantEnhancerPlugin(),
+            "builtin:input" => new InputPlugin(),
+            "builtin:copy" => new CopyToChannelPlugin(),
+            "builtin:bus-input" => new BusInputPlugin(),
+            "builtin:merge" => new MergePlugin(),
+            "builtin:output-send" => new OutputSendPlugin(),
             _ => null
         };
     }

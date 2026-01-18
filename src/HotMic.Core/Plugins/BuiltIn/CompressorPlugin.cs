@@ -5,7 +5,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
+public sealed class CompressorPlugin : IContextualPlugin, IQualityConfigurablePlugin
 {
     public const int ThresholdIndex = 0;
     public const int RatioIndex = 1;
@@ -80,6 +80,11 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
         _envelopeDb = -120f;
         _gainReductionDb = 0f;
         UpdateCoefficients();
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)

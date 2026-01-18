@@ -771,8 +771,16 @@ public sealed class AnalysisOrchestrator : IDisposable
         bool vowelLike = false;
         if (needsFormants && voicing == VoicingState.Voiced)
         {
+            float vowelMinHz = MathF.Max(VowelEnergyMinHz, _activeFormantPreset.F1MinHz);
+            float vowelMaxHz = MathF.Min(VowelEnergyMaxHz, _activeFormantPreset.F1MaxHz);
+            if (vowelMaxHz <= vowelMinHz)
+            {
+                vowelMinHz = VowelEnergyMinHz;
+                vowelMaxHz = VowelEnergyMaxHz;
+            }
+
             float ratio = DspUtils.ComputeBandEnergyRatio(fftMagnitudes, _binResolution,
-                VowelEnergyMinHz, VowelEnergyMaxHz);
+                vowelMinHz, vowelMaxHz);
             vowelLike = ratio >= VowelEnergyRatioThreshold;
         }
 

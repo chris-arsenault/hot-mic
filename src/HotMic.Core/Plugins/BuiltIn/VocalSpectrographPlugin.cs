@@ -12,7 +12,7 @@ namespace HotMic.Core.Plugins.BuiltIn;
 /// Vocal-focused spectrograph analysis with pitch, formant, voicing, and harmonic overlays.
 /// Pass-through plugin (no audio modification).
 /// </summary>
-public sealed partial class VocalSpectrographPlugin : IPlugin
+public sealed partial class VocalSpectrographPlugin : IContextualPlugin
 {
     public const int FftSizeIndex = 0;
     public const int WindowFunctionIndex = 1;
@@ -88,6 +88,9 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private const float DefaultBrightness = 1.0f;
     private const float DefaultGamma = 0.8f;
     private const float DefaultContrast = 1.2f;
+    private const float VowelEnergyMinHz = 200f;
+    private const float VowelEnergyMaxHz = 1000f;
+    private const float VowelEnergyRatioThreshold = 0.15f;
     private const float LpcGaussianEdgeAmplitude = 0.04f; // Praat: ~4% outside the effective window
     private static readonly float LpcGaussianSigma =
         1f / MathF.Sqrt(-2f * MathF.Log(LpcGaussianEdgeAmplitude));
@@ -131,7 +134,8 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private int _activeLpcSampleRate;
     private int _activeLpcDecimationStages;
     private float _activeFormantCeilingHz;
-    private FormantProfile _activeFormantProfile = FormantProfile.Male;
+    private FormantProfile _activeFormantProfile = FormantProfile.Tenor;
+    private FormantTrackingPreset _activeFormantPreset;
     private long _lastDroppedHops;
 
     private Thread? _analysisThread;
@@ -279,7 +283,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private int _requestedPitchAlgorithm = (int)PitchDetectorType.Yin;
     private int _requestedAxisMode = (int)SpectrogramAxisMode.Hz;
     private int _requestedVoiceRange = (int)VocalRangeType.Tenor;
-    private int _requestedFormantProfile = (int)FormantProfile.Male;
+    private int _requestedFormantProfile = (int)FormantProfile.Tenor;
     private int _requestedShowRange = 1;
     private int _requestedShowGuides = 1;
     private int _requestedShowWaveform = 1;

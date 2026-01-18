@@ -6,7 +6,7 @@ using HotMic.Core.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class FiveBandEqPlugin : IPlugin, IQualityConfigurablePlugin
+public sealed class FiveBandEqPlugin : IContextualPlugin, IQualityConfigurablePlugin
 {
     public const int HpfFreqIndex = 0;
     public const int LowShelfGainIndex = 1;
@@ -147,6 +147,11 @@ public sealed class FiveBandEqPlugin : IPlugin, IQualityConfigurablePlugin
         _sampleRate = sampleRate;
         ConfigureAnalysis(_analysisSize);
         ConfigureSmoothers();
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)

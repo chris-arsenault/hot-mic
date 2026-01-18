@@ -141,4 +141,10 @@ public interface IAnalysisResultStore
     /// Get the analysis descriptor for frequency mapping.
     /// </summary>
     SpectrogramAnalysisDescriptor? GetAnalysisDescriptor();
+
+    /// <summary>
+    /// Gets discontinuity events that occurred at or after the specified frame ID.
+    /// Used by the renderer to display markers indicating parameter changes.
+    /// </summary>
+    IReadOnlyList<DiscontinuityEvent> GetDiscontinuities(long oldestFrameId);
 }

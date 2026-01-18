@@ -9,7 +9,11 @@ namespace HotMic.Core.Analysis;
 /// </summary>
 public sealed class AnalysisResultStore : IAnalysisResultStore
 {
+    private const int MaxDiscontinuityEvents = 32;
+
     private readonly object _configLock = new();
+    private readonly object _discontinuityLock = new();
+    private readonly Queue<DiscontinuityEvent> _discontinuityEvents = new();
     private AnalysisConfiguration _config = new();
     private int _sampleRate;
 
@@ -82,6 +86,7 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
 
     /// <summary>
     /// Configure the store with new dimensions. Called by orchestrator on config change.
+    /// Only reallocates buffers and clears data when display dimensions change.
     /// </summary>
     public void Configure(
         int sampleRate,
@@ -93,6 +98,11 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         AnalysisConfiguration config)
     {
         Interlocked.Increment(ref _dataVersion);
+
+        // Check if display dimensions changed (requires buffer reallocation)
+        int oldFrameCapacity = _frameCapacity;
+        int oldDisplayBins = _displayBins;
+        bool displayDimensionsChanged = frameCapacity != oldFrameCapacity || displayBins != oldDisplayBins;
 
         Volatile.Write(ref _sampleRate, sampleRate);
         Volatile.Write(ref _frameCapacity, frameCapacity);
@@ -106,42 +116,118 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
             _config = config.Clone();
         }
 
-        // Reallocate buffers
-        int specLength = frameCapacity * displayBins;
-        int linearLength = frameCapacity * analysisBins;
-        int formantLength = frameCapacity * AnalysisConfiguration.MaxFormants;
-        int harmonicLength = frameCapacity * AnalysisConfiguration.MaxHarmonics;
+        if (displayDimensionsChanged)
+        {
+            // Reallocate buffers - display dimensions changed
+            int specLength = frameCapacity * displayBins;
+            int linearLength = frameCapacity * analysisBins;
+            int formantLength = frameCapacity * AnalysisConfiguration.MaxFormants;
+            int harmonicLength = frameCapacity * AnalysisConfiguration.MaxHarmonics;
 
-        _spectrogramBuffer = new float[specLength];
-        _linearMagnitudeBuffer = new float[linearLength];
-        _pitchTrack = new float[frameCapacity];
-        _pitchConfidence = new float[frameCapacity];
-        _voicingStates = new byte[frameCapacity];
-        _formantFrequencies = new float[formantLength];
-        _formantBandwidths = new float[formantLength];
-        _harmonicFrequencies = new float[harmonicLength];
-        _harmonicMagnitudes = new float[harmonicLength];
-        _waveformMin = new float[frameCapacity];
-        _waveformMax = new float[frameCapacity];
-        _spectralCentroid = new float[frameCapacity];
-        _spectralSlope = new float[frameCapacity];
-        _spectralFlux = new float[frameCapacity];
-        _hnrTrack = new float[frameCapacity];
-        _cppTrack = new float[frameCapacity];
-        _syllableRateTrack = new float[frameCapacity];
-        _articulationRateTrack = new float[frameCapacity];
-        _pauseRatioTrack = new float[frameCapacity];
-        _monotoneScoreTrack = new float[frameCapacity];
-        _clarityScoreTrack = new float[frameCapacity];
-        _intelligibilityTrack = new float[frameCapacity];
-        _speakingStateTrack = new byte[frameCapacity];
-        _syllableMarkers = new byte[frameCapacity];
+            _spectrogramBuffer = new float[specLength];
+            _linearMagnitudeBuffer = new float[linearLength];
+            _pitchTrack = new float[frameCapacity];
+            _pitchConfidence = new float[frameCapacity];
+            _voicingStates = new byte[frameCapacity];
+            _formantFrequencies = new float[formantLength];
+            _formantBandwidths = new float[formantLength];
+            _harmonicFrequencies = new float[harmonicLength];
+            _harmonicMagnitudes = new float[harmonicLength];
+            _waveformMin = new float[frameCapacity];
+            _waveformMax = new float[frameCapacity];
+            _spectralCentroid = new float[frameCapacity];
+            _spectralSlope = new float[frameCapacity];
+            _spectralFlux = new float[frameCapacity];
+            _hnrTrack = new float[frameCapacity];
+            _cppTrack = new float[frameCapacity];
+            _syllableRateTrack = new float[frameCapacity];
+            _articulationRateTrack = new float[frameCapacity];
+            _pauseRatioTrack = new float[frameCapacity];
+            _monotoneScoreTrack = new float[frameCapacity];
+            _clarityScoreTrack = new float[frameCapacity];
+            _intelligibilityTrack = new float[frameCapacity];
+            _speakingStateTrack = new byte[frameCapacity];
+            _syllableMarkers = new byte[frameCapacity];
 
-        Volatile.Write(ref _frameCounter, 0);
-        Volatile.Write(ref _latestFrameId, -1);
-        Volatile.Write(ref _availableFrames, 0);
+            Volatile.Write(ref _frameCounter, 0);
+            Volatile.Write(ref _latestFrameId, -1);
+            Volatile.Write(ref _availableFrames, 0);
+
+            // Clear discontinuity events when buffers are reallocated
+            lock (_discontinuityLock)
+            {
+                _discontinuityEvents.Clear();
+            }
+        }
+        else
+        {
+            // Only analysis parameters changed - resize linear magnitude buffer if needed
+            int linearLength = frameCapacity * analysisBins;
+            if (_linearMagnitudeBuffer.Length != linearLength)
+            {
+                _linearMagnitudeBuffer = new float[linearLength];
+            }
+        }
 
         Interlocked.Increment(ref _dataVersion);
+    }
+
+    /// <summary>
+    /// Records a discontinuity event at the specified frame position.
+    /// Used to mark where analysis parameters changed without clearing display.
+    /// </summary>
+    public void RecordDiscontinuity(DiscontinuityType type, string? description = null)
+    {
+        if (type == DiscontinuityType.None)
+            return;
+
+        long frameId = Volatile.Read(ref _latestFrameId);
+        if (frameId < 0)
+            frameId = 0;
+
+        var evt = new DiscontinuityEvent(frameId, type, description ?? BuildDiscontinuityDescription(type));
+
+        lock (_discontinuityLock)
+        {
+            if (_discontinuityEvents.Count >= MaxDiscontinuityEvents)
+            {
+                _discontinuityEvents.Dequeue();
+            }
+            _discontinuityEvents.Enqueue(evt);
+        }
+    }
+
+    /// <summary>
+    /// Gets discontinuity events that occurred at or after the specified frame ID.
+    /// </summary>
+    public IReadOnlyList<DiscontinuityEvent> GetDiscontinuities(long oldestFrameId)
+    {
+        lock (_discontinuityLock)
+        {
+            var result = new List<DiscontinuityEvent>();
+            foreach (var evt in _discontinuityEvents)
+            {
+                if (evt.FrameId >= oldestFrameId)
+                {
+                    result.Add(evt);
+                }
+            }
+            return result;
+        }
+    }
+
+    private static string BuildDiscontinuityDescription(DiscontinuityType type)
+    {
+        var parts = new List<string>(4);
+        if (type.HasFlag(DiscontinuityType.TransformChange)) parts.Add("Transform");
+        if (type.HasFlag(DiscontinuityType.ResolutionChange)) parts.Add("Resolution");
+        if (type.HasFlag(DiscontinuityType.FrequencyRangeChange)) parts.Add("Freq Range");
+        if (type.HasFlag(DiscontinuityType.WindowChange)) parts.Add("Window");
+        if (type.HasFlag(DiscontinuityType.FilterChange)) parts.Add("Filter");
+        if (type.HasFlag(DiscontinuityType.TimeWindowChange)) parts.Add("Time");
+        if (type.HasFlag(DiscontinuityType.OverlapChange)) parts.Add("Overlap");
+        if (type.HasFlag(DiscontinuityType.BufferDrop)) parts.Add("Dropout");
+        return parts.Count > 0 ? string.Join(", ", parts) : "Change";
     }
 
     /// <summary>

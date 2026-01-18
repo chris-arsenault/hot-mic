@@ -3,7 +3,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class HighPassFilterPlugin : IPlugin
+public sealed class HighPassFilterPlugin : IContextualPlugin
 {
     public const int CutoffIndex = 0;
     public const int SlopeIndex = 1;
@@ -73,6 +73,11 @@ public sealed class HighPassFilterPlugin : IPlugin
         _spectrumWorker?.Dispose();
         _spectrumWorker = new SpectrumDisplayWorker(sampleRate, FftSize, SpectrumBins, 20f, 500f, SpectrumDecay, FftSize / 2);
         UpdateFilters();
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)

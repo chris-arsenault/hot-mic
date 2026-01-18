@@ -5,7 +5,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
+public sealed class FFTNoiseRemovalPlugin : IContextualPlugin, IQualityConfigurablePlugin
 {
     public const int ReductionIndex = 0;
 
@@ -141,6 +141,11 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
         {
             StartLearning();
         }
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)

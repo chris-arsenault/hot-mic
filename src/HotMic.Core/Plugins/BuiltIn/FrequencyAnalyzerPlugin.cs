@@ -8,7 +8,7 @@ namespace HotMic.Core.Plugins.BuiltIn;
 /// Real-time frequency analyzer with configurable FFT size and display bins.
 /// Pass-through plugin (no audio modification).
 /// </summary>
-public sealed class FrequencyAnalyzerPlugin : IPlugin
+public sealed class FrequencyAnalyzerPlugin : IContextualPlugin
 {
     public const int FftSizeIndex = 0;
     public const int DisplayBinsIndex = 1;
@@ -166,6 +166,11 @@ public sealed class FrequencyAnalyzerPlugin : IPlugin
         _sampleRate = sampleRate;
         ConfigureAnalysis(force: true);
         EnsureAnalysisThread();
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)

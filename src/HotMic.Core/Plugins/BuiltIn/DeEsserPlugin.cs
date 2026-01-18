@@ -3,7 +3,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class DeEsserPlugin : IPlugin
+public sealed class DeEsserPlugin : IContextualPlugin, ISidechainProducer
 {
     public const int CenterFreqIndex = 0;
     public const int BandwidthIndex = 1;
@@ -27,6 +27,7 @@ public sealed class DeEsserPlugin : IPlugin
     private float _gainAttackCoeff;
     private float _gainReleaseCoeff;
     private int _sampleRate;
+    private float[] _sibilanceBuffer = Array.Empty<float>();
 
     // Thread-safe metering
     private int _inputLevelBits;
@@ -37,6 +38,7 @@ public sealed class DeEsserPlugin : IPlugin
 
     private readonly BiquadFilter _bandPass = new();
     private readonly EnvelopeFollower _detector = new();
+    private readonly EnvelopeFollower _inputEnv = new();
 
     public DeEsserPlugin()
     {
@@ -67,67 +69,44 @@ public sealed class DeEsserPlugin : IPlugin
     public float MaxRangeDb => _maxRangeDb;
     public int SampleRate => _sampleRate;
 
+    public SidechainSignalMask ProducedSignals => SidechainSignalMask.SibilanceEnergy;
+
     public void Initialize(int sampleRate, int blockSize)
     {
         _sampleRate = sampleRate;
         _gain = 1f;
         _spectrumWorker?.Dispose();
         _spectrumWorker = new SpectrumDisplayWorker(sampleRate, FftSize, SpectrumBins, 1000f, 16000f, SpectrumDecay, FftSize / 2);
+        EnsureSidechainBuffer(blockSize);
         UpdateFilters();
     }
 
-    public void Process(Span<float> buffer)
+    public void Process(Span<float> buffer, in PluginProcessContext context)
     {
-        if (IsBypassed || buffer.IsEmpty)
+        if (_sibilanceBuffer.Length < buffer.Length)
+        {
+            ProcessCore(buffer, Span<float>.Empty);
+            return;
+        }
+
+        var sibilanceSpan = _sibilanceBuffer.AsSpan(0, buffer.Length);
+        if (!ProcessCore(buffer, sibilanceSpan))
         {
             return;
         }
 
-        _spectrumWorker?.Write(buffer);
-
-        float gain = _gain;
-        float attackCoeff = _gainAttackCoeff;
-        float releaseCoeff = _gainReleaseCoeff;
-        float thresholdDb = _thresholdDb;
-        float reductionDb = _reductionDb;
-        float maxRangeDb = _maxRangeDb;
-        float inputPeak = 0f;
-        float sibilancePeak = 0f;
-        float minGain = 1f;
-
-        for (int i = 0; i < buffer.Length; i++)
+        if (!context.SidechainWriter.IsEnabled)
         {
-            float input = buffer[i];
-            inputPeak = MathF.Max(inputPeak, MathF.Abs(input));
-
-            float band = _bandPass.Process(input);
-            float env = _detector.Process(band);
-            sibilancePeak = MathF.Max(sibilancePeak, env);
-            float envDb = DspUtils.LinearToDb(env);
-
-            float targetReduction = 0f;
-            if (envDb > thresholdDb)
-            {
-                float overDb = envDb - thresholdDb;
-                targetReduction = MathF.Min(maxRangeDb, MathF.Min(reductionDb, overDb));
-            }
-
-            float targetGain = DspUtils.DbToLinear(-targetReduction);
-            float coeff = targetGain < gain ? attackCoeff : releaseCoeff;
-            gain += coeff * (targetGain - gain);
-            minGain = MathF.Min(minGain, gain);
-
-            float processedBand = band * gain;
-            buffer[i] = input - band + processedBand;
+            return;
         }
 
-        _gain = gain;
+        long writeTime = context.SampleTime - LatencySamples;
+        context.SidechainWriter.WriteBlock(SidechainSignalId.SibilanceEnergy, writeTime, sibilanceSpan);
+    }
 
-        // Update metering (thread-safe)
-        UpdatePeakLevel(ref _inputLevelBits, inputPeak);
-        UpdatePeakLevel(ref _sibilanceLevelBits, sibilancePeak);
-        float grDb = minGain < 1f ? DspUtils.LinearToDb(minGain) : 0f;
-        Interlocked.Exchange(ref _gainReductionBits, BitConverter.SingleToInt32Bits(grDb));
+    public void Process(Span<float> buffer)
+    {
+        ProcessCore(buffer, Span<float>.Empty);
     }
 
     private static void UpdatePeakLevel(ref int levelBits, float newPeak)
@@ -242,7 +221,79 @@ public sealed class DeEsserPlugin : IPlugin
         float q = Math.Clamp(_centerHz / MathF.Max(1f, _bandwidthHz), 0.2f, 12f);
         _bandPass.SetBandPass(_sampleRate, _centerHz, q);
         _detector.Configure(AttackMs, ReleaseMs, _sampleRate);
+        _inputEnv.Configure(AttackMs, ReleaseMs, _sampleRate);
         _gainAttackCoeff = DspUtils.TimeToCoefficient(AttackMs, _sampleRate);
         _gainReleaseCoeff = DspUtils.TimeToCoefficient(ReleaseMs, _sampleRate);
+    }
+
+    private bool ProcessCore(Span<float> buffer, Span<float> sibilanceSpan)
+    {
+        if (IsBypassed || buffer.IsEmpty)
+        {
+            return false;
+        }
+
+        _spectrumWorker?.Write(buffer);
+
+        float gain = _gain;
+        float attackCoeff = _gainAttackCoeff;
+        float releaseCoeff = _gainReleaseCoeff;
+        float thresholdDb = _thresholdDb;
+        float reductionDb = _reductionDb;
+        float maxRangeDb = _maxRangeDb;
+        float inputPeak = 0f;
+        float sibilancePeak = 0f;
+        float minGain = 1f;
+        bool writeSibilance = !sibilanceSpan.IsEmpty;
+
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            float input = buffer[i];
+            inputPeak = MathF.Max(inputPeak, MathF.Abs(input));
+
+            float band = _bandPass.Process(input);
+            float env = _detector.Process(band);
+            sibilancePeak = MathF.Max(sibilancePeak, env);
+            float envDb = DspUtils.LinearToDb(env);
+
+            float targetReduction = 0f;
+            if (envDb > thresholdDb)
+            {
+                float overDb = envDb - thresholdDb;
+                targetReduction = MathF.Min(maxRangeDb, MathF.Min(reductionDb, overDb));
+            }
+
+            float targetGain = DspUtils.DbToLinear(-targetReduction);
+            float coeff = targetGain < gain ? attackCoeff : releaseCoeff;
+            gain += coeff * (targetGain - gain);
+            minGain = MathF.Min(minGain, gain);
+
+            float processedBand = band * gain;
+            buffer[i] = input - band + processedBand;
+
+            if (writeSibilance)
+            {
+                float totalEnv = _inputEnv.Process(input);
+                float norm = totalEnv > 1e-6f ? env / totalEnv : 0f;
+                sibilanceSpan[i] = Math.Clamp(norm, 0f, 1f);
+            }
+        }
+
+        _gain = gain;
+
+        // Update metering (thread-safe)
+        UpdatePeakLevel(ref _inputLevelBits, inputPeak);
+        UpdatePeakLevel(ref _sibilanceLevelBits, sibilancePeak);
+        float grDb = minGain < 1f ? DspUtils.LinearToDb(minGain) : 0f;
+        Interlocked.Exchange(ref _gainReductionBits, BitConverter.SingleToInt32Bits(grDb));
+        return true;
+    }
+
+    private void EnsureSidechainBuffer(int blockSize)
+    {
+        if (blockSize > 0 && _sibilanceBuffer.Length != blockSize)
+        {
+            _sibilanceBuffer = new float[blockSize];
+        }
     }
 }

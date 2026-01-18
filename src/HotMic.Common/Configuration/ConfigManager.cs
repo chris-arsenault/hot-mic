@@ -62,15 +62,11 @@ public sealed class ConfigManager
             {
                 SampleRate = 48000,
                 BufferSize = 256,
-                QualityMode = AudioQualityMode.LatencyPriority,
-                Input1Channel = InputChannelMode.Sum,
-                Input2Channel = InputChannelMode.Sum,
-                OutputRouting = OutputRoutingMode.Split
+                QualityMode = AudioQualityMode.LatencyPriority
             },
             Channels =
             {
-                CreateDefaultChannel(1, "Mic 1"),
-                CreateDefaultChannel(2, "Mic 2")
+                CreateDefaultChannel(1, "Mic 1", includeOutputSend: true)
             },
             Ui = new UiConfig
             {
@@ -80,8 +76,28 @@ public sealed class ConfigManager
         };
     }
 
-    private static ChannelConfig CreateDefaultChannel(int id, string name)
+    private static ChannelConfig CreateDefaultChannel(int id, string name, bool includeOutputSend)
     {
-        return new ChannelConfig { Id = id, Name = name };
+        var config = new ChannelConfig
+        {
+            Id = id,
+            Name = name,
+            InputChannel = InputChannelMode.Sum
+        };
+
+        config.Plugins.Add(new PluginConfig
+        {
+            Type = "builtin:input"
+        });
+
+        if (includeOutputSend)
+        {
+            config.Plugins.Add(new PluginConfig
+            {
+                Type = "builtin:output-send"
+            });
+        }
+
+        return config;
     }
 }

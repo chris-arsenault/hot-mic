@@ -1,7 +1,7 @@
 namespace HotMic.Core.Dsp.Analysis.Formants;
 
 /// <summary>
-/// Computes LPC coefficients using Levinson-Durbin recursion.
+/// Computes LPC coefficients using Burg recursion.
 /// </summary>
 public sealed class LpcAnalyzer
 {

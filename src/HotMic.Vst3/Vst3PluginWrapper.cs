@@ -9,7 +9,7 @@ using Jacobi.Vst.Interop.Host;
 
 namespace HotMic.Vst3;
 
-public sealed class Vst3PluginWrapper : IPlugin
+public sealed class Vst3PluginWrapper : IContextualPlugin
 {
     private readonly Vst3PluginInfo _info;
     private VstPluginContext? _context;
@@ -108,6 +108,11 @@ public sealed class Vst3PluginWrapper : IPlugin
         _inputBuffers = GetBuffers(_inputBufferManager);
         _outputBuffers = GetBuffers(_outputBufferManager);
         _parameters = BuildParameters();
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)

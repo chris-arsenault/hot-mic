@@ -5,7 +5,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPluginStatusProvider
+public sealed class RNNoisePlugin : IContextualPlugin, IQualityConfigurablePlugin, IPluginStatusProvider, ISidechainProducer
 {
     public const int ReductionIndex = 0;
     public const int VadThresholdIndex = 1;
@@ -21,6 +21,7 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
     private readonly float[] _frameIn = new float[FrameSize];
     private readonly float[] _frameOut = new float[FrameSize];
     private LinearSmoother _mixSmoother = new();
+    private float[] _speechBuffer = Array.Empty<float>();
 
     private IntPtr _state = IntPtr.Zero;
     private int _ringIndex;
@@ -72,9 +73,14 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
 
     public string StatusMessage => _statusMessage;
 
+    public SidechainSignalMask ProducedSignals => _forcedBypass || _state == IntPtr.Zero
+        ? SidechainSignalMask.None
+        : SidechainSignalMask.SpeechPresence;
+
     public void Initialize(int sampleRate, int blockSize)
     {
         _sampleRate = sampleRate;
+        EnsureSidechainBuffer(blockSize);
         _statusMessage = string.Empty;
         _forcedBypass = false;
         ReleaseState();
@@ -115,54 +121,28 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
         _wasBypassed = false;
     }
 
-    public void Process(Span<float> buffer)
+    public void Process(Span<float> buffer, in PluginProcessContext context)
     {
-        if (IsBypassed || _forcedBypass || _state == IntPtr.Zero)
+        if (!ProcessCore(buffer))
         {
-            _wasBypassed = true;
             return;
         }
 
-        if (_wasBypassed)
+        if (_speechBuffer.Length < buffer.Length || !context.SidechainWriter.IsEnabled)
         {
-            ResetState(clearBuffers: true);
-            _wasBypassed = false;
+            return;
         }
 
-        float mix = _mixSmoother.Current;
-        bool smoothing = _mixSmoother.IsSmoothing;
+        float vad = VadProbability;
+        var span = _speechBuffer.AsSpan(0, buffer.Length);
+        span.Fill(vad);
+        long writeTime = context.SampleTime - LatencySamples;
+        context.SidechainWriter.WriteBlock(SidechainSignalId.SpeechPresence, writeTime, span);
+    }
 
-        for (int i = 0; i < buffer.Length; i++)
-        {
-            if (smoothing)
-            {
-                mix = _mixSmoother.Next();
-                smoothing = _mixSmoother.IsSmoothing;
-            }
-
-            float input = buffer[i];
-            float dry = _dryRing[_ringIndex];
-            float wet = _outputRing[_ringIndex];
-            _outputRing[_ringIndex] = 0f;
-
-            buffer[i] = dry * (1f - mix) + wet * mix;
-
-            _dryRing[_ringIndex] = input;
-            _inputRing[_ringIndex] = input;
-
-            _ringIndex++;
-            if (_ringIndex >= FrameSize)
-            {
-                _ringIndex = 0;
-            }
-
-            _hopCounter++;
-            if (_hopCounter >= FrameSize)
-            {
-                _hopCounter = 0;
-                ProcessFrame();
-            }
-        }
+    public void Process(Span<float> buffer)
+    {
+        ProcessCore(buffer);
     }
 
     public void SetParameter(int index, float value)
@@ -231,6 +211,58 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
     public void Dispose()
     {
         ReleaseState();
+    }
+
+    private bool ProcessCore(Span<float> buffer)
+    {
+        if (IsBypassed || _forcedBypass || _state == IntPtr.Zero)
+        {
+            _wasBypassed = true;
+            return false;
+        }
+
+        if (_wasBypassed)
+        {
+            ResetState(clearBuffers: true);
+            _wasBypassed = false;
+        }
+
+        float mix = _mixSmoother.Current;
+        bool smoothing = _mixSmoother.IsSmoothing;
+
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            if (smoothing)
+            {
+                mix = _mixSmoother.Next();
+                smoothing = _mixSmoother.IsSmoothing;
+            }
+
+            float input = buffer[i];
+            float dry = _dryRing[_ringIndex];
+            float wet = _outputRing[_ringIndex];
+            _outputRing[_ringIndex] = 0f;
+
+            buffer[i] = dry * (1f - mix) + wet * mix;
+
+            _dryRing[_ringIndex] = input;
+            _inputRing[_ringIndex] = input;
+
+            _ringIndex++;
+            if (_ringIndex >= FrameSize)
+            {
+                _ringIndex = 0;
+            }
+
+            _hopCounter++;
+            if (_hopCounter >= FrameSize)
+            {
+                _hopCounter = 0;
+                ProcessFrame();
+            }
+        }
+
+        return true;
     }
 
     private void ProcessFrame()
@@ -316,6 +348,14 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
             Array.Clear(_dryRing, 0, _dryRing.Length);
             Array.Clear(_frameIn, 0, _frameIn.Length);
             Array.Clear(_frameOut, 0, _frameOut.Length);
+        }
+    }
+
+    private void EnsureSidechainBuffer(int blockSize)
+    {
+        if (blockSize > 0 && _speechBuffer.Length != blockSize)
+        {
+            _speechBuffer = new float[blockSize];
         }
     }
 

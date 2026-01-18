@@ -1,10 +1,12 @@
 using System.Diagnostics;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using HotMic.Common.Configuration;
 using HotMic.Core.Analysis;
 using HotMic.Core.Metering;
+using HotMic.Core.Plugins;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Threading;
 using NAudio.CoreAudioApi;
@@ -18,10 +20,14 @@ public sealed class AudioEngine : IDisposable
 
     private readonly DeviceManager _deviceManager = new();
     private readonly LockFreeQueue<ParameterChange> _parameterQueue = new();
-    private readonly LockFreeRingBuffer _inputBuffer1;
-    private readonly LockFreeRingBuffer _inputBuffer2;
+    private readonly List<PendingPluginDisposal> _pendingPluginDisposals = new();
+    private readonly List<IPlugin> _disposeBuffer = new();
+    private readonly object _pendingPluginDisposalsLock = new();
+    private readonly List<InputCapture> _inputCaptures = new();
+    private readonly object _inputCaptureLock = new();
     private LockFreeRingBuffer? _monitorBuffer;
-    private readonly ChannelStrip[] _channels;
+    private ChannelStrip[] _channels = Array.Empty<ChannelStrip>();
+    private RoutingSnapshot? _routingSnapshot;
     private readonly LufsMeterProcessor _masterLufsLeft;
     private readonly LufsMeterProcessor _masterLufsRight;
     private readonly int _sampleRate;
@@ -29,42 +35,17 @@ public sealed class AudioEngine : IDisposable
     private readonly int _latencyMs;
 
     private long _lastOutputCallbackTicks;
-    private long _lastInput1CallbackTicks;
-    private long _lastInput2CallbackTicks;
     private long _outputCallbackCount;
-    private long _input1CallbackCount;
-    private long _input2CallbackCount;
     private int _lastOutputFrames;
-    private int _lastInput1Frames;
-    private int _lastInput2Frames;
     private int _outputActive;
-    private int _input1Active;
-    private int _input2Active;
+    private int _processingEnabled = 1;
     private int _monitorActive;
-    private int _input1Channels = 1;
-    private int _input2Channels = 1;
-    private int _input1SampleRate;
-    private int _input2SampleRate;
-    private long _input1DroppedSamples;
-    private long _input2DroppedSamples;
-    private long _outputUnderflowSamples1;
-    private long _outputUnderflowSamples2;
-    private int _input1BlockAlign;
-    private int _input2BlockAlign;
-    private float[] _input1MixBuffer = Array.Empty<float>();
-    private float[] _input2MixBuffer = Array.Empty<float>();
-    private int _input1ChannelMode;
-    private int _input2ChannelMode;
-    private int _outputRoutingMode;
+    private long _outputUnderflowSamples;
 
-    private WasapiCapture? _capture1;
-    private WasapiCapture? _capture2;
     private WasapiOut? _output;
     private WasapiOut? _monitorOutput;
     private OutputMixProvider? _outputProvider;
 
-    private string _input1Id = string.Empty;
-    private string _input2Id = string.Empty;
     private string _outputId = string.Empty;
     private string _monitorOutputId = string.Empty;
     private CancellationTokenSource? _recoveryCts;
@@ -76,26 +57,16 @@ public sealed class AudioEngine : IDisposable
     public event EventHandler<DeviceDisconnectedEventArgs>? DeviceDisconnected;
     public event EventHandler<DeviceRecoveredEventArgs>? DeviceRecovered;
 
-    public AudioEngine(AudioSettingsConfig settings)
+    public AudioEngine(AudioSettingsConfig settings, int channelCount)
     {
         _sampleRate = settings.SampleRate;
         _blockSize = settings.BufferSize;
         _latencyMs = Math.Max(20, (int)(1000.0 * _blockSize / _sampleRate));
-        _input1ChannelMode = (int)settings.Input1Channel;
-        _input2ChannelMode = (int)settings.Input2Channel;
-        _outputRoutingMode = (int)settings.OutputRouting;
-
-        _inputBuffer1 = new LockFreeRingBuffer(_blockSize * 32);
-        _inputBuffer2 = new LockFreeRingBuffer(_blockSize * 32);
-        _channels =
-        [
-            new ChannelStrip(_sampleRate, _blockSize),
-            new ChannelStrip(_sampleRate, _blockSize)
-        ];
         _masterLufsLeft = new LufsMeterProcessor(_sampleRate);
         _masterLufsRight = new LufsMeterProcessor(_sampleRate);
 
-        ConfigureDevices(settings.InputDevice1Id, settings.InputDevice2Id, settings.OutputDeviceId, settings.MonitorOutputDeviceId);
+        ConfigureOutputDevices(settings.OutputDeviceId, settings.MonitorOutputDeviceId);
+        EnsureChannelCount(Math.Max(1, channelCount));
     }
 
     public IReadOnlyList<ChannelStrip> Channels => _channels;
@@ -119,24 +90,328 @@ public sealed class AudioEngine : IDisposable
     /// </summary>
     public LufsMeterProcessor MasterLufsRight => _masterLufsRight;
 
-    public void ConfigureDevices(string input1Id, string input2Id, string outputId, string? monitorOutputId)
+    public void ConfigureOutputDevices(string outputId, string? monitorOutputId)
     {
-        _input1Id = input1Id;
-        _input2Id = input2Id;
         _outputId = outputId;
         _monitorOutputId = monitorOutputId ?? string.Empty;
     }
 
-    public void ConfigureRouting(InputChannelMode input1Channel, InputChannelMode input2Channel, OutputRoutingMode outputRouting)
+    public string ConfigureChannelInput(int channelId, string deviceId, InputChannelMode channelMode)
     {
-        Volatile.Write(ref _input1ChannelMode, (int)input1Channel);
-        Volatile.Write(ref _input2ChannelMode, (int)input2Channel);
-        Volatile.Write(ref _outputRoutingMode, (int)outputRouting);
+        if ((uint)channelId >= (uint)_channels.Length)
+        {
+            return string.Empty;
+        }
+
+        string resolvedDeviceId = deviceId ?? string.Empty;
+
+        lock (_inputCaptureLock)
+        {
+            for (int i = 0; i < _inputCaptures.Count; i++)
+            {
+                var capture = _inputCaptures[i];
+                if (capture.ChannelId != channelId && capture.DeviceId == resolvedDeviceId)
+                {
+                    resolvedDeviceId = string.Empty;
+                    break;
+                }
+            }
+
+            InputCapture? existing = null;
+            for (int i = 0; i < _inputCaptures.Count; i++)
+            {
+                if (_inputCaptures[i].ChannelId == channelId)
+                {
+                    existing = _inputCaptures[i];
+                    break;
+                }
+            }
+            if (string.IsNullOrWhiteSpace(resolvedDeviceId))
+            {
+                if (existing is not null)
+                {
+                    existing.Stop();
+                    existing.Dispose();
+                    _inputCaptures.Remove(existing);
+                }
+            }
+            else
+            {
+                if (existing is null)
+                {
+                    existing = new InputCapture(this, channelId, _blockSize);
+                    _inputCaptures.Add(existing);
+                }
+
+                existing.Configure(resolvedDeviceId, channelMode);
+                if (Volatile.Read(ref _outputActive) == 1)
+                {
+                    using var enumerator = new MMDeviceEnumerator();
+                    existing.Start(enumerator, _sampleRate);
+                }
+            }
+
+            UpdateRoutingInputSources();
+        }
+
+        return resolvedDeviceId;
+    }
+
+    public void EnsureChannelCount(int channelCount)
+    {
+        if (channelCount < 1)
+        {
+            channelCount = 1;
+        }
+
+        var current = Volatile.Read(ref _channels);
+        if (current.Length == channelCount)
+        {
+            return;
+        }
+
+        var next = new ChannelStrip[channelCount];
+        int copyCount = Math.Min(current.Length, channelCount);
+        Array.Copy(current, next, copyCount);
+        for (int i = copyCount; i < channelCount; i++)
+        {
+            next[i] = new ChannelStrip(i, _sampleRate, _blockSize);
+        }
+
+        if (channelCount < current.Length)
+        {
+            for (int i = channelCount; i < current.Length; i++)
+            {
+                var slots = current[i].PluginChain.DetachAll();
+                for (int j = 0; j < slots.Length; j++)
+                {
+                    if (slots[j] is { } slot)
+                    {
+                        QueuePluginDisposal(slot.Plugin);
+                    }
+                }
+            }
+        }
+
+        Interlocked.Exchange(ref _channels, next);
+
+        lock (_inputCaptureLock)
+        {
+            for (int i = _inputCaptures.Count - 1; i >= 0; i--)
+            {
+                if (_inputCaptures[i].ChannelId >= channelCount)
+                {
+                    _inputCaptures[i].Stop();
+                    _inputCaptures[i].Dispose();
+                    _inputCaptures.RemoveAt(i);
+                }
+            }
+        }
+
+        RebuildRoutingSnapshot(next, BuildProcessingOrder(next));
+    }
+
+    public void RebuildRoutingGraph()
+    {
+        var channels = Volatile.Read(ref _channels);
+        RebuildRoutingSnapshot(channels, BuildProcessingOrder(channels));
+    }
+
+    private void RebuildRoutingSnapshot(ChannelStrip[] channels, int[] processingOrder)
+    {
+        if (processingOrder.Length != channels.Length)
+        {
+            processingOrder = BuildDefaultOrder(channels.Length);
+        }
+
+        var snapshot = new RoutingSnapshot(channels, processingOrder, _sampleRate, _blockSize);
+        lock (_inputCaptureLock)
+        {
+            for (int i = 0; i < channels.Length; i++)
+            {
+                snapshot.Routing.SetInputSource(i, null);
+            }
+
+            for (int i = 0; i < _inputCaptures.Count; i++)
+            {
+                var capture = _inputCaptures[i];
+                if ((uint)capture.ChannelId < (uint)channels.Length)
+                {
+                    snapshot.Routing.SetInputSource(capture.ChannelId, capture.Source);
+                }
+            }
+        }
+
+        _routingSnapshot = snapshot;
+        _outputProvider?.UpdateSnapshot(snapshot);
+    }
+
+    private void UpdateRoutingInputSources()
+    {
+        var snapshot = _routingSnapshot;
+        if (snapshot is null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < snapshot.Channels.Length; i++)
+        {
+            snapshot.Routing.SetInputSource(i, null);
+        }
+
+        for (int i = 0; i < _inputCaptures.Count; i++)
+        {
+            var capture = _inputCaptures[i];
+            if ((uint)capture.ChannelId < (uint)snapshot.Channels.Length)
+            {
+                snapshot.Routing.SetInputSource(capture.ChannelId, capture.Source);
+            }
+        }
+    }
+
+    private int[] BuildProcessingOrder(ChannelStrip[] channels)
+    {
+        int count = channels.Length;
+        if (count == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var edges = new bool[count, count];
+        var indegree = new int[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            var slots = channels[i].PluginChain.GetSnapshot();
+            for (int s = 0; s < slots.Length; s++)
+            {
+                var slot = slots[s];
+                if (slot is null)
+                {
+                    continue;
+                }
+
+                if (slot.Plugin is CopyToChannelPlugin copy)
+                {
+                    int targetIndex = copy.TargetChannelId - 1;
+                    AddEdge(edges, indegree, i, targetIndex);
+                }
+                else if (slot.Plugin is MergePlugin merge)
+                {
+                    int sourceCount = merge.SourceCount;
+                    for (int m = 0; m < sourceCount; m++)
+                    {
+                        int sourceIndex = merge.GetSourceChannelId(m) - 1;
+                        AddEdge(edges, indegree, sourceIndex, i);
+                    }
+                }
+            }
+        }
+
+        var queue = new Queue<int>(count);
+        for (int i = 0; i < count; i++)
+        {
+            if (indegree[i] == 0)
+            {
+                queue.Enqueue(i);
+            }
+        }
+
+        var order = new int[count];
+        int index = 0;
+        while (queue.Count > 0)
+        {
+            int node = queue.Dequeue();
+            order[index++] = node;
+            for (int j = 0; j < count; j++)
+            {
+                if (!edges[node, j])
+                {
+                    continue;
+                }
+
+                indegree[j]--;
+                if (indegree[j] == 0)
+                {
+                    queue.Enqueue(j);
+                }
+            }
+        }
+
+        if (index != count)
+        {
+            return BuildDefaultOrder(count);
+        }
+
+        return order;
+    }
+
+    private static int[] BuildDefaultOrder(int channelCount)
+    {
+        var order = new int[channelCount];
+        for (int i = 0; i < channelCount; i++)
+        {
+            order[i] = i;
+        }
+        return order;
+    }
+
+    private static void AddEdge(bool[,] edges, int[] indegree, int sourceIndex, int targetIndex)
+    {
+        int count = indegree.Length;
+        if ((uint)sourceIndex >= (uint)count || (uint)targetIndex >= (uint)count || sourceIndex == targetIndex)
+        {
+            return;
+        }
+
+        if (!edges[sourceIndex, targetIndex])
+        {
+            edges[sourceIndex, targetIndex] = true;
+            indegree[targetIndex]++;
+        }
+    }
+
+    private void StartInputCaptures(MMDeviceEnumerator enumerator)
+    {
+        lock (_inputCaptureLock)
+        {
+            for (int i = 0; i < _inputCaptures.Count; i++)
+            {
+                _inputCaptures[i].Start(enumerator, _sampleRate);
+            }
+        }
+    }
+
+    private void StopInputCaptures()
+    {
+        lock (_inputCaptureLock)
+        {
+            for (int i = 0; i < _inputCaptures.Count; i++)
+            {
+                _inputCaptures[i].Stop();
+            }
+        }
+    }
+
+    private void ClearInputBuffers()
+    {
+        lock (_inputCaptureLock)
+        {
+            for (int i = 0; i < _inputCaptures.Count; i++)
+            {
+                _inputCaptures[i].Source.Buffer.Clear();
+            }
+        }
     }
 
     public void SetMasterMute(bool muted)
     {
         _outputProvider?.SetMasterMute(muted);
+    }
+
+    public void SetProcessingEnabled(bool enabled)
+    {
+        Volatile.Write(ref _processingEnabled, enabled ? 1 : 0);
     }
 
     public void Start()
@@ -150,16 +425,27 @@ public sealed class AudioEngine : IDisposable
 
         var outputDevice = enumerator.GetDevice(_outputId);
         var outputFormat = WaveFormat.CreateIeeeFloatWaveFormat(_sampleRate, 2);
+
+        var channels = Volatile.Read(ref _channels);
+        if (channels.Length == 0)
+        {
+            EnsureChannelCount(1);
+            channels = Volatile.Read(ref _channels);
+        }
+
+        if (_routingSnapshot is null)
+        {
+            RebuildRoutingSnapshot(channels, BuildProcessingOrder(channels));
+        }
+
+        var snapshot = _routingSnapshot ?? new RoutingSnapshot(channels, BuildDefaultOrder(channels.Length), _sampleRate, _blockSize);
         _outputProvider = new OutputMixProvider(
-            _channels,
+            snapshot,
             _parameterQueue,
-            _inputBuffer1,
-            _inputBuffer2,
             _blockSize,
             ReportOutputCallback,
-            ReportOutputUnderflow1,
-            ReportOutputUnderflow2,
-            () => (OutputRoutingMode)Volatile.Read(ref _outputRoutingMode),
+            ReportOutputUnderflow,
+            () => Volatile.Read(ref _processingEnabled) != 0,
             _masterLufsLeft,
             _masterLufsRight,
             _analysisTap,
@@ -182,57 +468,7 @@ public sealed class AudioEngine : IDisposable
             _monitorOutput.Play();
             Interlocked.Exchange(ref _monitorActive, 1);
         }
-
-        _capture1 = CreateCapture(enumerator, _input1Id);
-        _capture2 = CreateCapture(enumerator, _input2Id);
-
-        if (_capture1 is not null)
-        {
-            CacheInputFormat(_capture1, isFirst: true);
-        }
-
-        if (_capture2 is not null)
-        {
-            CacheInputFormat(_capture2, isFirst: false);
-        }
-
-        if (_capture1 is not null)
-        {
-            _capture1.DataAvailable += OnInput1DataAvailable;
-            _capture1.RecordingStopped += OnInput1Stopped;
-            try
-            {
-                _capture1.StartRecording();
-                CacheInputFormat(_capture1, isFirst: true);
-                Interlocked.Exchange(ref _input1Active, 1);
-            }
-            catch
-            {
-                _capture1.DataAvailable -= OnInput1DataAvailable;
-                _capture1.Dispose();
-                _capture1 = null;
-                Interlocked.Exchange(ref _input1Active, 0);
-            }
-        }
-
-        if (_capture2 is not null)
-        {
-            _capture2.DataAvailable += OnInput2DataAvailable;
-            _capture2.RecordingStopped += OnInput2Stopped;
-            try
-            {
-                _capture2.StartRecording();
-                CacheInputFormat(_capture2, isFirst: false);
-                Interlocked.Exchange(ref _input2Active, 1);
-            }
-            catch
-            {
-                _capture2.DataAvailable -= OnInput2DataAvailable;
-                _capture2.Dispose();
-                _capture2 = null;
-                Interlocked.Exchange(ref _input2Active, 0);
-            }
-        }
+        StartInputCaptures(enumerator);
     }
 
     public void Stop()
@@ -242,23 +478,7 @@ public sealed class AudioEngine : IDisposable
             return;
         }
 
-        if (_capture1 is not null)
-        {
-            _capture1.DataAvailable -= OnInput1DataAvailable;
-            _capture1.RecordingStopped -= OnInput1Stopped;
-            _capture1.StopRecording();
-            _capture1.Dispose();
-            _capture1 = null;
-        }
-
-        if (_capture2 is not null)
-        {
-            _capture2.DataAvailable -= OnInput2DataAvailable;
-            _capture2.RecordingStopped -= OnInput2Stopped;
-            _capture2.StopRecording();
-            _capture2.Dispose();
-            _capture2 = null;
-        }
+        StopInputCaptures();
 
         if (_output is not null)
         {
@@ -278,18 +498,36 @@ public sealed class AudioEngine : IDisposable
         _monitorOutput = null;
         Interlocked.Exchange(ref _monitorActive, 0);
 
-        _inputBuffer1.Clear();
-        _inputBuffer2.Clear();
+        ClearInputBuffers();
         _monitorBuffer?.Clear();
-        Interlocked.Exchange(ref _input1Active, 0);
-        Interlocked.Exchange(ref _input2Active, 0);
 
         Interlocked.Exchange(ref _isStopping, 0);
+        DrainPendingPluginDisposals(force: true);
     }
 
     public void EnqueueParameterChange(ParameterChange change)
     {
         _parameterQueue.Enqueue(change);
+    }
+
+    public void QueuePluginDisposal(IPlugin plugin)
+    {
+        if (Volatile.Read(ref _outputActive) == 0)
+        {
+            plugin.Dispose();
+            return;
+        }
+
+        long targetCallback = Interlocked.Read(ref _outputCallbackCount) + 1;
+        lock (_pendingPluginDisposalsLock)
+        {
+            _pendingPluginDisposals.Add(new PendingPluginDisposal(plugin, targetCallback));
+        }
+    }
+
+    public void DrainPendingPluginDisposals()
+    {
+        DrainPendingPluginDisposals(force: false);
     }
 
     public bool IsVbCableInstalled()
@@ -299,41 +537,88 @@ public sealed class AudioEngine : IDisposable
 
     public AudioEngineDiagnosticsSnapshot GetDiagnosticsSnapshot()
     {
+        var inputs = new List<InputDiagnosticsSnapshot>();
+        lock (_inputCaptureLock)
+        {
+            for (int i = 0; i < _inputCaptures.Count; i++)
+            {
+                var capture = _inputCaptures[i];
+                inputs.Add(new InputDiagnosticsSnapshot(
+                    channelId: capture.ChannelId,
+                    deviceId: capture.DeviceId,
+                    isActive: capture.IsActive,
+                    lastCallbackTicks: capture.LastCallbackTicks,
+                    callbackCount: capture.CallbackCount,
+                    lastFrames: capture.LastFrames,
+                    bufferedSamples: capture.Source.BufferedSamples,
+                    bufferCapacity: capture.Source.Capacity,
+                    channels: capture.Channels,
+                    sampleRate: capture.SampleRate,
+                    droppedSamples: capture.DroppedSamples,
+                    underflowSamples: capture.Source.UnderflowSamples));
+            }
+        }
+
         return new AudioEngineDiagnosticsSnapshot(
             outputActive: Volatile.Read(ref _outputActive) == 1,
-            input1Active: Volatile.Read(ref _input1Active) == 1,
-            input2Active: Volatile.Read(ref _input2Active) == 1,
             monitorActive: Volatile.Read(ref _monitorActive) == 1,
             isRecovering: Volatile.Read(ref _isRecovering) == 1,
             lastOutputCallbackTicks: Volatile.Read(ref _lastOutputCallbackTicks),
-            lastInput1CallbackTicks: Volatile.Read(ref _lastInput1CallbackTicks),
-            lastInput2CallbackTicks: Volatile.Read(ref _lastInput2CallbackTicks),
             outputCallbackCount: Interlocked.Read(ref _outputCallbackCount),
-            input1CallbackCount: Interlocked.Read(ref _input1CallbackCount),
-            input2CallbackCount: Interlocked.Read(ref _input2CallbackCount),
             lastOutputFrames: Volatile.Read(ref _lastOutputFrames),
-            lastInput1Frames: Volatile.Read(ref _lastInput1Frames),
-            lastInput2Frames: Volatile.Read(ref _lastInput2Frames),
-            input1BufferedSamples: _inputBuffer1.AvailableRead,
-            input2BufferedSamples: _inputBuffer2.AvailableRead,
             monitorBufferedSamples: _monitorBuffer?.AvailableRead ?? 0,
-            input1BufferCapacity: _inputBuffer1.Capacity,
-            input2BufferCapacity: _inputBuffer2.Capacity,
             monitorBufferCapacity: _monitorBuffer?.Capacity ?? 0,
-            input1Channels: Volatile.Read(ref _input1Channels),
-            input2Channels: Volatile.Read(ref _input2Channels),
-            input1SampleRate: Volatile.Read(ref _input1SampleRate),
-            input2SampleRate: Volatile.Read(ref _input2SampleRate),
-            input1DroppedSamples: Interlocked.Read(ref _input1DroppedSamples),
-            input2DroppedSamples: Interlocked.Read(ref _input2DroppedSamples),
-            outputUnderflowSamples1: Interlocked.Read(ref _outputUnderflowSamples1),
-            outputUnderflowSamples2: Interlocked.Read(ref _outputUnderflowSamples2));
+            outputUnderflowSamples: Interlocked.Read(ref _outputUnderflowSamples),
+            inputs: inputs.ToArray());
     }
 
     public void Dispose()
     {
         CancelRecovery();
         Stop();
+        DrainPendingPluginDisposals(force: true);
+        DisposeAllPlugins();
+    }
+
+    private void DisposeAllPlugins()
+    {
+        var channels = Volatile.Read(ref _channels);
+        for (int i = 0; i < channels.Length; i++)
+        {
+            var slots = channels[i].PluginChain.DetachAll();
+            for (int j = 0; j < slots.Length; j++)
+            {
+                slots[j]?.Plugin.Dispose();
+            }
+        }
+    }
+
+    private void DrainPendingPluginDisposals(bool force)
+    {
+        lock (_pendingPluginDisposalsLock)
+        {
+            if (_pendingPluginDisposals.Count == 0)
+            {
+                return;
+            }
+
+            long callbackCount = force ? long.MaxValue : Interlocked.Read(ref _outputCallbackCount);
+            for (int i = _pendingPluginDisposals.Count - 1; i >= 0; i--)
+            {
+                var pending = _pendingPluginDisposals[i];
+                if (callbackCount >= pending.TargetCallbackCount)
+                {
+                    _disposeBuffer.Add(pending.Plugin);
+                    _pendingPluginDisposals.RemoveAt(i);
+                }
+            }
+        }
+
+        for (int i = 0; i < _disposeBuffer.Count; i++)
+        {
+            _disposeBuffer[i].Dispose();
+        }
+        _disposeBuffer.Clear();
     }
 
     private WasapiCapture? CreateCapture(MMDeviceEnumerator enumerator, string deviceId)
@@ -343,14 +628,21 @@ public sealed class AudioEngine : IDisposable
             return null;
         }
 
-        var device = enumerator.GetDevice(deviceId);
-        int channels = GetPreferredInputChannels(device);
-        var capture = new WasapiCapture(device)
+        try
         {
-            WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(_sampleRate, channels)
-        };
+            var device = enumerator.GetDevice(deviceId);
+            int channels = GetPreferredInputChannels(device);
+            var capture = new WasapiCapture(device)
+            {
+                WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(_sampleRate, channels)
+            };
 
-        return capture;
+            return capture;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static int GetPreferredInputChannels(MMDevice device)
@@ -366,88 +658,6 @@ public sealed class AudioEngine : IDisposable
         }
     }
 
-    private void CacheInputFormat(WasapiCapture capture, bool isFirst)
-    {
-        int channels = capture.WaveFormat.Channels;
-        int sampleRate = capture.WaveFormat.SampleRate;
-        int blockAlign = capture.WaveFormat.BlockAlign;
-        int mixBufferSize = Math.Max(_blockSize * 8, sampleRate);
-        if (mixBufferSize < 1)
-        {
-            mixBufferSize = _blockSize * 8;
-        }
-
-        if (isFirst)
-        {
-            Interlocked.Exchange(ref _input1Channels, channels);
-            Interlocked.Exchange(ref _input1SampleRate, sampleRate);
-            _input1BlockAlign = blockAlign;
-            _input1MixBuffer = new float[mixBufferSize];
-        }
-        else
-        {
-            Interlocked.Exchange(ref _input2Channels, channels);
-            Interlocked.Exchange(ref _input2SampleRate, sampleRate);
-            _input2BlockAlign = blockAlign;
-            _input2MixBuffer = new float[mixBufferSize];
-        }
-    }
-
-    private void OnInput1DataAvailable(object? sender, WaveInEventArgs e)
-    {
-        int frames = _input1BlockAlign > 0 ? e.BytesRecorded / _input1BlockAlign : e.BytesRecorded / sizeof(float);
-        ReportInput1Callback(frames);
-        WriteInputBuffer(
-            _inputBuffer1,
-            e.Buffer.AsSpan(0, e.BytesRecorded),
-            _input1Channels,
-            _input1BlockAlign,
-            _input1MixBuffer,
-            Volatile.Read(ref _input1ChannelMode),
-            ref _input1DroppedSamples);
-    }
-
-    private void OnInput2DataAvailable(object? sender, WaveInEventArgs e)
-    {
-        int frames = _input2BlockAlign > 0 ? e.BytesRecorded / _input2BlockAlign : e.BytesRecorded / sizeof(float);
-        ReportInput2Callback(frames);
-        WriteInputBuffer(
-            _inputBuffer2,
-            e.Buffer.AsSpan(0, e.BytesRecorded),
-            _input2Channels,
-            _input2BlockAlign,
-            _input2MixBuffer,
-            Volatile.Read(ref _input2ChannelMode),
-            ref _input2DroppedSamples);
-    }
-
-    private void OnInput1Stopped(object? sender, StoppedEventArgs e)
-    {
-        if (ShouldIgnoreStopEvent())
-        {
-            return;
-        }
-
-        Interlocked.Exchange(ref _input1Active, 0);
-        if (IsDeviceInvalidated(e.Exception))
-        {
-            HandleDeviceInvalidated(_input1Id, "Input device disconnected.");
-        }
-    }
-
-    private void OnInput2Stopped(object? sender, StoppedEventArgs e)
-    {
-        if (ShouldIgnoreStopEvent())
-        {
-            return;
-        }
-
-        Interlocked.Exchange(ref _input2Active, 0);
-        if (IsDeviceInvalidated(e.Exception))
-        {
-            HandleDeviceInvalidated(_input2Id, "Input device disconnected.");
-        }
-    }
 
     private void OnOutputStopped(object? sender, StoppedEventArgs e)
     {
@@ -475,12 +685,6 @@ public sealed class AudioEngine : IDisposable
         {
             HandleDeviceInvalidated(_monitorOutputId, "Monitor device disconnected.");
         }
-    }
-
-    private static void WriteInputBuffer(LockFreeRingBuffer buffer, ReadOnlySpan<byte> data)
-    {
-        var floatSpan = MemoryMarshal.Cast<byte, float>(data);
-        buffer.Write(floatSpan);
     }
 
     private static void WriteInputBuffer(
@@ -565,38 +769,14 @@ public sealed class AudioEngine : IDisposable
         Interlocked.Increment(ref _outputCallbackCount);
     }
 
-    private void ReportInput1Callback(int frames)
-    {
-        Interlocked.Exchange(ref _lastInput1Frames, frames);
-        Interlocked.Exchange(ref _lastInput1CallbackTicks, Stopwatch.GetTimestamp());
-        Interlocked.Increment(ref _input1CallbackCount);
-    }
-
-    private void ReportInput2Callback(int frames)
-    {
-        Interlocked.Exchange(ref _lastInput2Frames, frames);
-        Interlocked.Exchange(ref _lastInput2CallbackTicks, Stopwatch.GetTimestamp());
-        Interlocked.Increment(ref _input2CallbackCount);
-    }
-
-    private void ReportOutputUnderflow1(int missingFrames)
+    private void ReportOutputUnderflow(int missingFrames)
     {
         if (missingFrames <= 0)
         {
             return;
         }
 
-        Interlocked.Add(ref _outputUnderflowSamples1, missingFrames);
-    }
-
-    private void ReportOutputUnderflow2(int missingFrames)
-    {
-        if (missingFrames <= 0)
-        {
-            return;
-        }
-
-        Interlocked.Add(ref _outputUnderflowSamples2, missingFrames);
+        Interlocked.Add(ref _outputUnderflowSamples, missingFrames);
     }
 
     private bool ShouldIgnoreStopEvent()
@@ -637,7 +817,7 @@ public sealed class AudioEngine : IDisposable
                     try
                     {
                         Start();
-                        DeviceRecovered?.Invoke(this, new DeviceRecoveredEventArgs(_input1Id, _input2Id, _outputId, _monitorOutputId));
+                        DeviceRecovered?.Invoke(this, new DeviceRecoveredEventArgs(GetInputDeviceIds(), _outputId, _monitorOutputId));
                         Interlocked.Exchange(ref _isRecovering, 0);
                         return;
                     }
@@ -653,6 +833,19 @@ public sealed class AudioEngine : IDisposable
         }, token);
     }
 
+    private string[] GetInputDeviceIds()
+    {
+        lock (_inputCaptureLock)
+        {
+            var ids = new string[_inputCaptures.Count];
+            for (int i = 0; i < _inputCaptures.Count; i++)
+            {
+                ids[i] = _inputCaptures[i].DeviceId;
+            }
+            return ids;
+        }
+    }
+
     private bool TryRecoverDevices()
     {
         using var enumerator = new MMDeviceEnumerator();
@@ -662,9 +855,25 @@ public sealed class AudioEngine : IDisposable
             return false;
         }
 
-        _input1Id = ResolveInputDevice(enumerator, _input1Id);
-        _input2Id = ResolveInputDevice(enumerator, _input2Id);
         _monitorOutputId = ResolveMonitorDevice(enumerator, _monitorOutputId);
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        lock (_inputCaptureLock)
+        {
+            for (int i = 0; i < _inputCaptures.Count; i++)
+            {
+                var capture = _inputCaptures[i];
+                string resolved = ResolveInputDevice(enumerator, capture.DeviceId);
+                if (!string.IsNullOrWhiteSpace(resolved))
+                {
+                    if (!used.Add(resolved))
+                    {
+                        resolved = string.Empty;
+                    }
+                }
+
+                capture.Configure(resolved, capture.ChannelMode);
+            }
+        }
         return true;
     }
 
@@ -750,59 +959,249 @@ public sealed class AudioEngine : IDisposable
         Interlocked.Exchange(ref _isRecovering, 0);
     }
 
+    private sealed class PendingPluginDisposal
+    {
+        public PendingPluginDisposal(IPlugin plugin, long targetCallbackCount)
+        {
+            Plugin = plugin;
+            TargetCallbackCount = targetCallbackCount;
+        }
+
+        public IPlugin Plugin { get; }
+        public long TargetCallbackCount { get; }
+    }
+
+    private sealed class InputCapture : IDisposable
+    {
+        private readonly AudioEngine _engine;
+        private readonly int _channelId;
+        private readonly InputSource _source;
+        private WasapiCapture? _capture;
+        private string _deviceId = string.Empty;
+        private int _channels = 1;
+        private int _sampleRate;
+        private int _blockAlign;
+        private float[] _mixBuffer = Array.Empty<float>();
+        private int _channelMode;
+        private long _droppedSamples;
+        private long _lastCallbackTicks;
+        private long _callbackCount;
+        private int _lastFrames;
+        private int _active;
+
+        public InputCapture(AudioEngine engine, int channelId, int blockSize)
+        {
+            _engine = engine;
+            _channelId = channelId;
+            _source = new InputSource(blockSize * 32);
+        }
+
+        public int ChannelId => _channelId;
+
+        public InputSource Source => _source;
+
+        public string DeviceId => _deviceId;
+
+        public bool IsActive => Volatile.Read(ref _active) == 1;
+
+        public long LastCallbackTicks => Volatile.Read(ref _lastCallbackTicks);
+
+        public long CallbackCount => Interlocked.Read(ref _callbackCount);
+
+        public int LastFrames => Volatile.Read(ref _lastFrames);
+
+        public int Channels => Volatile.Read(ref _channels);
+
+        public int SampleRate => Volatile.Read(ref _sampleRate);
+
+        public long DroppedSamples => Interlocked.Read(ref _droppedSamples);
+
+        public InputChannelMode ChannelMode => (InputChannelMode)Volatile.Read(ref _channelMode);
+
+        public void Configure(string deviceId, InputChannelMode channelMode)
+        {
+            _deviceId = deviceId ?? string.Empty;
+            Volatile.Write(ref _channelMode, (int)channelMode);
+        }
+
+        public void Start(MMDeviceEnumerator enumerator, int sampleRate)
+        {
+            Stop();
+
+            if (string.IsNullOrWhiteSpace(_deviceId))
+            {
+                return;
+            }
+
+            _capture = _engine.CreateCapture(enumerator, _deviceId);
+            if (_capture is null)
+            {
+                return;
+            }
+
+            CacheInputFormat(_capture, sampleRate);
+            _capture.DataAvailable += OnDataAvailable;
+            _capture.RecordingStopped += OnStopped;
+
+            try
+            {
+                _capture.StartRecording();
+                CacheInputFormat(_capture, sampleRate);
+                Volatile.Write(ref _active, 1);
+            }
+            catch
+            {
+                CleanupCapture();
+                Volatile.Write(ref _active, 0);
+            }
+        }
+
+        public void Stop()
+        {
+            if (_capture is null)
+            {
+                Volatile.Write(ref _active, 0);
+                return;
+            }
+
+            _capture.DataAvailable -= OnDataAvailable;
+            _capture.RecordingStopped -= OnStopped;
+            _capture.StopRecording();
+            CleanupCapture();
+            Volatile.Write(ref _active, 0);
+        }
+
+        public void Dispose()
+        {
+            Stop();
+        }
+
+        private void CleanupCapture()
+        {
+            _capture?.Dispose();
+            _capture = null;
+        }
+
+        private void CacheInputFormat(WasapiCapture capture, int sampleRate)
+        {
+            int channels = capture.WaveFormat.Channels;
+            int blockAlign = capture.WaveFormat.BlockAlign;
+            int mixBufferSize = Math.Max(sampleRate, _engine._blockSize * 8);
+            if (mixBufferSize < 1)
+            {
+                mixBufferSize = _engine._blockSize * 8;
+            }
+
+            Volatile.Write(ref _channels, channels);
+            Volatile.Write(ref _sampleRate, capture.WaveFormat.SampleRate);
+            _blockAlign = blockAlign;
+            if (_mixBuffer.Length != mixBufferSize)
+            {
+                _mixBuffer = new float[mixBufferSize];
+            }
+        }
+
+        private void OnDataAvailable(object? sender, WaveInEventArgs e)
+        {
+            int blockAlign = _blockAlign;
+            int frames = blockAlign > 0 ? e.BytesRecorded / blockAlign : e.BytesRecorded / sizeof(float);
+            Volatile.Write(ref _lastFrames, frames);
+            Volatile.Write(ref _lastCallbackTicks, Stopwatch.GetTimestamp());
+            Interlocked.Increment(ref _callbackCount);
+
+            WriteInputBuffer(
+                _source.Buffer,
+                e.Buffer.AsSpan(0, e.BytesRecorded),
+                Volatile.Read(ref _channels),
+                blockAlign,
+                _mixBuffer,
+                Volatile.Read(ref _channelMode),
+                ref _droppedSamples);
+        }
+
+        private void OnStopped(object? sender, StoppedEventArgs e)
+        {
+            if (_engine.ShouldIgnoreStopEvent())
+            {
+                return;
+            }
+
+            Volatile.Write(ref _active, 0);
+            if (AudioEngine.IsDeviceInvalidated(e.Exception))
+            {
+                _engine.HandleDeviceInvalidated(_deviceId, "Input device disconnected.");
+            }
+        }
+    }
+
+    private sealed class RoutingSnapshot
+    {
+        public RoutingSnapshot(ChannelStrip[] channels, int[] processingOrder, int sampleRate, int blockSize)
+        {
+            Channels = channels;
+            ProcessingOrder = processingOrder;
+            Routing = new RoutingContext(Math.Max(1, channels.Length), sampleRate, blockSize);
+            Buffers = new float[channels.Length][];
+            for (int i = 0; i < channels.Length; i++)
+            {
+                Buffers[i] = new float[blockSize];
+            }
+        }
+
+        public ChannelStrip[] Channels { get; }
+
+        public float[][] Buffers { get; }
+
+        public int[] ProcessingOrder { get; }
+
+        public RoutingContext Routing { get; }
+    }
+
     private sealed class OutputMixProvider : IWaveProvider
     {
-        private readonly ChannelStrip[] _channels;
         private readonly LockFreeQueue<ParameterChange> _parameterQueue;
-        private readonly LockFreeRingBuffer _input1;
-        private readonly LockFreeRingBuffer _input2;
         private readonly int _blockSize;
-        private readonly float[] _channel1Buffer;
-        private readonly float[] _channel2Buffer;
-        private LockFreeRingBuffer? _monitorBuffer;
-        private int _masterMuted;
+        private readonly Action<int> _reportOutput;
+        private readonly Action<int> _reportUnderflow;
+        private readonly Func<bool> _isProcessingEnabled;
         private readonly LufsMeterProcessor _masterLufsLeft;
         private readonly LufsMeterProcessor _masterLufsRight;
         private readonly AnalysisTap _analysisTap;
-
-        private readonly Action<int> _reportOutput;
-        private readonly Action<int> _reportUnderflow1;
-        private readonly Action<int> _reportUnderflow2;
-        private readonly Func<OutputRoutingMode> _getRoutingMode;
+        private RoutingSnapshot _snapshot;
+        private LockFreeRingBuffer? _monitorBuffer;
+        private int _masterMuted;
+        private long _sampleClock;
 
         public OutputMixProvider(
-            ChannelStrip[] channels,
+            RoutingSnapshot snapshot,
             LockFreeQueue<ParameterChange> parameterQueue,
-            LockFreeRingBuffer input1,
-            LockFreeRingBuffer input2,
             int blockSize,
             Action<int> reportOutput,
-            Action<int> reportUnderflow1,
-            Action<int> reportUnderflow2,
-            Func<OutputRoutingMode> getRoutingMode,
+            Action<int> reportUnderflow,
+            Func<bool> isProcessingEnabled,
             LufsMeterProcessor masterLufsLeft,
             LufsMeterProcessor masterLufsRight,
             AnalysisTap analysisTap,
             WaveFormat waveFormat)
         {
-            _channels = channels;
+            _snapshot = snapshot;
             _parameterQueue = parameterQueue;
-            _input1 = input1;
-            _input2 = input2;
             _blockSize = blockSize;
             _reportOutput = reportOutput;
-            _reportUnderflow1 = reportUnderflow1;
-            _reportUnderflow2 = reportUnderflow2;
-            _getRoutingMode = getRoutingMode;
+            _reportUnderflow = reportUnderflow;
+            _isProcessingEnabled = isProcessingEnabled;
             _masterLufsLeft = masterLufsLeft;
             _masterLufsRight = masterLufsRight;
             _analysisTap = analysisTap;
             WaveFormat = waveFormat;
-            _channel1Buffer = new float[blockSize];
-            _channel2Buffer = new float[blockSize];
         }
 
         public WaveFormat WaveFormat { get; }
+
+        public void UpdateSnapshot(RoutingSnapshot snapshot)
+        {
+            _snapshot = snapshot;
+        }
 
         public int Read(byte[] buffer, int offset, int count)
         {
@@ -813,67 +1212,91 @@ public sealed class AudioEngine : IDisposable
             int processed = 0;
             _reportOutput(totalFrames);
 
+            if (!_isProcessingEnabled())
+            {
+                output.Clear();
+                return count;
+            }
+
+            long sampleClock = _sampleClock;
             while (processed < totalFrames)
             {
                 int chunk = Math.Min(_blockSize, totalFrames - processed);
-                var ch1Span = _channel1Buffer.AsSpan(0, chunk);
-                var ch2Span = _channel2Buffer.AsSpan(0, chunk);
-                var routingMode = _getRoutingMode();
+                var snapshot = _snapshot;
+                var routing = snapshot.Routing;
+                routing.BeginBlock(sampleClock);
 
-                int read1 = _input1.Read(ch1Span);
-                if (read1 < chunk)
+                var channels = snapshot.Channels;
+                var buffers = snapshot.Buffers;
+                bool soloActive = false;
+                for (int i = 0; i < channels.Length; i++)
                 {
-                    ch1Span.Slice(read1).Clear();
-                    _reportUnderflow1(chunk - read1);
+                    if (channels[i].IsSoloed)
+                    {
+                        soloActive = true;
+                        break;
+                    }
                 }
 
-                int read2 = _input2.Read(ch2Span);
-                if (read2 < chunk)
+                for (int i = 0; i < buffers.Length; i++)
                 {
-                    ch2Span.Slice(read2).Clear();
-                    _reportUnderflow2(chunk - read2);
+                    buffers[i].AsSpan(0, chunk).Clear();
                 }
 
-                bool soloActive = _channels[0].IsSoloed || _channels[1].IsSoloed;
-                _channels[0].Process(ch1Span, soloActive && !_channels[0].IsSoloed);
-                _channels[1].Process(ch2Span, soloActive && !_channels[1].IsSoloed);
+                var order = snapshot.ProcessingOrder;
+                for (int i = 0; i < order.Length; i++)
+                {
+                    int channelIndex = order[i];
+                    if ((uint)channelIndex >= (uint)channels.Length)
+                    {
+                        continue;
+                    }
 
-                // Capture post-chain audio for visualizers (zero overhead when no consumers)
-                _analysisTap.Capture(ch1Span, 0);
-                _analysisTap.Capture(ch2Span, 1);
+                    var channel = channels[channelIndex];
+                    var channelSpan = buffers[channelIndex].AsSpan(0, chunk);
+                    int latencySamples = channel.Process(channelSpan, soloActive && !channel.IsSoloed, sampleClock, routing);
+                    routing.PublishChannelOutput(channelIndex, buffers[channelIndex], chunk, latencySamples);
+                }
 
                 var outputSlice = output.Slice(processed * 2, chunk * 2);
                 bool muted = Volatile.Read(ref _masterMuted) != 0;
+                var outputBus = routing.OutputBus;
 
-                if (muted)
+                if (muted || !outputBus.HasData || outputBus.Length < chunk)
                 {
                     outputSlice.Clear();
-                }
-                else if (routingMode == OutputRoutingMode.Sum)
-                {
-                    for (int i = 0; i < chunk; i++)
+                    if (!muted)
                     {
-                        int baseIndex = i * 2;
-                        float mix = 0.5f * (ch1Span[i] + ch2Span[i]);
-                        outputSlice[baseIndex] = mix;
-                        outputSlice[baseIndex + 1] = mix;
+                        _reportUnderflow(chunk);
                     }
                 }
                 else
                 {
+                    var left = outputBus.Left;
+                    var right = outputBus.Right;
                     for (int i = 0; i < chunk; i++)
                     {
                         int baseIndex = i * 2;
-                        outputSlice[baseIndex] = ch1Span[i];
-                        outputSlice[baseIndex + 1] = ch2Span[i];
+                        outputSlice[baseIndex] = left[i];
+                        outputSlice[baseIndex + 1] = right[i];
                     }
                 }
 
                 _masterLufsLeft.ProcessInterleaved(outputSlice, 2, 0);
                 _masterLufsRight.ProcessInterleaved(outputSlice, 2, 1);
+
+                if (outputBus.HasData)
+                {
+                    var analysisBuffer = outputBus.Mode == OutputSendMode.Right ? outputBus.Right : outputBus.Left;
+                    _analysisTap.Capture(analysisBuffer, 0);
+                }
+
                 _monitorBuffer?.Write(outputSlice);
                 processed += chunk;
+                sampleClock += chunk;
             }
+
+            _sampleClock = sampleClock;
 
             return count;
         }
@@ -890,14 +1313,15 @@ public sealed class AudioEngine : IDisposable
 
         private void ApplyParameterChanges()
         {
+            var channels = _snapshot.Channels;
             while (_parameterQueue.TryDequeue(out var change))
             {
-                if ((uint)change.ChannelId >= (uint)_channels.Length)
+                if ((uint)change.ChannelId >= (uint)channels.Length)
                 {
                     continue;
                 }
 
-                var channel = _channels[change.ChannelId];
+                var channel = channels[change.ChannelId];
                 switch (change.Type)
                 {
                     case ParameterType.InputGainDb:
@@ -913,54 +1337,45 @@ public sealed class AudioEngine : IDisposable
                         channel.SetSoloed(change.Value >= 0.5f);
                         break;
                     case ParameterType.PluginBypass:
-                        ApplyPluginBypass(channel, change.PluginIndex, change.Value >= 0.5f);
+                        ApplyPluginBypass(channel, change.PluginInstanceId, change.Value >= 0.5f);
                         break;
                     case ParameterType.PluginParameter:
-                        ApplyPluginParameter(channel, change.PluginIndex, change.ParameterIndex, change.Value);
+                        ApplyPluginParameter(channel, change.PluginInstanceId, change.ParameterIndex, change.Value);
                         break;
                     case ParameterType.PluginCommand:
-                        ApplyPluginCommand(channel, change.PluginIndex, change.Command);
+                        ApplyPluginCommand(channel, change.PluginInstanceId, change.Command);
                         break;
                 }
             }
         }
 
-        private static void ApplyPluginBypass(ChannelStrip channel, int pluginIndex, bool bypass)
+        private static void ApplyPluginBypass(ChannelStrip channel, int pluginInstanceId, bool bypass)
         {
-            var slots = channel.PluginChain.GetSnapshot();
-            if ((uint)pluginIndex >= (uint)slots.Length)
+            if (channel.PluginChain.TryGetSlotById(pluginInstanceId, out var slot, out _)
+                && slot is not null)
             {
-                return;
-            }
-
-            var plugin = slots[pluginIndex];
-            if (plugin is not null)
-            {
-                plugin.IsBypassed = bypass;
+                slot.Plugin.IsBypassed = bypass;
             }
         }
 
-        private static void ApplyPluginParameter(ChannelStrip channel, int pluginIndex, int parameterIndex, float value)
+        private static void ApplyPluginParameter(ChannelStrip channel, int pluginInstanceId, int parameterIndex, float value)
         {
-            var slots = channel.PluginChain.GetSnapshot();
-            if ((uint)pluginIndex >= (uint)slots.Length)
+            if (channel.PluginChain.TryGetSlotById(pluginInstanceId, out var slot, out _)
+                && slot is not null)
             {
-                return;
+                slot.Plugin.SetParameter(parameterIndex, value);
             }
-
-            var plugin = slots[pluginIndex];
-            plugin?.SetParameter(parameterIndex, value);
         }
 
-        private static void ApplyPluginCommand(ChannelStrip channel, int pluginIndex, PluginCommandType command)
+        private static void ApplyPluginCommand(ChannelStrip channel, int pluginInstanceId, PluginCommandType command)
         {
-            var slots = channel.PluginChain.GetSnapshot();
-            if ((uint)pluginIndex >= (uint)slots.Length)
+            if (!channel.PluginChain.TryGetSlotById(pluginInstanceId, out var slot, out _)
+                || slot is null)
             {
                 return;
             }
 
-            var plugin = slots[pluginIndex];
+            var plugin = slot.Plugin;
             if (plugin is FFTNoiseRemovalPlugin noise && command == PluginCommandType.LearnNoiseProfile)
             {
                 noise.LearnNoiseProfile();

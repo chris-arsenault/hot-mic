@@ -9,7 +9,7 @@ namespace HotMic.Core.Plugins.BuiltIn;
 /// Convolution reverb plugin using FFT-based overlap-add convolution.
 /// Supports loading custom impulse response files or using built-in presets.
 /// </summary>
-public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugin, IPluginStatusProvider
+public sealed class ConvolutionReverbPlugin : IContextualPlugin, IQualityConfigurablePlugin, IPluginStatusProvider
 {
     public const int DryWetIndex = 0;
     public const int DecayIndex = 1;
@@ -134,6 +134,11 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
 
         // Load IR based on preset
         ApplyIrPreset(_irPreset);
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)

@@ -7,7 +7,7 @@ using HotMic.Core.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider
+public sealed class SileroVoiceGatePlugin : IContextualPlugin, IPluginStatusProvider, ISidechainProducer
 {
     public const int ThresholdIndex = 0;
     public const int AttackIndex = 1;
@@ -51,6 +51,7 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider
     private bool _forcedBypass;
     private bool _wasBypassed = true;
     private string _statusMessage = string.Empty;
+    private float[] _speechBuffer = Array.Empty<float>();
 
     public SileroVoiceGatePlugin()
     {
@@ -74,6 +75,10 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
     public string StatusMessage => _statusMessage;
+
+    public SidechainSignalMask ProducedSignals => _forcedBypass || _inputBuffer is null
+        ? SidechainSignalMask.None
+        : SidechainSignalMask.SpeechPresence;
 
     public float VadProbability => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _vadBits, 0, 0));
 
@@ -127,67 +132,34 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider
         }
 
         InitializeBuffers(blockSize);
+        EnsureSidechainBuffer(blockSize);
         UpdateCoefficients();
         StartWorker();
         _wasBypassed = false;
     }
 
-    public void Process(Span<float> buffer)
+    public void Process(Span<float> buffer, in PluginProcessContext context)
     {
-        if (IsBypassed || _forcedBypass || _inputBuffer is null)
+        if (!ProcessCore(buffer))
         {
-            _wasBypassed = true;
             return;
         }
 
-        if (_wasBypassed)
+        if (_speechBuffer.Length < buffer.Length || !context.SidechainWriter.IsEnabled)
         {
-            ResetState();
-            _wasBypassed = false;
+            return;
         }
-
-        _inputBuffer.Write(buffer);
-        _frameSignal?.Set();
 
         float vad = VadProbability;
-        bool detected = vad >= _threshold;
-        int holdLeft = detected ? _holdSamples : _holdSamplesLeft;
-        float gate = _gate;
-        float peakIn = 0f;
-        float peakOut = 0f;
+        var span = _speechBuffer.AsSpan(0, buffer.Length);
+        span.Fill(vad);
+        long writeTime = context.SampleTime - LatencySamples;
+        context.SidechainWriter.WriteBlock(SidechainSignalId.SpeechPresence, writeTime, span);
+    }
 
-        for (int i = 0; i < buffer.Length; i++)
-        {
-            float input = buffer[i];
-            float absIn = MathF.Abs(input);
-            if (absIn > peakIn)
-            {
-                peakIn = absIn;
-            }
-
-            if (!detected && holdLeft > 0)
-            {
-                holdLeft--;
-            }
-
-            float target = (detected || holdLeft > 0) ? 1f : 0f;
-            float coeff = target > gate ? _attackCoeff : _releaseCoeff;
-            gate += coeff * (target - gate);
-            float output = input * gate;
-            buffer[i] = output;
-
-            float absOut = MathF.Abs(output);
-            if (absOut > peakOut)
-            {
-                peakOut = absOut;
-            }
-        }
-
-        _gate = gate;
-        _holdSamplesLeft = holdLeft;
-
-        Interlocked.Exchange(ref _inputLevelBits, BitConverter.SingleToInt32Bits(peakIn));
-        Interlocked.Exchange(ref _outputLevelBits, BitConverter.SingleToInt32Bits(peakOut));
+    public void Process(Span<float> buffer)
+    {
+        ProcessCore(buffer);
     }
 
     public void SetParameter(int index, float value)
@@ -259,6 +231,73 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider
         _inputBuffer = new LockFreeRingBuffer(ringCapacity);
         _decimatorFilter.Configure(LowPassCutoffHz, RequiredSampleRate);
         ResetState();
+    }
+
+    private bool ProcessCore(Span<float> buffer)
+    {
+        if (IsBypassed || _forcedBypass || _inputBuffer is null)
+        {
+            _wasBypassed = true;
+            return false;
+        }
+
+        if (_wasBypassed)
+        {
+            ResetState();
+            _wasBypassed = false;
+        }
+
+        _inputBuffer.Write(buffer);
+        _frameSignal?.Set();
+
+        float vad = VadProbability;
+        bool detected = vad >= _threshold;
+        int holdLeft = detected ? _holdSamples : _holdSamplesLeft;
+        float gate = _gate;
+        float peakIn = 0f;
+        float peakOut = 0f;
+
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            float input = buffer[i];
+            float absIn = MathF.Abs(input);
+            if (absIn > peakIn)
+            {
+                peakIn = absIn;
+            }
+
+            if (!detected && holdLeft > 0)
+            {
+                holdLeft--;
+            }
+
+            float target = (detected || holdLeft > 0) ? 1f : 0f;
+            float coeff = target > gate ? _attackCoeff : _releaseCoeff;
+            gate += coeff * (target - gate);
+            float output = input * gate;
+            buffer[i] = output;
+
+            float absOut = MathF.Abs(output);
+            if (absOut > peakOut)
+            {
+                peakOut = absOut;
+            }
+        }
+
+        _gate = gate;
+        _holdSamplesLeft = holdLeft;
+
+        Interlocked.Exchange(ref _inputLevelBits, BitConverter.SingleToInt32Bits(peakIn));
+        Interlocked.Exchange(ref _outputLevelBits, BitConverter.SingleToInt32Bits(peakOut));
+        return true;
+    }
+
+    private void EnsureSidechainBuffer(int blockSize)
+    {
+        if (blockSize > 0 && _speechBuffer.Length != blockSize)
+        {
+            _speechBuffer = new float[blockSize];
+        }
     }
 
     private void ResetState()

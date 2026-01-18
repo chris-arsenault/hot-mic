@@ -5,7 +5,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
+public sealed class NoiseGatePlugin : IContextualPlugin, IQualityConfigurablePlugin
 {
     public const int ThresholdIndex = 0;
     public const int HysteresisIndex = 1;
@@ -76,6 +76,11 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
         Interlocked.Exchange(ref _gateOpenBits, 0);
         Interlocked.Exchange(ref _inputLevelBits, 0);
         UpdateCoefficients();
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)

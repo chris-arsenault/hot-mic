@@ -11,7 +11,7 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
+public sealed class SpeechDenoiserPlugin : IContextualPlugin, IPluginStatusProvider
 {
     public const int DryWetIndex = 0;
     public const int AttenLimitIndex = 1;
@@ -170,6 +170,11 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
         _mixSmoother.Configure(sampleRate, MixSmoothingMs, _dryWetPercent / 100f);
         StartWorker();
         _wasBypassed = false;
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)

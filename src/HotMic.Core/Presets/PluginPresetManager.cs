@@ -54,7 +54,12 @@ public sealed class PluginPresetBank
 
 public sealed record ChainPresetEntry(string PluginId, string PresetName, IReadOnlyDictionary<string, float>? Parameters = null);
 
-public sealed record ChainPreset(string Name, IReadOnlyList<ChainPresetEntry> Entries, bool IsBuiltIn = true);
+public sealed record ChainPresetContainer(string Name, IReadOnlyList<int> PluginIndices, bool IsBypassed = false);
+
+public sealed record ChainPreset(string Name, IReadOnlyList<ChainPresetEntry> Entries, bool IsBuiltIn = true)
+{
+    public IReadOnlyList<ChainPresetContainer> Containers { get; init; } = Array.Empty<ChainPresetContainer>();
+}
 
 public sealed class PluginPresetManager
 {
@@ -188,7 +193,16 @@ public sealed class PluginPresetManager
                 entries.Add(new ChainPresetEntry(plugin.PluginId, CustomPresetName, parameters));
             }
 
-            var preset = new ChainPreset(stored.Name, entries, IsBuiltIn: false);
+            var containers = new List<ChainPresetContainer>();
+            foreach (var container in stored.Containers)
+            {
+                containers.Add(new ChainPresetContainer(container.Name, container.PluginIndices, container.IsBypassed));
+            }
+
+            var preset = new ChainPreset(stored.Name, entries, IsBuiltIn: false)
+            {
+                Containers = containers
+            };
             _userChainPresets.Add(preset);
             _chainLookup[preset.Name] = preset;
         }
@@ -236,7 +250,7 @@ public sealed class PluginPresetManager
     /// Saves a new user chain preset or overwrites an existing user preset.
     /// Returns false if trying to overwrite a built-in preset.
     /// </summary>
-    public bool SaveChainPreset(string name, IReadOnlyList<(string pluginId, Dictionary<string, float> parameters)> plugins)
+    public bool SaveChainPreset(string name, IReadOnlyList<(string pluginId, Dictionary<string, float> parameters)> plugins, IReadOnlyList<ChainPresetContainer>? containers = null)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -256,7 +270,13 @@ public sealed class PluginPresetManager
             {
                 PluginId = p.pluginId,
                 Parameters = new Dictionary<string, float>(p.parameters)
-            }).ToList()
+            }).ToList(),
+            Containers = containers?.Select(c => new StoredChainContainer
+            {
+                Name = c.Name,
+                IsBypassed = c.IsBypassed,
+                PluginIndices = c.PluginIndices.ToList()
+            }).ToList() ?? new List<StoredChainContainer>()
         };
 
         if (!_storage.SaveChainPreset(stored))
@@ -267,7 +287,10 @@ public sealed class PluginPresetManager
         // Update in-memory cache
         var entries = plugins.Select(p =>
             new ChainPresetEntry(p.pluginId, CustomPresetName, p.parameters)).ToList();
-        var preset = new ChainPreset(name, entries, IsBuiltIn: false);
+        var preset = new ChainPreset(name, entries, IsBuiltIn: false)
+        {
+            Containers = containers ?? Array.Empty<ChainPresetContainer>()
+        };
 
         // Remove old version if exists
         _userChainPresets.RemoveAll(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));

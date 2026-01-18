@@ -3,7 +3,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class LimiterPlugin : IPlugin
+public sealed class LimiterPlugin : IContextualPlugin
 {
     public const int CeilingIndex = 0;
     public const int ReleaseIndex = 1;
@@ -48,6 +48,11 @@ public sealed class LimiterPlugin : IPlugin
         _sampleRate = sampleRate;
         _gain = 1f;
         UpdateCoefficients();
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)

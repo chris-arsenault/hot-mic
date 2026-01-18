@@ -5,7 +5,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class GainPlugin : IPlugin, IQualityConfigurablePlugin
+public sealed class GainPlugin : IContextualPlugin, IQualityConfigurablePlugin
 {
     public const int GainIndex = 0;
     public const int PhaseInvertIndex = 1;
@@ -47,6 +47,11 @@ public sealed class GainPlugin : IPlugin, IQualityConfigurablePlugin
         _sampleRate = sampleRate;
         _gainSmoother.Configure(sampleRate, _smoothingMs, _gainLinear * _phaseMultiplier);
         UpdateCoefficients();
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)

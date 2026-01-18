@@ -1,22 +1,28 @@
 using System.Threading;
-using HotMic.Core.Dsp;
-using HotMic.Core.Metering;
+using HotMic.Core.Engine;
 
 namespace HotMic.Core.Plugins;
 
 public sealed class PluginChain
 {
-    private IPlugin?[] _slots;
-    private MeterProcessor[] _meters;
-    private SpectralDeltaProcessor[] _deltaProcessors;
+    private PluginSlot?[] _slots;
+    private PluginIdIndexMap _idIndexMap = PluginIdIndexMap.Empty;
+    private int _nextInstanceId;
     private readonly int _sampleRate;
+    private readonly int _blockSize;
+    private readonly int _sidechainCapacity;
+    private readonly int[] _lastProducerScratch;
+    private SidechainBus? _sidechainBus;
 
-    public PluginChain(int sampleRate, int initialCapacity = 0)
+    public PluginChain(int sampleRate, int blockSize, int initialCapacity = 0)
     {
         _sampleRate = sampleRate;
-        _slots = initialCapacity > 0 ? new IPlugin?[initialCapacity] : [];
-        _meters = initialCapacity > 0 ? CreateMeters(initialCapacity) : [];
-        _deltaProcessors = initialCapacity > 0 ? CreateDeltaProcessors(initialCapacity) : [];
+        _blockSize = blockSize;
+        _slots = initialCapacity > 0 ? new PluginSlot?[initialCapacity] : [];
+        _sidechainCapacity = Math.Max(sampleRate * 2, blockSize * 4);
+        _lastProducerScratch = new int[(int)SidechainSignalId.Count];
+        RebuildIdIndexMap(_slots);
+        RebuildSidechainBus();
     }
 
     public int Count => Volatile.Read(ref _slots).Length;
@@ -38,35 +44,98 @@ public sealed class PluginChain
         }
     }
 
-    public IPlugin?[] GetSnapshot()
+    public PluginSlot?[] GetSnapshot()
     {
         return Volatile.Read(ref _slots);
     }
 
-    public MeterProcessor[] GetMeterSnapshot()
+    public bool TryGetSlotById(int instanceId, out PluginSlot? slot, out int index)
     {
-        return Volatile.Read(ref _meters);
+        slot = null;
+        index = -1;
+
+        var map = Volatile.Read(ref _idIndexMap);
+        if (!map.TryGetIndex(instanceId, out int foundIndex))
+        {
+            return false;
+        }
+
+        var slots = Volatile.Read(ref _slots);
+        if ((uint)foundIndex >= (uint)slots.Length)
+        {
+            return false;
+        }
+
+        var candidate = slots[foundIndex];
+        if (candidate is null || candidate.InstanceId != instanceId)
+        {
+            return false;
+        }
+
+        slot = candidate;
+        index = foundIndex;
+        return true;
     }
 
-    public SpectralDeltaProcessor[] GetDeltaSnapshot()
-    {
-        return Volatile.Read(ref _deltaProcessors);
-    }
-
-    public void AddSlot(IPlugin? plugin = null)
+    public int AddSlot(IPlugin? plugin = null, int instanceId = 0)
     {
         var oldSlots = Volatile.Read(ref _slots);
-        var newSlots = new IPlugin?[oldSlots.Length + 1];
+        var newSlots = new PluginSlot?[oldSlots.Length + 1];
         Array.Copy(oldSlots, newSlots, oldSlots.Length);
-        newSlots[^1] = plugin;
-        var newMeters = CopyAndResizeMeters(newSlots.Length);
-        var newDeltas = CopyAndResizeDeltaProcessors(newSlots.Length);
-        Interlocked.Exchange(ref _deltaProcessors, newDeltas);
-        Interlocked.Exchange(ref _meters, newMeters);
+
+        int createdId = 0;
+        if (plugin is not null)
+        {
+            var slot = CreateSlot(plugin, instanceId);
+            newSlots[^1] = slot;
+            createdId = slot.InstanceId;
+        }
+
         Interlocked.Exchange(ref _slots, newSlots);
+        RebuildIdIndexMap(newSlots);
+        RebuildSidechainBus();
+        return createdId;
     }
 
-    public void RemoveSlot(int index)
+    public int InsertSlot(int index, IPlugin? plugin = null, int instanceId = 0)
+    {
+        var oldSlots = Volatile.Read(ref _slots);
+        if (index < 0)
+        {
+            index = 0;
+        }
+        else if (index > oldSlots.Length)
+        {
+            index = oldSlots.Length;
+        }
+
+        var newSlots = new PluginSlot?[oldSlots.Length + 1];
+        int createdId = 0;
+
+        for (int i = 0, j = 0; i < newSlots.Length; i++)
+        {
+            if (i == index)
+            {
+                if (plugin is not null)
+                {
+                    var slot = CreateSlot(plugin, instanceId);
+                    newSlots[i] = slot;
+                    createdId = slot.InstanceId;
+                }
+                j = i;
+                continue;
+            }
+
+            newSlots[i] = oldSlots[j++];
+        }
+
+        Interlocked.Exchange(ref _slots, newSlots);
+        RebuildIdIndexMap(newSlots);
+        RebuildSidechainBus();
+        return createdId;
+    }
+
+    public PluginSlot? RemoveSlot(int index)
     {
         var oldSlots = Volatile.Read(ref _slots);
         if ((uint)index >= (uint)oldSlots.Length || oldSlots.Length == 0)
@@ -74,11 +143,8 @@ public sealed class PluginChain
             throw new ArgumentOutOfRangeException(nameof(index));
         }
 
-        var newSlots = new IPlugin?[oldSlots.Length - 1];
-        var oldMeters = Volatile.Read(ref _meters);
-        var oldDeltas = Volatile.Read(ref _deltaProcessors);
-        var newMeters = CreateMeters(newSlots.Length);
-        var newDeltas = CreateDeltaProcessors(newSlots.Length);
+        var removed = oldSlots[index];
+        var newSlots = new PluginSlot?[oldSlots.Length - 1];
         for (int i = 0, j = 0; i < oldSlots.Length; i++)
         {
             if (i != index)
@@ -86,44 +152,38 @@ public sealed class PluginChain
                 newSlots[j++] = oldSlots[i];
             }
         }
-        for (int i = 0, j = 0; i < oldMeters.Length; i++)
-        {
-            if (i != index && j < newMeters.Length)
-            {
-                newMeters[j++] = oldMeters[i];
-            }
-        }
-        for (int i = 0, j = 0; i < oldDeltas.Length; i++)
-        {
-            if (i != index && j < newDeltas.Length)
-            {
-                newDeltas[j++] = oldDeltas[i];
-            }
-        }
-        Interlocked.Exchange(ref _deltaProcessors, newDeltas);
-        Interlocked.Exchange(ref _meters, newMeters);
+
         Interlocked.Exchange(ref _slots, newSlots);
+        RebuildIdIndexMap(newSlots);
+        RebuildSidechainBus();
+        return removed;
     }
 
-    public void SetSlot(int index, IPlugin? plugin)
+    public PluginSlot? SetSlot(int index, IPlugin? plugin, int instanceId = 0)
     {
-        var slots = Volatile.Read(ref _slots);
-        if ((uint)index >= (uint)slots.Length)
+        var oldSlots = Volatile.Read(ref _slots);
+        if ((uint)index >= (uint)oldSlots.Length)
         {
             throw new ArgumentOutOfRangeException(nameof(index));
         }
 
-        slots[index] = plugin;
-        var meters = Volatile.Read(ref _meters);
-        if ((uint)index < (uint)meters.Length)
+        var newSlots = new PluginSlot?[oldSlots.Length];
+        Array.Copy(oldSlots, newSlots, oldSlots.Length);
+
+        var previous = newSlots[index];
+        if (plugin is null)
         {
-            meters[index] = new MeterProcessor(_sampleRate);
+            newSlots[index] = null;
         }
-        var deltas = Volatile.Read(ref _deltaProcessors);
-        if ((uint)index < (uint)deltas.Length)
+        else
         {
-            deltas[index].Reset();
+            newSlots[index] = CreateSlot(plugin, instanceId);
         }
+
+        Interlocked.Exchange(ref _slots, newSlots);
+        RebuildIdIndexMap(newSlots);
+        RebuildSidechainBus();
+        return previous;
     }
 
     public void EnsureCapacity(int count)
@@ -134,172 +194,374 @@ public sealed class PluginChain
             return;
         }
 
-        var newSlots = new IPlugin?[count];
+        var newSlots = new PluginSlot?[count];
         Array.Copy(slots, newSlots, slots.Length);
-        var newMeters = CopyAndResizeMeters(count);
-        var newDeltas = CopyAndResizeDeltaProcessors(count);
-        Interlocked.Exchange(ref _deltaProcessors, newDeltas);
-        Interlocked.Exchange(ref _meters, newMeters);
         Interlocked.Exchange(ref _slots, newSlots);
+        RebuildIdIndexMap(newSlots);
+        RebuildSidechainBus();
     }
 
     public void Swap(int indexA, int indexB)
     {
-        var slots = Volatile.Read(ref _slots);
-        if ((uint)indexA >= (uint)slots.Length || (uint)indexB >= (uint)slots.Length)
+        var oldSlots = Volatile.Read(ref _slots);
+        if ((uint)indexA >= (uint)oldSlots.Length || (uint)indexB >= (uint)oldSlots.Length)
         {
             throw new ArgumentOutOfRangeException();
         }
 
-        (slots[indexA], slots[indexB]) = (slots[indexB], slots[indexA]);
-        var meters = Volatile.Read(ref _meters);
-        if ((uint)indexA < (uint)meters.Length && (uint)indexB < (uint)meters.Length)
-        {
-            (meters[indexA], meters[indexB]) = (meters[indexB], meters[indexA]);
-        }
-        var deltas = Volatile.Read(ref _deltaProcessors);
-        if ((uint)indexA < (uint)deltas.Length && (uint)indexB < (uint)deltas.Length)
-        {
-            (deltas[indexA], deltas[indexB]) = (deltas[indexB], deltas[indexA]);
-        }
-    }
+        var newSlots = new PluginSlot?[oldSlots.Length];
+        Array.Copy(oldSlots, newSlots, oldSlots.Length);
+        (newSlots[indexA], newSlots[indexB]) = (newSlots[indexB], newSlots[indexA]);
 
-    public void ReplaceAll(IPlugin?[] newSlots)
-    {
-        var newMeters = CreateMeters(newSlots.Length);
-        var newDeltas = CreateDeltaProcessors(newSlots.Length);
-        Interlocked.Exchange(ref _deltaProcessors, newDeltas);
-        Interlocked.Exchange(ref _meters, newMeters);
         Interlocked.Exchange(ref _slots, newSlots);
+        RebuildIdIndexMap(newSlots);
+        RebuildSidechainBus();
     }
 
-    public void Process(Span<float> buffer)
+    public void ReplaceAll(PluginSlot?[] newSlots)
+    {
+        Interlocked.Exchange(ref _slots, newSlots);
+        UpdateNextInstanceId(newSlots);
+        RebuildIdIndexMap(newSlots);
+        RebuildSidechainBus();
+    }
+
+    public PluginSlot?[] DetachAll()
+    {
+        var oldSlots = Volatile.Read(ref _slots);
+        Interlocked.Exchange(ref _slots, Array.Empty<PluginSlot?>());
+        RebuildIdIndexMap(Array.Empty<PluginSlot?>());
+        RebuildSidechainBus();
+        return oldSlots;
+    }
+
+    public int Process(Span<float> buffer, long sampleClock, int channelId, RoutingContext routingContext)
+    {
+        return ProcessInternal(buffer, sampleClock, channelId, routingContext, splitIndex: -1, onSplit: null);
+    }
+
+    public int ProcessWithSplit(Span<float> buffer, long sampleClock, int channelId, RoutingContext routingContext, int splitIndex, Action<Span<float>> onSplit)
+    {
+        if (onSplit is null)
+        {
+            throw new ArgumentNullException(nameof(onSplit));
+        }
+
+        return ProcessInternal(buffer, sampleClock, channelId, routingContext, splitIndex, onSplit);
+    }
+
+    private int ProcessInternal(Span<float> buffer, long sampleClock, int channelId, RoutingContext routingContext, int splitIndex, Action<Span<float>>? onSplit)
     {
         var slots = Volatile.Read(ref _slots);
-        var meters = Volatile.Read(ref _meters);
-        var deltas = Volatile.Read(ref _deltaProcessors);
-        int meterCount = meters.Length;
-        int deltaCount = deltas.Length;
+        var bus = Volatile.Read(ref _sidechainBus);
+        int cumulativeLatency = 0;
+        var lastProducer = _lastProducerScratch;
+        for (int s = 0; s < lastProducer.Length; s++)
+        {
+            lastProducer[s] = -1;
+        }
 
         for (int i = 0; i < slots.Length; i++)
         {
-            var plugin = slots[i];
-            var delta = i < deltaCount ? deltas[i] : null;
+            var slot = slots[i];
+            if (slot is null)
+            {
+                continue;
+            }
 
-            // Short-circuit: only compute FFT if plugin is active and we have signal
-            bool shouldCaptureDelta = plugin is not null
-                                   && !plugin.IsBypassed
-                                   && delta is not null;
+            var plugin = slot.Plugin;
+            var delta = slot.Delta;
+            long sampleTime = sampleClock - cumulativeLatency;
+
+            bool hasRequiredSidechain = true;
+            if (plugin is ISidechainConsumer consumer)
+            {
+                hasRequiredSidechain = HasRequiredSignals(lastProducer, consumer.RequiredSignals);
+                consumer.SetSidechainAvailable(plugin.IsBypassed ? true : hasRequiredSidechain);
+            }
+
+            bool isActive = !plugin.IsBypassed && hasRequiredSidechain;
+
+            bool shouldCaptureDelta = isActive;
 
             if (shouldCaptureDelta)
             {
-                // Check previous meter for signal level (skip FFT if below noise floor)
-                if (i > 0 && i - 1 < meterCount)
+                if (i > 0 && slots[i - 1] is { } previousSlot)
                 {
-                    float rms = meters[i - 1].GetRmsLevel();
-                    shouldCaptureDelta = rms > 0.001f; // ~-60dB threshold
+                    float rms = previousSlot.Meter.GetRmsLevel();
+                    shouldCaptureDelta = rms > 0.001f;
                 }
             }
 
             if (shouldCaptureDelta)
             {
-                delta!.ProcessPre(buffer);
+                delta.ProcessPre(buffer);
             }
 
-            if (plugin is not null && !plugin.IsBypassed)
+            SidechainSignalMask producedSignals = SidechainSignalMask.None;
+            if (plugin is ISidechainProducer producer && isActive)
             {
-                plugin.Process(buffer);
+                producedSignals = producer.ProducedSignals;
+            }
+
+            if (plugin is IContextualPlugin contextual && isActive)
+            {
+                var context = new PluginProcessContext(
+                    _sampleRate,
+                    _blockSize,
+                    sampleClock,
+                    sampleTime,
+                    i,
+                    cumulativeLatency,
+                    channelId,
+                    routingContext,
+                    bus,
+                    lastProducer[(int)SidechainSignalId.SpeechPresence],
+                    lastProducer[(int)SidechainSignalId.VoicedProbability],
+                    lastProducer[(int)SidechainSignalId.UnvoicedEnergy],
+                    lastProducer[(int)SidechainSignalId.SibilanceEnergy],
+                    producedSignals);
+                contextual.Process(buffer, context);
             }
 
             if (shouldCaptureDelta)
             {
-                delta!.ProcessPost(buffer);
+                delta.ProcessPost(buffer);
             }
 
-            if (plugin is not null && i < meterCount)
+            slot.Meter.Process(buffer);
+
+            if (isActive)
             {
-                meters[i].Process(buffer);
+                cumulativeLatency += Math.Max(0, plugin.LatencySamples);
+            }
+
+            if (producedSignals != SidechainSignalMask.None)
+            {
+                UpdateLastProducer(lastProducer, producedSignals, i);
+            }
+
+            if (onSplit is not null && i == splitIndex)
+            {
+                onSplit(buffer);
             }
         }
+
+        return cumulativeLatency;
     }
 
     public void ProcessMeters(Span<float> buffer)
     {
         var slots = Volatile.Read(ref _slots);
-        var meters = Volatile.Read(ref _meters);
-        int count = Math.Min(slots.Length, meters.Length);
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < slots.Length; i++)
         {
-            if (slots[i] is not null)
+            var slot = slots[i];
+            if (slot is not null)
             {
-                meters[i].Process(buffer);
+                slot.Meter.Process(buffer);
             }
         }
     }
 
-    private MeterProcessor[] CopyAndResizeMeters(int count)
+    private void RebuildSidechainBus()
     {
-        if (count <= 0)
+        var slots = Volatile.Read(ref _slots);
+        bool hasProducer = false;
+        for (int i = 0; i < slots.Length; i++)
         {
-            return [];
+            if (slots[i]?.Plugin is ISidechainProducer)
+            {
+                hasProducer = true;
+                break;
+            }
         }
 
-        var newMeters = CreateMeters(count);
-        var oldMeters = Volatile.Read(ref _meters);
-        int copyCount = Math.Min(oldMeters.Length, newMeters.Length);
-        if (copyCount > 0)
-        {
-            Array.Copy(oldMeters, newMeters, copyCount);
-        }
-        return newMeters;
+        var newBus = hasProducer ? new SidechainBus(slots.Length, _sidechainCapacity) : null;
+        Interlocked.Exchange(ref _sidechainBus, newBus);
     }
 
-    private MeterProcessor[] CreateMeters(int count)
+    private PluginSlot CreateSlot(IPlugin plugin, int instanceId)
     {
-        if (count <= 0)
+        int resolvedId = instanceId > 0 ? instanceId : NextInstanceId();
+        if (resolvedId > _nextInstanceId)
         {
-            return [];
+            _nextInstanceId = resolvedId;
         }
 
-        var meters = new MeterProcessor[count];
-        for (int i = 0; i < meters.Length; i++)
-        {
-            meters[i] = new MeterProcessor(_sampleRate);
-        }
-
-        return meters;
+        return new PluginSlot(resolvedId, plugin, _sampleRate);
     }
 
-    private SpectralDeltaProcessor[] CreateDeltaProcessors(int count)
+    private int NextInstanceId()
     {
-        if (count <= 0)
+        _nextInstanceId++;
+        if (_nextInstanceId <= 0)
         {
-            return [];
+            _nextInstanceId = 1;
         }
-
-        var processors = new SpectralDeltaProcessor[count];
-        for (int i = 0; i < processors.Length; i++)
-        {
-            processors[i] = new SpectralDeltaProcessor(_sampleRate);
-        }
-
-        return processors;
+        return _nextInstanceId;
     }
 
-    private SpectralDeltaProcessor[] CopyAndResizeDeltaProcessors(int count)
+    private void UpdateNextInstanceId(PluginSlot?[] slots)
     {
-        if (count <= 0)
+        int max = _nextInstanceId;
+        for (int i = 0; i < slots.Length; i++)
         {
-            return [];
+            if (slots[i] is { } slot && slot.InstanceId > max)
+            {
+                max = slot.InstanceId;
+            }
+        }
+        _nextInstanceId = max;
+    }
+
+    private void RebuildIdIndexMap(PluginSlot?[] slots)
+    {
+        var map = PluginIdIndexMap.Build(slots);
+        Interlocked.Exchange(ref _idIndexMap, map);
+    }
+
+    private sealed class PluginIdIndexMap
+    {
+        public static readonly PluginIdIndexMap Empty = new(Array.Empty<int>(), Array.Empty<int>(), 0);
+
+        private readonly int[] _keys;
+        private readonly int[] _values;
+        private readonly int _mask;
+
+        private PluginIdIndexMap(int[] keys, int[] values, int mask)
+        {
+            _keys = keys;
+            _values = values;
+            _mask = mask;
         }
 
-        var newProcessors = CreateDeltaProcessors(count);
-        var oldProcessors = Volatile.Read(ref _deltaProcessors);
-        int copyCount = Math.Min(oldProcessors.Length, newProcessors.Length);
-        if (copyCount > 0)
+        public static PluginIdIndexMap Build(PluginSlot?[] slots)
         {
-            Array.Copy(oldProcessors, newProcessors, copyCount);
+            int count = 0;
+            for (int i = 0; i < slots.Length; i++)
+            {
+                if (slots[i] is not null)
+                {
+                    count++;
+                }
+            }
+
+            if (count == 0)
+            {
+                return Empty;
+            }
+
+            int capacity = 1;
+            while (capacity < count * 2)
+            {
+                capacity <<= 1;
+            }
+
+            var keys = new int[capacity];
+            var values = new int[capacity];
+            int mask = capacity - 1;
+
+            for (int i = 0; i < slots.Length; i++)
+            {
+                if (slots[i] is not { } slot)
+                {
+                    continue;
+                }
+
+                int id = slot.InstanceId;
+                if (id <= 0)
+                {
+                    continue;
+                }
+
+                int pos = id & mask;
+                while (keys[pos] != 0)
+                {
+                    pos = (pos + 1) & mask;
+                }
+
+                keys[pos] = id;
+                values[pos] = i + 1;
+            }
+
+            return new PluginIdIndexMap(keys, values, mask);
         }
-        return newProcessors;
+
+        public bool TryGetIndex(int id, out int index)
+        {
+            index = -1;
+
+            if (id <= 0 || _keys.Length == 0)
+            {
+                return false;
+            }
+
+            int pos = id & _mask;
+            for (int i = 0; i < _keys.Length; i++)
+            {
+                int key = _keys[pos];
+                if (key == id)
+                {
+                    index = _values[pos] - 1;
+                    return index >= 0;
+                }
+                if (key == 0)
+                {
+                    return false;
+                }
+                pos = (pos + 1) & _mask;
+            }
+
+            return false;
+        }
+    }
+
+    private static void UpdateLastProducer(int[] lastProducer, SidechainSignalMask producedSignals, int slotIndex)
+    {
+        if ((producedSignals & SidechainSignalMask.SpeechPresence) != 0)
+        {
+            lastProducer[(int)SidechainSignalId.SpeechPresence] = slotIndex;
+        }
+        if ((producedSignals & SidechainSignalMask.VoicedProbability) != 0)
+        {
+            lastProducer[(int)SidechainSignalId.VoicedProbability] = slotIndex;
+        }
+        if ((producedSignals & SidechainSignalMask.UnvoicedEnergy) != 0)
+        {
+            lastProducer[(int)SidechainSignalId.UnvoicedEnergy] = slotIndex;
+        }
+        if ((producedSignals & SidechainSignalMask.SibilanceEnergy) != 0)
+        {
+            lastProducer[(int)SidechainSignalId.SibilanceEnergy] = slotIndex;
+        }
+    }
+
+    private static bool HasRequiredSignals(int[] lastProducer, SidechainSignalMask requiredSignals)
+    {
+        if (requiredSignals == SidechainSignalMask.None)
+        {
+            return true;
+        }
+        if ((requiredSignals & SidechainSignalMask.SpeechPresence) != 0
+            && lastProducer[(int)SidechainSignalId.SpeechPresence] < 0)
+        {
+            return false;
+        }
+        if ((requiredSignals & SidechainSignalMask.VoicedProbability) != 0
+            && lastProducer[(int)SidechainSignalId.VoicedProbability] < 0)
+        {
+            return false;
+        }
+        if ((requiredSignals & SidechainSignalMask.UnvoicedEnergy) != 0
+            && lastProducer[(int)SidechainSignalId.UnvoicedEnergy] < 0)
+        {
+            return false;
+        }
+        if ((requiredSignals & SidechainSignalMask.SibilanceEnergy) != 0
+            && lastProducer[(int)SidechainSignalId.SibilanceEnergy] < 0)
+        {
+            return false;
+        }
+        return true;
     }
 }

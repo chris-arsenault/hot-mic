@@ -299,10 +299,11 @@ public sealed partial class VocalSpectrographPlugin
                 Index = FormantProfileIndex,
                 Name = "Formant Profile",
                 MinValue = 0f,
-                MaxValue = 2f,
-                DefaultValue = (float)FormantProfile.Male,
+                MaxValue = 3f,
+                DefaultValue = (float)FormantProfile.Tenor,
                 Unit = "",
-                FormatValue = value => ((FormantProfile)Math.Clamp((int)MathF.Round(value), 0, 2)).ToString()
+                FormatValue = value => FormantProfileInfo.GetLabel(
+                    (FormantProfile)Math.Clamp((int)MathF.Round(value), 0, 3))
             },
             new PluginParameter
             {
@@ -605,7 +606,7 @@ public sealed partial class VocalSpectrographPlugin
         (VocalRangeType)Math.Clamp(Volatile.Read(ref _requestedVoiceRange), 0, 5);
 
     public FormantProfile FormantProfile =>
-        (FormantProfile)Math.Clamp(Volatile.Read(ref _requestedFormantProfile), 0, 2);
+        (FormantProfile)Math.Clamp(Volatile.Read(ref _requestedFormantProfile), 0, 3);
 
     public bool ShowRange => Volatile.Read(ref _requestedShowRange) != 0;
 
@@ -806,7 +807,7 @@ public sealed partial class VocalSpectrographPlugin
                 Interlocked.Exchange(ref _requestedVoiceRange, Math.Clamp((int)MathF.Round(value), 0, 5));
                 break;
             case FormantProfileIndex:
-                Interlocked.Exchange(ref _requestedFormantProfile, Math.Clamp((int)MathF.Round(value), 0, 2));
+                Interlocked.Exchange(ref _requestedFormantProfile, Math.Clamp((int)MathF.Round(value), 0, 3));
                 break;
             case ShowRangeIndex:
                 Interlocked.Exchange(ref _requestedShowRange, value >= 0.5f ? 1 : 0);

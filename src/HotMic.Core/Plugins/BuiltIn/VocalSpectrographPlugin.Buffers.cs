@@ -1166,11 +1166,13 @@ public sealed partial class VocalSpectrographPlugin
             // Initialize beam-search tracker (V2)
             if (_beamFormantTracker is null)
             {
-                _beamFormantTracker = new BeamSearchFormantTracker(lpcOrder, beamWidth: 8);
+                float frameSeconds = _activeHopSize / (float)Math.Max(1, _sampleRate);
+                _beamFormantTracker = new BeamSearchFormantTracker(lpcOrder, formantPreset, frameSeconds, beamWidth: 5);
             }
             else
             {
-                _beamFormantTracker.Configure(lpcOrder, FormantProfileInfo.GetTrackingPreset(FormantProfile.Tenor), beamWidth: 8);
+                float frameSeconds = _activeHopSize / (float)Math.Max(1, _sampleRate);
+                _beamFormantTracker.Configure(lpcOrder, formantPreset, frameSeconds, beamWidth: 5);
             }
 
             _lpcCoefficients = new float[lpcOrder + 1];

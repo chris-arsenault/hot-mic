@@ -32,7 +32,7 @@ public sealed class AnalysisConfiguration
     private SpectrogramTransformType _transformType = SpectrogramTransformType.Fft;
     private int _cqtBinsPerOctave = 48;
     private PitchDetectorType _pitchAlgorithm = PitchDetectorType.Yin;
-    private FormantProfile _formantProfile = FormantProfile.Male;
+    private FormantProfile _formantProfile = FormantProfile.Tenor;
     private ClarityProcessingMode _clarityMode = ClarityProcessingMode.None;
     private float _clarityNoise = 1f;
     private float _clarityHarmonic = 1f;

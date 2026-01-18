@@ -14,10 +14,15 @@ public sealed partial class VocalSpectrographPlugin
     {
         _sampleRate = sampleRate;
         _requestedLpcOrder = FormantProfileInfo.GetRecommendedLpcOrder(
-            (FormantProfile)Math.Clamp(_requestedFormantProfile, 0, 2),
+            (FormantProfile)Math.Clamp(_requestedFormantProfile, 0, 3),
             MaxFormants);
         ConfigureAnalysis(force: true);
         EnsureAnalysisThread();
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)
@@ -494,9 +499,28 @@ public sealed partial class VocalSpectrographPlugin
             : VoicingState.Silence;
 
         formantCount = 0;
-        bool lpcOk = _lpcAnalyzer is not null;
-        bool beamTrackerOk = _beamFormantTracker is not null;
+        var lpcAnalyzer = _lpcAnalyzer;
+        var beamTracker = _beamFormantTracker;
+        bool lpcOk = lpcAnalyzer is not null;
+        bool beamTrackerOk = beamTracker is not null;
         bool voiced = voicing == VoicingState.Voiced;
+        float vowelRatio = 0f;
+        bool vowelLike = false;
+
+        if (needsFormants && voiced)
+        {
+            float vowelMinHz = MathF.Max(VowelEnergyMinHz, _activeFormantPreset.F1MinHz);
+            float vowelMaxHz = MathF.Min(VowelEnergyMaxHz, _activeFormantPreset.F1MaxHz);
+            if (vowelMaxHz <= vowelMinHz)
+            {
+                vowelMinHz = VowelEnergyMinHz;
+                vowelMaxHz = VowelEnergyMaxHz;
+            }
+
+            vowelRatio = DspUtils.ComputeBandEnergyRatio(fftMagnitudes, _binResolution,
+                vowelMinHz, vowelMaxHz);
+            vowelLike = vowelRatio >= VowelEnergyRatioThreshold;
+        }
 
         _formantDiagCounter++;
 
@@ -507,10 +531,10 @@ public sealed partial class VocalSpectrographPlugin
             float zcr = ComputeZeroCrossingRate(_analysisBufferRaw);
             float flatness = ComputeSpectralFlatness(fftMagnitudes);
             int lpcOrder = _lpcAnalyzer?.Order ?? 0;
-            Console.WriteLine($"[FormantGate] voiced={voicing}, pitchConf={lastConfidence:F2}, energyDb={energyDb:F1}, zcr={zcr:F3}, flat={flatness:F3}, lpcOk={lpcOk}, beamOk={beamTrackerOk}, lpcOrder={lpcOrder}, lpcSr={_activeLpcSampleRate}, decim={_activeLpcDecimationStages}, ceiling={_activeFormantCeilingHz:F0}, profile={_activeFormantProfile}, preEmp={_activePreEmphasisEnabled}, hpf={_activeHighPassEnabled}, transform={_activeTransformType}");
+            Console.WriteLine($"[FormantGate] voiced={voicing}, pitchConf={lastConfidence:F2}, energyDb={energyDb:F1}, zcr={zcr:F3}, flat={flatness:F3}, vowelRatio={vowelRatio:F2}, lpcOk={lpcOk}, beamOk={beamTrackerOk}, lpcOrder={lpcOrder}, lpcSr={_activeLpcSampleRate}, decim={_activeLpcDecimationStages}, ceiling={_activeFormantCeilingHz:F0}, profile={_activeFormantProfile}, preEmp={_activePreEmphasisEnabled}, hpf={_activeHighPassEnabled}, transform={_activeTransformType}");
         }
 
-        if (needsFormants && lpcOk && beamTrackerOk && voiced)
+        if (needsFormants && lpcAnalyzer is not null && beamTracker is not null && voiced && vowelLike)
         {
             // LPC formant analysis (Praat/Burg reference):
             // 1) Decimate to >= 2 * formant ceiling
@@ -572,18 +596,21 @@ public sealed partial class VocalSpectrographPlugin
                 _lpcWindowedBuffer[i] = emphasized * _lpcWindow[i];
             }
 
-            if (_lpcAnalyzer.Compute(_lpcWindowedBuffer.AsSpan(0, decimatedLen), _lpcCoefficients))
+            if (lpcAnalyzer.Compute(_lpcWindowedBuffer.AsSpan(0, decimatedLen), _lpcCoefficients))
             {
                 // Use beam-search tracker (V2) for better continuity and lower dropout
-                formantCount = _beamFormantTracker.Track(_lpcCoefficients, _activeLpcSampleRate,
+                formantCount = beamTracker.Track(_lpcCoefficients, _activeLpcSampleRate,
                     _formantFreqScratch, _formantBwScratch,
                     50f, _activeFormantCeilingHz, MaxFormants);
             }
+            else
+            {
+                beamTracker.MarkNoUpdate();
+            }
         }
-        else if (beamTrackerOk && !voiced)
+        else if (needsFormants && beamTracker is not null)
         {
-            // Reset beam tracker state when not voiced to avoid stale continuity
-            _beamFormantTracker.Reset();
+            beamTracker.MarkNoUpdate();
         }
 
         harmonicCount = 0;

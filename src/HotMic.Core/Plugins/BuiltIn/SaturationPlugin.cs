@@ -4,7 +4,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
+public sealed class SaturationPlugin : IContextualPlugin, IQualityConfigurablePlugin
 {
     public const int WarmthIndex = 0;
     public const int BlendIndex = 1;
@@ -101,6 +101,11 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
         _sampleRate = sampleRate;
         _blockSize = blockSize;
         ConfigureOversampling();
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)
