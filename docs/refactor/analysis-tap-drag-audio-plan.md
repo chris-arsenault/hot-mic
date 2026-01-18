@@ -6,6 +6,7 @@ Goal: Fix analysis tap drag/drop behavior and resolve silence/clipping regressio
 - Audit main window drag/drop logic for plugin slots and routing slots.
 - Add explicit drop index resolution that honors before/after position (and matches orange insertion line).
 - Apply the same insertion logic to plugin container windows so intra-container drag/drop is consistent.
+- Ensure plugin drag/drop honors container slots so inserts work between containers.
 - Keep input plugins pinned and preserve container/routing constraints.
 
 ## Phase 2: Analysis Tap Generation + Meter Updates
@@ -21,6 +22,7 @@ Goal: Fix analysis tap drag/drop behavior and resolve silence/clipping regressio
 ## Phase 4: Cleanup + Validation Hooks
 - Verify UI meters + clipping indicators map to the correct slots after drag/drop.
 - Ensure analysis tap requested signals are applied per channel and cleared on dispose.
+- Align "used later" analysis tap indicators with actual downstream signal requirements (including blockers).
 - Leave notes for Windows-side verification (audio output + drag/drop behavior).
 
 ## Progress Log
@@ -28,3 +30,5 @@ Goal: Fix analysis tap drag/drop behavior and resolve silence/clipping regressio
 - Updated analysis tap processing to compute Generate signals for meters while only publishing requested signals.
 - Added analysis signal sanitization in AnalysisSignalProcessor and VAD producers (RNNoise, Silero Voice Gate).
 - Added mouse capture for plugin slot dragging in main window to stabilize drop targeting.
+- Added container-aware plugin drop targets so inserts work between container slots.
+- Updated analysis tap "used later" mask to honor blockers and bypassed plugins.

@@ -1720,24 +1720,27 @@ internal sealed class MainPluginCoordinator
             return AnalysisSignalMask.None;
         }
 
-        AnalysisSignalMask used = AnalysisSignalMask.None;
-        for (int i = slotIndex + 1; i < slots.Length; i++)
+        AnalysisSignalMask downstream = AnalysisSignalMask.None;
+        for (int i = slots.Length - 1; i > slotIndex; i--)
         {
             var slot = slots[i];
-            if (slot?.Plugin is not IAnalysisSignalConsumer consumer)
+            if (slot is null || slot.Plugin.IsBypassed)
             {
                 continue;
             }
 
-            if (slot.Plugin.IsBypassed)
+            if (slot.Plugin is IAnalysisSignalConsumer consumer)
             {
-                continue;
+                downstream |= consumer.RequiredSignals;
             }
 
-            used |= consumer.RequiredSignals;
+            if (slot.Plugin is IAnalysisSignalBlocker blocker && blocker.BlockedSignals != AnalysisSignalMask.None)
+            {
+                downstream &= ~blocker.BlockedSignals;
+            }
         }
 
-        return used;
+        return downstream;
     }
 
     private void UpdateAnalysisTapRequest(int channelIndex, int instanceId, AnalysisSignalMask requestedSignals)

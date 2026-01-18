@@ -1016,6 +1016,14 @@ public partial class MainWindow : Window, IDisposable
             return -1;
         }
 
+        var containerHit = _renderer.HitTestContainerSlot(x, y, out _, out var containerRect);
+        if (containerHit.HasValue)
+        {
+            bool dropAfter = x > containerRect.MidX;
+            int dropIndex = GetContainerInsertIndex(channel, containerHit.Value.SlotIndex, dropAfter);
+            return ResolvePluginInsertIndex(channel, sourceSlot, dropIndex);
+        }
+
         var pluginHit = _renderer.HitTestPluginSlot(x, y, out _, out var pluginRect);
         if (pluginHit.HasValue)
         {
@@ -1124,6 +1132,14 @@ public partial class MainWindow : Window, IDisposable
         {
             // Invalid: different channel - return invalid drop target with ghost at cursor
             return new DropTarget(false, SKRect.Empty, 0, 0, 0);
+        }
+
+        var containerHit = _renderer.HitTestContainerSlot(x, y, out _, out var containerRect);
+        if (containerHit.HasValue)
+        {
+            bool insertBefore = x < containerRect.MidX;
+            float lineX = insertBefore ? containerRect.Left - 2f : containerRect.Right + 2f;
+            return new DropTarget(true, containerRect, lineX, containerRect.Top, containerRect.Bottom);
         }
 
         // Check specific slot for insertion point
