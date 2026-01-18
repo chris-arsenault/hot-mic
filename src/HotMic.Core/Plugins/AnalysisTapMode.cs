@@ -1,6 +1,6 @@
 namespace HotMic.Core.Plugins;
 
-public enum SidechainTapMode
+public enum AnalysisTapMode
 {
     /// <summary>Do not forward or generate this signal.</summary>
     Disabled = 0,

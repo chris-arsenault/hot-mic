@@ -16,7 +16,7 @@ internal sealed class OutputPipeline : IWaveProvider
     private readonly Func<bool> _isProcessingEnabled;
     private readonly LufsMeterProcessor _masterLufsLeft;
     private readonly LufsMeterProcessor _masterLufsRight;
-    private readonly AnalysisTap _analysisTap;
+    private readonly AnalysisCaptureLink _analysisCapture;
     private RoutingSnapshot _snapshot;
     private LockFreeRingBuffer? _monitorBuffer;
     private int _masterMuted;
@@ -31,7 +31,7 @@ internal sealed class OutputPipeline : IWaveProvider
         Func<bool> isProcessingEnabled,
         LufsMeterProcessor masterLufsLeft,
         LufsMeterProcessor masterLufsRight,
-        AnalysisTap analysisTap,
+        AnalysisCaptureLink analysisCapture,
         WaveFormat waveFormat)
     {
         _snapshot = snapshot;
@@ -42,7 +42,7 @@ internal sealed class OutputPipeline : IWaveProvider
         _isProcessingEnabled = isProcessingEnabled;
         _masterLufsLeft = masterLufsLeft;
         _masterLufsRight = masterLufsRight;
-        _analysisTap = analysisTap;
+        _analysisCapture = analysisCapture;
         WaveFormat = waveFormat;
     }
 
@@ -143,7 +143,8 @@ internal sealed class OutputPipeline : IWaveProvider
             if (outputBus.HasData)
             {
                 var analysisBuffer = outputBus.Mode == OutputSendMode.Right ? outputBus.Right : outputBus.Left;
-                _analysisTap.Capture(analysisBuffer, 0);
+                _analysisCapture.Capture(analysisBuffer, sampleClock, sampleClock, 0, null, ReadOnlySpan<int>.Empty,
+                    AnalysisCaptureSource.Output);
             }
 
             var monitorBuffer = Volatile.Read(ref _monitorBuffer);

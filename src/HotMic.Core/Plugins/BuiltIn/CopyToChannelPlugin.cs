@@ -1,7 +1,7 @@
 namespace HotMic.Core.Plugins.BuiltIn;
 
 /// <summary>
-/// Copies audio and sidechain data at the current slot into a copy bus for another channel.
+/// Copies audio and analysis signal data at the current slot into a copy bus for another channel.
 /// </summary>
 public sealed class CopyToChannelPlugin : IPlugin, IRoutingDependencyProvider
 {

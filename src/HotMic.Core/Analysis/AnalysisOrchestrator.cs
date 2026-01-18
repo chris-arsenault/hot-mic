@@ -1,7 +1,6 @@
 using System.Threading;
 using HotMic.Core.Dsp;
 using HotMic.Core.Dsp.Analysis;
-using HotMic.Core.Dsp.Analysis.Formants;
 using HotMic.Core.Dsp.Analysis.Pitch;
 using HotMic.Core.Dsp.Analysis.Speech;
 using HotMic.Core.Dsp.Fft;
@@ -9,6 +8,7 @@ using HotMic.Core.Dsp.Filters;
 using HotMic.Core.Dsp.Mapping;
 using HotMic.Core.Dsp.Spectrogram;
 using HotMic.Core.Dsp.Voice;
+using HotMic.Core.Plugins;
 using HotMic.Core.Threading;
 
 namespace HotMic.Core.Analysis;
@@ -22,14 +22,8 @@ public sealed class AnalysisOrchestrator : IDisposable
     private const int CaptureBufferSize = 262144;
     private const float DcCutoffHz = 10f;
     private const float DefaultPreEmphasis = 0.97f;
-    private const float LpcWindowSeconds = 0.025f;
-    private const float LpcGaussianSigma = 0.4f;
     private const int ZoomFftZoomFactor = 8;
     private const float MaxReassignFrameShift = 0.5f;
-    private const float MaxReassignBinShift = 0.5f;
-    private const float VowelEnergyMinHz = 200f;
-    private const float VowelEnergyMaxHz = 1000f;
-    private const float VowelEnergyRatioThreshold = 0.15f;
 
     private readonly AnalysisResultStore _resultStore = new();
     private readonly VisualizerSyncHub _syncHub = new();
@@ -42,6 +36,9 @@ public sealed class AnalysisOrchestrator : IDisposable
     private CancellationTokenSource? _analysisCts;
     private int _sampleRate;
     private int _consumerCount;
+    private AnalysisCaptureLink? _captureLink;
+    private AnalysisSignalMask _requestedSignals;
+    private long _analysisReadSampleTime = long.MinValue;
 
     // FFT/Transform
     private FastFft? _fft;
@@ -50,6 +47,8 @@ public sealed class AnalysisOrchestrator : IDisposable
     private float[] _analysisBufferRaw = Array.Empty<float>();
     private float[] _analysisBufferProcessed = Array.Empty<float>();
     private float[] _hopBuffer = Array.Empty<float>();
+    private readonly AnalysisSignalProcessor _analysisSignalProcessor = new();
+    private readonly float[] _analysisSignalValues = new float[(int)AnalysisSignalId.Count];
     private float[] _fftReal = Array.Empty<float>();
     private float[] _fftImag = Array.Empty<float>();
     private float[] _fftWindow = Array.Empty<float>();
@@ -85,36 +84,11 @@ public sealed class AnalysisOrchestrator : IDisposable
     private readonly SpectrogramHpssProcessor _hpssProcessor = new();
     private readonly SpectrogramSmoother _smoother = new();
     private readonly SpectrogramHarmonicComb _harmonicComb = new();
-    private readonly SpectralFeatureExtractor _featureExtractor = new();
 
     // Filters (not readonly - these are mutable structs)
     private OnePoleHighPass _dcHighPass;
     private BiquadFilter _rumbleHighPass = new();
     private PreEmphasisFilter _preEmphasisFilter;
-    private DecimatingFilter _lpcDecimator1 = new();
-    private DecimatingFilter _lpcDecimator2 = new();
-    private PreEmphasisFilter _lpcPreEmphasisFilter;
-
-    // Pitch detection
-    private YinPitchDetector? _yinPitchDetector;
-    private PyinPitchDetector? _pyinPitchDetector;
-    private AutocorrelationPitchDetector? _autocorrPitchDetector;
-    private CepstralPitchDetector? _cepstralPitchDetector;
-    private SwipePitchDetector? _swipePitchDetector;
-    private readonly VoicingDetector _voicingDetector = new();
-
-    // Formant analysis
-    private LpcAnalyzer? _lpcAnalyzer;
-    private FormantTracker? _formantTracker;
-    private BeamSearchFormantTracker? _beamFormantTracker;
-    private float[] _lpcCoefficients = Array.Empty<float>();
-    private float[] _lpcInputBuffer = Array.Empty<float>();
-    private float[] _lpcDecimateBuffer1 = Array.Empty<float>();
-    private float[] _lpcDecimatedBuffer = Array.Empty<float>();
-    private float[] _lpcWindowedBuffer = Array.Empty<float>();
-    private float[] _lpcWindow = Array.Empty<float>();
-    private int _lpcWindowLength;
-    private int _lpcWindowSamples;
     private readonly float[] _formantFreqScratch = new float[AnalysisConfiguration.MaxFormants];
     private readonly float[] _formantBwScratch = new float[AnalysisConfiguration.MaxFormants];
     private readonly float[] _harmonicScratch = new float[AnalysisConfiguration.MaxHarmonics];
@@ -138,11 +112,6 @@ public sealed class AnalysisOrchestrator : IDisposable
     private FrequencyScale _activeScale;
     private SpectrogramTransformType _activeTransformType;
     private SpectrogramReassignMode _activeReassignMode;
-    private FormantProfile _activeFormantProfile;
-    private FormantTrackingPreset _activeFormantPreset;
-    private float _activeFormantCeilingHz;
-    private int _activeLpcSampleRate;
-    private int _activeLpcDecimationStages;
     private int _activeCqtBinsPerOctave;
     private bool _activeHighPassEnabled;
     private float _activeHighPassCutoff;
@@ -204,13 +173,21 @@ public sealed class AnalysisOrchestrator : IDisposable
     public float DebugLastProcessedMax => Volatile.Read(ref _debugLastProcessedMax);
     public int DebugAnalysisFilled => Volatile.Read(ref _debugAnalysisFilled);
 
-    public AnalysisTap? DebugTap { get; set; }
-
     public IAnalysisResultStore Results => _resultStore;
     public VisualizerSyncHub SyncHub => _syncHub;
     public AnalysisConfiguration Config => _config;
     public int SampleRate => Volatile.Read(ref _sampleRate);
     public bool HasActiveConsumers => Volatile.Read(ref _consumerCount) > 0;
+
+    public AnalysisCaptureLink? CaptureLink
+    {
+        get => Volatile.Read(ref _captureLink);
+        set => Volatile.Write(ref _captureLink, value);
+    }
+
+    public AnalysisSignalMask RequestedSignals => Volatile.Read(ref _requestedSignals);
+
+    public event Action<AnalysisSignalMask>? RequestedSignalsChanged;
 
     public void Initialize(int sampleRate)
     {
@@ -243,6 +220,7 @@ public sealed class AnalysisOrchestrator : IDisposable
     public IDisposable Subscribe(AnalysisCapabilities required)
     {
         var consumer = new AnalysisConsumer(required, this);
+        AnalysisSignalMask requestedSignals;
         lock (_consumerLock)
         {
             _consumers.Add(consumer);
@@ -253,12 +231,17 @@ public sealed class AnalysisOrchestrator : IDisposable
             {
                 StartAnalysisThread();
             }
+
+            requestedSignals = ComputeRequestedSignalsLocked();
         }
+
+        UpdateRequestedSignals(requestedSignals);
         return consumer;
     }
 
     private void Unsubscribe(AnalysisConsumer consumer)
     {
+        AnalysisSignalMask requestedSignals;
         lock (_consumerLock)
         {
             _consumers.Remove(consumer);
@@ -269,7 +252,11 @@ public sealed class AnalysisOrchestrator : IDisposable
             {
                 StopAnalysisThread();
             }
+
+            requestedSignals = ComputeRequestedSignalsLocked();
         }
+
+        UpdateRequestedSignals(requestedSignals);
     }
 
     private AnalysisCapabilities GetActiveCapabilities()
@@ -283,14 +270,77 @@ public sealed class AnalysisOrchestrator : IDisposable
         return caps;
     }
 
+    private static AnalysisSignalMask ComputeRequestedSignals(AnalysisCapabilities caps)
+    {
+        AnalysisSignalMask mask = AnalysisSignalMask.None;
+
+        bool needsPitch = caps.HasFlag(AnalysisCapabilities.Pitch) ||
+                          caps.HasFlag(AnalysisCapabilities.Harmonics) ||
+                          caps.HasFlag(AnalysisCapabilities.Formants) ||
+                          caps.HasFlag(AnalysisCapabilities.SpeechMetrics);
+        if (needsPitch)
+        {
+            mask |= AnalysisSignalMask.PitchHz | AnalysisSignalMask.PitchConfidence;
+        }
+
+        bool needsVoicing = caps.HasFlag(AnalysisCapabilities.VoicingState) ||
+                            caps.HasFlag(AnalysisCapabilities.Formants) ||
+                            caps.HasFlag(AnalysisCapabilities.SpeechMetrics);
+        if (needsVoicing)
+        {
+            mask |= AnalysisSignalMask.VoicingState | AnalysisSignalMask.VoicingScore;
+        }
+
+        if (caps.HasFlag(AnalysisCapabilities.Formants) || caps.HasFlag(AnalysisCapabilities.SpeechMetrics))
+        {
+            mask |= AnalysisSignalMask.FormantF1Hz |
+                    AnalysisSignalMask.FormantF2Hz |
+                    AnalysisSignalMask.FormantF3Hz |
+                    AnalysisSignalMask.FormantConfidence;
+        }
+
+        if (caps.HasFlag(AnalysisCapabilities.SpectralFeatures) || caps.HasFlag(AnalysisCapabilities.SpeechMetrics))
+        {
+            mask |= AnalysisSignalMask.SpectralFlux | AnalysisSignalMask.HnrDb;
+        }
+
+        return mask;
+    }
+
+    private void UpdateRequestedSignals(AnalysisSignalMask requestedSignals)
+    {
+        AnalysisSignalMask previous = Volatile.Read(ref _requestedSignals);
+        if (previous == requestedSignals)
+        {
+            return;
+        }
+
+        Volatile.Write(ref _requestedSignals, requestedSignals);
+        RequestedSignalsChanged?.Invoke(requestedSignals);
+    }
+
+    private AnalysisSignalMask ComputeRequestedSignalsLocked()
+    {
+        var caps = AnalysisCapabilities.None;
+        foreach (var consumer in _consumers)
+        {
+            caps |= consumer.RequiredCapabilities;
+        }
+
+        return ComputeRequestedSignals(caps);
+    }
+
     public void Reset()
     {
         _captureBuffer.Clear();
         _resultStore.Clear();
         _syncHub.Reset();
+        _analysisSignalProcessor.Reset();
+        Array.Clear(_analysisSignalValues, 0, _analysisSignalValues.Length);
         Volatile.Write(ref _analysisFilled, 0);
         Volatile.Write(ref _frameCounter, 0);
         Volatile.Write(ref _lastDroppedHops, 0);
+        Volatile.Write(ref _analysisReadSampleTime, long.MinValue);
     }
 
     private void StartAnalysisThread()
@@ -321,13 +371,6 @@ public sealed class AnalysisOrchestrator : IDisposable
 
     private void AnalysisLoop(CancellationToken token)
     {
-        int pitchFrameCounter = 0;
-        int cppFrameCounter = 0;
-        float lastPitch = 0f;
-        float lastConfidence = 0f;
-        float lastCpp = 0f;
-        float lastHnr = 0f;
-
         while (!token.IsCancellationRequested)
         {
             Interlocked.Increment(ref _debugLoopIterations);
@@ -351,13 +394,16 @@ public sealed class AnalysisOrchestrator : IDisposable
                 continue;
             }
 
-            if (_captureBuffer.AvailableRead < _activeHopSize)
+            var captureLink = Volatile.Read(ref _captureLink);
+            int availableRead = _captureBuffer.AvailableRead;
+            if (availableRead < _activeHopSize)
             {
                 Interlocked.Increment(ref _debugLoopNotEnoughData);
                 Thread.Sleep(1);
                 continue;
             }
 
+            long hopSampleTime = GetReadSampleTime(captureLink, availableRead);
             int read = _captureBuffer.Read(_hopBuffer);
             if (read < _activeHopSize)
             {
@@ -365,6 +411,7 @@ public sealed class AnalysisOrchestrator : IDisposable
                 Thread.Sleep(1);
                 continue;
             }
+            Volatile.Write(ref _analysisReadSampleTime, hopSampleTime + read);
 
             // Track max hop buffer value for debugging
             float hopMax = 0f;
@@ -406,27 +453,66 @@ public sealed class AnalysisOrchestrator : IDisposable
                 displayMagnitudes = NormalizeFftMagnitudes();
             }
 
-            // Pitch and voicing (demand-driven)
-            bool needsPitch = capabilities.HasFlag(AnalysisCapabilities.Pitch) ||
-                              capabilities.HasFlag(AnalysisCapabilities.Harmonics) ||
-                              capabilities.HasFlag(AnalysisCapabilities.Formants);
-            bool needsVoicing = capabilities.HasFlag(AnalysisCapabilities.VoicingState) ||
-                                capabilities.HasFlag(AnalysisCapabilities.Formants);
+            AnalysisSignalMask requestedSignals = ComputeRequestedSignals(capabilities);
+            Array.Clear(_analysisSignalValues, 0, _analysisSignalValues.Length);
 
-            VoicingState voicing = VoicingState.Silence;
-            int formantCount = 0;
-            int harmonicCount = 0;
+            AnalysisSignalMask availableSignals = ReadSignalsFromBus(captureLink, hopSampleTime, read, requestedSignals, _analysisSignalValues);
+            AnalysisSignalMask missingSignals = requestedSignals & ~availableSignals;
 
-            if (needsPitch || needsVoicing)
+            bool needsSpectralFeatures = capabilities.HasFlag(AnalysisCapabilities.SpectralFeatures) ||
+                                         capabilities.HasFlag(AnalysisCapabilities.SpeechMetrics);
+            bool needsCpp = (requestedSignals & AnalysisSignalMask.PitchHz) != 0 &&
+                            _config.PitchAlgorithm == PitchDetectorType.Cepstral;
+
+            AnalysisSignalMask processorSignals = missingSignals;
+            if (needsSpectralFeatures)
             {
-                AnalyzePitchAndVoicing(ref pitchFrameCounter, ref cppFrameCounter,
-                    ref lastPitch, ref lastConfidence, ref lastCpp,
-                    _fftMagnitudes, capabilities,
-                    out voicing, out formantCount, out harmonicCount);
+                processorSignals |= AnalysisSignalMask.SpectralFlux;
+                if ((requestedSignals & AnalysisSignalMask.HnrDb) != 0 &&
+                    (availableSignals & AnalysisSignalMask.HnrDb) == 0)
+                {
+                    processorSignals |= AnalysisSignalMask.HnrDb;
+                }
             }
 
+            if (needsCpp)
+            {
+                processorSignals |= AnalysisSignalMask.PitchHz | AnalysisSignalMask.PitchConfidence;
+            }
+
+            if (processorSignals != AnalysisSignalMask.None)
+            {
+                _analysisSignalProcessor.ProcessBlock(_hopBuffer.AsSpan(0, read), hopSampleTime, default, processorSignals);
+                FillSignalValuesFromProcessor(missingSignals, _analysisSignalValues);
+            }
+
+            float lastPitch = _analysisSignalValues[(int)AnalysisSignalId.PitchHz];
+            float lastConfidence = _analysisSignalValues[(int)AnalysisSignalId.PitchConfidence];
+            float lastHnr = _analysisSignalValues[(int)AnalysisSignalId.HnrDb];
+            float flux = _analysisSignalValues[(int)AnalysisSignalId.SpectralFlux];
+            var voicing = (VoicingState)MathF.Round(_analysisSignalValues[(int)AnalysisSignalId.VoicingState]);
+
+            float centroid = needsSpectralFeatures && (processorSignals & AnalysisSignalMask.SpectralFlux) != 0
+                ? _analysisSignalProcessor.LastCentroid
+                : 0f;
+            float slope = needsSpectralFeatures && (processorSignals & AnalysisSignalMask.SpectralFlux) != 0
+                ? _analysisSignalProcessor.LastSlope
+                : 0f;
+            float lastCpp = needsCpp && (processorSignals & (AnalysisSignalMask.PitchHz | AnalysisSignalMask.PitchConfidence)) != 0
+                ? _analysisSignalProcessor.LastCpp
+                : 0f;
+
+            int formantCount = 0;
+            if ((requestedSignals & (AnalysisSignalMask.FormantF1Hz | AnalysisSignalMask.FormantF2Hz | AnalysisSignalMask.FormantF3Hz)) != 0)
+            {
+                float formantConfidence = _analysisSignalValues[(int)AnalysisSignalId.FormantConfidence];
+                formantCount = UpdateFormantScratch(formantConfidence);
+            }
+
+            int harmonicCount = ComputeHarmonics(capabilities, lastPitch);
+
             // Clarity processing
-            lastHnr = ProcessClarity(clarityBins, voicing, lastPitch, lastConfidence);
+            _ = ProcessClarity(clarityBins, voicing, lastPitch, lastConfidence);
 
             // Write frame to result store
             long frameId = _frameCounter;
@@ -446,17 +532,11 @@ public sealed class AnalysisOrchestrator : IDisposable
                 MapToDisplayBins(clarityBins, frameIndex);
             }
 
-            // Compute spectral features if needed
-            float centroid = 0f, slope = 0f, flux = 0f;
-            if (capabilities.HasFlag(AnalysisCapabilities.SpectralFeatures))
-            {
-                _featureExtractor.Compute(_displaySmoothed, clarityBins, out centroid, out slope, out flux);
-            }
-
             // Write overlay data
             _resultStore.WritePitchFrame(frameIndex, lastPitch, lastConfidence, voicing);
             _resultStore.WriteWaveformFrame(frameIndex, waveformMin, waveformMax);
             _resultStore.WriteSpectralFeatures(frameIndex, centroid, slope, flux, lastHnr, lastCpp);
+            _resultStore.WriteAnalysisSignalFrame(frameIndex, _analysisSignalValues);
 
             if (formantCount > 0)
             {
@@ -483,6 +563,327 @@ public sealed class AnalysisOrchestrator : IDisposable
             // Update sync hub
             _syncHub.UpdateViewRange(frameId, _activeFrameCapacity, _sampleRate, _activeHopSize);
         }
+    }
+
+    private long GetReadSampleTime(AnalysisCaptureLink? captureLink, int availableRead)
+    {
+        long readTime = Volatile.Read(ref _analysisReadSampleTime);
+        if (readTime != long.MinValue)
+        {
+            return readTime;
+        }
+
+        long baseTime = 0;
+        if (captureLink is not null)
+        {
+            long writeTime = captureLink.WriteSampleTime;
+            baseTime = writeTime - availableRead;
+            if (baseTime < 0)
+            {
+                baseTime = 0;
+            }
+        }
+
+        Volatile.Write(ref _analysisReadSampleTime, baseTime);
+        return baseTime;
+    }
+
+    private AnalysisSignalMask ReadSignalsFromBus(AnalysisCaptureLink? captureLink, long sampleTime, int count,
+        AnalysisSignalMask requestedSignals, float[] values)
+    {
+        if (captureLink is null || requestedSignals == AnalysisSignalMask.None || sampleTime < 0 || count <= 0)
+        {
+            return AnalysisSignalMask.None;
+        }
+
+        var bus = captureLink.SignalBus;
+        var producers = captureLink.SignalProducers;
+        if (bus is null || producers.Length < values.Length)
+        {
+            return AnalysisSignalMask.None;
+        }
+
+        int lastIndex = count - 1;
+        long lastTime = sampleTime + lastIndex;
+        AnalysisSignalMask available = AnalysisSignalMask.None;
+
+        bool wantSpeech = (requestedSignals & AnalysisSignalMask.SpeechPresence) != 0;
+        bool wantFricative = (requestedSignals & AnalysisSignalMask.FricativeActivity) != 0;
+        bool wantSibilance = (requestedSignals & AnalysisSignalMask.SibilanceEnergy) != 0;
+
+        bool hasSpeech = wantSpeech && TryGetSource(bus, producers, AnalysisSignalId.SpeechPresence, out var speechSource);
+        bool hasFricative = wantFricative && TryGetSource(bus, producers, AnalysisSignalId.FricativeActivity, out var fricativeSource);
+        bool hasSibilance = wantSibilance && TryGetSource(bus, producers, AnalysisSignalId.SibilanceEnergy, out var sibilanceSource);
+
+        if (hasSpeech || hasFricative || hasSibilance)
+        {
+            float speechSum = 0f;
+            float fricativeSum = 0f;
+            float sibilanceSum = 0f;
+
+            for (int i = 0; i < count; i++)
+            {
+                long t = sampleTime + i;
+                if (hasSpeech)
+                {
+                    speechSum += speechSource.ReadSample(t);
+                }
+                if (hasFricative)
+                {
+                    fricativeSum += fricativeSource.ReadSample(t);
+                }
+                if (hasSibilance)
+                {
+                    sibilanceSum += sibilanceSource.ReadSample(t);
+                }
+            }
+
+            float invCount = 1f / count;
+            if (hasSpeech)
+            {
+                values[(int)AnalysisSignalId.SpeechPresence] = speechSum * invCount;
+                available |= AnalysisSignalMask.SpeechPresence;
+            }
+            if (hasFricative)
+            {
+                values[(int)AnalysisSignalId.FricativeActivity] = fricativeSum * invCount;
+                available |= AnalysisSignalMask.FricativeActivity;
+            }
+            if (hasSibilance)
+            {
+                values[(int)AnalysisSignalId.SibilanceEnergy] = sibilanceSum * invCount;
+                available |= AnalysisSignalMask.SibilanceEnergy;
+            }
+        }
+
+        if ((requestedSignals & AnalysisSignalMask.VoicingScore) != 0 &&
+            TryReadSample(bus, producers, AnalysisSignalId.VoicingScore, lastTime, out float voicingScore))
+        {
+            values[(int)AnalysisSignalId.VoicingScore] = voicingScore;
+            available |= AnalysisSignalMask.VoicingScore;
+        }
+
+        if ((requestedSignals & AnalysisSignalMask.VoicingState) != 0 &&
+            TryReadSample(bus, producers, AnalysisSignalId.VoicingState, lastTime, out float voicingState))
+        {
+            values[(int)AnalysisSignalId.VoicingState] = voicingState;
+            available |= AnalysisSignalMask.VoicingState;
+        }
+
+        if ((requestedSignals & AnalysisSignalMask.OnsetFluxHigh) != 0 &&
+            TryReadSample(bus, producers, AnalysisSignalId.OnsetFluxHigh, lastTime, out float onsetFlux))
+        {
+            values[(int)AnalysisSignalId.OnsetFluxHigh] = onsetFlux;
+            available |= AnalysisSignalMask.OnsetFluxHigh;
+        }
+
+        if ((requestedSignals & AnalysisSignalMask.PitchHz) != 0 &&
+            TryReadSample(bus, producers, AnalysisSignalId.PitchHz, lastTime, out float pitch))
+        {
+            values[(int)AnalysisSignalId.PitchHz] = pitch;
+            available |= AnalysisSignalMask.PitchHz;
+        }
+
+        if ((requestedSignals & AnalysisSignalMask.PitchConfidence) != 0 &&
+            TryReadSample(bus, producers, AnalysisSignalId.PitchConfidence, lastTime, out float pitchConfidence))
+        {
+            values[(int)AnalysisSignalId.PitchConfidence] = pitchConfidence;
+            available |= AnalysisSignalMask.PitchConfidence;
+        }
+
+        if ((requestedSignals & AnalysisSignalMask.FormantF1Hz) != 0 &&
+            TryReadSample(bus, producers, AnalysisSignalId.FormantF1Hz, lastTime, out float f1Hz))
+        {
+            values[(int)AnalysisSignalId.FormantF1Hz] = f1Hz;
+            available |= AnalysisSignalMask.FormantF1Hz;
+        }
+
+        if ((requestedSignals & AnalysisSignalMask.FormantF2Hz) != 0 &&
+            TryReadSample(bus, producers, AnalysisSignalId.FormantF2Hz, lastTime, out float f2Hz))
+        {
+            values[(int)AnalysisSignalId.FormantF2Hz] = f2Hz;
+            available |= AnalysisSignalMask.FormantF2Hz;
+        }
+
+        if ((requestedSignals & AnalysisSignalMask.FormantF3Hz) != 0 &&
+            TryReadSample(bus, producers, AnalysisSignalId.FormantF3Hz, lastTime, out float f3Hz))
+        {
+            values[(int)AnalysisSignalId.FormantF3Hz] = f3Hz;
+            available |= AnalysisSignalMask.FormantF3Hz;
+        }
+
+        if ((requestedSignals & AnalysisSignalMask.FormantConfidence) != 0 &&
+            TryReadSample(bus, producers, AnalysisSignalId.FormantConfidence, lastTime, out float formantConfidence))
+        {
+            values[(int)AnalysisSignalId.FormantConfidence] = formantConfidence;
+            available |= AnalysisSignalMask.FormantConfidence;
+        }
+
+        if ((requestedSignals & AnalysisSignalMask.SpectralFlux) != 0 &&
+            TryReadSample(bus, producers, AnalysisSignalId.SpectralFlux, lastTime, out float flux))
+        {
+            values[(int)AnalysisSignalId.SpectralFlux] = flux;
+            available |= AnalysisSignalMask.SpectralFlux;
+        }
+
+        if ((requestedSignals & AnalysisSignalMask.HnrDb) != 0 &&
+            TryReadSample(bus, producers, AnalysisSignalId.HnrDb, lastTime, out float hnr))
+        {
+            values[(int)AnalysisSignalId.HnrDb] = hnr;
+            available |= AnalysisSignalMask.HnrDb;
+        }
+
+        return available;
+    }
+
+    private static bool TryGetSource(AnalysisSignalBus bus, int[] producers, AnalysisSignalId signal, out AnalysisSignalSource source)
+    {
+        int index = (int)signal;
+        if ((uint)index >= (uint)producers.Length)
+        {
+            source = default;
+            return false;
+        }
+
+        int producerIndex = producers[index];
+        if (producerIndex < 0)
+        {
+            source = default;
+            return false;
+        }
+
+        source = bus.GetSource(producerIndex, signal);
+        return true;
+    }
+
+    private static bool TryReadSample(AnalysisSignalBus bus, int[] producers, AnalysisSignalId signal, long sampleTime, out float value)
+    {
+        if (TryGetSource(bus, producers, signal, out var source))
+        {
+            value = source.ReadSample(sampleTime);
+            return true;
+        }
+
+        value = 0f;
+        return false;
+    }
+
+    private void FillSignalValuesFromProcessor(AnalysisSignalMask missingSignals, float[] values)
+    {
+        if ((missingSignals & AnalysisSignalMask.SpeechPresence) != 0)
+        {
+            values[(int)AnalysisSignalId.SpeechPresence] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.SpeechPresence);
+        }
+        if ((missingSignals & AnalysisSignalMask.VoicingScore) != 0)
+        {
+            values[(int)AnalysisSignalId.VoicingScore] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.VoicingScore);
+        }
+        if ((missingSignals & AnalysisSignalMask.VoicingState) != 0)
+        {
+            values[(int)AnalysisSignalId.VoicingState] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.VoicingState);
+        }
+        if ((missingSignals & AnalysisSignalMask.FricativeActivity) != 0)
+        {
+            values[(int)AnalysisSignalId.FricativeActivity] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.FricativeActivity);
+        }
+        if ((missingSignals & AnalysisSignalMask.SibilanceEnergy) != 0)
+        {
+            values[(int)AnalysisSignalId.SibilanceEnergy] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.SibilanceEnergy);
+        }
+        if ((missingSignals & AnalysisSignalMask.OnsetFluxHigh) != 0)
+        {
+            values[(int)AnalysisSignalId.OnsetFluxHigh] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.OnsetFluxHigh);
+        }
+        if ((missingSignals & AnalysisSignalMask.PitchHz) != 0)
+        {
+            values[(int)AnalysisSignalId.PitchHz] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.PitchHz);
+        }
+        if ((missingSignals & AnalysisSignalMask.PitchConfidence) != 0)
+        {
+            values[(int)AnalysisSignalId.PitchConfidence] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.PitchConfidence);
+        }
+        if ((missingSignals & AnalysisSignalMask.FormantF1Hz) != 0)
+        {
+            values[(int)AnalysisSignalId.FormantF1Hz] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.FormantF1Hz);
+        }
+        if ((missingSignals & AnalysisSignalMask.FormantF2Hz) != 0)
+        {
+            values[(int)AnalysisSignalId.FormantF2Hz] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.FormantF2Hz);
+        }
+        if ((missingSignals & AnalysisSignalMask.FormantF3Hz) != 0)
+        {
+            values[(int)AnalysisSignalId.FormantF3Hz] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.FormantF3Hz);
+        }
+        if ((missingSignals & AnalysisSignalMask.FormantConfidence) != 0)
+        {
+            values[(int)AnalysisSignalId.FormantConfidence] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.FormantConfidence);
+        }
+        if ((missingSignals & AnalysisSignalMask.SpectralFlux) != 0)
+        {
+            values[(int)AnalysisSignalId.SpectralFlux] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.SpectralFlux);
+        }
+        if ((missingSignals & AnalysisSignalMask.HnrDb) != 0)
+        {
+            values[(int)AnalysisSignalId.HnrDb] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.HnrDb);
+        }
+    }
+
+    private int UpdateFormantScratch(float confidence)
+    {
+        if (confidence <= 0f)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        float f1 = _analysisSignalValues[(int)AnalysisSignalId.FormantF1Hz];
+        if (f1 > 0f)
+        {
+            _formantFreqScratch[0] = f1;
+            _formantBwScratch[0] = _analysisSignalProcessor.LastFormantBandwidth1;
+            count = 1;
+        }
+
+        float f2 = _analysisSignalValues[(int)AnalysisSignalId.FormantF2Hz];
+        if (f2 > 0f)
+        {
+            _formantFreqScratch[1] = f2;
+            _formantBwScratch[1] = _analysisSignalProcessor.LastFormantBandwidth2;
+            count = 2;
+        }
+
+        float f3 = _analysisSignalValues[(int)AnalysisSignalId.FormantF3Hz];
+        if (f3 > 0f)
+        {
+            _formantFreqScratch[2] = f3;
+            _formantBwScratch[2] = _analysisSignalProcessor.LastFormantBandwidth3;
+            count = 3;
+        }
+
+        return count;
+    }
+
+    private int ComputeHarmonics(AnalysisCapabilities capabilities, float pitchHz)
+    {
+        if (!capabilities.HasFlag(AnalysisCapabilities.Harmonics) || pitchHz <= 0f)
+        {
+            return 0;
+        }
+
+        var descriptor = _analysisDescriptor;
+        if (descriptor is null)
+        {
+            return 0;
+        }
+
+        ReadOnlySpan<float> activeMagnitudes = _activeTransformType switch
+        {
+            SpectrogramTransformType.Cqt when _cqtMagnitudes.Length > 0 => _cqtMagnitudes,
+            SpectrogramTransformType.ZoomFft when _fftDisplayMagnitudes.Length > 0 => _fftDisplayMagnitudes,
+            _ => _fftMagnitudes
+        };
+
+        return HarmonicPeakDetector.Detect(activeMagnitudes, descriptor, pitchHz, _harmonicScratch, _harmonicMagScratch);
     }
 
     private bool ProcessHopBuffer(out float waveformMin, out float waveformMax)
@@ -696,214 +1097,6 @@ public sealed class AnalysisOrchestrator : IDisposable
         return _fftMagnitudes;
     }
 
-    private void AnalyzePitchAndVoicing(
-        ref int pitchFrameCounter,
-        ref int cppFrameCounter,
-        ref float lastPitch,
-        ref float lastConfidence,
-        ref float lastCpp,
-        ReadOnlySpan<float> fftMagnitudes,
-        AnalysisCapabilities caps,
-        out VoicingState voicing,
-        out int formantCount,
-        out int harmonicCount)
-    {
-        var pitchAlgorithm = _config.PitchAlgorithm;
-        if (_activeTransformType == SpectrogramTransformType.Cqt && pitchAlgorithm == PitchDetectorType.Swipe)
-            pitchAlgorithm = PitchDetectorType.Yin;
-
-        bool needsPitch = caps.HasFlag(AnalysisCapabilities.Pitch) ||
-                          caps.HasFlag(AnalysisCapabilities.Harmonics) ||
-                          caps.HasFlag(AnalysisCapabilities.Formants);
-        bool needsVoicing = caps.HasFlag(AnalysisCapabilities.VoicingState) ||
-                            caps.HasFlag(AnalysisCapabilities.Formants);
-        bool needsFormants = caps.HasFlag(AnalysisCapabilities.Formants);
-        bool needsHarmonics = caps.HasFlag(AnalysisCapabilities.Harmonics);
-        bool needsCpp = pitchAlgorithm == PitchDetectorType.Cepstral && needsPitch;
-
-        if (!needsPitch)
-        {
-            pitchFrameCounter = 0;
-            lastPitch = 0f;
-            lastConfidence = 0f;
-        }
-        else
-        {
-            pitchFrameCounter++;
-            if (pitchFrameCounter >= 2)
-            {
-                pitchFrameCounter = 0;
-                DetectPitch(pitchAlgorithm, fftMagnitudes, ref lastPitch, ref lastConfidence);
-            }
-        }
-
-        if (!needsCpp)
-        {
-            cppFrameCounter = 0;
-            lastCpp = 0f;
-        }
-        else
-        {
-            cppFrameCounter++;
-            if (cppFrameCounter >= 2)
-            {
-                cppFrameCounter = 0;
-                if (_cepstralPitchDetector is not null)
-                {
-                    var pitch = _cepstralPitchDetector.Detect(_analysisBufferRaw);
-                    lastCpp = _cepstralPitchDetector.LastCpp;
-                    if (pitchAlgorithm == PitchDetectorType.Cepstral)
-                    {
-                        lastPitch = pitch.FrequencyHz ?? 0f;
-                        lastConfidence = pitch.Confidence;
-                    }
-                }
-            }
-        }
-
-        voicing = needsVoicing
-            ? _voicingDetector.Detect(_analysisBufferRaw, fftMagnitudes, lastConfidence)
-            : VoicingState.Silence;
-
-        formantCount = 0;
-        harmonicCount = 0;
-
-        bool vowelLike = false;
-        if (needsFormants && voicing == VoicingState.Voiced)
-        {
-            float vowelMinHz = MathF.Max(VowelEnergyMinHz, _activeFormantPreset.F1MinHz);
-            float vowelMaxHz = MathF.Min(VowelEnergyMaxHz, _activeFormantPreset.F1MaxHz);
-            if (vowelMaxHz <= vowelMinHz)
-            {
-                vowelMinHz = VowelEnergyMinHz;
-                vowelMaxHz = VowelEnergyMaxHz;
-            }
-
-            float ratio = DspUtils.ComputeBandEnergyRatio(fftMagnitudes, _binResolution,
-                vowelMinHz, vowelMaxHz);
-            vowelLike = ratio >= VowelEnergyRatioThreshold;
-        }
-
-        if (needsFormants && voicing == VoicingState.Voiced && vowelLike &&
-            _lpcAnalyzer is not null && _beamFormantTracker is not null)
-        {
-            formantCount = ExtractFormants();
-        }
-        else if (_beamFormantTracker is not null && needsFormants)
-        {
-            _beamFormantTracker.MarkNoUpdate();
-        }
-
-        if (needsHarmonics && lastPitch > 0f)
-        {
-            var descriptor = _analysisDescriptor;
-            if (descriptor is not null)
-            {
-                ReadOnlySpan<float> activeMagnitudes = _activeTransformType switch
-                {
-                    SpectrogramTransformType.Cqt when _cqtMagnitudes.Length > 0 => _cqtMagnitudes,
-                    SpectrogramTransformType.ZoomFft when _fftDisplayMagnitudes.Length > 0 => _fftDisplayMagnitudes,
-                    _ => fftMagnitudes
-                };
-
-                harmonicCount = HarmonicPeakDetector.Detect(activeMagnitudes, descriptor, lastPitch,
-                    _harmonicScratch, _harmonicMagScratch);
-            }
-        }
-    }
-
-    private void DetectPitch(PitchDetectorType algorithm, ReadOnlySpan<float> fftMagnitudes,
-        ref float pitch, ref float confidence)
-    {
-        switch (algorithm)
-        {
-            case PitchDetectorType.Yin when _yinPitchDetector is not null:
-                var yinResult = _yinPitchDetector.Detect(_analysisBufferRaw);
-                pitch = yinResult.FrequencyHz ?? 0f;
-                confidence = yinResult.Confidence;
-                break;
-
-            case PitchDetectorType.Pyin when _pyinPitchDetector is not null:
-                var pyinResult = _pyinPitchDetector.Detect(_analysisBufferRaw);
-                pitch = pyinResult.FrequencyHz ?? 0f;
-                confidence = pyinResult.Confidence;
-                break;
-
-            case PitchDetectorType.Autocorrelation when _autocorrPitchDetector is not null:
-                var autoResult = _autocorrPitchDetector.Detect(_analysisBufferRaw);
-                pitch = autoResult.FrequencyHz ?? 0f;
-                confidence = autoResult.Confidence;
-                break;
-
-            case PitchDetectorType.Swipe when _swipePitchDetector is not null:
-                var swipeResult = _swipePitchDetector.Detect(fftMagnitudes);
-                pitch = swipeResult.FrequencyHz ?? 0f;
-                confidence = swipeResult.Confidence;
-                break;
-        }
-    }
-
-    private int ExtractFormants()
-    {
-        int bufferLen = _analysisBufferRaw.Length;
-        int lpcLen = Math.Min(_lpcWindowSamples, bufferLen);
-        int lpcStart = bufferLen - lpcLen;
-
-        _analysisBufferRaw.AsSpan(lpcStart, lpcLen).CopyTo(_lpcInputBuffer.AsSpan(0, lpcLen));
-
-        int decimatedLen = lpcLen;
-        if (_activeLpcDecimationStages >= 1)
-        {
-            _lpcDecimator1.Reset();
-            int decimated1Len = lpcLen / 2;
-            _lpcDecimator1.ProcessDownsample(_lpcInputBuffer.AsSpan(0, lpcLen),
-                _lpcDecimateBuffer1.AsSpan(0, decimated1Len));
-
-            if (_activeLpcDecimationStages == 2)
-            {
-                _lpcDecimator2.Reset();
-                decimatedLen = decimated1Len / 2;
-                _lpcDecimator2.ProcessDownsample(_lpcDecimateBuffer1.AsSpan(0, decimated1Len),
-                    _lpcDecimatedBuffer.AsSpan(0, decimatedLen));
-            }
-            else
-            {
-                decimatedLen = decimated1Len;
-                _lpcDecimateBuffer1.AsSpan(0, decimatedLen).CopyTo(_lpcDecimatedBuffer.AsSpan(0, decimatedLen));
-            }
-        }
-        else
-        {
-            _lpcInputBuffer.AsSpan(0, lpcLen).CopyTo(_lpcDecimatedBuffer.AsSpan(0, lpcLen));
-        }
-
-        float preEmphasisAlpha = ComputePreEmphasisAlpha(FormantProfileInfo.DefaultPreEmphasisHz, _activeLpcSampleRate);
-        _lpcPreEmphasisFilter.Configure(preEmphasisAlpha);
-        _lpcPreEmphasisFilter.Reset();
-
-        if (_lpcWindowLength != decimatedLen)
-        {
-            WindowFunctions.FillGaussian(_lpcWindow.AsSpan(0, decimatedLen), LpcGaussianSigma);
-            _lpcWindowLength = decimatedLen;
-        }
-
-        for (int i = 0; i < decimatedLen; i++)
-        {
-            float emphasized = _lpcPreEmphasisFilter.Process(_lpcDecimatedBuffer[i]);
-            _lpcWindowedBuffer[i] = emphasized * _lpcWindow[i];
-        }
-
-        if (_lpcAnalyzer!.Compute(_lpcWindowedBuffer.AsSpan(0, decimatedLen), _lpcCoefficients))
-        {
-            return _beamFormantTracker!.Track(_lpcCoefficients, _activeLpcSampleRate,
-                _formantFreqScratch, _formantBwScratch,
-                50f, _activeFormantCeilingHz, AnalysisConfiguration.MaxFormants);
-        }
-
-        _beamFormantTracker?.MarkNoUpdate();
-        return 0;
-    }
-
     private float ProcessClarity(int clarityBins, VoicingState voicing, float lastPitch, float lastConfidence)
     {
         var clarityMode = _config.ClarityMode;
@@ -1033,15 +1226,6 @@ public sealed class AnalysisOrchestrator : IDisposable
         bool preEmphasis = _config.PreEmphasis;
         int cqtBinsPerOctave = _config.CqtBinsPerOctave;
 
-        FormantTrackingPreset formantPreset = FormantProfileInfo.GetTrackingPreset(formantProfile);
-        float formantCeilingHz = formantPreset.FormantCeilingHz;
-        int lpcDecimationStages = GetLpcDecimationStages(_sampleRate, formantCeilingHz);
-        int lpcSampleRate = _sampleRate;
-        for (int i = 0; i < lpcDecimationStages; i++)
-            lpcSampleRate /= 2;
-
-        int recommendedLpcOrder = formantPreset.LpcOrder;
-
         bool sizeChanged = force || fftSize != _activeFftSize || overlapIndex != _activeOverlapIndex ||
                            MathF.Abs(timeWindow - _activeTimeWindow) > 1e-3f;
 
@@ -1081,15 +1265,6 @@ public sealed class AnalysisOrchestrator : IDisposable
             _fftNormalization = 2f / MathF.Max(1f, fftSize);
             _binResolution = _sampleRate / (float)fftSize;
 
-            // LPC buffers
-            _lpcWindowSamples = ComputeLpcWindowSamples(_sampleRate, recommendedLpcOrder, fftSize);
-            _lpcInputBuffer = new float[_lpcWindowSamples];
-            _lpcDecimateBuffer1 = new float[Math.Max(1, _lpcWindowSamples / 2)];
-            _lpcDecimatedBuffer = new float[_lpcWindowSamples];
-            _lpcWindowedBuffer = new float[_lpcWindowSamples];
-            _lpcWindow = new float[_lpcWindowSamples];
-            _lpcWindowLength = 0;
-
             UpdateAWeighting();
         }
 
@@ -1107,9 +1282,6 @@ public sealed class AnalysisOrchestrator : IDisposable
             _activeScale = scale;
             _activeMinFrequency = minHz;
             _activeMaxFrequency = maxHz;
-
-            float maxPitch = MathF.Min(_sampleRate * 0.25f, maxHz);
-            ConfigurePitchDetectors(maxPitch);
         }
 
         if (force || reassignMode != _activeReassignMode)
@@ -1133,7 +1305,6 @@ public sealed class AnalysisOrchestrator : IDisposable
                 {
                     _analysisBufferRaw = new float[requiredSize];
                     _analysisBufferProcessed = new float[requiredSize];
-                    _lpcInputBuffer = new float[requiredSize];
                     _analysisFilled = 0;
                 }
                 _activeAnalysisSize = requiredSize;
@@ -1163,7 +1334,6 @@ public sealed class AnalysisOrchestrator : IDisposable
                 {
                     _analysisBufferRaw = new float[requiredSize];
                     _analysisBufferProcessed = new float[requiredSize];
-                    _lpcInputBuffer = new float[requiredSize];
                     _analysisFilled = 0;
                 }
                 _activeAnalysisSize = requiredSize;
@@ -1211,7 +1381,6 @@ public sealed class AnalysisOrchestrator : IDisposable
             _hpssProcessor.EnsureCapacity(desiredAnalysisBins);
             _smoother.EnsureCapacity(desiredAnalysisBins);
             _harmonicComb.EnsureCapacity(desiredAnalysisBins);
-            _featureExtractor.EnsureCapacity(desiredAnalysisBins);
         }
 
         if (_activeDisplayBins == 0)
@@ -1220,32 +1389,6 @@ public sealed class AnalysisOrchestrator : IDisposable
         _activeTransformType = transformType;
 
         // Formant analysis
-        bool lpcOrderChanged = _lpcAnalyzer is null || _lpcAnalyzer.Order != recommendedLpcOrder;
-        bool formantProfileChanged = formantProfile != _activeFormantProfile;
-        bool lpcSampleRateChanged = lpcSampleRate != _activeLpcSampleRate;
-        bool formantConfigChanged = force || formantProfileChanged || lpcSampleRateChanged || lpcOrderChanged;
-
-        if (formantConfigChanged)
-        {
-            _activeFormantProfile = formantProfile;
-            _activeFormantPreset = formantPreset;
-            _activeFormantCeilingHz = formantCeilingHz;
-            _activeLpcSampleRate = lpcSampleRate;
-            _activeLpcDecimationStages = lpcDecimationStages;
-            _lpcWindowLength = 0;
-            ConfigureLpcAnalyzers(recommendedLpcOrder, formantPreset);
-        }
-        else
-        {
-            _beamFormantTracker?.UpdatePreset(formantPreset);
-        }
-
-        if (sizeChanged || force)
-        {
-            float frameSeconds = _activeHopSize / (float)Math.Max(1, _sampleRate);
-            _beamFormantTracker?.UpdateFrameSeconds(frameSeconds);
-        }
-
         // Filters
         if (sizeChanged || force || MathF.Abs(hpfCutoff - _activeHighPassCutoff) > 1e-3f ||
             hpfEnabled != _activeHighPassEnabled || preEmphasis != _activePreEmphasisEnabled)
@@ -1294,39 +1437,26 @@ public sealed class AnalysisOrchestrator : IDisposable
             _resultStore.Configure(_sampleRate, _activeFrameCapacity, _activeDisplayBins,
                 _activeAnalysisBins, _binResolution, transformType, _config);
         }
-    }
 
-    private void ConfigurePitchDetectors(float maxPitch)
-    {
-        _yinPitchDetector ??= new YinPitchDetector(_sampleRate, _activeFftSize, 50f, maxPitch, 0.15f);
-        _yinPitchDetector.Configure(_sampleRate, _activeFftSize, 50f, maxPitch, 0.15f);
+        var pitchAlgorithm = _config.PitchAlgorithm;
+        if (transformType == SpectrogramTransformType.Cqt && pitchAlgorithm == PitchDetectorType.Swipe)
+        {
+            pitchAlgorithm = PitchDetectorType.Yin;
+        }
 
-        _pyinPitchDetector ??= new PyinPitchDetector(_sampleRate, _activeFftSize, 50f, maxPitch, 0.15f);
-        _pyinPitchDetector.Configure(_sampleRate, _activeFftSize, 50f, maxPitch, 0.15f);
-
-        _autocorrPitchDetector ??= new AutocorrelationPitchDetector(_sampleRate, _activeFftSize, 50f, maxPitch, 0.3f);
-        _autocorrPitchDetector.Configure(_sampleRate, _activeFftSize, 50f, maxPitch, 0.3f);
-
-        _cepstralPitchDetector ??= new CepstralPitchDetector(_sampleRate, _activeFftSize, 50f, maxPitch, 2f);
-        _cepstralPitchDetector.Configure(_sampleRate, _activeFftSize, 50f, maxPitch, 2f);
-
-        _swipePitchDetector ??= new SwipePitchDetector(_sampleRate, _activeFftSize, _activeMinFrequency, _activeMaxFrequency);
-        _swipePitchDetector.Configure(_sampleRate, _activeFftSize, _activeMinFrequency, _activeMaxFrequency);
-    }
-
-    private void ConfigureLpcAnalyzers(int lpcOrder, FormantTrackingPreset preset)
-    {
-        _lpcAnalyzer ??= new LpcAnalyzer(lpcOrder);
-        _lpcAnalyzer.Configure(lpcOrder);
-
-        _formantTracker ??= new FormantTracker(lpcOrder);
-        _formantTracker.Configure(lpcOrder);
-
-        float frameSeconds = _activeHopSize / (float)Math.Max(1, _sampleRate);
-        _beamFormantTracker ??= new BeamSearchFormantTracker(lpcOrder, preset, frameSeconds, beamWidth: 5);
-        _beamFormantTracker.Configure(lpcOrder, preset, frameSeconds, beamWidth: 5);
-
-        _lpcCoefficients = new float[lpcOrder + 1];
+        var signalSettings = new AnalysisSignalProcessorSettings
+        {
+            AnalysisSize = _activeFftSize,
+            PitchDetector = pitchAlgorithm,
+            FormantProfile = formantProfile,
+            MinFrequency = minHz,
+            MaxFrequency = maxHz,
+            WindowFunction = window,
+            PreEmphasisEnabled = preEmphasis,
+            HighPassEnabled = hpfEnabled,
+            HighPassCutoff = hpfCutoff
+        };
+        _analysisSignalProcessor.Configure(_sampleRate, _activeHopSize, signalSettings);
     }
 
     private void UpdateAnalysisDescriptor(SpectrogramTransformType transformType)
@@ -1352,7 +1482,6 @@ public sealed class AnalysisOrchestrator : IDisposable
 
         if (descriptor is not null)
         {
-            _featureExtractor.UpdateFrequencies(descriptor.BinCentersHz.Span);
             _analysisDescriptor = descriptor;
             _resultStore.SetAnalysisDescriptor(descriptor);
         }
@@ -1404,6 +1533,9 @@ public sealed class AnalysisOrchestrator : IDisposable
         Array.Clear(_analysisBufferRaw);
         Array.Clear(_analysisBufferProcessed);
         Array.Clear(_hopBuffer);
+        _analysisSignalProcessor.Reset();
+        Array.Clear(_analysisSignalValues, 0, _analysisSignalValues.Length);
+        Volatile.Write(ref _analysisReadSampleTime, long.MinValue);
     }
 
     private static int SelectDiscrete(int value, int[] options)
@@ -1420,37 +1552,6 @@ public sealed class AnalysisOrchestrator : IDisposable
             }
         }
         return best;
-    }
-
-    private static int ComputeLpcWindowSamples(int sampleRate, int lpcOrder, int maxWindowSamples)
-    {
-        int desired = (int)MathF.Round(LpcWindowSeconds * sampleRate);
-        int maxWindow = Math.Max(1, maxWindowSamples);
-        int minWindow = Math.Min(maxWindow, Math.Max(lpcOrder + 1, 128));
-        return Math.Clamp(desired, minWindow, maxWindow);
-    }
-
-    private static int GetLpcDecimationStages(int sampleRate, float formantCeilingHz)
-    {
-        if (sampleRate <= 0 || formantCeilingHz <= 0f)
-            return 0;
-
-        float requiredRate = formantCeilingHz * 2f;
-        int stages = 0;
-        float currentRate = sampleRate;
-        while (stages < 2 && currentRate / 2f >= requiredRate)
-        {
-            currentRate /= 2f;
-            stages++;
-        }
-        return stages;
-    }
-
-    private static float ComputePreEmphasisAlpha(float cutoffHz, int sampleRate)
-    {
-        if (cutoffHz <= 0f || sampleRate <= 0)
-            return 0f;
-        return MathF.Exp(-2f * MathF.PI * cutoffHz / sampleRate);
     }
 
     private static float ComputeSpectralFlatness(ReadOnlySpan<float> magnitudes)

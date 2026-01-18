@@ -24,7 +24,7 @@ public static class PluginFactory
             "builtin:voice-gate" => new SileroVoiceGatePlugin(),
             "builtin:reverb" => new ConvolutionReverbPlugin(),
             "builtin:signal-generator" => new SignalGeneratorPlugin(),
-            "builtin:sidechain-tap" => new SidechainTapPlugin(),
+            "builtin:analysis-tap" => new AnalysisTapPlugin(),
             "builtin:upward-expander" => new UpwardExpanderPlugin(),
             "builtin:spectral-contrast" => new SpectralContrastPlugin(),
             "builtin:dynamic-eq" => new DynamicEqPlugin(),

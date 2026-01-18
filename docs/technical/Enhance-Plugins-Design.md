@@ -1,8 +1,8 @@
 # Enhance Plugins Design (Reference)
 
 Purpose: architecture and data-flow design for the 8 plugins described in
-`ENHANCE.md`. This doc focuses on correct timing and sidechain alignment, not
-UI or implementation details.
+`ENHANCE.md`. This doc focuses on correct timing and analysis-signal alignment,
+not UI or implementation details.
 
 Key decision: all 8 are NEW plugins. No behavior changes to existing plugins.
 
@@ -18,7 +18,7 @@ Key decision: all 8 are NEW plugins. No behavior changes to existing plugins.
 ### 1) Sample clock
 
 Maintain a monotonic `sampleClock` in the audio callback. Every block advances
-the clock by `blockSize`. This clock is the shared timebase for audio, sidechain
+the clock by `blockSize`. This clock is the shared timebase for audio, analysis
 signals, and spectral frames.
 
 ### 2) Cumulative latency map
@@ -26,9 +26,9 @@ signals, and spectral frames.
 For each plugin slot, compute `cumulativeLatencySamples` as the sum of
 `LatencySamples` for all earlier slots. Update on chain changes only.
 
-### 3) Sidechain bus (time-domain control)
+### 3) Analysis signal bus (time-aligned control)
 
-Use a shared, pre-allocated bus that stores control signals (float) by sample
+Use a shared, pre-allocated bus that stores analysis signals (float) by sample
 time. Producers write by sample time at their slot; consumers read from the
 nearest upstream active producer for each signal so buffers never drift.
 
@@ -37,10 +37,11 @@ Design rules:
 - Consumers read using their own `sampleTime` (already latency-corrected).
 - No per-consumer read cursors; routing is derived from chain order.
 
-### 4) Frame bus (spectral/formant control)
+### 4) Frame-derived signals
 
-Spectral and formant signals are frame-based (hop-sized). Use a shared frame
-bus with a fixed hop size and frame center offset.
+Spectral and formant measurements are frame-based (hop-sized), but they are
+written into the same analysis bus by holding the latest frame value across the
+hop. Consumers read by sample time only; no separate frame bus is required.
 
 Design rules:
 - Frame index derived from `sampleClock` (not from buffer counters).
@@ -50,93 +51,99 @@ Design rules:
 
 ### 5) Producer placement
 
-Sidechain producers live at specific slots in the chain. Consumers always use
+Analysis signal producers live at specific slots in the chain. Consumers always use
 the nearest upstream active producer for each required signal.
 
-When no upstream producer exists, insert a Sidechain Tap plugin at the desired
+When no upstream producer exists, insert an Analysis Tap plugin at the desired
 location to generate the shared signals.
 
-## Sidechain Signals (shared definitions)
+## Analysis Signals (shared definitions)
 
 Minimal set to support all 8 plugins:
 - SpeechPresence (0..1, smoothed VAD)
-- VoicedProb (0..1, periodicity/harmonicity)
-- UnvoicedEnergy (HF energy without periodicity)
+- VoicingScore (0..1, periodicity/harmonicity)
+- VoicingState (0=Silence, 1=Unvoiced, 2=Voiced)
+- FricativeActivity (HF aperiodic activity, 0..1)
 - SibilanceEnergy (narrow HF band energy)
-- SpectralFlux (frame-based, optional)
-- FormantF1/F2 (frame-based, Hz)
+- OnsetFluxHigh (HF spectral flux, 0..1)
+- PitchHz (Hz)
+- PitchConfidence (0..1)
+- FormantF1/F2/F3 (Hz)
+- FormantConfidence (0..1)
+- SpectralFlux (full-band)
+- HnrDb (dB)
 
 Producers should write each signal at their slot's `sampleTime` and maintain
 stable definitions for the shared signals.
 
 ## Plugin Set (all new)
 
-Each plugin uses the sidechain and/or frame bus so detectors run once and all
+Each plugin uses the analysis signal bus so detectors run once and all
 consumers stay aligned. IDs are illustrative and should be finalized later.
 
 1) Multiband Upward Expander
 - Id: builtin:upward-expander
 - Domain: filterbank or STFT (single domain for analysis + gain)
-- Sidechain: SpeechPresence
+- Analysis signal: SpeechPresence
 - Notes: per-band expansion with gated detector; smooth attacks/releases.
 
 2) Spectral Contrast Enhancer (lateral inhibition)
 - Id: builtin:spectral-contrast
 - Domain: STFT + overlap-add
-- Sidechain: SpeechPresence
+- Analysis signal: SpeechPresence
 - Notes: apply inter-band inhibition on magnitudes; resynthesize with frame phase.
 
 3) Dynamic EQ (voiced/unvoiced keyed)
 - Id: builtin:dynamic-eq
 - Domain: time-domain biquads
-- Sidechain: VoicedProb, UnvoicedEnergy
+- Analysis signal: VoicingScore, FricativeActivity
 - Notes: small, fast dynamic moves; keep average spectrum stable.
 
 4) Room Tone / Ambience Bed
 - Id: builtin:room-tone
 - Domain: time-domain (looped audio or shaped noise)
-- Sidechain: SpeechPresence
+- Analysis signal: SpeechPresence
 - Notes: duck under speech; use slow envelope to avoid modulation artifacts.
 
 5) Keyed Air Exciter (de-ess aware)
 - Id: builtin:air-exciter
 - Domain: time-domain oversampled harmonic generation
-- Sidechain: VoicedProb, SibilanceEnergy
+- Analysis signal: VoicingScore, SibilanceEnergy
 - Notes: excite on voiced regions, clamp on sibilance.
 
 6) Psychoacoustic Bass Enhancer
 - Id: builtin:bass-enhancer
 - Domain: time-domain (bandpass + harmonic synthesis)
-- Sidechain: VoicedProb (optional)
+- Analysis signal: VoicingScore (optional)
 - Notes: subtle harmonics for LF perception; avoid LF boost.
 
 7) Consonant Transient Emphasis
 - Id: builtin:consonant-transient
 - Domain: time-domain HF transient shaper OR STFT flux
-- Sidechain: UnvoicedEnergy or SpectralFlux
+- Analysis signal: FricativeActivity or OnsetFluxHigh
 - Notes: short window emphasis with hard ceiling.
 
 8) Formant-Aware Enhancement
 - Id: builtin:formant-enhance
 - Domain: time-domain EQ steered by formants
-- Sidechain: FormantF1/F2 (frame-based)
+- Analysis signal: FormantF1/F2/F3 + FormantConfidence
 - Notes: light tracking; boost near moving formants, avoid in-between.
 
 ## Alignment Rules
 
-- Consumers read sidechain/control at their `sampleTime` derived from the
+- Consumers read analysis signals at their `sampleTime` derived from the
   chain's cumulative latency.
-- Frame-based consumers must read:
-  `consumerFrameIndex - delayFrames`
-- If a control signal is missing (not yet produced for that time), hold the
-  last valid value or fall back to neutral (0..1).
+- Frame-derived signals are held per-sample across the hop (no separate frame
+  index path required).
+- If a signal is missing (not yet produced for that time), hold the last valid
+  value or fall back to neutral (0..1).
 
 ## Implementation Notes (non-binding)
 
-- Add `ISidechainProducer` / `ISidechainConsumer` interfaces for routing and
-  missing-sidechain status.
+- Add `IAnalysisSignalProducer` / `IAnalysisSignalConsumer` interfaces for
+  routing and missing-signal status.
 - Extend plugin processing with a `ProcessContext` containing sampleClock,
-  sampleTime, and sidechain accessors.
+  sampleTime, and analysis signal accessors.
 - Use the contextual path for all plugins; no parallel legacy processing.
 
 ## Integration Checklist

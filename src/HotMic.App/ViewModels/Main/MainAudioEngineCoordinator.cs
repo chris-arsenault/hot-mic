@@ -24,6 +24,9 @@ internal sealed class MainAudioEngineCoordinator
     private readonly AnalysisOrchestrator _analysisOrchestrator = new();
     private readonly Queue<(long ticks, long inputDrops, long outputUnderflow)> _dropHistory = new();
     private bool[] _inputUsageScratch = Array.Empty<bool>();
+    private AnalysisSignalMask[] _analysisTapRequestedSignals = Array.Empty<AnalysisSignalMask>();
+    private AnalysisSignalMask _analysisVisualRequestedSignals;
+    private bool _analysisRequestedSubscribed;
     private long _lastMeterUpdateTicks;
     private long _nextDebugUpdateTicks;
     private static readonly long DebugUpdateIntervalTicks = Math.Max(1, Stopwatch.Frequency / 4);
@@ -54,6 +57,18 @@ internal sealed class MainAudioEngineCoordinator
     public AnalysisOrchestrator AnalysisOrchestrator => _analysisOrchestrator;
 
     private AudioEngine AudioEngine => _getAudioEngine();
+
+    public void SetAnalysisTapRequestedSignals(int channelIndex, AnalysisSignalMask requestedSignals)
+    {
+        if ((uint)channelIndex >= (uint)AudioEngine.Channels.Count)
+        {
+            return;
+        }
+
+        EnsureAnalysisTapRequestCapacity(AudioEngine.Channels.Count);
+        _analysisTapRequestedSignals[channelIndex] = requestedSignals;
+        UpdateVisualRequestedSignals();
+    }
 
     public void EnsureEngineMatchesConfig()
     {
@@ -752,11 +767,49 @@ internal sealed class MainAudioEngineCoordinator
         return _inputUsageScratch;
     }
 
+    private void EnsureAnalysisTapRequestCapacity(int channelCount)
+    {
+        if (_analysisTapRequestedSignals.Length == channelCount)
+        {
+            return;
+        }
+
+        Array.Resize(ref _analysisTapRequestedSignals, channelCount);
+    }
+
+    private void UpdateVisualRequestedSignals()
+    {
+        var channels = AudioEngine.Channels;
+        EnsureAnalysisTapRequestCapacity(channels.Count);
+
+        for (int i = 0; i < channels.Count; i++)
+        {
+            AnalysisSignalMask visualMask = i == 0 ? _analysisVisualRequestedSignals : AnalysisSignalMask.None;
+            AnalysisSignalMask combined = _analysisTapRequestedSignals[i] | visualMask;
+            channels[i].PluginChain.SetVisualRequestedSignals(combined);
+        }
+    }
+
+    private void HandleRequestedSignalsChanged(AnalysisSignalMask requestedSignals)
+    {
+        _analysisVisualRequestedSignals = requestedSignals;
+        UpdateVisualRequestedSignals();
+    }
+
     private void AttachAnalysisOrchestrator(AudioEngine engine, int sampleRate)
     {
         _analysisOrchestrator.Initialize(sampleRate);
         _analysisOrchestrator.Reset();
-        engine.AnalysisTap.Orchestrator = _analysisOrchestrator;
-        _analysisOrchestrator.DebugTap = engine.AnalysisTap;
+        engine.AnalysisCaptureLink.Orchestrator = _analysisOrchestrator;
+        _analysisOrchestrator.CaptureLink = engine.AnalysisCaptureLink;
+
+        if (!_analysisRequestedSubscribed)
+        {
+            _analysisOrchestrator.RequestedSignalsChanged += HandleRequestedSignalsChanged;
+            _analysisRequestedSubscribed = true;
+        }
+
+        _analysisVisualRequestedSignals = _analysisOrchestrator.RequestedSignals;
+        UpdateVisualRequestedSignals();
     }
 }

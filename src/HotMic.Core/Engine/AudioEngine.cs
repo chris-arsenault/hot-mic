@@ -45,7 +45,7 @@ public sealed class AudioEngine : IDisposable
     private int _presetLoadDepth;
     private int _processingEnabledBeforePresetLoad;
 
-    private readonly AnalysisTap _analysisTap = new();
+    private readonly AnalysisCaptureLink _analysisCaptureLink = new();
 
     public event EventHandler<DeviceDisconnectedEventArgs>? DeviceDisconnected;
     public event EventHandler<DeviceRecoveredEventArgs>? DeviceRecovered;
@@ -98,9 +98,9 @@ public sealed class AudioEngine : IDisposable
     }
 
     /// <summary>
-    /// Gets the analysis tap for attaching visualizers.
+    /// Gets the analysis capture link for attaching visualizers.
     /// </summary>
-    public AnalysisTap AnalysisTap => _analysisTap;
+    public AnalysisCaptureLink AnalysisCaptureLink => _analysisCaptureLink;
 
     /// <summary>
     /// K-weighted LUFS meter for the master left output channel.
@@ -144,6 +144,10 @@ public sealed class AudioEngine : IDisposable
         var current = Volatile.Read(ref _channels);
         if (current.Length == channelCount)
         {
+            for (int i = 0; i < current.Length; i++)
+            {
+                current[i].PluginChain.SetAnalysisCaptureLink(_analysisCaptureLink);
+            }
             return;
         }
 
@@ -168,6 +172,11 @@ public sealed class AudioEngine : IDisposable
                     }
                 }
             }
+        }
+
+        for (int i = 0; i < next.Length; i++)
+        {
+            next[i].PluginChain.SetAnalysisCaptureLink(_analysisCaptureLink);
         }
 
         Interlocked.Exchange(ref _channels, next);
@@ -196,6 +205,7 @@ public sealed class AudioEngine : IDisposable
         _inputCaptureManager.StopAll();
         _inputCaptureManager.ClearBuffers();
         _monitorBuffer?.Clear();
+        _analysisCaptureLink.Reset();
         _outputPipeline?.ResetSampleClock();
     }
 
@@ -266,7 +276,7 @@ public sealed class AudioEngine : IDisposable
             () => Volatile.Read(ref _processingEnabled) != 0,
             _masterLufsLeft,
             _masterLufsRight,
-            _analysisTap,
+            _analysisCaptureLink,
             outputFormat);
 
         _output = new WasapiOut(outputDevice, AudioClientShareMode.Shared, true, _latencyMs);
@@ -321,6 +331,7 @@ public sealed class AudioEngine : IDisposable
         _inputCaptureManager.ClearBuffers();
         _monitorBuffer?.Clear();
         _monitorBuffer = null;
+        _analysisCaptureLink.Reset();
 
         Interlocked.Exchange(ref _isStopping, 0);
         DrainPendingPluginDisposals(force: true);

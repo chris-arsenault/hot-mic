@@ -2,7 +2,7 @@ using System.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class ConsonantTransientPlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer, IPluginStatusProvider
 {
     public const int AmountIndex = 0;
     public const int ThresholdIndex = 1;
@@ -14,14 +14,14 @@ public sealed class ConsonantTransientPlugin : IPlugin, ISidechainConsumer, IPlu
     private int _sampleRate;
     private string _statusMessage = string.Empty;
 
-    private const string MissingSidechainMessage = "Missing sidechain data.";
+    private const string MissingSidechainMessage = "Missing analysis data.";
 
     private readonly BiquadFilter _highPass = new();
     private readonly EnvelopeFollower _fastEnv = new();
     private readonly EnvelopeFollower _slowEnv = new();
 
     // Metering
-    private float _meterUnvoicedGate;
+    private float _meterFricativeGate;
     private float _meterFastEnvelope;
     private float _meterSlowEnvelope;
     private float _meterTransientDetected;
@@ -46,7 +46,7 @@ public sealed class ConsonantTransientPlugin : IPlugin, ISidechainConsumer, IPlu
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
-    public SidechainSignalMask RequiredSignals => SidechainSignalMask.UnvoicedEnergy;
+    public AnalysisSignalMask RequiredSignals => AnalysisSignalMask.FricativeActivity;
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
@@ -55,7 +55,7 @@ public sealed class ConsonantTransientPlugin : IPlugin, ISidechainConsumer, IPlu
     public float HighCutHz => _highCutHz;
     public int SampleRate => _sampleRate;
 
-    public void SetSidechainAvailable(bool available)
+    public void SetAnalysisSignalsAvailable(bool available)
     {
         Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);
     }
@@ -75,7 +75,7 @@ public sealed class ConsonantTransientPlugin : IPlugin, ISidechainConsumer, IPlu
             return;
         }
 
-        if (!context.TryGetSidechainSource(SidechainSignalId.UnvoicedEnergy, out var unvoicedSource))
+        if (!context.TryGetAnalysisSignalSource(AnalysisSignalId.FricativeActivity, out var fricativeSource))
         {
             return;
         }
@@ -92,21 +92,21 @@ public sealed class ConsonantTransientPlugin : IPlugin, ISidechainConsumer, IPlu
             float transient = MathF.Max(0f, fast - slow);
             float norm = slow > 1e-6f ? transient / slow : 0f;
 
-            float gate = unvoicedSource.ReadSample(baseTime + i);
+            float gate = fricativeSource.ReadSample(baseTime + i);
 
             float gain = norm > _threshold ? 1f + _amount * gate * MathF.Min(1.5f, norm * 2f) : 1f;
             buffer[i] = input + high * (gain - 1f);
 
             // Update metering
-            _meterUnvoicedGate = gate;
+            _meterFricativeGate = gate;
             _meterFastEnvelope = fast;
             _meterSlowEnvelope = slow;
             _meterTransientDetected = norm > _threshold ? 1f : 0f;
         }
     }
 
-    /// <summary>Gets the current unvoiced gate level (0-1).</summary>
-    public float GetUnvoicedGate() => Volatile.Read(ref _meterUnvoicedGate);
+    /// <summary>Gets the current fricative gate level (0-1).</summary>
+    public float GetFricativeGate() => Volatile.Read(ref _meterFricativeGate);
 
     /// <summary>Gets the fast envelope level.</summary>
     public float GetFastEnvelope() => Volatile.Read(ref _meterFastEnvelope);

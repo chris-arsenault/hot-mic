@@ -2,7 +2,7 @@ using System.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class BassEnhancerPlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPluginStatusProvider
 {
     public const int AmountIndex = 0;
     public const int DriveIndex = 1;
@@ -17,7 +17,7 @@ public sealed class BassEnhancerPlugin : IPlugin, ISidechainConsumer, IPluginSta
     private int _sampleRate;
     private string _statusMessage = string.Empty;
 
-    private const string MissingSidechainMessage = "Missing sidechain data.";
+    private const string MissingSidechainMessage = "Missing analysis data.";
 
     private readonly BiquadFilter _bandPass = new();
     private readonly BiquadFilter _highPass = new();
@@ -48,7 +48,7 @@ public sealed class BassEnhancerPlugin : IPlugin, ISidechainConsumer, IPluginSta
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
-    public SidechainSignalMask RequiredSignals => SidechainSignalMask.VoicedProbability;
+    public AnalysisSignalMask RequiredSignals => AnalysisSignalMask.VoicingScore;
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
@@ -58,7 +58,7 @@ public sealed class BassEnhancerPlugin : IPlugin, ISidechainConsumer, IPluginSta
     public float CenterHz => _centerHz;
     public int SampleRate => _sampleRate;
 
-    public void SetSidechainAvailable(bool available)
+    public void SetAnalysisSignalsAvailable(bool available)
     {
         Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);
     }
@@ -76,7 +76,7 @@ public sealed class BassEnhancerPlugin : IPlugin, ISidechainConsumer, IPluginSta
             return;
         }
 
-        if (!context.TryGetSidechainSource(SidechainSignalId.VoicedProbability, out var voicedSource))
+        if (!context.TryGetAnalysisSignalSource(AnalysisSignalId.VoicingScore, out var voicedSource))
         {
             return;
         }

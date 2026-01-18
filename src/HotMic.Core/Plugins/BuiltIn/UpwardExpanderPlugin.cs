@@ -4,7 +4,7 @@ using HotMic.Core.Dsp.Filters;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class UpwardExpanderPlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPluginStatusProvider
 {
     public const int AmountIndex = 0;
     public const int ThresholdIndex = 1;
@@ -36,7 +36,7 @@ public sealed class UpwardExpanderPlugin : IPlugin, ISidechainConsumer, IPluginS
     private int _sampleRate;
     private string _statusMessage = string.Empty;
 
-    private const string MissingSidechainMessage = "Missing sidechain data.";
+    private const string MissingSidechainMessage = "Missing analysis data.";
 
     private readonly BiquadFilter _lowPass = new();
     private readonly BiquadFilter _highPass = new();
@@ -77,7 +77,7 @@ public sealed class UpwardExpanderPlugin : IPlugin, ISidechainConsumer, IPluginS
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
-    public SidechainSignalMask RequiredSignals => SidechainSignalMask.SpeechPresence;
+    public AnalysisSignalMask RequiredSignals => AnalysisSignalMask.SpeechPresence;
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
@@ -90,7 +90,7 @@ public sealed class UpwardExpanderPlugin : IPlugin, ISidechainConsumer, IPluginS
     public float GateStrength => _gateStrength;
     public int SampleRate => _sampleRate;
 
-    public void SetSidechainAvailable(bool available)
+    public void SetAnalysisSignalsAvailable(bool available)
     {
         Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);
     }
@@ -115,7 +115,7 @@ public sealed class UpwardExpanderPlugin : IPlugin, ISidechainConsumer, IPluginS
             return;
         }
 
-        if (!context.TryGetSidechainSource(SidechainSignalId.SpeechPresence, out var speechSource))
+        if (!context.TryGetAnalysisSignalSource(AnalysisSignalId.SpeechPresence, out var speechSource))
         {
             return;
         }

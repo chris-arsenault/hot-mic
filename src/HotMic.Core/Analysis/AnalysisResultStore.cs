@@ -1,5 +1,6 @@
 using System.Threading;
 using HotMic.Core.Dsp.Spectrogram;
+using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Analysis;
 
@@ -68,6 +69,9 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
     private float[] _intelligibilityTrack = Array.Empty<float>();
     private byte[] _speakingStateTrack = Array.Empty<byte>();
     private byte[] _syllableMarkers = Array.Empty<byte>();
+
+    // Analysis signal tracks
+    private float[][] _analysisSignalTracks = Array.Empty<float[]>();
 
     public AnalysisConfiguration Config
     {
@@ -148,6 +152,11 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
             _intelligibilityTrack = new float[frameCapacity];
             _speakingStateTrack = new byte[frameCapacity];
             _syllableMarkers = new byte[frameCapacity];
+            _analysisSignalTracks = new float[(int)AnalysisSignalId.Count][];
+            for (int i = 0; i < _analysisSignalTracks.Length; i++)
+            {
+                _analysisSignalTracks[i] = new float[frameCapacity];
+            }
 
             Volatile.Write(ref _frameCounter, 0);
             Volatile.Write(ref _latestFrameId, -1);
@@ -317,6 +326,18 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
     }
 
     /// <summary>
+    /// Write analysis signal values for a frame.
+    /// </summary>
+    public void WriteAnalysisSignalFrame(int frameIndex, ReadOnlySpan<float> values)
+    {
+        int count = Math.Min(values.Length, _analysisSignalTracks.Length);
+        for (int i = 0; i < count; i++)
+        {
+            _analysisSignalTracks[i][frameIndex] = values[i];
+        }
+    }
+
+    /// <summary>
     /// Write speech metrics for a frame.
     /// </summary>
     public void WriteSpeechMetrics(int frameIndex, in SpeechMetricsFrame metrics)
@@ -392,6 +413,10 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         Array.Clear(_intelligibilityTrack);
         Array.Clear(_speakingStateTrack);
         Array.Clear(_syllableMarkers);
+        for (int i = 0; i < _analysisSignalTracks.Length; i++)
+        {
+            Array.Clear(_analysisSignalTracks[i]);
+        }
 
         Volatile.Write(ref _frameCounter, 0);
         Volatile.Write(ref _latestFrameId, -1);
@@ -702,6 +727,34 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         }
 
         return false;
+    }
+
+    public bool TryGetAnalysisSignalRange(
+        AnalysisSignalId signal,
+        long sinceFrameId,
+        float[] values,
+        out long latestFrameId,
+        out int availableFrames,
+        out bool fullCopy)
+    {
+        latestFrameId = -1;
+        availableFrames = 0;
+        fullCopy = false;
+
+        int index = (int)signal;
+        if ((uint)index >= (uint)_analysisSignalTracks.Length)
+        {
+            return false;
+        }
+
+        return TryGetRangeInternal(
+            sinceFrameId,
+            _analysisSignalTracks[index],
+            values,
+            1,
+            out latestFrameId,
+            out availableFrames,
+            out fullCopy);
     }
 
     public bool TryGetSpeechMetrics(

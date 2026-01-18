@@ -1,4 +1,5 @@
 using System.Threading;
+using HotMic.Core.Analysis;
 using HotMic.Core.Engine;
 
 namespace HotMic.Core.Plugins;
@@ -10,9 +11,12 @@ public sealed class PluginChain
     private int _nextInstanceId;
     private readonly int _sampleRate;
     private readonly int _blockSize;
-    private readonly int _sidechainCapacity;
+    private readonly int _analysisSignalCapacity;
     private readonly int[] _lastProducerScratch;
-    private SidechainBus? _sidechainBus;
+    private AnalysisSignalBus? _analysisSignalBus;
+    private AnalysisSignalMask[] _downstreamRequiredSignals = Array.Empty<AnalysisSignalMask>();
+    private AnalysisSignalMask _visualRequestedSignals;
+    private AnalysisCaptureLink? _analysisCapture;
     private int _inputStageIndex = -1;
 
     public PluginChain(int sampleRate, int blockSize, int initialCapacity = 0)
@@ -20,10 +24,11 @@ public sealed class PluginChain
         _sampleRate = sampleRate;
         _blockSize = blockSize;
         _slots = initialCapacity > 0 ? new PluginSlot?[initialCapacity] : [];
-        _sidechainCapacity = Math.Max(sampleRate * 2, blockSize * 4);
-        _lastProducerScratch = new int[(int)SidechainSignalId.Count];
+        _analysisSignalCapacity = Math.Max(sampleRate * 2, blockSize * 4);
+        _lastProducerScratch = new int[(int)AnalysisSignalId.Count];
         RebuildIdIndexMap(_slots);
-        RebuildSidechainBus();
+        RebuildAnalysisSignalBus();
+        RebuildDownstreamRequiredSignals(_slots);
         RebuildInputStageIndex(_slots);
     }
 
@@ -52,6 +57,11 @@ public sealed class PluginChain
     }
 
     public int InputStageIndex => Volatile.Read(ref _inputStageIndex);
+
+    public void SetAnalysisCaptureLink(AnalysisCaptureLink? captureLink)
+    {
+        Volatile.Write(ref _analysisCapture, captureLink);
+    }
 
     public bool TryGetSlotById(int instanceId, out PluginSlot? slot, out int index)
     {
@@ -113,7 +123,8 @@ public sealed class PluginChain
 
         Interlocked.Exchange(ref _slots, newSlots);
         RebuildIdIndexMap(newSlots);
-        RebuildSidechainBus();
+        RebuildAnalysisSignalBus();
+        RebuildDownstreamRequiredSignals(newSlots);
         RebuildInputStageIndex(newSlots);
         return createdId;
     }
@@ -152,7 +163,8 @@ public sealed class PluginChain
 
         Interlocked.Exchange(ref _slots, newSlots);
         RebuildIdIndexMap(newSlots);
-        RebuildSidechainBus();
+        RebuildAnalysisSignalBus();
+        RebuildDownstreamRequiredSignals(newSlots);
         RebuildInputStageIndex(newSlots);
         return createdId;
     }
@@ -177,7 +189,8 @@ public sealed class PluginChain
 
         Interlocked.Exchange(ref _slots, newSlots);
         RebuildIdIndexMap(newSlots);
-        RebuildSidechainBus();
+        RebuildAnalysisSignalBus();
+        RebuildDownstreamRequiredSignals(newSlots);
         RebuildInputStageIndex(newSlots);
         return removed;
     }
@@ -205,7 +218,8 @@ public sealed class PluginChain
 
         Interlocked.Exchange(ref _slots, newSlots);
         RebuildIdIndexMap(newSlots);
-        RebuildSidechainBus();
+        RebuildAnalysisSignalBus();
+        RebuildDownstreamRequiredSignals(newSlots);
         RebuildInputStageIndex(newSlots);
         return previous;
     }
@@ -222,7 +236,8 @@ public sealed class PluginChain
         Array.Copy(slots, newSlots, slots.Length);
         Interlocked.Exchange(ref _slots, newSlots);
         RebuildIdIndexMap(newSlots);
-        RebuildSidechainBus();
+        RebuildAnalysisSignalBus();
+        RebuildDownstreamRequiredSignals(newSlots);
         RebuildInputStageIndex(newSlots);
     }
 
@@ -244,7 +259,8 @@ public sealed class PluginChain
 
         Interlocked.Exchange(ref _slots, newSlots);
         RebuildIdIndexMap(newSlots);
-        RebuildSidechainBus();
+        RebuildAnalysisSignalBus();
+        RebuildDownstreamRequiredSignals(newSlots);
         RebuildInputStageIndex(newSlots);
     }
 
@@ -253,7 +269,8 @@ public sealed class PluginChain
         Interlocked.Exchange(ref _slots, newSlots);
         UpdateNextInstanceId(newSlots);
         RebuildIdIndexMap(newSlots);
-        RebuildSidechainBus();
+        RebuildAnalysisSignalBus();
+        RebuildDownstreamRequiredSignals(newSlots);
         RebuildInputStageIndex(newSlots);
     }
 
@@ -262,9 +279,15 @@ public sealed class PluginChain
         var oldSlots = Volatile.Read(ref _slots);
         Interlocked.Exchange(ref _slots, Array.Empty<PluginSlot?>());
         RebuildIdIndexMap(Array.Empty<PluginSlot?>());
-        RebuildSidechainBus();
+        RebuildAnalysisSignalBus();
+        RebuildDownstreamRequiredSignals(Array.Empty<PluginSlot?>());
         RebuildInputStageIndex(Array.Empty<PluginSlot?>());
         return oldSlots;
+    }
+
+    public void SetVisualRequestedSignals(AnalysisSignalMask requestedSignals)
+    {
+        Volatile.Write(ref _visualRequestedSignals, requestedSignals);
     }
 
     public int Process(Span<float> buffer, long sampleClock, int channelId, IRoutingContext routingContext)
@@ -282,7 +305,9 @@ public sealed class PluginChain
     private int ProcessInternal(Span<float> buffer, long sampleClock, int channelId, IRoutingContext routingContext, int splitIndex, Action<Span<float>>? onSplit)
     {
         var slots = Volatile.Read(ref _slots);
-        var bus = Volatile.Read(ref _sidechainBus);
+        var bus = Volatile.Read(ref _analysisSignalBus);
+        var downstreamRequiredSignals = UpdateDownstreamRequiredSignals(slots);
+        var visualRequestedSignals = Volatile.Read(ref _visualRequestedSignals);
         int cumulativeLatency = 0;
         var lastProducer = _lastProducerScratch;
         for (int s = 0; s < lastProducer.Length; s++)
@@ -302,14 +327,14 @@ public sealed class PluginChain
             var delta = slot.Delta;
             long sampleTime = sampleClock - cumulativeLatency;
 
-            bool hasRequiredSidechain = true;
-            if (plugin is ISidechainConsumer consumer)
+            bool hasRequiredSignals = true;
+            if (plugin is IAnalysisSignalConsumer consumer)
             {
-                hasRequiredSidechain = HasRequiredSignals(lastProducer, consumer.RequiredSignals);
-                consumer.SetSidechainAvailable(plugin.IsBypassed ? true : hasRequiredSidechain);
+                hasRequiredSignals = HasRequiredSignals(lastProducer, consumer.RequiredSignals);
+                consumer.SetAnalysisSignalsAvailable(plugin.IsBypassed ? true : hasRequiredSignals);
             }
 
-            bool isActive = !plugin.IsBypassed && hasRequiredSidechain;
+            bool isActive = !plugin.IsBypassed && hasRequiredSignals;
 
             bool shouldCaptureDelta = isActive;
 
@@ -318,14 +343,27 @@ public sealed class PluginChain
                 delta.ProcessPre(buffer);
             }
 
-            SidechainSignalMask producedSignals = SidechainSignalMask.None;
-            if (plugin is ISidechainProducer producer && isActive)
+            AnalysisSignalMask requestedSignals = AnalysisSignalMask.None;
+            if (isActive)
             {
-                producedSignals = producer.ProducedSignals;
+                if (i < downstreamRequiredSignals.Length)
+                {
+                    requestedSignals = downstreamRequiredSignals[i] | visualRequestedSignals;
+                }
+                else
+                {
+                    requestedSignals = visualRequestedSignals;
+                }
             }
 
-            SidechainSignalMask blockedSignals = SidechainSignalMask.None;
-            if (plugin is ISidechainSignalBlocker blocker && isActive)
+            AnalysisSignalMask producedSignals = AnalysisSignalMask.None;
+            if (plugin is IAnalysisSignalProducer producer && isActive)
+            {
+                producedSignals = producer.ProducedSignals & requestedSignals;
+            }
+
+            AnalysisSignalMask blockedSignals = AnalysisSignalMask.None;
+            if (plugin is IAnalysisSignalBlocker blocker && isActive)
             {
                 blockedSignals = blocker.BlockedSignals;
             }
@@ -341,12 +379,11 @@ public sealed class PluginChain
                     cumulativeLatency,
                     channelId,
                     routingContext,
+                    Volatile.Read(ref _analysisCapture),
                     bus,
-                    lastProducer[(int)SidechainSignalId.SpeechPresence],
-                    lastProducer[(int)SidechainSignalId.VoicedProbability],
-                    lastProducer[(int)SidechainSignalId.UnvoicedEnergy],
-                    lastProducer[(int)SidechainSignalId.SibilanceEnergy],
-                    producedSignals);
+                    lastProducer,
+                    producedSignals,
+                    requestedSignals);
                 plugin.Process(buffer, context);
             }
 
@@ -362,14 +399,14 @@ public sealed class PluginChain
                 cumulativeLatency += Math.Max(0, plugin.LatencySamples);
             }
 
-            if (producedSignals != SidechainSignalMask.None)
+            if (producedSignals != AnalysisSignalMask.None)
             {
                 UpdateLastProducer(lastProducer, producedSignals, i);
             }
 
-            if (blockedSignals != SidechainSignalMask.None)
+            if (blockedSignals != AnalysisSignalMask.None)
             {
-                ApplySidechainBlocks(lastProducer, blockedSignals);
+                ApplySignalBlocks(lastProducer, blockedSignals);
             }
 
             if (onSplit is not null && i == splitIndex)
@@ -394,21 +431,89 @@ public sealed class PluginChain
         }
     }
 
-    private void RebuildSidechainBus()
+    private void RebuildAnalysisSignalBus()
     {
         var slots = Volatile.Read(ref _slots);
         bool hasProducer = false;
         for (int i = 0; i < slots.Length; i++)
         {
-            if (slots[i]?.Plugin is ISidechainProducer)
+            if (slots[i]?.Plugin is IAnalysisSignalProducer)
             {
                 hasProducer = true;
                 break;
             }
         }
 
-        var newBus = hasProducer ? new SidechainBus(slots.Length, _sidechainCapacity) : null;
-        Interlocked.Exchange(ref _sidechainBus, newBus);
+        var newBus = hasProducer ? new AnalysisSignalBus(slots.Length, _analysisSignalCapacity) : null;
+        Interlocked.Exchange(ref _analysisSignalBus, newBus);
+    }
+
+    private void RebuildDownstreamRequiredSignals(PluginSlot?[] slots)
+    {
+        if (slots.Length == 0)
+        {
+            Interlocked.Exchange(ref _downstreamRequiredSignals, Array.Empty<AnalysisSignalMask>());
+            return;
+        }
+
+        var required = new AnalysisSignalMask[slots.Length];
+        AnalysisSignalMask downstream = AnalysisSignalMask.None;
+
+        for (int i = slots.Length - 1; i >= 0; i--)
+        {
+            required[i] = downstream;
+
+            var slot = slots[i];
+            if (slot is null || slot.Plugin.IsBypassed)
+            {
+                continue;
+            }
+
+            if (slot.Plugin is IAnalysisSignalConsumer consumer)
+            {
+                downstream |= consumer.RequiredSignals;
+            }
+
+            if (slot.Plugin is IAnalysisSignalBlocker blocker && blocker.BlockedSignals != AnalysisSignalMask.None)
+            {
+                downstream &= ~blocker.BlockedSignals;
+            }
+        }
+
+        Interlocked.Exchange(ref _downstreamRequiredSignals, required);
+    }
+
+    private AnalysisSignalMask[] UpdateDownstreamRequiredSignals(PluginSlot?[] slots)
+    {
+        var required = Volatile.Read(ref _downstreamRequiredSignals);
+        if (required.Length != slots.Length)
+        {
+            return required;
+        }
+
+        AnalysisSignalMask downstream = AnalysisSignalMask.None;
+        for (int i = slots.Length - 1; i >= 0; i--)
+        {
+            required[i] = downstream;
+
+            var slot = slots[i];
+            if (slot is null || slot.Plugin.IsBypassed)
+            {
+                continue;
+            }
+
+            if (slot.Plugin is IAnalysisSignalConsumer consumer)
+            {
+                downstream |= consumer.RequiredSignals;
+            }
+
+            if (slot.Plugin is IAnalysisSignalBlocker blocker && blocker.BlockedSignals != AnalysisSignalMask.None)
+            {
+                downstream &= ~blocker.BlockedSignals;
+            }
+        }
+
+        return required;
     }
 
     private void RebuildInputStageIndex(PluginSlot?[] slots)
@@ -570,72 +675,59 @@ public sealed class PluginChain
         }
     }
 
-    private static void UpdateLastProducer(int[] lastProducer, SidechainSignalMask producedSignals, int slotIndex)
+    private static void UpdateLastProducer(int[] lastProducer, AnalysisSignalMask producedSignals, int slotIndex)
     {
-        if ((producedSignals & SidechainSignalMask.SpeechPresence) != 0)
+        if (producedSignals == AnalysisSignalMask.None)
         {
-            lastProducer[(int)SidechainSignalId.SpeechPresence] = slotIndex;
+            return;
         }
-        if ((producedSignals & SidechainSignalMask.VoicedProbability) != 0)
+
+        int mask = (int)producedSignals;
+        int count = lastProducer.Length;
+        for (int i = 0; i < count; i++)
         {
-            lastProducer[(int)SidechainSignalId.VoicedProbability] = slotIndex;
-        }
-        if ((producedSignals & SidechainSignalMask.UnvoicedEnergy) != 0)
-        {
-            lastProducer[(int)SidechainSignalId.UnvoicedEnergy] = slotIndex;
-        }
-        if ((producedSignals & SidechainSignalMask.SibilanceEnergy) != 0)
-        {
-            lastProducer[(int)SidechainSignalId.SibilanceEnergy] = slotIndex;
+            if ((mask & (1 << i)) != 0)
+            {
+                lastProducer[i] = slotIndex;
+            }
         }
     }
 
-    private static void ApplySidechainBlocks(int[] lastProducer, SidechainSignalMask blockedSignals)
+    private static void ApplySignalBlocks(int[] lastProducer, AnalysisSignalMask blockedSignals)
     {
-        if ((blockedSignals & SidechainSignalMask.SpeechPresence) != 0)
+        if (blockedSignals == AnalysisSignalMask.None)
         {
-            lastProducer[(int)SidechainSignalId.SpeechPresence] = -1;
+            return;
         }
-        if ((blockedSignals & SidechainSignalMask.VoicedProbability) != 0)
+
+        int mask = (int)blockedSignals;
+        int count = lastProducer.Length;
+        for (int i = 0; i < count; i++)
         {
-            lastProducer[(int)SidechainSignalId.VoicedProbability] = -1;
-        }
-        if ((blockedSignals & SidechainSignalMask.UnvoicedEnergy) != 0)
-        {
-            lastProducer[(int)SidechainSignalId.UnvoicedEnergy] = -1;
-        }
-        if ((blockedSignals & SidechainSignalMask.SibilanceEnergy) != 0)
-        {
-            lastProducer[(int)SidechainSignalId.SibilanceEnergy] = -1;
+            if ((mask & (1 << i)) != 0)
+            {
+                lastProducer[i] = -1;
+            }
         }
     }
 
-    private static bool HasRequiredSignals(int[] lastProducer, SidechainSignalMask requiredSignals)
+    private static bool HasRequiredSignals(int[] lastProducer, AnalysisSignalMask requiredSignals)
     {
-        if (requiredSignals == SidechainSignalMask.None)
+        if (requiredSignals == AnalysisSignalMask.None)
         {
             return true;
         }
-        if ((requiredSignals & SidechainSignalMask.SpeechPresence) != 0
-            && lastProducer[(int)SidechainSignalId.SpeechPresence] < 0)
+
+        int mask = (int)requiredSignals;
+        int count = lastProducer.Length;
+        for (int i = 0; i < count; i++)
         {
-            return false;
+            if ((mask & (1 << i)) != 0 && lastProducer[i] < 0)
+            {
+                return false;
+            }
         }
-        if ((requiredSignals & SidechainSignalMask.VoicedProbability) != 0
-            && lastProducer[(int)SidechainSignalId.VoicedProbability] < 0)
-        {
-            return false;
-        }
-        if ((requiredSignals & SidechainSignalMask.UnvoicedEnergy) != 0
-            && lastProducer[(int)SidechainSignalId.UnvoicedEnergy] < 0)
-        {
-            return false;
-        }
-        if ((requiredSignals & SidechainSignalMask.SibilanceEnergy) != 0
-            && lastProducer[(int)SidechainSignalId.SibilanceEnergy] < 0)
-        {
-            return false;
-        }
+
         return true;
     }
 }

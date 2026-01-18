@@ -4,9 +4,9 @@ using HotMic.Core.Engine;
 namespace HotMic.Core.Plugins.BuiltIn;
 
 /// <summary>
-/// Input plugin for copy-created channels that reads from a copy bus and re-emits sidechain signals.
+/// Input plugin for copy-created channels that reads from a copy bus and re-emits analysis signals.
 /// </summary>
-public sealed class BusInputPlugin : IPlugin, IChannelInputPlugin, ISidechainProducer
+public sealed class BusInputPlugin : IPlugin, IChannelInputPlugin, IAnalysisSignalProducer
 {
     private static readonly PluginParameter[] EmptyParameters = Array.Empty<PluginParameter>();
     private int _latencySamples;
@@ -23,7 +23,7 @@ public sealed class BusInputPlugin : IPlugin, IChannelInputPlugin, ISidechainPro
 
     public ChannelInputKind InputKind => ChannelInputKind.Bus;
 
-    public SidechainSignalMask ProducedSignals => SidechainSignalMask.All;
+    public AnalysisSignalMask ProducedSignals => AnalysisSignalMask.All;
 
     public void Initialize(int sampleRate, int blockSize)
     {
@@ -60,15 +60,12 @@ public sealed class BusInputPlugin : IPlugin, IChannelInputPlugin, ISidechainPro
 
         Volatile.Write(ref _latencySamples, bus.LatencySamples);
 
-        if (!context.SidechainWriter.IsEnabled)
+        if (!context.AnalysisSignalWriter.IsEnabled)
         {
             return;
         }
 
-        WriteSidechain(context, bus, SidechainSignalId.SpeechPresence, SidechainSignalMask.SpeechPresence);
-        WriteSidechain(context, bus, SidechainSignalId.VoicedProbability, SidechainSignalMask.VoicedProbability);
-        WriteSidechain(context, bus, SidechainSignalId.UnvoicedEnergy, SidechainSignalMask.UnvoicedEnergy);
-        WriteSidechain(context, bus, SidechainSignalId.SibilanceEnergy, SidechainSignalMask.SibilanceEnergy);
+        WriteAnalysisSignals(context, bus);
     }
 
     public void SetParameter(int index, float value)
@@ -88,19 +85,30 @@ public sealed class BusInputPlugin : IPlugin, IChannelInputPlugin, ISidechainPro
     {
     }
 
-    private static void WriteSidechain(in PluginProcessContext context, CopyBus bus, SidechainSignalId signal, SidechainSignalMask mask)
+    private static void WriteAnalysisSignals(in PluginProcessContext context, CopyBus bus)
     {
-        if ((bus.Signals & mask) == 0)
+        var allowed = context.AnalysisSignalWriter.AllowedSignals;
+        if (allowed == AnalysisSignalMask.None || bus.Signals == AnalysisSignalMask.None)
         {
             return;
         }
 
-        var data = bus.GetSidechain(signal);
-        if (data.IsEmpty)
+        for (int i = 0; i < (int)AnalysisSignalId.Count; i++)
         {
-            return;
-        }
+            var mask = (AnalysisSignalMask)(1 << i);
+            if ((allowed & mask) == 0 || (bus.Signals & mask) == 0)
+            {
+                continue;
+            }
 
-        context.SidechainWriter.WriteBlock(signal, bus.SampleTime, data);
+            var signal = (AnalysisSignalId)i;
+            var data = bus.GetAnalysisSignal(signal);
+            if (data.IsEmpty)
+            {
+                continue;
+            }
+
+            context.AnalysisSignalWriter.WriteBlock(signal, bus.SampleTime, data);
+        }
     }
 }

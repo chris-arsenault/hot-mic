@@ -748,9 +748,9 @@ public partial class AnalyzerWindow : Window, IDisposable
         if (_debugLogCounter >= 60)
         {
             _debugLogCounter = 0;
-            var tap = _orchestrator.DebugTap;
+            var capture = _orchestrator.CaptureLink;
             Console.WriteLine("=== ANALYZER DEBUG ===");
-            Console.WriteLine($"TAP: calls={tap?.DebugCaptureCallCount ?? 0} noOrc={tap?.DebugSkippedNoOrchestrator ?? 0} noCons={tap?.DebugSkippedNoConsumers ?? 0} fwd={tap?.DebugForwardedCount ?? 0} buf={tap?.DebugLastBufferLength ?? 0}");
+            Console.WriteLine($"CAP: calls={capture?.DebugCaptureCallCount ?? 0} noOrc={capture?.DebugSkippedNoOrchestrator ?? 0} noCons={capture?.DebugSkippedNoConsumers ?? 0} noCh={capture?.DebugSkippedChannel ?? 0} noOv={capture?.DebugSkippedOutputOverride ?? 0} fwd={capture?.DebugForwardedCount ?? 0} buf={capture?.DebugLastBufferLength ?? 0}");
             Console.WriteLine($"ENQ: calls={_orchestrator.DebugEnqueueCalls} skipCh={_orchestrator.DebugEnqueueSkippedChannel} skipE={_orchestrator.DebugEnqueueSkippedEmpty} written={_orchestrator.DebugEnqueueWritten} samp={_orchestrator.DebugEnqueueSamplesWritten}");
             Console.WriteLine($"LOOP: iter={_orchestrator.DebugLoopIterations} noCons={_orchestrator.DebugLoopNoConsumers} noData={_orchestrator.DebugLoopNotEnoughData} proc={_orchestrator.DebugLoopFramesProcessed} written={_orchestrator.DebugLoopFramesWritten}");
             Console.WriteLine($"ORC: capBuf={_orchestrator.DebugCaptureBufferAvailable} hop={_orchestrator.DebugActiveHopSize} frames={_orchestrator.DebugActiveFrameCapacity} disp={_orchestrator.DebugActiveDisplayBins} anl={_orchestrator.DebugActiveAnalysisBins} cons={_orchestrator.DebugConsumerCount}");

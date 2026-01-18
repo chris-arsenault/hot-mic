@@ -2,7 +2,7 @@ using System.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class RoomTonePlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class RoomTonePlugin : IPlugin, IAnalysisSignalConsumer, IPluginStatusProvider
 {
     public const int LevelIndex = 0;
     public const int DuckIndex = 1;
@@ -19,7 +19,7 @@ public sealed class RoomTonePlugin : IPlugin, ISidechainConsumer, IPluginStatusP
     private int _sampleRate;
     private string _statusMessage = string.Empty;
 
-    private const string MissingSidechainMessage = "Missing sidechain data.";
+    private const string MissingSidechainMessage = "Missing analysis data.";
 
     private readonly BiquadFilter _highPass = new();
     private readonly BiquadFilter _lowPass = new();
@@ -49,7 +49,7 @@ public sealed class RoomTonePlugin : IPlugin, ISidechainConsumer, IPluginStatusP
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
-    public SidechainSignalMask RequiredSignals => SidechainSignalMask.SpeechPresence;
+    public AnalysisSignalMask RequiredSignals => AnalysisSignalMask.SpeechPresence;
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
@@ -58,7 +58,7 @@ public sealed class RoomTonePlugin : IPlugin, ISidechainConsumer, IPluginStatusP
     public float ToneHz => _toneHz;
     public int SampleRate => _sampleRate;
 
-    public void SetSidechainAvailable(bool available)
+    public void SetAnalysisSignalsAvailable(bool available)
     {
         Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);
     }
@@ -79,7 +79,7 @@ public sealed class RoomTonePlugin : IPlugin, ISidechainConsumer, IPluginStatusP
             return;
         }
 
-        if (!context.TryGetSidechainSource(SidechainSignalId.SpeechPresence, out var speechSource))
+        if (!context.TryGetAnalysisSignalSource(AnalysisSignalId.SpeechPresence, out var speechSource))
         {
             return;
         }

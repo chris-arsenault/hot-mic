@@ -1,14 +1,14 @@
 namespace HotMic.Core.Plugins;
 
-public readonly struct SidechainSource
+public readonly struct AnalysisSignalSource
 {
     private static readonly float[] EmptyBuffer = new float[1];
     private readonly float[] _buffer;
     private readonly int _mask;
 
-    public static SidechainSource Empty => new SidechainSource(EmptyBuffer, 0);
+    public static AnalysisSignalSource Empty => new AnalysisSignalSource(EmptyBuffer, 0);
 
-    public SidechainSource(float[] buffer, int mask)
+    public AnalysisSignalSource(float[] buffer, int mask)
     {
         _buffer = buffer;
         _mask = mask;
@@ -26,29 +26,31 @@ public readonly struct SidechainSource
     }
 }
 
-public readonly struct SidechainWriter
+public readonly struct AnalysisSignalWriter
 {
-    private readonly SidechainBus? _bus;
+    private readonly AnalysisSignalBus? _bus;
     private readonly int _producerIndex;
-    private readonly SidechainSignalMask _allowedSignals;
+    private readonly AnalysisSignalMask _allowedSignals;
 
-    public SidechainWriter(SidechainBus? bus, int producerIndex, SidechainSignalMask allowedSignals)
+    public AnalysisSignalWriter(AnalysisSignalBus? bus, int producerIndex, AnalysisSignalMask allowedSignals)
     {
         _bus = bus;
         _producerIndex = producerIndex;
         _allowedSignals = allowedSignals;
     }
 
-    public bool IsEnabled => _bus is not null && _allowedSignals != SidechainSignalMask.None;
+    public bool IsEnabled => _bus is not null && _allowedSignals != AnalysisSignalMask.None;
 
-    public void WriteBlock(SidechainSignalId signal, long sampleTime, ReadOnlySpan<float> data)
+    public AnalysisSignalMask AllowedSignals => _allowedSignals;
+
+    public void WriteBlock(AnalysisSignalId signal, long sampleTime, ReadOnlySpan<float> data)
     {
         if (_bus is null || data.IsEmpty)
         {
             return;
         }
 
-        var mask = (SidechainSignalMask)(1 << (int)signal);
+        var mask = (AnalysisSignalMask)(1 << (int)signal);
         if ((_allowedSignals & mask) == 0)
         {
             return;

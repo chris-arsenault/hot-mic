@@ -2,7 +2,7 @@ using System.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class DynamicEqPlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginStatusProvider
 {
     public const int LowBoostIndex = 0;
     public const int HighBoostIndex = 1;
@@ -19,21 +19,21 @@ public sealed class DynamicEqPlugin : IPlugin, ISidechainConsumer, IPluginStatus
     private float _highGainDb;
     private float _smoothingCoeff;
 
-    private float _lastVoiced;
-    private float _lastUnvoiced;
+    private float _lastVoicing;
+    private float _lastFricative;
 
     private int _sampleRate;
     private int _blockSize;
     private string _statusMessage = string.Empty;
 
-    private const string MissingSidechainMessage = "Missing sidechain data.";
+    private const string MissingSidechainMessage = "Missing analysis data.";
 
     private readonly BiquadFilter _lowShelf = new();
     private readonly BiquadFilter _highShelf = new();
 
     // Metering
-    private float _meterVoicedLevel;
-    private float _meterUnvoicedLevel;
+    private float _meterVoicingLevel;
+    private float _meterFricativeLevel;
     private float _meterLowGainDb;
     private float _meterHighGainDb;
 
@@ -57,7 +57,7 @@ public sealed class DynamicEqPlugin : IPlugin, ISidechainConsumer, IPluginStatus
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
-    public SidechainSignalMask RequiredSignals => SidechainSignalMask.VoicedProbability | SidechainSignalMask.UnvoicedEnergy;
+    public AnalysisSignalMask RequiredSignals => AnalysisSignalMask.VoicingScore | AnalysisSignalMask.FricativeActivity;
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
@@ -66,7 +66,7 @@ public sealed class DynamicEqPlugin : IPlugin, ISidechainConsumer, IPluginStatus
     public float SmoothingMs => _smoothingMs;
     public int SampleRate => _sampleRate;
 
-    public void SetSidechainAvailable(bool available)
+    public void SetAnalysisSignalsAvailable(bool available)
     {
         Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);
     }
@@ -89,19 +89,19 @@ public sealed class DynamicEqPlugin : IPlugin, ISidechainConsumer, IPluginStatus
         }
 
         // Apply gains from previous block.
-        _lowGainDb += _smoothingCoeff * (_lastVoiced * _lowBoostDb - _lowGainDb);
-        _highGainDb += _smoothingCoeff * (_lastUnvoiced * _highBoostDb - _highGainDb);
+        _lowGainDb += _smoothingCoeff * (_lastVoicing * _lowBoostDb - _lowGainDb);
+        _highGainDb += _smoothingCoeff * (_lastFricative * _highBoostDb - _highGainDb);
         UpdateFilters(_lowGainDb, _highGainDb);
 
-        if (!context.TryGetSidechainSource(SidechainSignalId.VoicedProbability, out var voicedSource)
-            || !context.TryGetSidechainSource(SidechainSignalId.UnvoicedEnergy, out var unvoicedSource))
+        if (!context.TryGetAnalysisSignalSource(AnalysisSignalId.VoicingScore, out var voicingSource)
+            || !context.TryGetAnalysisSignalSource(AnalysisSignalId.FricativeActivity, out var fricativeSource))
         {
             return;
         }
 
         long baseTime = context.SampleTime;
-        float voicedSum = 0f;
-        float unvoicedSum = 0f;
+        float voicingSum = 0f;
+        float fricativeSum = 0f;
 
         for (int i = 0; i < buffer.Length; i++)
         {
@@ -110,26 +110,26 @@ public sealed class DynamicEqPlugin : IPlugin, ISidechainConsumer, IPluginStatus
             processed = _highShelf.Process(processed);
             buffer[i] = processed;
 
-            voicedSum += voicedSource.ReadSample(baseTime + i);
-            unvoicedSum += unvoicedSource.ReadSample(baseTime + i);
+            voicingSum += voicingSource.ReadSample(baseTime + i);
+            fricativeSum += fricativeSource.ReadSample(baseTime + i);
         }
 
         float inv = 1f / buffer.Length;
-        _lastVoiced = Math.Clamp(voicedSum * inv, 0f, 1f);
-        _lastUnvoiced = Math.Clamp(unvoicedSum * inv, 0f, 1f);
+        _lastVoicing = Math.Clamp(voicingSum * inv, 0f, 1f);
+        _lastFricative = Math.Clamp(fricativeSum * inv, 0f, 1f);
 
         // Update metering
-        _meterVoicedLevel = _lastVoiced;
-        _meterUnvoicedLevel = _lastUnvoiced;
+        _meterVoicingLevel = _lastVoicing;
+        _meterFricativeLevel = _lastFricative;
         _meterLowGainDb = _lowGainDb;
         _meterHighGainDb = _highGainDb;
     }
 
-    /// <summary>Gets the current voiced probability level (0-1).</summary>
-    public float GetVoicedLevel() => Volatile.Read(ref _meterVoicedLevel);
+    /// <summary>Gets the current voicing score level (0-1).</summary>
+    public float GetVoicingLevel() => Volatile.Read(ref _meterVoicingLevel);
 
-    /// <summary>Gets the current unvoiced energy level (0-1).</summary>
-    public float GetUnvoicedLevel() => Volatile.Read(ref _meterUnvoicedLevel);
+    /// <summary>Gets the current fricative activity level (0-1).</summary>
+    public float GetFricativeLevel() => Volatile.Read(ref _meterFricativeLevel);
 
     /// <summary>Gets the current low shelf gain in dB.</summary>
     public float GetLowGainDb() => Volatile.Read(ref _meterLowGainDb);

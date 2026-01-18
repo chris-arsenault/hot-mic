@@ -41,6 +41,8 @@ internal sealed class MainPluginCoordinator
     private readonly Action<int, InputChannelMode> _setChannelInputMode;
     private readonly Action<int, float> _setChannelInputGain;
     private PluginGraph[] _pluginGraphs = Array.Empty<PluginGraph>();
+    private readonly Dictionary<(int ChannelIndex, int InstanceId), AnalysisSignalMask> _analysisTapRequests = new();
+    private Action<int, AnalysisSignalMask>? _analysisTapSignalHandler;
     private bool _suppressPresetUpdates;
 
     public int GraphCount => _pluginGraphs.Length;
@@ -97,6 +99,11 @@ internal sealed class MainPluginCoordinator
 
     private AudioEngine AudioEngine => _getAudioEngine();
     private AppConfig Config => _getConfig();
+
+    public void SetAnalysisTapSignalHandler(Action<int, AnalysisSignalMask> handler)
+    {
+        _analysisTapSignalHandler = handler;
+    }
 
     public void InitializePluginGraphs()
     {
@@ -415,7 +422,8 @@ internal sealed class MainPluginCoordinator
             GetPluginParameterValue = GetPluginParameterValue,
             ApplyPluginParameter = ApplyPluginParameter,
             SetPluginBypass = SetPluginBypass,
-            GetSidechainUsageMask = GetSidechainUsageMask,
+            GetAnalysisUsageMask = GetAnalysisUsageMask,
+            UpdateAnalysisTapRequest = UpdateAnalysisTapRequest,
             RequestNoiseLearn = RequestNoiseLearn,
             SetChannelInputDevice = _setChannelInputDevice,
             SetChannelInputMode = _setChannelInputMode,
@@ -1704,30 +1712,30 @@ internal sealed class MainPluginCoordinator
         }
     }
 
-    private SidechainSignalMask GetSidechainUsageMask(int channelIndex, int instanceId)
+    private AnalysisSignalMask GetAnalysisUsageMask(int channelIndex, int instanceId)
     {
         if ((uint)channelIndex >= (uint)AudioEngine.Channels.Count)
         {
-            return SidechainSignalMask.None;
+            return AnalysisSignalMask.None;
         }
 
         var chain = AudioEngine.Channels[channelIndex].PluginChain;
         if (!chain.TryGetSlotById(instanceId, out _, out int slotIndex))
         {
-            return SidechainSignalMask.None;
+            return AnalysisSignalMask.None;
         }
 
         var slots = chain.GetSnapshot();
         if ((uint)slotIndex >= (uint)slots.Length)
         {
-            return SidechainSignalMask.None;
+            return AnalysisSignalMask.None;
         }
 
-        SidechainSignalMask used = SidechainSignalMask.None;
+        AnalysisSignalMask used = AnalysisSignalMask.None;
         for (int i = slotIndex + 1; i < slots.Length; i++)
         {
             var slot = slots[i];
-            if (slot?.Plugin is not ISidechainConsumer consumer)
+            if (slot?.Plugin is not IAnalysisSignalConsumer consumer)
             {
                 continue;
             }
@@ -1741,6 +1749,30 @@ internal sealed class MainPluginCoordinator
         }
 
         return used;
+    }
+
+    private void UpdateAnalysisTapRequest(int channelIndex, int instanceId, AnalysisSignalMask requestedSignals)
+    {
+        var key = (channelIndex, instanceId);
+        if (requestedSignals == AnalysisSignalMask.None)
+        {
+            _analysisTapRequests.Remove(key);
+        }
+        else
+        {
+            _analysisTapRequests[key] = requestedSignals;
+        }
+
+        AnalysisSignalMask combined = AnalysisSignalMask.None;
+        foreach (var entry in _analysisTapRequests)
+        {
+            if (entry.Key.ChannelIndex == channelIndex)
+            {
+                combined |= entry.Value;
+            }
+        }
+
+        _analysisTapSignalHandler?.Invoke(channelIndex, combined);
     }
 
     public static int FindPluginSlotIndex(ChannelStripViewModel channel, int instanceId)

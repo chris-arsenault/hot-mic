@@ -1,12 +1,12 @@
 namespace HotMic.Core.Plugins;
 
-public sealed class SidechainBus
+public sealed class AnalysisSignalBus
 {
     private readonly int _capacity;
     private readonly int _mask;
-    private readonly SidechainProducerBuffer[] _producers;
+    private readonly AnalysisSignalProducerBuffer[] _producers;
 
-    public SidechainBus(int producerCount, int capacitySamples)
+    public AnalysisSignalBus(int producerCount, int capacitySamples)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(producerCount);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacitySamples);
@@ -14,10 +14,10 @@ public sealed class SidechainBus
         int size = NextPowerOfTwo(capacitySamples);
         _capacity = size;
         _mask = size - 1;
-        _producers = new SidechainProducerBuffer[producerCount];
+        _producers = new AnalysisSignalProducerBuffer[producerCount];
         for (int i = 0; i < _producers.Length; i++)
         {
-            _producers[i] = new SidechainProducerBuffer(_capacity, _mask);
+            _producers[i] = new AnalysisSignalProducerBuffer(_capacity, _mask);
         }
     }
 
@@ -25,18 +25,18 @@ public sealed class SidechainBus
 
     public int ProducerCount => _producers.Length;
 
-    public SidechainSource GetSource(int producerIndex, SidechainSignalId signal)
+    public AnalysisSignalSource GetSource(int producerIndex, AnalysisSignalId signal)
     {
         if ((uint)producerIndex >= (uint)_producers.Length)
         {
-            return SidechainSource.Empty;
+            return AnalysisSignalSource.Empty;
         }
 
         var producer = _producers[producerIndex];
-        return new SidechainSource(producer.GetSignalBuffer(signal), _mask);
+        return new AnalysisSignalSource(producer.GetSignalBuffer(signal), _mask);
     }
 
-    public void WriteBlock(int producerIndex, SidechainSignalId signal, long sampleTime, ReadOnlySpan<float> data)
+    public void WriteBlock(int producerIndex, AnalysisSignalId signal, long sampleTime, ReadOnlySpan<float> data)
     {
         if ((uint)producerIndex >= (uint)_producers.Length)
         {
@@ -57,29 +57,29 @@ public sealed class SidechainBus
     }
 }
 
-public sealed class SidechainProducerBuffer
+public sealed class AnalysisSignalProducerBuffer
 {
     private readonly float[][] _signals;
     private readonly int _mask;
     private readonly int _capacity;
 
-    public SidechainProducerBuffer(int capacity, int mask)
+    public AnalysisSignalProducerBuffer(int capacity, int mask)
     {
         _capacity = capacity;
         _mask = mask;
-        _signals = new float[(int)SidechainSignalId.Count][];
-        for (int i = 0; i < (int)SidechainSignalId.Count; i++)
+        _signals = new float[(int)AnalysisSignalId.Count][];
+        for (int i = 0; i < (int)AnalysisSignalId.Count; i++)
         {
             _signals[i] = new float[_capacity];
         }
     }
 
-    public float[] GetSignalBuffer(SidechainSignalId signal)
+    public float[] GetSignalBuffer(AnalysisSignalId signal)
     {
         return _signals[(int)signal];
     }
 
-    public void WriteBlock(SidechainSignalId signal, long sampleTime, ReadOnlySpan<float> data)
+    public void WriteBlock(AnalysisSignalId signal, long sampleTime, ReadOnlySpan<float> data)
     {
         int count = data.Length;
         if (count == 0)

@@ -3,7 +3,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class DeEsserPlugin : IPlugin, ISidechainProducer
+public sealed class DeEsserPlugin : IPlugin, IAnalysisSignalProducer
 {
     public const int CenterFreqIndex = 0;
     public const int BandwidthIndex = 1;
@@ -69,7 +69,7 @@ public sealed class DeEsserPlugin : IPlugin, ISidechainProducer
     public float MaxRangeDb => _maxRangeDb;
     public int SampleRate => _sampleRate;
 
-    public SidechainSignalMask ProducedSignals => SidechainSignalMask.SibilanceEnergy;
+    public AnalysisSignalMask ProducedSignals => AnalysisSignalMask.SibilanceEnergy;
 
     public void Initialize(int sampleRate, int blockSize)
     {
@@ -95,13 +95,13 @@ public sealed class DeEsserPlugin : IPlugin, ISidechainProducer
             return;
         }
 
-        if (!context.SidechainWriter.IsEnabled)
+        if (!context.AnalysisSignalWriter.IsEnabled)
         {
             return;
         }
 
         long writeTime = context.SampleTime - LatencySamples;
-        context.SidechainWriter.WriteBlock(SidechainSignalId.SibilanceEnergy, writeTime, sibilanceSpan);
+        context.AnalysisSignalWriter.WriteBlock(AnalysisSignalId.SibilanceEnergy, writeTime, sibilanceSpan);
     }
 
     public void Process(Span<float> buffer)

@@ -4,16 +4,13 @@ using HotMic.Core.Plugins;
 namespace HotMic.Core.Engine;
 
 /// <summary>
-/// Captures audio and sidechain data from a channel at a plugin point.
+/// Captures audio and analysis signal data from a channel at a plugin point.
 /// </summary>
 public sealed class CopyBus
 {
     private readonly float[] _audio;
-    private readonly float[] _speech;
-    private readonly float[] _voiced;
-    private readonly float[] _unvoiced;
-    private readonly float[] _sibilance;
-    private SidechainSignalMask _signals;
+    private readonly float[][] _signalBuffers;
+    private AnalysisSignalMask _signals;
     private int _latencySamples;
     private long _sampleClock;
     private long _sampleTime;
@@ -24,16 +21,17 @@ public sealed class CopyBus
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(blockSize);
 
         _audio = new float[blockSize];
-        _speech = new float[blockSize];
-        _voiced = new float[blockSize];
-        _unvoiced = new float[blockSize];
-        _sibilance = new float[blockSize];
+        _signalBuffers = new float[(int)AnalysisSignalId.Count][];
+        for (int i = 0; i < _signalBuffers.Length; i++)
+        {
+            _signalBuffers[i] = new float[blockSize];
+        }
     }
 
     /// <summary>
-    /// Gets the set of sidechain signals captured in the current block.
+    /// Gets the set of analysis signals captured in the current block.
     /// </summary>
-    public SidechainSignalMask Signals => _signals;
+    public AnalysisSignalMask Signals => _signals;
 
     /// <summary>
     /// Gets the cumulative latency (in samples) for the captured block.
@@ -61,22 +59,21 @@ public sealed class CopyBus
     public ReadOnlySpan<float> Audio => _audio.AsSpan(0, _length);
 
     /// <summary>
-    /// Gets the captured sidechain signal for the current block.
+    /// Gets the captured analysis signal for the current block.
     /// </summary>
-    public ReadOnlySpan<float> GetSidechain(SidechainSignalId signal)
+    public ReadOnlySpan<float> GetAnalysisSignal(AnalysisSignalId signal)
     {
-        return signal switch
+        var mask = (AnalysisSignalMask)(1 << (int)signal);
+        if ((_signals & mask) == 0)
         {
-            SidechainSignalId.SpeechPresence => _speech.AsSpan(0, _length),
-            SidechainSignalId.VoicedProbability => _voiced.AsSpan(0, _length),
-            SidechainSignalId.UnvoicedEnergy => _unvoiced.AsSpan(0, _length),
-            SidechainSignalId.SibilanceEnergy => _sibilance.AsSpan(0, _length),
-            _ => ReadOnlySpan<float>.Empty
-        };
+            return ReadOnlySpan<float>.Empty;
+        }
+
+        return _signalBuffers[(int)signal].AsSpan(0, _length);
     }
 
     /// <summary>
-    /// Captures audio and sidechain data from a processing context.
+    /// Captures audio and analysis signal data from a processing context.
     /// </summary>
     public void Write(ReadOnlySpan<float> audio, in PluginProcessContext context)
     {
@@ -85,22 +82,22 @@ public sealed class CopyBus
         _latencySamples = Math.Max(0, context.CumulativeLatencySamples);
         _sampleClock = context.SampleClock;
         _sampleTime = context.SampleTime;
-        _signals = SidechainSignalMask.None;
+        _signals = AnalysisSignalMask.None;
 
-        CopySidechainSignal(context, SidechainSignalId.SpeechPresence, _speech, ref _signals);
-        CopySidechainSignal(context, SidechainSignalId.VoicedProbability, _voiced, ref _signals);
-        CopySidechainSignal(context, SidechainSignalId.UnvoicedEnergy, _unvoiced, ref _signals);
-        CopySidechainSignal(context, SidechainSignalId.SibilanceEnergy, _sibilance, ref _signals);
+        for (int i = 0; i < _signalBuffers.Length; i++)
+        {
+            CopyAnalysisSignal(context, (AnalysisSignalId)i, _signalBuffers[i], ref _signals);
+        }
     }
 
-    private void CopySidechainSignal(in PluginProcessContext context, SidechainSignalId signal, float[] destination, ref SidechainSignalMask mask)
+    private void CopyAnalysisSignal(in PluginProcessContext context, AnalysisSignalId signal, float[] destination, ref AnalysisSignalMask mask)
     {
-        if (!context.TryGetSidechainSource(signal, out var source))
+        if (!context.TryGetAnalysisSignalSource(signal, out var source))
         {
             return;
         }
 
-        var signalMask = (SidechainSignalMask)(1 << (int)signal);
+        var signalMask = (AnalysisSignalMask)(1 << (int)signal);
         mask |= signalMask;
 
         long sampleTime = _sampleTime;

@@ -2,7 +2,7 @@
 
 This document defines the multi-channel routing design for HotMic using the existing
 canonical plugin graph and DRY plugin shell UI. It covers routing plugins, latency
-compensation, processing order, and output analysis taps.
+compensation, processing order, and analysis capture.
 
 ## Goals
 - Support 1-N mono channels.
@@ -11,7 +11,7 @@ compensation, processing order, and output analysis taps.
 - Merge 2-N channels at any point in the target chain.
 - Maintain sync across differing pipeline latencies (merge alignment).
 - Main output is driven by a single Output Send plugin (left/right/both).
-- Analysis taps are taken after the main output merge.
+- Analysis taps are plugin-controlled; fallback capture can use the post-output feed.
 
 ## Non-Goals
 - Backward compatibility for existing configs (users will delete old configs).
@@ -30,14 +30,14 @@ handled through an extended `PluginProcessContext` with a routing accessor.
    - Provides channel mode selection (Sum/Left/Right) for stereo inputs.
 
 2) **CopyToChannelPlugin** (`builtin:copy`)
-   - Captures audio + sidechain signals at its slot position.
+   - Captures audio + analysis signals at its slot position.
    - Writes to a copy bus associated with the target channel.
    - Always targets a newly created channel (no overwrite of existing channels).
    - The new channel starts with a pinned `BusInputPlugin`.
 
 3) **BusInputPlugin** (`builtin:bus-input`)
    - Reads from a copy bus and feeds the channel buffer.
-   - Produces sidechain signals captured by the copy plugin.
+   - Produces analysis signals captured by the copy plugin.
    - Used only for copy-created channels (not user insertable).
 
 4) **MergePlugin** (`builtin:merge`)
@@ -49,7 +49,7 @@ handled through an extended `PluginProcessContext` with a routing accessor.
    - Marks the channel as the main output sender (left/right/both).
    - Exactly one active Output Send plugin allowed globally (others blocked or auto-bypassed).
    - Output send happens post-fader (after output gain/mute) so UI faders apply.
-   - Output tap for analysis happens after this send.
+   - Output fallback capture happens after this send when no analysis tap is present.
 
 ## Latency Compensation
 ### Merge Alignment (Primary)
@@ -70,14 +70,15 @@ Each audio block is processed in dependency order:
 - Merge: all source channels must run before the target channel.
 - Cycles are invalid; UI prevents them and core validation rejects them.
 
-## Sidechain Propagation
-Copy plugin captures sidechain signals visible at its slot and forwards them.
-Bus input plugin re-emits those signals into the target chain’s sidechain bus
+## Analysis Signal Propagation
+Copy plugin captures analysis signals visible at its slot and forwards them.
+Bus input plugin re-emits those signals into the target chain’s analysis bus
 as a producer at slot 0.
 
-## Output Analysis
-The `AnalysisTap` moves to the main output path (post Output Send).
-Only the mono output feed is analyzed.
+## Analysis Capture
+Analysis Tap forwards audio + analysis signals to the analysis orchestrator at
+its slot in the chain. When no tap is present (or it is bypassed), the output
+pipeline captures the post Output Send feed as a fallback.
 
 ## Config Changes (New)
 - Channels own their input settings.

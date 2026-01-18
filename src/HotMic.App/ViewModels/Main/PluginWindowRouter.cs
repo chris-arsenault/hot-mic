@@ -22,7 +22,7 @@ internal sealed class PluginWindowRouter
         {
             new() { Id = "ui:container", Name = "Plugin Container", IsVst3 = false, Category = PluginCategory.Utility, Description = "Create a visual container to group plugins on the main strip" },
             new() { Id = "builtin:input", Name = "Input Source", IsVst3 = false, Category = PluginCategory.Routing, Description = "Read a microphone input into this channel" },
-            new() { Id = "builtin:copy", Name = "Copy to Channel", IsVst3 = false, Category = PluginCategory.Routing, Description = "Duplicate audio + sidechain into a new channel" },
+            new() { Id = "builtin:copy", Name = "Copy to Channel", IsVst3 = false, Category = PluginCategory.Routing, Description = "Duplicate audio + analysis signals into a new channel" },
             new() { Id = "builtin:merge", Name = "Merge", IsVst3 = false, Category = PluginCategory.Routing, Description = "Merge 2-N channels into the current chain with alignment" },
             new() { Id = "builtin:output-send", Name = "Output Send", IsVst3 = false, Category = PluginCategory.Routing, Description = "Send this chain to the main output (left/right/both)" },
             // Dynamics
@@ -46,7 +46,7 @@ internal sealed class PluginWindowRouter
             new() { Id = "builtin:freq-analyzer", Name = "Frequency Analyzer", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Real-time spectrum view with tunable bins" },
             new() { Id = "builtin:vocal-spectrograph", Name = "Vocal Spectrograph", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Vocal-focused spectrogram with overlays" },
             new() { Id = "builtin:signal-generator", Name = "Signal Generator", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Test tones, noise, and sample playback" },
-            new() { Id = "builtin:sidechain-tap", Name = "Sidechain Tap", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Sidechain signal source for downstream plugins" },
+            new() { Id = "builtin:analysis-tap", Name = "Analysis Tap", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Analysis signal tap with use/gen/off per signal" },
 
             // AI/ML
             new() { Id = "builtin:rnnoise", Name = "RNNoise", IsVst3 = false, Category = PluginCategory.AiMl, Description = "Neural network noise suppression" },
@@ -241,9 +241,9 @@ internal sealed class PluginWindowRouter
             return;
         }
 
-        if (plugin is SidechainTapPlugin sidechainTap)
+        if (plugin is AnalysisTapPlugin analysisTap)
         {
-            ShowSidechainTapWindow(channelIndex, pluginInstanceId, sidechainTap, request);
+            ShowAnalysisTapWindow(channelIndex, pluginInstanceId, analysisTap, request);
             return;
         }
 
@@ -690,16 +690,17 @@ internal sealed class PluginWindowRouter
         window.Show();
     }
 
-    private void ShowSidechainTapWindow(int channelIndex, int pluginInstanceId, SidechainTapPlugin plugin, PluginWindowRequest request)
+    private void ShowAnalysisTapWindow(int channelIndex, int pluginInstanceId, AnalysisTapPlugin plugin, PluginWindowRequest request)
     {
-        var window = new SidechainTapWindow(plugin,
+        var window = new AnalysisTapWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed),
-            () => request.GetSidechainUsageMask(channelIndex, pluginInstanceId))
+            () => request.GetAnalysisUsageMask(channelIndex, pluginInstanceId),
+            requested => request.UpdateAnalysisTapRequest(channelIndex, pluginInstanceId, requested))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
@@ -749,7 +750,8 @@ internal sealed record PluginWindowRequest
     public Func<int, int, string, float, float> GetPluginParameterValue { get; init; } = (_, _, _, fallback) => fallback;
     public Action<int, int, int, string, float> ApplyPluginParameter { get; init; } = (_, _, _, _, _) => { };
     public Action<int, int, bool> SetPluginBypass { get; init; } = (_, _, _) => { };
-    public Func<int, int, SidechainSignalMask> GetSidechainUsageMask { get; init; } = (_, _) => SidechainSignalMask.None;
+    public Func<int, int, AnalysisSignalMask> GetAnalysisUsageMask { get; init; } = (_, _) => AnalysisSignalMask.None;
+    public Action<int, int, AnalysisSignalMask> UpdateAnalysisTapRequest { get; init; } = (_, _, _) => { };
     public Action<int, int> RequestNoiseLearn { get; init; } = (_, _) => { };
     public Action<int, string> SetChannelInputDevice { get; init; } = (_, _) => { };
     public Action<int, InputChannelMode> SetChannelInputMode { get; init; } = (_, _) => { };

@@ -1,4 +1,5 @@
 using HotMic.Core.Dsp.Spectrogram;
+using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Analysis;
 
@@ -116,6 +117,17 @@ public interface IAnalysisResultStore
         float[] flux,
         float[] hnr,
         float[] cpp,
+        out long latestFrameId,
+        out int availableFrames,
+        out bool fullCopy);
+
+    /// <summary>
+    /// Copy a single analysis signal track.
+    /// </summary>
+    bool TryGetAnalysisSignalRange(
+        AnalysisSignalId signal,
+        long sinceFrameId,
+        float[] values,
         out long latestFrameId,
         out int availableFrames,
         out bool fullCopy);

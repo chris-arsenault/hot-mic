@@ -3,7 +3,7 @@ using HotMic.Core.Dsp.Fft;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class SpectralContrastPlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class SpectralContrastPlugin : IPlugin, IAnalysisSignalConsumer, IPluginStatusProvider
 {
     public const int StrengthIndex = 0;
     public const int MixIndex = 1;
@@ -37,7 +37,7 @@ public sealed class SpectralContrastPlugin : IPlugin, ISidechainConsumer, IPlugi
     private float _meterSpeechGate;
     private float _meterContrastStrength;
 
-    private const string MissingSidechainMessage = "Missing sidechain data.";
+    private const string MissingSidechainMessage = "Missing analysis data.";
 
     public SpectralContrastPlugin()
     {
@@ -59,7 +59,7 @@ public sealed class SpectralContrastPlugin : IPlugin, ISidechainConsumer, IPlugi
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
-    public SidechainSignalMask RequiredSignals => SidechainSignalMask.SpeechPresence;
+    public AnalysisSignalMask RequiredSignals => AnalysisSignalMask.SpeechPresence;
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
@@ -68,7 +68,7 @@ public sealed class SpectralContrastPlugin : IPlugin, ISidechainConsumer, IPlugi
     public float GateStrength => _gateStrength;
     public int SampleRate => _sampleRate;
 
-    public void SetSidechainAvailable(bool available)
+    public void SetAnalysisSignalsAvailable(bool available)
     {
         Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);
     }
@@ -107,7 +107,7 @@ public sealed class SpectralContrastPlugin : IPlugin, ISidechainConsumer, IPlugi
             return;
         }
 
-        if (!context.TryGetSidechainSource(SidechainSignalId.SpeechPresence, out var speechSource))
+        if (!context.TryGetAnalysisSignalSource(AnalysisSignalId.SpeechPresence, out var speechSource))
         {
             return;
         }
@@ -217,7 +217,7 @@ public sealed class SpectralContrastPlugin : IPlugin, ISidechainConsumer, IPlugi
     {
     }
 
-    private void ProcessFrame(bool useSidechain, in SidechainSource speechSource, long frameTime)
+    private void ProcessFrame(bool useSidechain, in AnalysisSignalSource speechSource, long frameTime)
     {
         if (_fft is null)
         {

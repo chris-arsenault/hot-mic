@@ -5,7 +5,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPluginStatusProvider, ISidechainProducer
+public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPluginStatusProvider, IAnalysisSignalProducer
 {
     public const int ReductionIndex = 0;
     public const int VadThresholdIndex = 1;
@@ -73,9 +73,9 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
 
     public string StatusMessage => _statusMessage;
 
-    public SidechainSignalMask ProducedSignals => _forcedBypass || _state == IntPtr.Zero
-        ? SidechainSignalMask.None
-        : SidechainSignalMask.SpeechPresence;
+    public AnalysisSignalMask ProducedSignals => _forcedBypass || _state == IntPtr.Zero
+        ? AnalysisSignalMask.None
+        : AnalysisSignalMask.SpeechPresence;
 
     public void Initialize(int sampleRate, int blockSize)
     {
@@ -128,7 +128,7 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
             return;
         }
 
-        if (_speechBuffer.Length < buffer.Length || !context.SidechainWriter.IsEnabled)
+        if (_speechBuffer.Length < buffer.Length || !context.AnalysisSignalWriter.IsEnabled)
         {
             return;
         }
@@ -137,7 +137,7 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
         var span = _speechBuffer.AsSpan(0, buffer.Length);
         span.Fill(vad);
         long writeTime = context.SampleTime - LatencySamples;
-        context.SidechainWriter.WriteBlock(SidechainSignalId.SpeechPresence, writeTime, span);
+        context.AnalysisSignalWriter.WriteBlock(AnalysisSignalId.SpeechPresence, writeTime, span);
     }
 
     public void Process(Span<float> buffer)

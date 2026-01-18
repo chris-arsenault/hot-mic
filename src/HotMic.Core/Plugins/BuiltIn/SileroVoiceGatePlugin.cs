@@ -7,7 +7,7 @@ using HotMic.Core.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, ISidechainProducer
+public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAnalysisSignalProducer
 {
     public const int ThresholdIndex = 0;
     public const int AttackIndex = 1;
@@ -76,9 +76,9 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, ISid
 
     public string StatusMessage => _statusMessage;
 
-    public SidechainSignalMask ProducedSignals => _forcedBypass || _inputBuffer is null
-        ? SidechainSignalMask.None
-        : SidechainSignalMask.SpeechPresence;
+    public AnalysisSignalMask ProducedSignals => _forcedBypass || _inputBuffer is null
+        ? AnalysisSignalMask.None
+        : AnalysisSignalMask.SpeechPresence;
 
     public float VadProbability => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _vadBits, 0, 0));
 
@@ -145,7 +145,7 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, ISid
             return;
         }
 
-        if (_speechBuffer.Length < buffer.Length || !context.SidechainWriter.IsEnabled)
+        if (_speechBuffer.Length < buffer.Length || !context.AnalysisSignalWriter.IsEnabled)
         {
             return;
         }
@@ -154,7 +154,7 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, ISid
         var span = _speechBuffer.AsSpan(0, buffer.Length);
         span.Fill(vad);
         long writeTime = context.SampleTime - LatencySamples;
-        context.SidechainWriter.WriteBlock(SidechainSignalId.SpeechPresence, writeTime, span);
+        context.AnalysisSignalWriter.WriteBlock(AnalysisSignalId.SpeechPresence, writeTime, span);
     }
 
     public void Process(Span<float> buffer)

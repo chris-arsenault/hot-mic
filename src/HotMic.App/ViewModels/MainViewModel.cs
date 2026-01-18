@@ -93,6 +93,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             () => _audioEngine,
             engine => _audioEngine = engine,
             () => _config);
+        _pluginCoordinator.SetAnalysisTapSignalHandler(_audioEngineCoordinator.SetAnalysisTapRequestedSignals);
 
         _channelCoordinator.SetRebuildHandler(index =>
             _audioEngineCoordinator.RebuildForChannelTopologyChange(index, ApplyConfigToViewModels, UpdateDynamicWindowWidth));

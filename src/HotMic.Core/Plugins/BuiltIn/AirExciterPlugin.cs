@@ -2,7 +2,7 @@ using System.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class AirExciterPlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPluginStatusProvider
 {
     public const int DriveIndex = 0;
     public const int MixIndex = 1;
@@ -14,7 +14,7 @@ public sealed class AirExciterPlugin : IPlugin, ISidechainConsumer, IPluginStatu
     private int _sampleRate;
     private string _statusMessage = string.Empty;
 
-    private const string MissingSidechainMessage = "Missing sidechain data.";
+    private const string MissingSidechainMessage = "Missing analysis data.";
 
     private readonly BiquadFilter _highPass = new();
 
@@ -43,7 +43,7 @@ public sealed class AirExciterPlugin : IPlugin, ISidechainConsumer, IPluginStatu
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
-    public SidechainSignalMask RequiredSignals => SidechainSignalMask.VoicedProbability | SidechainSignalMask.SibilanceEnergy;
+    public AnalysisSignalMask RequiredSignals => AnalysisSignalMask.VoicingScore | AnalysisSignalMask.SibilanceEnergy;
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
@@ -52,7 +52,7 @@ public sealed class AirExciterPlugin : IPlugin, ISidechainConsumer, IPluginStatu
     public float CutoffHz => _cutoffHz;
     public int SampleRate => _sampleRate;
 
-    public void SetSidechainAvailable(bool available)
+    public void SetAnalysisSignalsAvailable(bool available)
     {
         Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);
     }
@@ -70,8 +70,8 @@ public sealed class AirExciterPlugin : IPlugin, ISidechainConsumer, IPluginStatu
             return;
         }
 
-        if (!context.TryGetSidechainSource(SidechainSignalId.VoicedProbability, out var voicedSource)
-            || !context.TryGetSidechainSource(SidechainSignalId.SibilanceEnergy, out var sibilanceSource))
+        if (!context.TryGetAnalysisSignalSource(AnalysisSignalId.VoicingScore, out var voicedSource)
+            || !context.TryGetAnalysisSignalSource(AnalysisSignalId.SibilanceEnergy, out var sibilanceSource))
         {
             return;
         }
