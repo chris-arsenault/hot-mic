@@ -2,6 +2,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
+using HotMic.Common.Configuration;
+using HotMic.Core.Threading;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 

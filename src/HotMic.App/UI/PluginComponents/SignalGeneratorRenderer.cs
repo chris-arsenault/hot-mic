@@ -575,7 +575,7 @@ public sealed class SignalGeneratorRenderer : IDisposable
 
         // Hint text
         using var hintPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Left);
-        canvas.DrawText("Drop WAV or click ● to capture input", px, centerY + 3, hintPaint);
+        canvas.DrawText("Drop WAV or click ● to capture slot audio", px, centerY + 3, hintPaint);
     }
 
     public SignalGeneratorHitTest HitTest(float x, float y)

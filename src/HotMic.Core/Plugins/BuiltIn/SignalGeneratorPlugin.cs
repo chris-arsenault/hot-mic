@@ -2,11 +2,10 @@ using System;
 using System.Threading;
 using HotMic.Core.Dsp;
 using HotMic.Core.Dsp.Filters;
-using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed partial class SignalGeneratorPlugin : IPlugin, IChannelInputPlugin
+public sealed partial class SignalGeneratorPlugin : IPlugin
 {
     private readonly SignalGeneratorSlot[] _slots;
 
@@ -27,7 +26,6 @@ public sealed partial class SignalGeneratorPlugin : IPlugin, IChannelInputPlugin
     public bool IsBypassed { get; set; }
     public int LatencySamples => 0;
     public IReadOnlyList<PluginParameter> Parameters { get; }
-    public ChannelInputKind InputKind => ChannelInputKind.Device;
 
     public void Initialize(int sampleRate, int blockSize)
     {
