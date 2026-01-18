@@ -35,11 +35,6 @@ public sealed class HotMicTheme
     public SKColor MeterWarn { get; } = new(0xFF, 0xA0, 0x30);     // Orange
     public SKColor MeterClip { get; } = new(0xFF, 0x40, 0x40);     // Red
 
-    // Legacy meter colors (for backward compat)
-    public SKColor MeterGreen { get; } = new(0x00, 0xD4, 0xAA);
-    public SKColor MeterYellow { get; } = new(0xE0, 0xE0, 0x40);
-    public SKColor MeterRed { get; } = new(0xFF, 0x40, 0x40);
-
     // Meter background
     public SKColor MeterBackground { get; } = new(0x18, 0x18, 0x1C);
     public SKColor MeterSegmentOff { get; } = new(0x28, 0x28, 0x30);

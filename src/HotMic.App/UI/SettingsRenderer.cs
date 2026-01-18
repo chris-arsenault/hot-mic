@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using HotMic.App.ViewModels;
-using HotMic.Common.Configuration;
 using HotMic.Common.Models;
 using SkiaSharp;
 
@@ -104,35 +103,23 @@ public sealed class SettingsRenderer
         float y = TitleBarHeight + Padding;
         float contentWidth = size.Width - Padding * 2f;
         float halfWidth = (contentWidth - ColumnSpacing) / 2f;
-        float thirdWidth = (contentWidth - ColumnSpacing * 2f) / 3f;
 
-        // Row 1: Input devices
-        DrawFieldRow(canvas, "Input 1", GetDeviceName(viewModel.SelectedInputDevice1), Padding, y, halfWidth, SettingsField.Input1);
-        DrawFieldRow(canvas, "Input 2", GetDeviceName(viewModel.SelectedInputDevice2), Padding + halfWidth + ColumnSpacing, y, halfWidth, SettingsField.Input2);
-        y += LabelHeight + 6f + FieldHeight + RowSpacing;
-
-        // Row 2: Output devices
+        // Row 1: Output devices
         DrawFieldRow(canvas, "Output (VB-Cable)", GetDeviceName(viewModel.SelectedOutputDevice), Padding, y, halfWidth, SettingsField.Output);
         DrawFieldRow(canvas, "Monitor", GetDeviceName(viewModel.SelectedMonitorDevice), Padding + halfWidth + ColumnSpacing, y, halfWidth, SettingsField.Monitor);
         y += LabelHeight + 6f + FieldHeight + RowSpacing;
 
-        // Row 3: Sample rate & buffer
+        // Row 2: Sample rate & buffer
         DrawFieldRow(canvas, "Sample Rate", FormatSampleRate(viewModel.SelectedSampleRate), Padding, y, halfWidth, SettingsField.SampleRate);
         DrawFieldRow(canvas, "Buffer Size", $"{viewModel.SelectedBufferSize} samples", Padding + halfWidth + ColumnSpacing, y, halfWidth, SettingsField.BufferSize);
         y += LabelHeight + 6f + FieldHeight + RowSpacing;
 
-        // Row 4: Channel modes
-        DrawFieldRow(canvas, "Input 1 Channel", FormatInputChannel(viewModel.SelectedInput1Channel), Padding, y, thirdWidth, SettingsField.Input1Channel);
-        DrawFieldRow(canvas, "Input 2 Channel", FormatInputChannel(viewModel.SelectedInput2Channel), Padding + thirdWidth + ColumnSpacing, y, thirdWidth, SettingsField.Input2Channel);
-        DrawFieldRow(canvas, "Output Routing", FormatOutputRouting(viewModel.SelectedOutputRouting), Padding + (thirdWidth + ColumnSpacing) * 2f, y, thirdWidth, SettingsField.OutputRouting);
-        y += LabelHeight + 6f + FieldHeight + RowSpacing;
-
-        // Row 5: VST Plugins checkbox + MIDI checkbox
+        // Row 3: VST Plugins checkbox + MIDI checkbox
         DrawCheckbox(canvas, "Enable VST Plugins", viewModel.EnableVstPlugins, Padding, y, out _vstCheckboxRect);
         DrawCheckbox(canvas, "Enable MIDI", viewModel.EnableMidi, Padding + halfWidth + ColumnSpacing, y, out _midiCheckboxRect);
         y += FieldHeight + RowSpacing;
 
-        // Row 7: MIDI Device dropdown (only if MIDI enabled)
+        // Row 4: MIDI Device dropdown (only if MIDI enabled)
         if (viewModel.EnableMidi)
         {
             DrawFieldRow(canvas, "MIDI Device", viewModel.SelectedMidiDevice ?? "Select...", Padding, y, halfWidth, SettingsField.MidiDevice);
@@ -262,15 +249,10 @@ public sealed class SettingsRenderer
         selectedIndex = -1;
         return field switch
         {
-            SettingsField.Input1 => BuildDeviceList(viewModel.InputDevices, viewModel.SelectedInputDevice1, out selectedIndex),
-            SettingsField.Input2 => BuildDeviceList(viewModel.InputDevices, viewModel.SelectedInputDevice2, out selectedIndex),
             SettingsField.Output => BuildDeviceList(viewModel.OutputDevices, viewModel.SelectedOutputDevice, out selectedIndex),
             SettingsField.Monitor => BuildDeviceList(viewModel.OutputDevices, viewModel.SelectedMonitorDevice, out selectedIndex),
             SettingsField.SampleRate => BuildOptionList(viewModel.SampleRateOptions, viewModel.SelectedSampleRate, FormatSampleRate, out selectedIndex),
             SettingsField.BufferSize => BuildOptionList(viewModel.BufferSizeOptions, viewModel.SelectedBufferSize, b => $"{b} samples", out selectedIndex),
-            SettingsField.Input1Channel => BuildEnumList(viewModel.InputChannelOptions, viewModel.SelectedInput1Channel, FormatInputChannel, out selectedIndex),
-            SettingsField.Input2Channel => BuildEnumList(viewModel.InputChannelOptions, viewModel.SelectedInput2Channel, FormatInputChannel, out selectedIndex),
-            SettingsField.OutputRouting => BuildEnumList(viewModel.OutputRoutingOptions, viewModel.SelectedOutputRouting, FormatOutputRouting, out selectedIndex),
             SettingsField.MidiDevice => BuildMidiDeviceList(viewModel.MidiDevices, viewModel.SelectedMidiDevice, out selectedIndex),
             _ => []
         };
@@ -318,31 +300,8 @@ public sealed class SettingsRenderer
         return list;
     }
 
-    private static IReadOnlyList<string> BuildEnumList<T>(IReadOnlyList<T> options, T selected, Func<T, string> format, out int selectedIndex) where T : struct
-    {
-        selectedIndex = -1;
-        var list = new List<string>(options.Count);
-        for (int i = 0; i < options.Count; i++)
-        {
-            list.Add(format(options[i]));
-            if (EqualityComparer<T>.Default.Equals(options[i], selected)) selectedIndex = i;
-        }
-        return list;
-    }
-
     private static string GetDeviceName(AudioDevice? device) => device?.Name ?? "Select...";
     private static string FormatSampleRate(int rate) => rate >= 1000 ? $"{rate / 1000f:0.#} kHz" : $"{rate} Hz";
-    private static string FormatInputChannel(InputChannelMode mode) => mode switch
-    {
-        InputChannelMode.Left => "Left",
-        InputChannelMode.Right => "Right",
-        _ => "Sum (L+R)"
-    };
-    private static string FormatOutputRouting(OutputRoutingMode mode) => mode switch
-    {
-        OutputRoutingMode.Sum => "Sum (L+R)",
-        _ => "Split (1=L, 2=R)"
-    };
 
     private void DrawChevron(SKCanvas canvas, SKPoint center, float size)
     {
@@ -412,9 +371,8 @@ public sealed class SettingsRenderer
 public enum SettingsField
 {
     None,
-    Input1, Input2, Output, Monitor,
+    Output, Monitor,
     SampleRate, BufferSize,
-    Input1Channel, Input2Channel, OutputRouting,
     MidiDevice
 }
 

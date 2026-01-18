@@ -30,61 +30,57 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer _meterTimer;
     private AppConfig _config;
     private readonly PluginPresetManager _presetManager = PluginPresetManager.Default;
-    private readonly Dictionary<int, int> _channel1PluginIndexMap = new();
-    private readonly Dictionary<int, int> _channel2PluginIndexMap = new();
+    private PluginGraph[] _pluginGraphs = Array.Empty<PluginGraph>();
     private readonly Dictionary<(int ChannelIndex, int ContainerId), PluginContainerWindow> _containerWindows = new();
     private long _lastMeterUpdateTicks;
     private long _nextDebugUpdateTicks;
     private static readonly long DebugUpdateIntervalTicks = Math.Max(1, Stopwatch.Frequency / 4);
     private bool _isInitializing = true; // Skip side effects during initial config load
+    private bool _suppressChannelConfig;
 #pragma warning disable CS0649 // Field is reserved for future batch preset operations
     private bool _suppressPresetUpdates;
 #pragma warning restore CS0649
 
     // 30-second rolling window for drop tracking
-    private readonly Queue<(long ticks, long input1, long input2, long underflow1, long underflow2)> _dropHistory = new();
+    private readonly Queue<(long ticks, long inputDrops, long outputUnderflow)> _dropHistory = new();
     private static readonly long ThirtySecondsInTicks = Stopwatch.Frequency * 30;
 
     public MainViewModel()
     {
         _config = _configManager.LoadOrDefault();
-        _audioEngine = new AudioEngine(_config.AudioSettings);
+        if (_config.Channels.Count == 0)
+        {
+            _config.Channels.Add(new ChannelConfig
+            {
+                Id = 1,
+                Name = "Mic 1",
+                InputChannel = InputChannelMode.Sum,
+                Plugins =
+                [
+                    new PluginConfig
+                    {
+                        Type = "builtin:input"
+                    },
+                    new PluginConfig
+                    {
+                        Type = "builtin:output-send"
+                    }
+                ]
+            });
+        }
+
+        _audioEngine = new AudioEngine(_config.AudioSettings, _config.Channels.Count);
 
         // Connect analysis orchestrator to audio engine tap
         _analysisOrchestrator.Initialize(_config.AudioSettings.SampleRate);
         _audioEngine.AnalysisTap.Orchestrator = _analysisOrchestrator;
         _analysisOrchestrator.DebugTap = _audioEngine.AnalysisTap;
 
-        Channel1 = new ChannelStripViewModel(
-            0,
-            "Channel 1",
-            EnqueueParameterChange,
-            (instanceId, slotIndex) => HandlePluginAction(0, instanceId, slotIndex),
-            instanceId => RemovePlugin(0, instanceId),
-            (instanceId, toIndex) => ReorderPlugins(0, instanceId, toIndex),
-            (instanceId, value) => UpdatePluginBypassConfig(0, instanceId, value),
-            containerId => HandleContainerAction(0, containerId),
-            containerId => RemoveContainer(0, containerId),
-            (containerId, bypass) => SetContainerBypass(0, containerId, bypass));
-        Channel2 = new ChannelStripViewModel(
-            1,
-            "Channel 2",
-            EnqueueParameterChange,
-            (instanceId, slotIndex) => HandlePluginAction(1, instanceId, slotIndex),
-            instanceId => RemovePlugin(1, instanceId),
-            (instanceId, toIndex) => ReorderPlugins(1, instanceId, toIndex),
-            (instanceId, value) => UpdatePluginBypassConfig(1, instanceId, value),
-            containerId => HandleContainerAction(1, containerId),
-            containerId => RemoveContainer(1, containerId),
-            (containerId, bypass) => SetContainerBypass(1, containerId, bypass));
-        Channel1.PropertyChanged += (_, e) => UpdateChannelConfig(0, Channel1, e.PropertyName);
-        Channel2.PropertyChanged += (_, e) => UpdateChannelConfig(1, Channel2, e.PropertyName);
+        BuildChannelViewModels();
 
         InputDevices = new ObservableCollection<AudioDevice>(_deviceManager.GetInputDevices());
         OutputDevices = new ObservableCollection<AudioDevice>(_deviceManager.GetOutputDevices());
 
-        SelectedInputDevice1 = InputDevices.FirstOrDefault(d => d.Id == _config.AudioSettings.InputDevice1Id) ?? InputDevices.FirstOrDefault();
-        SelectedInputDevice2 = InputDevices.FirstOrDefault(d => d.Id == _config.AudioSettings.InputDevice2Id) ?? InputDevices.FirstOrDefault();
         SelectedOutputDevice = OutputDevices.FirstOrDefault(d => d.Id == _config.AudioSettings.OutputDeviceId) ??
             OutputDevices.FirstOrDefault(d => d.Name.Contains("VB-Cable", StringComparison.OrdinalIgnoreCase));
         SelectedMonitorDevice = OutputDevices.FirstOrDefault(d => d.Id == _config.AudioSettings.MonitorOutputDeviceId);
@@ -98,8 +94,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_audioEngine.SampleRate != _config.AudioSettings.SampleRate || _audioEngine.BlockSize != _config.AudioSettings.BufferSize)
         {
             _audioEngine.Dispose();
-            _audioEngine = new AudioEngine(_config.AudioSettings);
+            _audioEngine = new AudioEngine(_config.AudioSettings, _config.Channels.Count);
         }
+        InitializePluginGraphs();
         LoadPluginsFromConfig();
         UpdateDynamicWindowWidth(); // Recalculate after plugins are loaded
         _isInitializing = false; // Now safe to allow side effects from property changes
@@ -110,6 +107,40 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _meterTimer.Start();
 
         InitializeMidi();
+    }
+
+    private void BuildChannelViewModels()
+    {
+        Channels.Clear();
+        for (int i = 0; i < _config.Channels.Count; i++)
+        {
+            var config = _config.Channels[i];
+            var viewModel = CreateChannelViewModel(i, string.IsNullOrWhiteSpace(config.Name) ? $"Channel {i + 1}" : config.Name);
+            Channels.Add(viewModel);
+            int channelIndex = i;
+            viewModel.PropertyChanged += (_, e) => UpdateChannelConfig(channelIndex, viewModel, e.PropertyName);
+        }
+
+        if (ActiveChannelIndex < 0 || ActiveChannelIndex >= Channels.Count)
+        {
+            ActiveChannelIndex = 0;
+        }
+    }
+
+    private ChannelStripViewModel CreateChannelViewModel(int channelIndex, string name)
+    {
+        return new ChannelStripViewModel(
+            channelIndex,
+            name,
+            EnqueueParameterChange,
+            (instanceId, slotIndex) => HandlePluginAction(channelIndex, instanceId, slotIndex),
+            instanceId => RemovePlugin(channelIndex, instanceId),
+            (instanceId, toIndex) => ReorderPlugins(channelIndex, instanceId, toIndex),
+            (instanceId, value) => UpdatePluginBypassConfig(channelIndex, instanceId, value),
+            containerId => HandleContainerAction(channelIndex, containerId),
+            containerId => RemoveContainer(channelIndex, containerId),
+            (containerId, bypass) => SetContainerBypass(channelIndex, containerId, bypass),
+            (containerId, targetIndex) => ReorderContainer(channelIndex, containerId, targetIndex));
     }
 
     private void InitializeMidi()
@@ -139,16 +170,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var parts = targetPath.Split('.');
         if (parts.Length < 2) return;
 
-        int channelIndex = parts[0] switch
+        int channelIndex = -1;
+        if (parts[0].StartsWith("channel", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(parts[0].AsSpan("channel".Length), out int parsedIndex))
         {
-            "channel1" => 0,
-            "channel2" => 1,
-            _ => -1
-        };
+            channelIndex = parsedIndex - 1;
+        }
 
-        if (channelIndex < 0) return;
+        if (channelIndex < 0 || channelIndex >= Channels.Count)
+        {
+            return;
+        }
 
-        var channel = channelIndex == 0 ? Channel1 : Channel2;
+        var channel = Channels[channelIndex];
 
         switch (parts[1])
         {
@@ -165,16 +199,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (int.TryParse(parts[2], out int pluginInstanceId) &&
                     int.TryParse(parts[3], out int paramIndex))
                 {
-                    int resolvedInstanceId = ResolvePluginInstanceId(channel, pluginInstanceId);
-                    if (resolvedInstanceId <= 0)
+                    if (pluginInstanceId <= 0)
                     {
                         return;
                     }
 
-                    ApplyPluginParameter(channelIndex, resolvedInstanceId, paramIndex, "midi", value);
+                    ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, "midi", value);
 
                     // Update the UI knob (slot indices in PluginSlots are 1-based, +1 for add placeholder)
-                    int slotIndex = FindPluginSlotIndex(channel, resolvedInstanceId);
+                    int slotIndex = FindPluginSlotIndex(channel, pluginInstanceId);
                     if (slotIndex >= 0 && slotIndex < channel.PluginSlots.Count - 1)
                     {
                         var slot = channel.PluginSlots[slotIndex];
@@ -194,23 +227,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 }
                 break;
         }
-    }
-
-    private static int ResolvePluginInstanceId(ChannelStripViewModel channel, int legacyOrInstanceId)
-    {
-        int index = FindPluginSlotIndex(channel, legacyOrInstanceId);
-        if (index >= 0)
-        {
-            return legacyOrInstanceId;
-        }
-
-        // Legacy path: treat value as slot index and map to current instance ID.
-        if (legacyOrInstanceId >= 0 && legacyOrInstanceId < channel.PluginSlots.Count - 1)
-        {
-            return channel.PluginSlots[legacyOrInstanceId].InstanceId;
-        }
-
-        return 0;
     }
 
     private static int FindPluginSlotIndex(ChannelStripViewModel channel, int instanceId)
@@ -243,8 +259,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public string? CurrentMidiDevice => _midiManager?.CurrentDevice;
 
-    public ChannelStripViewModel Channel1 { get; }
-    public ChannelStripViewModel Channel2 { get; }
+    public ObservableCollection<ChannelStripViewModel> Channels { get; } = new();
 
     public ObservableCollection<AudioDevice> InputDevices { get; }
 
@@ -253,18 +268,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public IReadOnlyList<int> SampleRateOptions { get; } = [44100, 48000];
 
     public IReadOnlyList<int> BufferSizeOptions { get; } = [128, 256, 512, 1024];
-
-    public IReadOnlyList<InputChannelMode> InputChannelOptions { get; } =
-        [InputChannelMode.Sum, InputChannelMode.Left, InputChannelMode.Right];
-
-    public IReadOnlyList<OutputRoutingMode> OutputRoutingOptions { get; } =
-        [OutputRoutingMode.Split, OutputRoutingMode.Sum];
-
-    [ObservableProperty]
-    private AudioDevice? selectedInputDevice1;
-
-    [ObservableProperty]
-    private AudioDevice? selectedInputDevice2;
 
     [ObservableProperty]
     private AudioDevice? selectedOutputDevice;
@@ -277,15 +280,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private int selectedBufferSize;
-
-    [ObservableProperty]
-    private InputChannelMode selectedInput1Channel;
-
-    [ObservableProperty]
-    private InputChannelMode selectedInput2Channel;
-
-    [ObservableProperty]
-    private OutputRoutingMode selectedOutputRouting;
 
     [ObservableProperty]
     private bool isMinimalView;
@@ -311,15 +305,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private double windowHeight = 290;
 
-    // Mono/Stereo controls (Stereo: Ch1=Left, Ch2=Right; Mono: Sum)
     [ObservableProperty]
-    private bool input1IsStereo;
-
-    [ObservableProperty]
-    private bool input2IsStereo;
-
-    [ObservableProperty]
-    private bool masterIsStereo = true;
+    private int activeChannelIndex;
 
     [ObservableProperty]
     private bool masterMuted;
@@ -345,6 +332,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private float masterLufsShortTermRight = -70f;
 
     [ObservableProperty]
+    private float masterPeakLeft;
+
+    [ObservableProperty]
+    private float masterPeakRight;
+
+    [ObservableProperty]
+    private float masterRmsLeft;
+
+    [ObservableProperty]
+    private float masterRmsRight;
+
+    [ObservableProperty]
     private AudioQualityMode qualityMode;
 
     // Hotbar stats
@@ -361,16 +360,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private long drops30Sec;
 
     [ObservableProperty]
-    private long input1Drops30Sec;
+    private long inputDrops30Sec;
 
     [ObservableProperty]
-    private long input2Drops30Sec;
-
-    [ObservableProperty]
-    private long underflow1Drops30Sec;
-
-    [ObservableProperty]
-    private long underflow2Drops30Sec;
+    private long outputUnderflowDrops30Sec;
 
     // Debug overlay
     [ObservableProperty]
@@ -380,10 +373,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private AudioEngineDiagnosticsSnapshot diagnostics;
 
     [ObservableProperty]
-    private string channel1PresetName = PluginPresetManager.CustomPresetName;
-
-    [ObservableProperty]
-    private string channel2PresetName = PluginPresetManager.CustomPresetName;
+    private string activeChannelPresetName = PluginPresetManager.CustomPresetName;
 
     public string ViewToggleLabel => IsMinimalView ? "Full" : "Minimal";
 
@@ -403,23 +393,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void UpdateDynamicWindowWidth()
     {
+        int channelCount = Math.Max(1, Channels.Count);
         if (IsMinimalView)
         {
             WindowWidth = MinimalViewWidth;
-            WindowHeight = MinimalViewHeight;
+            double rowsHeight = MinimalRowHeight * channelCount + MinimalRowSpacing * Math.Max(0, channelCount - 1);
+            WindowHeight = FullViewTitleBarHeight + MinimalViewPadding + rowsHeight + MinimalViewPadding;
             return;
         }
 
         // Calculate width based on longest visible chain (containers or plugins + add placeholder).
-        int channel1Slots = GetVisibleSlotCount(0);
-        int channel2Slots = GetVisibleSlotCount(1);
-        int maxSlots = Math.Max(channel1Slots, channel2Slots);
+        int maxSlots = 1;
+        for (int i = 0; i < channelCount; i++)
+        {
+            int visibleSlots = GetVisibleSlotCount(i);
+            if (visibleSlots > maxSlots)
+            {
+                maxSlots = visibleSlots;
+            }
+        }
 
         double pluginAreaWidth = maxSlots * PluginSlotWidthWithSpacing;
         double calculatedWidth = FullViewBaseWidth + pluginAreaWidth;
 
         WindowWidth = Math.Clamp(calculatedWidth, MinFullViewWidth, MaxFullViewWidth);
-        WindowHeight = FullViewHeight;
+        double channelAreaHeight = FullViewChannelHeight * channelCount + FullViewChannelSpacing * Math.Max(0, channelCount - 1);
+        double addChannelAreaHeight = FullViewChannelSpacing + FullViewAddChannelHeight;
+        WindowHeight = FullViewTitleBarHeight + FullViewHotbarHeight + FullViewPadding + channelAreaHeight + addChannelAreaHeight + FullViewPadding;
     }
 
     private int GetVisibleSlotCount(int channelIndex)
@@ -429,40 +429,60 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return 1;
         }
 
+        var strip = _audioEngine.Channels[channelIndex];
+        var slots = strip.PluginChain.GetSnapshot();
         var config = GetOrCreateChannelConfig(channelIndex);
-        if (config.Containers.Count > 0)
+        if (config.Containers.Count == 0)
         {
-            return Math.Max(1, config.Containers.Count + 1);
+            return Math.Max(1, slots.Length + 1);
         }
 
-        return Math.Max(1, _audioEngine.Channels[channelIndex].PluginChain.Count + 1);
-    }
+        var containerIndexByPluginId = new Dictionary<int, int>();
+        for (int i = 0; i < config.Containers.Count; i++)
+        {
+            var container = config.Containers[i];
+            var pluginIds = container.PluginInstanceIds;
+            for (int j = 0; j < pluginIds.Count; j++)
+            {
+                int instanceId = pluginIds[j];
+                if (instanceId > 0 && !containerIndexByPluginId.ContainsKey(instanceId))
+                {
+                    containerIndexByPluginId[instanceId] = i;
+                }
+            }
+        }
 
-    partial void OnInput1IsStereoChanged(bool value)
-    {
-        SelectedInput1Channel = value ? InputChannelMode.Left : InputChannelMode.Sum;
-        if (_isInitializing) return;
-        _audioEngine.ConfigureRouting(SelectedInput1Channel, SelectedInput2Channel, SelectedOutputRouting);
-        _config.AudioSettings.Input1Channel = SelectedInput1Channel;
-        _configManager.Save(_config);
-    }
+        var countedContainers = new HashSet<int>();
+        int visibleCount = 0;
+        for (int i = 0; i < slots.Length; i++)
+        {
+            if (slots[i] is not { } slot)
+            {
+                continue;
+            }
 
-    partial void OnInput2IsStereoChanged(bool value)
-    {
-        SelectedInput2Channel = value ? InputChannelMode.Right : InputChannelMode.Sum;
-        if (_isInitializing) return;
-        _audioEngine.ConfigureRouting(SelectedInput1Channel, SelectedInput2Channel, SelectedOutputRouting);
-        _config.AudioSettings.Input2Channel = SelectedInput2Channel;
-        _configManager.Save(_config);
-    }
+            if (containerIndexByPluginId.TryGetValue(slot.InstanceId, out int containerIndex))
+            {
+                if (countedContainers.Add(containerIndex))
+                {
+                    visibleCount++;
+                }
+            }
+            else
+            {
+                visibleCount++;
+            }
+        }
 
-    partial void OnMasterIsStereoChanged(bool value)
-    {
-        SelectedOutputRouting = value ? OutputRoutingMode.Split : OutputRoutingMode.Sum;
-        if (_isInitializing) return;
-        _audioEngine.ConfigureRouting(SelectedInput1Channel, SelectedInput2Channel, SelectedOutputRouting);
-        _config.AudioSettings.OutputRouting = SelectedOutputRouting;
-        _configManager.Save(_config);
+        for (int i = 0; i < config.Containers.Count; i++)
+        {
+            if (config.Containers[i].PluginInstanceIds.Count == 0)
+            {
+                visibleCount++;
+            }
+        }
+
+        return Math.Max(1, visibleCount + 1);
     }
 
     partial void OnMasterMutedChanged(bool value)
@@ -476,17 +496,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void OpenSettings()
     {
         var settingsViewModel = new SettingsViewModel(
-            InputDevices,
             OutputDevices,
-            SelectedInputDevice1,
-            SelectedInputDevice2,
             SelectedOutputDevice,
             SelectedMonitorDevice,
             SelectedSampleRate,
             SelectedBufferSize,
-            SelectedInput1Channel,
-            SelectedInput2Channel,
-            SelectedOutputRouting,
             _config.EnableVstPlugins,
             _config.Midi.Enabled,
             MidiDevices,
@@ -500,15 +514,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (window.ShowDialog() == true)
         {
             // Apply settings from dialog
-            SelectedInputDevice1 = settingsViewModel.SelectedInputDevice1;
-            SelectedInputDevice2 = settingsViewModel.SelectedInputDevice2;
             SelectedOutputDevice = settingsViewModel.SelectedOutputDevice;
             SelectedMonitorDevice = settingsViewModel.SelectedMonitorDevice;
             SelectedSampleRate = settingsViewModel.SelectedSampleRate;
             SelectedBufferSize = settingsViewModel.SelectedBufferSize;
-            SelectedInput1Channel = settingsViewModel.SelectedInput1Channel;
-            SelectedInput2Channel = settingsViewModel.SelectedInput2Channel;
-            SelectedOutputRouting = settingsViewModel.SelectedOutputRouting;
 
             // Apply VST setting
             if (_config.EnableVstPlugins != settingsViewModel.EnableVstPlugins)
@@ -551,6 +560,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_isInitializing) return;
         _config.Ui.MeterScaleVox = value;
         _configManager.Save(_config);
+
+        foreach (var entry in _containerWindows)
+        {
+            if (entry.Value.DataContext is PluginContainerWindowViewModel viewModel)
+            {
+                viewModel.MeterScaleVox = value;
+            }
+        }
     }
 
     partial void OnMasterMeterLufsChanged(bool value)
@@ -558,6 +575,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_isInitializing) return;
         _config.Ui.MasterMeterLufs = value;
         _configManager.Save(_config);
+    }
+
+    partial void OnActiveChannelIndexChanged(int value)
+    {
+        if (value < 0 || value >= Channels.Count)
+        {
+            return;
+        }
+
+        ActiveChannelPresetName = GetChannelPresetName(value);
     }
 
     partial void OnQualityModeChanged(AudioQualityMode value)
@@ -620,21 +647,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
             SelectedBufferSize = profile.BufferSize;
         }
 
-        _config.AudioSettings.InputDevice1Id = SelectedInputDevice1?.Id ?? string.Empty;
-        _config.AudioSettings.InputDevice2Id = SelectedInputDevice2?.Id ?? string.Empty;
         _config.AudioSettings.OutputDeviceId = SelectedOutputDevice?.Id ?? string.Empty;
         _config.AudioSettings.MonitorOutputDeviceId = SelectedMonitorDevice?.Id ?? string.Empty;
         _config.AudioSettings.SampleRate = SelectedSampleRate;
         _config.AudioSettings.BufferSize = SelectedBufferSize;
         _config.AudioSettings.QualityMode = QualityMode;
-        _config.AudioSettings.Input1Channel = SelectedInput1Channel;
-        _config.AudioSettings.Input2Channel = SelectedInput2Channel;
-        _config.AudioSettings.OutputRouting = SelectedOutputRouting;
         _configManager.Save(_config);
 
         StatusMessage = string.Empty;
-        _audioEngine.ConfigureDevices(_config.AudioSettings.InputDevice1Id, _config.AudioSettings.InputDevice2Id, _config.AudioSettings.OutputDeviceId, _config.AudioSettings.MonitorOutputDeviceId);
-        _audioEngine.ConfigureRouting(_config.AudioSettings.Input1Channel, _config.AudioSettings.Input2Channel, _config.AudioSettings.OutputRouting);
+        _audioEngine.ConfigureOutputDevices(_config.AudioSettings.OutputDeviceId, _config.AudioSettings.MonitorOutputDeviceId);
+        _audioEngine.EnsureChannelCount(Math.Max(1, Channels.Count));
+        if (_pluginGraphs.Length != _audioEngine.Channels.Count)
+        {
+            InitializePluginGraphs();
+        }
+
+        ApplyChannelInputsToEngine();
+        _audioEngine.RebuildRoutingGraph();
+        ApplyChannelStateToEngine();
         try
         {
             _audioEngine.Start();
@@ -656,7 +686,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _audioEngine.Stop();
         var snapshots = CapturePluginSnapshots();
         _audioEngine.Dispose();
-        _audioEngine = new AudioEngine(_config.AudioSettings);
+        _audioEngine = new AudioEngine(_config.AudioSettings, Math.Max(1, _config.Channels.Count));
 
         // Reconnect analysis orchestrator to new engine
         _analysisOrchestrator.Initialize(_config.AudioSettings.SampleRate);
@@ -675,15 +705,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _audioEngine.ConfigureDevices(
-            SelectedInputDevice1?.Id ?? string.Empty,
-            SelectedInputDevice2?.Id ?? string.Empty,
+        _audioEngine.ConfigureOutputDevices(
             SelectedOutputDevice?.Id ?? string.Empty,
             SelectedMonitorDevice?.Id ?? string.Empty);
-        _audioEngine.ConfigureRouting(SelectedInput1Channel, SelectedInput2Channel, SelectedOutputRouting);
+        _audioEngine.EnsureChannelCount(Math.Max(1, Channels.Count));
+        ApplyChannelInputsToEngine();
+        _audioEngine.RebuildRoutingGraph();
         ApplyChannelStateToEngine();
 
         RestorePluginsFromSnapshots(snapshots, profile);
+        InitializePluginGraphs();
+        SyncGraphsWithConfig();
+        NormalizeOutputSendPlugins();
 
         try
         {
@@ -695,8 +728,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             StatusMessage = $"Audio start failed: {ex.Message}";
         }
 
-        RefreshPluginViewModels(0);
-        RefreshPluginViewModels(1);
+        for (int i = 0; i < _audioEngine.Channels.Count; i++)
+        {
+            RefreshPluginViewModels(i);
+        }
     }
 
     private PluginSlot?[][] CapturePluginSnapshots()
@@ -764,35 +799,114 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void ApplyChannelStateToEngine()
     {
-        if (_audioEngine.Channels.Count < 2)
+        int count = Math.Min(_audioEngine.Channels.Count, Channels.Count);
+        for (int i = 0; i < count; i++)
         {
-            return;
+            var channel = _audioEngine.Channels[i];
+            var viewModel = Channels[i];
+            channel.SetInputGainDb(viewModel.InputGainDb);
+            channel.SetOutputGainDb(viewModel.OutputGainDb);
+            channel.SetMuted(viewModel.IsMuted);
+            channel.SetSoloed(viewModel.IsSoloed);
         }
-
-        var channel1 = _audioEngine.Channels[0];
-        channel1.SetInputGainDb(Channel1.InputGainDb);
-        channel1.SetOutputGainDb(Channel1.OutputGainDb);
-        channel1.SetMuted(Channel1.IsMuted);
-        channel1.SetSoloed(Channel1.IsSoloed);
-
-        var channel2 = _audioEngine.Channels[1];
-        channel2.SetInputGainDb(Channel2.InputGainDb);
-        channel2.SetOutputGainDb(Channel2.OutputGainDb);
-        channel2.SetMuted(Channel2.IsMuted);
-        channel2.SetSoloed(Channel2.IsSoloed);
 
         _audioEngine.SetMasterMute(MasterMuted);
     }
 
+    private void ApplyChannelInputsToEngine()
+    {
+        bool changed = false;
+        int count = Math.Min(_audioEngine.Channels.Count, Channels.Count);
+        _suppressChannelConfig = true;
+
+        for (int i = 0; i < count; i++)
+        {
+            var viewModel = Channels[i];
+            var config = GetOrCreateChannelConfig(i);
+            string resolved = _audioEngine.ConfigureChannelInput(i, viewModel.InputDeviceId, viewModel.InputChannelMode);
+            if (!string.Equals(resolved, viewModel.InputDeviceId, StringComparison.OrdinalIgnoreCase))
+            {
+                viewModel.InputDeviceId = resolved;
+                viewModel.InputDeviceLabel = GetInputDeviceLabel(resolved);
+                config.InputDeviceId = resolved;
+                changed = true;
+            }
+            else
+            {
+                viewModel.InputDeviceLabel = GetInputDeviceLabel(resolved);
+            }
+        }
+
+        _suppressChannelConfig = false;
+        if (changed)
+        {
+            _configManager.Save(_config);
+        }
+    }
+
+    private void InitializePluginGraphs()
+    {
+        int channelCount = _audioEngine.Channels.Count;
+        if (channelCount <= 0)
+        {
+            _pluginGraphs = Array.Empty<PluginGraph>();
+            return;
+        }
+
+        var graphs = new PluginGraph[channelCount];
+        for (int i = 0; i < channelCount; i++)
+        {
+            graphs[i] = new PluginGraph(_audioEngine.Channels[i].PluginChain);
+        }
+
+        _pluginGraphs = graphs;
+    }
+
+    private PluginGraph? GetGraph(int channelIndex)
+    {
+        if ((uint)channelIndex >= (uint)_pluginGraphs.Length)
+        {
+            return null;
+        }
+
+        return _pluginGraphs[channelIndex];
+    }
+
+    private void SyncGraphsWithConfig()
+    {
+        bool changed = false;
+        for (int i = 0; i < _pluginGraphs.Length; i++)
+        {
+            var graph = _pluginGraphs[i];
+            var config = GetOrCreateChannelConfig(i);
+            if (graph.SyncWithChain(config))
+            {
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            _configManager.Save(_config);
+        }
+    }
+
     // Window size constants (must match MainRenderer layout calculations)
-    // MainRenderer: PluginSlotWidth=130, MiniMeterWidth=6, PluginSlotSpacing=2
-    private const double FullViewBaseWidth = 300;
+    // MainRenderer: ChannelHeaderWidth=90, PluginSlotWidth=130, MiniMeterWidth=6, PluginSlotSpacing=2
+    private const double FullViewBaseWidth = 236;
     private const double PluginSlotWidthWithSpacing = 140; // Filled slot width (130) + meter (6) + spacing (2) + padding
     private const double MaxFullViewWidth = 1600;
     private const double MinFullViewWidth = 500;
-    private const double FullViewHeight = 290;
+    private const double FullViewTitleBarHeight = 36;
+    private const double FullViewHotbarHeight = 24;
+    private const double FullViewPadding = 10;
+    private const double FullViewChannelHeight = 102;
+    private const double FullViewChannelSpacing = 6;
+    private const double FullViewAddChannelHeight = 26;
     private const double MinimalViewWidth = 400;
-    private const double MinimalViewHeight = 140;
+    private const double MinimalViewPadding = 10;
+    private const double MinimalRowHeight = 40;
+    private const double MinimalRowSpacing = 4;
 
     private void ApplyConfigToViewModels()
     {
@@ -807,9 +921,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Force correct window size based on view mode
         UpdateDynamicWindowWidth();
 
-        var channel1Config = _config.Channels.ElementAtOrDefault(0);
-        var channel2Config = _config.Channels.ElementAtOrDefault(1);
-
         QualityMode = _config.AudioSettings.QualityMode;
         SelectedSampleRate = SampleRateOptions.Contains(_config.AudioSettings.SampleRate)
             ? _config.AudioSettings.SampleRate
@@ -819,56 +930,56 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ? profile.BufferSize
             : BufferSizeOptions[1];
         _config.AudioSettings.BufferSize = SelectedBufferSize;
-        SelectedInput1Channel = _config.AudioSettings.Input1Channel;
-        SelectedInput2Channel = _config.AudioSettings.Input2Channel;
-        SelectedOutputRouting = _config.AudioSettings.OutputRouting;
 
-        // Initialize stereo settings from channel modes
-        Input1IsStereo = _config.AudioSettings.Input1Channel == InputChannelMode.Left;
-        Input2IsStereo = _config.AudioSettings.Input2Channel == InputChannelMode.Right;
-        MasterIsStereo = _config.AudioSettings.OutputRouting == OutputRoutingMode.Split;
-
-        if (channel1Config is not null)
+        _suppressChannelConfig = true;
+        for (int i = 0; i < Channels.Count; i++)
         {
-            Channel1.UpdateName(channel1Config.Name);
-            Channel1.InputGainDb = channel1Config.InputGainDb;
-            Channel1.OutputGainDb = channel1Config.OutputGainDb;
-            Channel1.IsMuted = channel1Config.IsMuted;
-            Channel1.IsSoloed = channel1Config.IsSoloed;
+            var channelConfig = GetOrCreateChannelConfig(i);
+            var channelViewModel = Channels[i];
+            channelViewModel.UpdateName(channelConfig.Name);
+            channelViewModel.InputGainDb = channelConfig.InputGainDb;
+            channelViewModel.OutputGainDb = channelConfig.OutputGainDb;
+            channelViewModel.IsMuted = channelConfig.IsMuted;
+            channelViewModel.IsSoloed = channelConfig.IsSoloed;
+            channelViewModel.InputDeviceId = channelConfig.InputDeviceId;
+            channelViewModel.InputChannelMode = channelConfig.InputChannel;
+            channelViewModel.InputDeviceLabel = GetInputDeviceLabel(channelConfig.InputDeviceId);
         }
+        _suppressChannelConfig = false;
 
-        if (channel2Config is not null)
+        if (ActiveChannelIndex < 0 || ActiveChannelIndex >= Channels.Count)
         {
-            Channel2.UpdateName(channel2Config.Name);
-            Channel2.InputGainDb = channel2Config.InputGainDb;
-            Channel2.OutputGainDb = channel2Config.OutputGainDb;
-            Channel2.IsMuted = channel2Config.IsMuted;
-            Channel2.IsSoloed = channel2Config.IsSoloed;
+            ActiveChannelIndex = 0;
         }
-
-        // Initialize preset names
-        Channel1PresetName = GetChannelPresetName(0);
-        Channel2PresetName = GetChannelPresetName(1);
+        ActiveChannelPresetName = GetChannelPresetName(ActiveChannelIndex);
     }
 
     private void LoadPluginsFromConfig()
     {
-        var channel1Config = _config.Channels.ElementAtOrDefault(0);
-        var channel2Config = _config.Channels.ElementAtOrDefault(1);
+        for (int i = 0; i < _config.Channels.Count; i++)
+        {
+            LoadChannelPlugins(i, GetOrCreateChannelConfig(i));
+        }
 
-        LoadChannelPlugins(0, channel1Config, Channel1);
-        LoadChannelPlugins(1, channel2Config, Channel2);
+        EnsureOutputSendPlugin();
+        NormalizeOutputSendPlugins();
+        _audioEngine.RebuildRoutingGraph();
     }
 
-    private void LoadChannelPlugins(int channelIndex, ChannelConfig? config, ChannelStripViewModel viewModel)
+    private void LoadChannelPlugins(int channelIndex, ChannelConfig config)
     {
         if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
         {
             return;
         }
 
-        if (config is not null &&
-            config.Plugins.Count == 0 &&
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
+        {
+            return;
+        }
+
+        if (config.Plugins.Count == 0 &&
             !IsCustomPreset(config.PresetName))
         {
             ApplyChannelPreset(channelIndex, config.PresetName);
@@ -876,131 +987,423 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var strip = _audioEngine.Channels[channelIndex];
-        var pluginSlots = new List<PluginSlot>();
         var profile = GetQualityProfile();
-        bool assignedInstanceIds = false;
-        int nextInstanceId = 0;
-        HashSet<int> bypassedByContainer = new();
-
-        if (config is not null)
+        var bypassedByContainer = new HashSet<int>();
+        for (int i = 0; i < config.Containers.Count; i++)
         {
-            for (int i = 0; i < config.Containers.Count; i++)
+            var container = config.Containers[i];
+            if (!container.IsBypassed)
             {
-                var container = config.Containers[i];
-                if (!container.IsBypassed)
-                {
-                    continue;
-                }
-
-                for (int j = 0; j < container.PluginInstanceIds.Count; j++)
-                {
-                    bypassedByContainer.Add(container.PluginInstanceIds[j]);
-                }
+                continue;
             }
 
-            for (int i = 0; i < config.Plugins.Count; i++)
+            for (int j = 0; j < container.PluginInstanceIds.Count; j++)
             {
-                if (config.Plugins[i].InstanceId > nextInstanceId)
-                {
-                    nextInstanceId = config.Plugins[i].InstanceId;
-                }
-            }
-
-            for (int i = 0; i < config.Plugins.Count; i++)
-            {
-                var pluginConfig = config.Plugins[i];
-                if (string.IsNullOrWhiteSpace(pluginConfig.Type))
-                {
-                    continue;
-                }
-
-                IPlugin? plugin = null;
-                if (TryParseVstPluginType(pluginConfig.Type, out var format, out var path))
-                {
-                    plugin = new Vst3PluginWrapper(new Vst3PluginInfo
-                    {
-                        Name = Path.GetFileNameWithoutExtension(path),
-                        Path = path,
-                        Format = format
-                    });
-                }
-                else
-                {
-                    plugin = PluginFactory.Create(pluginConfig.Type);
-                }
-                if (plugin is null)
-                {
-                    continue;
-                }
-
-                if (plugin is IQualityConfigurablePlugin qualityPlugin)
-                {
-                    qualityPlugin.ApplyQuality(profile);
-                }
-
-                plugin.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
-                bool containerBypass = pluginConfig.InstanceId > 0 && bypassedByContainer.Contains(pluginConfig.InstanceId);
-                plugin.IsBypassed = pluginConfig.IsBypassed || containerBypass;
-                if (containerBypass)
-                {
-                    pluginConfig.IsBypassed = true;
-                }
-
-                bool appliedPreset = false;
-                if (pluginConfig.Parameters.Count == 0 &&
-                    !string.IsNullOrWhiteSpace(pluginConfig.PresetName) &&
-                    !IsCustomPreset(pluginConfig.PresetName) &&
-                    _presetManager.TryGetPreset(plugin.Id, pluginConfig.PresetName, out var preset))
-                {
-                    pluginConfig.Parameters = ApplyPresetParameters(plugin, preset);
-                    appliedPreset = true;
-                }
-
-                if (!appliedPreset)
-                {
-                    foreach (var parameter in plugin.Parameters)
-                    {
-                        if (pluginConfig.Parameters.TryGetValue(parameter.Name, out var value))
-                        {
-                            plugin.SetParameter(parameter.Index, value);
-                        }
-                    }
-                }
-
-                if (pluginConfig.State is not null && pluginConfig.State.Length > 0)
-                {
-                    plugin.SetState(pluginConfig.State);
-                }
-
-                if (pluginConfig.InstanceId <= 0)
-                {
-                    pluginConfig.InstanceId = ++nextInstanceId;
-                    assignedInstanceIds = true;
-                }
-
-                pluginSlots.Add(new PluginSlot(pluginConfig.InstanceId, plugin, _audioEngine.SampleRate));
+                bypassedByContainer.Add(container.PluginInstanceIds[j]);
             }
         }
 
         var oldSlots = strip.PluginChain.GetSnapshot();
-        var newSlots = pluginSlots.ToArray();
-        strip.PluginChain.ReplaceAll(newSlots);
-        QueueRemovedPlugins(oldSlots, newSlots);
-        RefreshPluginViewModels(channelIndex);
-
-        if (config is not null)
+        bool bypassAdjusted = false;
+        bool configChanged = graph.LoadFromConfig(config, pluginConfig =>
         {
-            RebuildPluginIndexMap(config, GetPluginIndexMap(channelIndex));
-            bool containersChanged = NormalizeContainers(config, newSlots);
-            if (assignedInstanceIds || containersChanged)
+            if (string.IsNullOrWhiteSpace(pluginConfig.Type))
             {
-                _configManager.Save(_config);
+                return null;
             }
-            if (containersChanged)
+
+            IPlugin? plugin = null;
+            if (TryParseVstPluginType(pluginConfig.Type, out var format, out var path))
             {
-                RefreshPluginViewModels(channelIndex);
+                plugin = new Vst3PluginWrapper(new Vst3PluginInfo
+                {
+                    Name = Path.GetFileNameWithoutExtension(path),
+                    Path = path,
+                    Format = format
+                });
+            }
+            else
+            {
+                plugin = PluginFactory.Create(pluginConfig.Type);
+            }
+
+            if (plugin is null)
+            {
+                return null;
+            }
+
+            if (plugin is IQualityConfigurablePlugin qualityPlugin)
+            {
+                qualityPlugin.ApplyQuality(profile);
+            }
+
+            plugin.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
+            bool containerBypass = pluginConfig.InstanceId > 0 && bypassedByContainer.Contains(pluginConfig.InstanceId);
+            plugin.IsBypassed = pluginConfig.IsBypassed || containerBypass;
+            if (containerBypass)
+            {
+                if (!pluginConfig.IsBypassed)
+                {
+                    pluginConfig.IsBypassed = true;
+                    bypassAdjusted = true;
+                }
+            }
+
+            bool appliedPreset = false;
+            if (pluginConfig.Parameters.Count == 0 &&
+                !string.IsNullOrWhiteSpace(pluginConfig.PresetName) &&
+                !IsCustomPreset(pluginConfig.PresetName) &&
+                _presetManager.TryGetPreset(plugin.Id, pluginConfig.PresetName, out var preset))
+            {
+                pluginConfig.Parameters = ApplyPresetParameters(plugin, preset);
+                appliedPreset = true;
+            }
+
+            if (!appliedPreset)
+            {
+                foreach (var parameter in plugin.Parameters)
+                {
+                    if (pluginConfig.Parameters.TryGetValue(parameter.Name, out var value))
+                    {
+                        plugin.SetParameter(parameter.Index, value);
+                    }
+                }
+            }
+
+            if (pluginConfig.State is not null && pluginConfig.State.Length > 0)
+            {
+                plugin.SetState(pluginConfig.State);
+            }
+
+            return new PluginSlot(pluginConfig.InstanceId, plugin, _audioEngine.SampleRate);
+        });
+
+        var newSlots = strip.PluginChain.GetSnapshot();
+        QueueRemovedPlugins(oldSlots, newSlots);
+        bool inputOrderChanged = NormalizeInputPluginOrder(channelIndex, config);
+        if (configChanged || bypassAdjusted || inputOrderChanged)
+        {
+            _configManager.Save(_config);
+        }
+
+        RefreshPluginViewModels(channelIndex);
+    }
+
+    private bool NormalizeInputPluginOrder(int channelIndex, ChannelConfig config)
+    {
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
+        {
+            return false;
+        }
+
+        var strip = _audioEngine.Channels[channelIndex];
+        var slots = strip.PluginChain.GetSnapshot();
+        if (slots.Length == 0)
+        {
+            return false;
+        }
+
+        int inputIndex = -1;
+        int busIndex = -1;
+        for (int i = 0; i < slots.Length; i++)
+        {
+            var slot = slots[i];
+            if (slot is null)
+            {
+                continue;
+            }
+
+            if (busIndex < 0 && slot.Plugin is BusInputPlugin)
+            {
+                busIndex = i;
+                continue;
+            }
+
+            if (inputIndex < 0 && slot.Plugin is InputPlugin)
+            {
+                inputIndex = i;
             }
         }
+
+        bool changed = false;
+        if (busIndex >= 0)
+        {
+            var busSlot = slots[busIndex];
+            if (busSlot is not null && busIndex != 0)
+            {
+                graph.MovePlugin(busSlot.InstanceId, 0);
+                changed = true;
+            }
+
+            if (inputIndex >= 0)
+            {
+                var inputSlot = slots[inputIndex];
+                if (inputSlot is not null)
+                {
+                    if (graph.RemovePlugin(inputSlot.InstanceId, out var removedSlot) && removedSlot is not null)
+                    {
+                        _audioEngine.QueuePluginDisposal(removedSlot.Plugin);
+                        changed = true;
+                    }
+                }
+            }
+        }
+        else if (inputIndex >= 0)
+        {
+            var inputSlot = slots[inputIndex];
+            if (inputSlot is not null && inputIndex != 0)
+            {
+                graph.MovePlugin(inputSlot.InstanceId, 0);
+                changed = true;
+            }
+        }
+        if (changed && slots.Length > 0)
+        {
+            graph.SyncWithChain(config);
+        }
+
+        return changed;
+    }
+
+    private bool HasOutputSendPlugin()
+    {
+        for (int i = 0; i < _audioEngine.Channels.Count; i++)
+        {
+            var slots = _audioEngine.Channels[i].PluginChain.GetSnapshot();
+            for (int j = 0; j < slots.Length; j++)
+            {
+                if (slots[j]?.Plugin is OutputSendPlugin)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool ChannelHasInputPlugin(int channelIndex)
+    {
+        if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
+        {
+            return false;
+        }
+
+        var slots = _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot();
+        for (int i = 0; i < slots.Length; i++)
+        {
+            if (slots[i]?.Plugin is InputPlugin)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool ChannelHasBusInputPlugin(int channelIndex)
+    {
+        if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
+        {
+            return false;
+        }
+
+        var slots = _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot();
+        for (int i = 0; i < slots.Length; i++)
+        {
+            if (slots[i]?.Plugin is BusInputPlugin)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void EnsureOutputSendPlugin()
+    {
+        if (HasOutputSendPlugin())
+        {
+            return;
+        }
+
+        if (_audioEngine.Channels.Count == 0)
+        {
+            return;
+        }
+
+        int channelIndex = 0;
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
+        {
+            return;
+        }
+
+        var outputSend = new OutputSendPlugin();
+        outputSend.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
+
+        int insertIndex = _audioEngine.Channels[channelIndex].PluginChain.Count;
+        int instanceId = graph.InsertPlugin(outputSend, insertIndex);
+        if (instanceId <= 0)
+        {
+            return;
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        MarkChannelPresetCustom(config);
+        _configManager.Save(_config);
+        RefreshPluginViewModels(channelIndex);
+        UpdateDynamicWindowWidth();
+    }
+
+    private void NormalizeOutputSendPlugins()
+    {
+        bool foundActive = false;
+        bool changed = false;
+        PluginSlot? firstOutputSend = null;
+        int firstChannelIndex = -1;
+        PluginGraph? firstGraph = null;
+        ChannelConfig? firstConfig = null;
+
+        for (int i = 0; i < _audioEngine.Channels.Count; i++)
+        {
+            var graph = GetGraph(i);
+            var config = GetOrCreateChannelConfig(i);
+            var slots = _audioEngine.Channels[i].PluginChain.GetSnapshot();
+            for (int j = 0; j < slots.Length; j++)
+            {
+                var slot = slots[j];
+                if (slot?.Plugin is not OutputSendPlugin)
+                {
+                    continue;
+                }
+
+                if (firstOutputSend is null)
+                {
+                    firstOutputSend = slot;
+                    firstChannelIndex = i;
+                    firstGraph = graph;
+                    firstConfig = config;
+                }
+
+                if (!foundActive && !slot.Plugin.IsBypassed)
+                {
+                    foundActive = true;
+                    continue;
+                }
+
+                if (!slot.Plugin.IsBypassed)
+                {
+                    slot.Plugin.IsBypassed = true;
+                    if (graph is not null)
+                    {
+                        graph.SetPluginBypass(slot.InstanceId, true);
+                    }
+
+                    _audioEngine.EnqueueParameterChange(new ParameterChange
+                    {
+                        ChannelId = i,
+                        Type = ParameterType.PluginBypass,
+                        PluginInstanceId = slot.InstanceId,
+                        Value = 1f
+                    });
+
+                    MarkChannelPresetCustom(config);
+                    changed = true;
+                }
+            }
+        }
+
+        if (!foundActive && firstOutputSend is not null && firstOutputSend.Plugin.IsBypassed)
+        {
+            firstOutputSend.Plugin.IsBypassed = false;
+            if (firstGraph is not null)
+            {
+                firstGraph.SetPluginBypass(firstOutputSend.InstanceId, false);
+            }
+
+            _audioEngine.EnqueueParameterChange(new ParameterChange
+            {
+                ChannelId = firstChannelIndex,
+                Type = ParameterType.PluginBypass,
+                PluginInstanceId = firstOutputSend.InstanceId,
+                Value = 0f
+            });
+
+            if (firstConfig is not null)
+            {
+                MarkChannelPresetCustom(firstConfig);
+            }
+            changed = true;
+        }
+
+        if (changed)
+        {
+            _configManager.Save(_config);
+        }
+    }
+
+    private int CreateCopyChannel(int sourceChannelIndex)
+    {
+        int channelIndex = _config.Channels.Count;
+        var config = new ChannelConfig
+        {
+            Id = channelIndex + 1,
+            Name = $"Copy {sourceChannelIndex + 1} -> {channelIndex + 1}",
+            InputChannel = InputChannelMode.Sum,
+            InputDeviceId = string.Empty,
+            Plugins =
+            [
+                new PluginConfig
+                {
+                    Type = "builtin:bus-input"
+                }
+            ]
+        };
+
+        _config.Channels.Add(config);
+        _audioEngine.EnsureChannelCount(_config.Channels.Count);
+        InitializePluginGraphs();
+
+        var viewModel = CreateChannelViewModel(channelIndex, config.Name);
+        Channels.Add(viewModel);
+        int capturedIndex = channelIndex;
+        viewModel.PropertyChanged += (_, e) => UpdateChannelConfig(capturedIndex, viewModel, e.PropertyName);
+
+        _suppressChannelConfig = true;
+        viewModel.InputGainDb = config.InputGainDb;
+        viewModel.OutputGainDb = config.OutputGainDb;
+        viewModel.IsMuted = config.IsMuted;
+        viewModel.IsSoloed = config.IsSoloed;
+        viewModel.InputDeviceId = config.InputDeviceId;
+        viewModel.InputChannelMode = config.InputChannel;
+        viewModel.InputDeviceLabel = GetInputDeviceLabel(config.InputDeviceId);
+        _suppressChannelConfig = false;
+
+        LoadChannelPlugins(channelIndex, config);
+        RefreshPluginViewModels(channelIndex);
+        UpdateDynamicWindowWidth();
+        _configManager.Save(_config);
+
+        return config.Id;
+    }
+
+    private static ChannelConfig CreateDefaultChannelConfig(int id)
+    {
+        return new ChannelConfig
+        {
+            Id = id,
+            Name = $"Channel {id}",
+            InputChannel = InputChannelMode.Sum,
+            Plugins =
+            [
+                new PluginConfig
+                {
+                    Type = "builtin:input"
+                }
+            ]
+        };
     }
 
     private static bool IsCustomPreset(string? presetName)
@@ -1048,13 +1451,50 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var strip = _audioEngine.Channels[channelIndex];
+        var oldSlots = strip.PluginChain.GetSnapshot();
+        PluginSlot? preservedInputSlot = null;
+        for (int i = 0; i < oldSlots.Length; i++)
+        {
+            if (oldSlots[i]?.Plugin is BusInputPlugin)
+            {
+                preservedInputSlot = oldSlots[i];
+                break;
+            }
+        }
+
+        if (preservedInputSlot is null)
+        {
+            for (int i = 0; i < oldSlots.Length; i++)
+            {
+                if (oldSlots[i]?.Plugin is InputPlugin)
+                {
+                    preservedInputSlot = oldSlots[i];
+                    break;
+                }
+            }
+        }
+
         var profile = GetQualityProfile();
-        var pluginSlots = new List<PluginSlot>(chainPreset.Entries.Count);
+        int extraSlotCount = preservedInputSlot is null ? 0 : 1;
+        var pluginSlots = new List<PluginSlot>(chainPreset.Entries.Count + extraSlotCount);
         var pluginConfigs = new List<PluginConfig>(chainPreset.Entries.Count);
         int nextInstanceId = 0;
 
+        if (preservedInputSlot is not null)
+        {
+            pluginSlots.Add(preservedInputSlot);
+            nextInstanceId = Math.Max(nextInstanceId, preservedInputSlot.InstanceId);
+        }
+
         foreach (var entry in chainPreset.Entries)
         {
+            if (preservedInputSlot is not null &&
+                (string.Equals(entry.PluginId, "builtin:input", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(entry.PluginId, "builtin:bus-input", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
             IPlugin? plugin = PluginFactory.Create(entry.PluginId);
             if (plugin is null)
             {
@@ -1152,19 +1592,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         }
 
-        var oldSlots = strip.PluginChain.GetSnapshot();
         var newSlots = pluginSlots.ToArray();
         strip.PluginChain.ReplaceAll(newSlots);
         QueueRemovedPlugins(oldSlots, newSlots);
-        RefreshPluginViewModels(channelIndex);
-        UpdateDynamicWindowWidth();
 
         config.PresetName = chainPreset.Name;
         config.Plugins = pluginConfigs;
         config.Containers = containerConfigs;
-        RebuildPluginIndexMap(config, GetPluginIndexMap(channelIndex));
-        NormalizeContainers(config, newSlots);
+        GetGraph(channelIndex)?.SyncWithChain(config);
+        NormalizeInputPluginOrder(channelIndex, config);
         _configManager.Save(_config);
+
+        EnsureOutputSendPlugin();
+        NormalizeOutputSendPlugins();
+        _audioEngine.RebuildRoutingGraph();
+        RefreshPluginViewModels(channelIndex);
+        UpdateDynamicWindowWidth();
     }
 
     private string GetChannelPresetName(int channelIndex)
@@ -1189,92 +1632,182 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             config.PresetName = PluginPresetManager.CustomPresetName;
         }
+
+        int index = _config.Channels.IndexOf(config);
+        if (index == ActiveChannelIndex)
+        {
+            ActiveChannelPresetName = PluginPresetManager.CustomPresetName;
+        }
     }
 
-    private void MarkPluginPresetCustom(ChannelConfig config, int slotIndex)
+    private void MarkPluginPresetCustom(int channelIndex, int instanceId)
     {
         if (_suppressPresetUpdates)
         {
             return;
         }
 
-        if (slotIndex >= 0 && slotIndex < config.Plugins.Count)
+        var config = GetOrCreateChannelConfig(channelIndex);
+        var graph = GetGraph(channelIndex);
+        if (graph is not null && graph.TryGetPluginConfig(instanceId, out var pluginConfig))
         {
-            config.Plugins[slotIndex].PresetName = PluginPresetManager.CustomPresetName;
+            pluginConfig.PresetName = PluginPresetManager.CustomPresetName;
         }
 
         config.PresetName = PluginPresetManager.CustomPresetName;
+        if (channelIndex == ActiveChannelIndex)
+        {
+            ActiveChannelPresetName = PluginPresetManager.CustomPresetName;
+        }
     }
 
     private void UpdateMeters()
     {
-        if (_audioEngine.Channels.Count < 2)
+        int channelCount = Math.Min(_audioEngine.Channels.Count, Channels.Count);
+        if (channelCount == 0)
         {
             return;
         }
 
         long nowTicks = Stopwatch.GetTimestamp();
 
-        var channel1 = _audioEngine.Channels[0];
-        var channel2 = _audioEngine.Channels[1];
+        for (int i = 0; i < channelCount; i++)
+        {
+            var channel = _audioEngine.Channels[i];
+            var viewModel = Channels[i];
+            viewModel.InputPeakLevel = channel.InputMeter.GetPeakLevel();
+            viewModel.InputRmsLevel = channel.InputMeter.GetRmsLevel();
+            viewModel.OutputPeakLevel = channel.OutputMeter.GetPeakLevel();
+            viewModel.OutputRmsLevel = channel.OutputMeter.GetRmsLevel();
 
-        Channel1.InputPeakLevel = channel1.InputMeter.GetPeakLevel();
-        Channel1.InputRmsLevel = channel1.InputMeter.GetRmsLevel();
-        Channel1.OutputPeakLevel = channel1.OutputMeter.GetPeakLevel();
-        Channel1.OutputRmsLevel = channel1.OutputMeter.GetRmsLevel();
-
-        Channel2.InputPeakLevel = channel2.InputMeter.GetPeakLevel();
-        Channel2.InputRmsLevel = channel2.InputMeter.GetRmsLevel();
-        Channel2.OutputPeakLevel = channel2.OutputMeter.GetPeakLevel();
-        Channel2.OutputRmsLevel = channel2.OutputMeter.GetRmsLevel();
+            UpdatePluginMeters(viewModel, channel);
+            UpdateContainerMeters(viewModel, channel);
+            UpdateContainerWindowMeters(i, channel);
+        }
 
         MasterLufsMomentaryLeft = _audioEngine.MasterLufsLeft.GetMomentaryLufs();
         MasterLufsShortTermLeft = _audioEngine.MasterLufsLeft.GetShortTermLufs();
         MasterLufsMomentaryRight = _audioEngine.MasterLufsRight.GetMomentaryLufs();
         MasterLufsShortTermRight = _audioEngine.MasterLufsRight.GetShortTermLufs();
 
-        UpdatePluginMeters(Channel1, channel1);
-        UpdatePluginMeters(Channel2, channel2);
-        UpdateContainerMeters(Channel1, channel1);
-        UpdateContainerMeters(Channel2, channel2);
-        UpdateContainerWindowMeters(0, channel1);
-        UpdateContainerWindowMeters(1, channel2);
+        UpdateMasterMeterLevels();
 
-        // Update hotbar stats and diagnostics
         Diagnostics = _audioEngine.GetDiagnosticsSnapshot();
         int sampleRate = Math.Max(1, _audioEngine.SampleRate);
         float baseLatencyMs = SelectedBufferSize * 1000f / sampleRate;
-        int chainLatencySamples = Math.Max(GetChainLatencySamples(channel1), GetChainLatencySamples(channel2));
+        int chainLatencySamples = GetOutputChainLatencySamples();
         float chainLatencyMs = chainLatencySamples * 1000f / sampleRate;
         LatencyMs = baseLatencyMs + chainLatencyMs;
-        TotalDrops = Diagnostics.Input1DroppedSamples + Diagnostics.Input2DroppedSamples +
-                     Diagnostics.OutputUnderflowSamples1 + Diagnostics.OutputUnderflowSamples2;
 
-        // Track drops over 30-second rolling window
-        _dropHistory.Enqueue((nowTicks, Diagnostics.Input1DroppedSamples, Diagnostics.Input2DroppedSamples,
-                              Diagnostics.OutputUnderflowSamples1, Diagnostics.OutputUnderflowSamples2));
+        long inputDrops = 0;
+        var inputs = Diagnostics.Inputs;
+        for (int i = 0; i < inputs.Count; i++)
+        {
+            inputDrops += inputs[i].DroppedSamples;
+        }
 
-        // Remove entries older than 30 seconds
+        TotalDrops = inputDrops + Diagnostics.OutputUnderflowSamples;
+
+        _dropHistory.Enqueue((nowTicks, inputDrops, Diagnostics.OutputUnderflowSamples));
+
         long cutoffTicks = nowTicks - ThirtySecondsInTicks;
         while (_dropHistory.Count > 0 && _dropHistory.Peek().ticks < cutoffTicks)
         {
             _dropHistory.Dequeue();
         }
 
-        // Calculate 30-second drops (current - oldest in window)
         if (_dropHistory.Count > 0)
         {
             var oldest = _dropHistory.Peek();
-            Input1Drops30Sec = Diagnostics.Input1DroppedSamples - oldest.input1;
-            Input2Drops30Sec = Diagnostics.Input2DroppedSamples - oldest.input2;
-            Underflow1Drops30Sec = Diagnostics.OutputUnderflowSamples1 - oldest.underflow1;
-            Underflow2Drops30Sec = Diagnostics.OutputUnderflowSamples2 - oldest.underflow2;
-            Drops30Sec = Input1Drops30Sec + Input2Drops30Sec + Underflow1Drops30Sec + Underflow2Drops30Sec;
+            InputDrops30Sec = inputDrops - oldest.inputDrops;
+            OutputUnderflowDrops30Sec = Diagnostics.OutputUnderflowSamples - oldest.outputUnderflow;
+            Drops30Sec = InputDrops30Sec + OutputUnderflowDrops30Sec;
         }
 
         UpdateDebugInfo(nowTicks);
         _audioEngine.DrainPendingPluginDisposals();
         _lastMeterUpdateTicks = nowTicks;
+    }
+
+    private void UpdateMasterMeterLevels()
+    {
+        float peak = 0f;
+        float rms = 0f;
+        OutputSendMode mode = OutputSendMode.Both;
+
+        if (TryGetOutputSendSource(out int channelIndex, out mode))
+        {
+            var channel = _audioEngine.Channels[channelIndex];
+            peak = channel.OutputMeter.GetPeakLevel();
+            rms = channel.OutputMeter.GetRmsLevel();
+        }
+
+        if (MasterMuted)
+        {
+            peak = 0f;
+            rms = 0f;
+        }
+
+        switch (mode)
+        {
+            case OutputSendMode.Left:
+                MasterPeakLeft = peak;
+                MasterPeakRight = 0f;
+                MasterRmsLeft = rms;
+                MasterRmsRight = 0f;
+                break;
+            case OutputSendMode.Right:
+                MasterPeakLeft = 0f;
+                MasterPeakRight = peak;
+                MasterRmsLeft = 0f;
+                MasterRmsRight = rms;
+                break;
+            case OutputSendMode.Both:
+            default:
+                MasterPeakLeft = peak;
+                MasterPeakRight = peak;
+                MasterRmsLeft = rms;
+                MasterRmsRight = rms;
+                break;
+        }
+    }
+
+    private bool TryGetOutputSendSource(out int channelIndex, out OutputSendMode mode)
+    {
+        for (int i = 0; i < _audioEngine.Channels.Count; i++)
+        {
+            var slots = _audioEngine.Channels[i].PluginChain.GetSnapshot();
+            for (int j = 0; j < slots.Length; j++)
+            {
+                var slot = slots[j];
+                if (slot?.Plugin is OutputSendPlugin send && !send.IsBypassed)
+                {
+                    channelIndex = i;
+                    mode = send.Mode;
+                    return true;
+                }
+            }
+        }
+
+        channelIndex = -1;
+        mode = OutputSendMode.Both;
+        return false;
+    }
+
+    private int GetOutputChainLatencySamples()
+    {
+        if (TryGetOutputSendSource(out int channelIndex, out _))
+        {
+            return GetChainLatencySamples(_audioEngine.Channels[channelIndex]);
+        }
+
+        int max = 0;
+        for (int i = 0; i < _audioEngine.Channels.Count; i++)
+        {
+            max = Math.Max(max, GetChainLatencySamples(_audioEngine.Channels[i]));
+        }
+
+        return max;
     }
 
     private static void UpdatePluginMeters(ChannelStripViewModel viewModel, ChannelStrip channel)
@@ -1291,6 +1824,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 slot.OutputPeakLevel = chainSlot.Meter.GetPeakLevel();
                 slot.OutputRmsLevel = chainSlot.Meter.GetRmsLevel();
+                slot.SetBypassSilent(chainSlot.Plugin.IsBypassed);
             }
             else
             {
@@ -1409,12 +1943,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 {
                     slotVm.OutputPeakLevel = slot.Meter.GetPeakLevel();
                     slotVm.OutputRmsLevel = slot.Meter.GetRmsLevel();
-                    slotVm.IsBypassed = slot.Plugin.IsBypassed;
+                    slotVm.SetBypassSilent(slot.Plugin.IsBypassed);
+
+                    var delta = slot.Delta;
+                    if (delta.DisplayMode != slotVm.DeltaDisplayMode)
+                    {
+                        delta.DisplayMode = slotVm.DeltaDisplayMode;
+                    }
+
+                    if (delta.TryUpdate())
+                    {
+                        slotVm.SpectralDelta = delta.BandDeltas;
+                    }
                 }
                 else
                 {
                     slotVm.OutputPeakLevel = 0f;
                     slotVm.OutputRmsLevel = 0f;
+                    slotVm.SpectralDelta = null;
                 }
             }
         }
@@ -1431,20 +1977,37 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var diagnostics = _audioEngine.GetDiagnosticsSnapshot();
 
         string outputAge = FormatAgeMs(nowTicks, diagnostics.LastOutputCallbackTicks);
-        string input1Age = FormatAgeMs(nowTicks, diagnostics.LastInput1CallbackTicks);
-        string input2Age = FormatAgeMs(nowTicks, diagnostics.LastInput2CallbackTicks);
         string uiAge = _lastMeterUpdateTicks == 0
             ? "n/a"
             : $"{Math.Max(0.0, (nowTicks - _lastMeterUpdateTicks) * 1000.0 / Stopwatch.Frequency):0}";
 
+        var inputs = diagnostics.Inputs;
+        string inputStatus = inputs.Count == 0
+            ? "none"
+            : string.Join(" ", inputs.Select(i => $"ch{i.ChannelId + 1}:{FormatFlag(i.IsActive)}"));
+        string inputAges = inputs.Count == 0
+            ? "n/a"
+            : string.Join(" ", inputs.Select(i => $"ch{i.ChannelId + 1}={FormatAgeMs(nowTicks, i.LastCallbackTicks)}"));
+        string bufferSummary = inputs.Count == 0
+            ? "n/a"
+            : string.Join(" ", inputs.Select(i => $"ch{i.ChannelId + 1} {i.BufferedSamples}/{i.BufferCapacity}"));
+
+        long inputDrops = 0;
+        long inputUnderflows = 0;
+        for (int i = 0; i < inputs.Count; i++)
+        {
+            inputDrops += inputs[i].DroppedSamples;
+            inputUnderflows += inputs[i].UnderflowSamples;
+        }
+
         DebugLines =
         [
-            $"Audio: out={FormatFlag(diagnostics.OutputActive)} in1={FormatFlag(diagnostics.Input1Active)} in2={FormatFlag(diagnostics.Input2Active)} mon={FormatFlag(diagnostics.MonitorActive)} recov={(diagnostics.IsRecovering ? "yes" : "no")}",
-            $"Callbacks(ms): out={outputAge} in1={input1Age} in2={input2Age}",
-            $"Buffers: in1 {diagnostics.Input1BufferedSamples}/{diagnostics.Input1BufferCapacity} in2 {diagnostics.Input2BufferedSamples}/{diagnostics.Input2BufferCapacity} mon {diagnostics.MonitorBufferedSamples}/{diagnostics.MonitorBufferCapacity}",
-            $"Drops: in1 {diagnostics.Input1DroppedSamples} in2 {diagnostics.Input2DroppedSamples} under1 {diagnostics.OutputUnderflowSamples1} under2 {diagnostics.OutputUnderflowSamples2}",
-            $"Formats: in1 {diagnostics.Input1SampleRate}Hz/{diagnostics.Input1Channels}ch in2 {diagnostics.Input2SampleRate}Hz/{diagnostics.Input2Channels}ch out {SelectedSampleRate}Hz/2ch",
-            $"Routing: in1 {FormatInputChannel(SelectedInput1Channel)} in2 {FormatInputChannel(SelectedInput2Channel)} out {FormatOutputRouting(SelectedOutputRouting)}  UI {uiAge}ms"
+            $"Audio: out={FormatFlag(diagnostics.OutputActive)} mon={FormatFlag(diagnostics.MonitorActive)} inputs={inputStatus} recov={(diagnostics.IsRecovering ? "yes" : "no")}",
+            $"Callbacks(ms): out={outputAge} in={inputAges}",
+            $"Buffers: {bufferSummary} mon {diagnostics.MonitorBufferedSamples}/{diagnostics.MonitorBufferCapacity}",
+            $"Drops: in {inputDrops} under {inputUnderflows} out {diagnostics.OutputUnderflowSamples}",
+            $"Formats: out {SelectedSampleRate}Hz/2ch",
+            $"UI {uiAge}ms"
         ];
     }
 
@@ -1473,15 +2036,37 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _ => "Sum"
     };
 
-    private static string FormatOutputRouting(OutputRoutingMode mode) => mode switch
+    private string GetInputDeviceLabel(string deviceId)
     {
-        OutputRoutingMode.Sum => "Sum",
-        _ => "Split"
-    };
+        if (string.IsNullOrWhiteSpace(deviceId))
+        {
+            return "No Input";
+        }
+
+        var device = InputDevices.FirstOrDefault(d => d.Id == deviceId);
+        return device?.Name ?? "Unknown";
+    }
+
+    private void ApplyChannelInput(int channelIndex, ChannelStripViewModel viewModel, ChannelConfig config)
+    {
+        string resolved = _audioEngine.ConfigureChannelInput(channelIndex, viewModel.InputDeviceId, viewModel.InputChannelMode);
+        if (!string.Equals(resolved, viewModel.InputDeviceId, StringComparison.OrdinalIgnoreCase))
+        {
+            _suppressChannelConfig = true;
+            viewModel.InputDeviceId = resolved;
+            viewModel.InputDeviceLabel = GetInputDeviceLabel(resolved);
+            _suppressChannelConfig = false;
+            config.InputDeviceId = resolved;
+        }
+        else
+        {
+            viewModel.InputDeviceLabel = GetInputDeviceLabel(resolved);
+        }
+    }
 
     private void UpdateChannelConfig(int channelIndex, ChannelStripViewModel viewModel, string? propertyName)
     {
-        if (string.IsNullOrWhiteSpace(propertyName))
+        if (string.IsNullOrWhiteSpace(propertyName) || _suppressChannelConfig)
         {
             return;
         }
@@ -1504,6 +2089,25 @@ public partial class MainViewModel : ObservableObject, IDisposable
             case nameof(ChannelStripViewModel.Name):
                 config.Name = viewModel.Name;
                 break;
+            case nameof(ChannelStripViewModel.InputDeviceId):
+                config.InputDeviceId = viewModel.InputDeviceId;
+                if (!_isInitializing)
+                {
+                    ApplyChannelInput(channelIndex, viewModel, config);
+                    RefreshPluginViewModels(channelIndex);
+                }
+                else
+                {
+                    viewModel.InputDeviceLabel = GetInputDeviceLabel(viewModel.InputDeviceId);
+                }
+                break;
+            case nameof(ChannelStripViewModel.InputChannelMode):
+                config.InputChannel = viewModel.InputChannelMode;
+                if (!_isInitializing)
+                {
+                    ApplyChannelInput(channelIndex, viewModel, config);
+                }
+                break;
         }
 
         _configManager.Save(_config);
@@ -1512,6 +2116,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void HandlePluginAction(int channelIndex, int pluginInstanceId, int slotIndex)
     {
         if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
+        {
+            return;
+        }
+
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
         {
             return;
         }
@@ -1546,6 +2156,33 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 qualityPlugin.ApplyQuality(GetQualityProfile());
             }
 
+            if (newPlugin is OutputSendPlugin && HasOutputSendPlugin())
+            {
+                StatusMessage = "Only one Output Send plugin is allowed.";
+                newPlugin.Dispose();
+                return;
+            }
+
+            bool forceInputFirst = false;
+            if (newPlugin is InputPlugin)
+            {
+                if (ChannelHasBusInputPlugin(channelIndex))
+                {
+                    StatusMessage = "Bus input channels cannot add an Input Source plugin.";
+                    newPlugin.Dispose();
+                    return;
+                }
+
+                if (ChannelHasInputPlugin(channelIndex))
+                {
+                    StatusMessage = "Only one Input Source plugin is allowed per channel.";
+                    newPlugin.Dispose();
+                    return;
+                }
+
+                forceInputFirst = true;
+            }
+
             newPlugin.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
 
             int insertIndex = slotIndex;
@@ -1559,10 +2196,30 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 insertIndex = chainCount;
             }
 
-            int instanceId = strip.PluginChain.InsertSlot(insertIndex, newPlugin);
-            UpdatePluginConfig(channelIndex, insertIndex, instanceId, newPlugin);
-            AssignPluginToContainer(channelIndex, instanceId);
+            if (forceInputFirst)
+            {
+                insertIndex = 0;
+            }
+
+            int instanceId = graph.InsertPlugin(newPlugin, insertIndex);
+            if (instanceId <= 0)
+            {
+                return;
+            }
+
+            if (newPlugin is CopyToChannelPlugin copy)
+            {
+                int targetChannelId = CreateCopyChannel(channelIndex);
+                copy.TargetChannelId = targetChannelId;
+                UpdatePluginStateConfig(channelIndex, instanceId);
+            }
+
+            var config = GetOrCreateChannelConfig(channelIndex);
+            MarkChannelPresetCustom(config);
+            _configManager.Save(_config);
             RefreshPluginViewModels(channelIndex);
+            NormalizeOutputSendPlugins();
+            _audioEngine.RebuildRoutingGraph();
             UpdateDynamicWindowWidth();
             return;
         }
@@ -1606,7 +2263,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var strip = _audioEngine.Channels[channelIndex];
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
+        {
+            return;
+        }
+
         var choice = ShowPluginBrowser();
         if (choice is null)
         {
@@ -1633,22 +2295,42 @@ public partial class MainViewModel : ObservableObject, IDisposable
             qualityPlugin.ApplyQuality(GetQualityProfile());
         }
 
+        if (newPlugin is OutputSendPlugin && HasOutputSendPlugin())
+        {
+            StatusMessage = "Only one Output Send plugin is allowed.";
+            newPlugin.Dispose();
+            return;
+        }
+
+        if (newPlugin is InputPlugin)
+        {
+            StatusMessage = "Input Source plugins must be added to the main chain.";
+            newPlugin.Dispose();
+            return;
+        }
+
         newPlugin.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
 
-        int chainCount = strip.PluginChain.Count;
-        if (insertIndex < 0)
+        int instanceId = graph.InsertPluginIntoContainer(newPlugin, containerId, insertIndex);
+        if (instanceId <= 0)
         {
-            insertIndex = 0;
-        }
-        else if (insertIndex > chainCount)
-        {
-            insertIndex = chainCount;
+            return;
         }
 
-        int instanceId = strip.PluginChain.InsertSlot(insertIndex, newPlugin);
-        UpdatePluginConfig(channelIndex, insertIndex, instanceId, newPlugin);
-        AssignPluginToContainer(channelIndex, instanceId, containerId);
+        if (newPlugin is CopyToChannelPlugin copy)
+        {
+            int targetChannelId = CreateCopyChannel(channelIndex);
+            copy.TargetChannelId = targetChannelId;
+            UpdatePluginStateConfig(channelIndex, instanceId);
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        MarkChannelPresetCustom(config);
+        _configManager.Save(_config);
         RefreshPluginViewModels(channelIndex);
+        EnsureOutputSendPlugin();
+        NormalizeOutputSendPlugins();
+        _audioEngine.RebuildRoutingGraph();
         UpdateDynamicWindowWidth();
     }
 
@@ -1660,17 +2342,35 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var strip = _audioEngine.Channels[channelIndex];
-        if (!strip.PluginChain.TryGetSlotById(pluginInstanceId, out var slot, out int slotIndex)
-            || slot is null)
+        if (strip.PluginChain.TryGetSlotById(pluginInstanceId, out var existingSlot, out _) &&
+            existingSlot?.Plugin is BusInputPlugin)
         {
             return;
         }
 
-        strip.PluginChain.RemoveSlot(slotIndex);
-        _audioEngine.QueuePluginDisposal(slot.Plugin);
-        RemovePluginConfig(channelIndex, pluginInstanceId);
-        RemovePluginFromContainers(channelIndex, pluginInstanceId);
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
+        {
+            return;
+        }
+
+        if (!graph.RemovePlugin(pluginInstanceId, out var removedSlot))
+        {
+            return;
+        }
+
+        if (removedSlot is not null)
+        {
+            _audioEngine.QueuePluginDisposal(removedSlot.Plugin);
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        MarkChannelPresetCustom(config);
+        _configManager.Save(_config);
         RefreshPluginViewModels(channelIndex);
+        EnsureOutputSendPlugin();
+        NormalizeOutputSendPlugins();
+        _audioEngine.RebuildRoutingGraph();
         UpdateDynamicWindowWidth();
     }
 
@@ -1682,82 +2382,84 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var strip = _audioEngine.Channels[channelIndex];
+        if (strip.PluginChain.TryGetSlotById(pluginInstanceId, out var existingSlot, out _) &&
+            existingSlot?.Plugin is BusInputPlugin)
+        {
+            return;
+        }
+
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
+        {
+            return;
+        }
+
         var slots = strip.PluginChain.GetSnapshot();
-        if (slots.Length == 0)
+        if (slots.Length > 0 && slots[0]?.Plugin is InputPlugin or BusInputPlugin)
+        {
+            toIndex = Math.Max(1, toIndex);
+        }
+
+        if (!graph.MovePlugin(pluginInstanceId, toIndex))
         {
             return;
         }
 
-        if (!strip.PluginChain.TryGetSlotById(pluginInstanceId, out var slot, out int fromIndex)
-            || slot is null)
-        {
-            return;
-        }
-
-        if (toIndex < 0)
-        {
-            toIndex = 0;
-        }
-        else if (toIndex >= slots.Length)
-        {
-            toIndex = slots.Length - 1;
-        }
-
-        if (fromIndex == toIndex)
-        {
-            return;
-        }
-
-        var newSlots = new List<PluginSlot?>(slots);
-        var item = newSlots[fromIndex];
-        newSlots.RemoveAt(fromIndex);
-        newSlots.Insert(toIndex, item);
-
-        var newSlotsArray = newSlots.ToArray();
-        strip.PluginChain.ReplaceAll(newSlotsArray);
-        QueueRemovedPlugins(slots, newSlotsArray);
-        MovePluginConfig(channelIndex, pluginInstanceId, toIndex);
         var config = GetOrCreateChannelConfig(channelIndex);
-        if (NormalizeContainers(config, newSlotsArray))
-        {
-            _configManager.Save(_config);
-        }
+        MarkChannelPresetCustom(config);
+        _configManager.Save(_config);
         RefreshPluginViewModels(channelIndex);
+        _audioEngine.RebuildRoutingGraph();
+    }
+
+    private void ReorderContainerPlugin(int channelIndex, int containerId, int pluginInstanceId, int toIndex)
+    {
+        if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
+        {
+            return;
+        }
+
+        var strip = _audioEngine.Channels[channelIndex];
+        if (strip.PluginChain.TryGetSlotById(pluginInstanceId, out var existingSlot, out _) &&
+            existingSlot?.Plugin is InputPlugin or BusInputPlugin)
+        {
+            return;
+        }
+
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
+        {
+            return;
+        }
+
+        if (!graph.MovePluginWithinContainer(pluginInstanceId, containerId, toIndex))
+        {
+            return;
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        MarkChannelPresetCustom(config);
+        _configManager.Save(_config);
+
+        RefreshPluginViewModels(channelIndex);
+        _audioEngine.RebuildRoutingGraph();
     }
 
     private void CreateContainer(int channelIndex, bool openWindow)
     {
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
+        {
+            return;
+        }
+
         var config = GetOrCreateChannelConfig(channelIndex);
-        int nextId = 1;
-        for (int i = 0; i < config.Containers.Count; i++)
+        int containerId = graph.CreateContainer(string.Empty);
+        var container = graph.GetContainers().FirstOrDefault(c => c.Id == containerId);
+        if (container is not null && string.IsNullOrWhiteSpace(container.Name))
         {
-            if (config.Containers[i].Id >= nextId)
-            {
-                nextId = config.Containers[i].Id + 1;
-            }
+            container.Name = $"Container {containerId}";
         }
-
-        var container = new PluginContainerConfig
-        {
-            Id = nextId,
-            Name = $"Container {nextId}",
-            IsBypassed = false
-        };
-
-        if (config.Containers.Count == 0)
-        {
-            var slots = _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot();
-            for (int i = 0; i < slots.Length; i++)
-            {
-                if (slots[i] is { } slot)
-                {
-                    container.PluginInstanceIds.Add(slot.InstanceId);
-                }
-            }
-        }
-
-        config.Containers.Add(container);
-        NormalizeContainers(config, _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot());
         MarkChannelPresetCustom(config);
         _configManager.Save(_config);
         RefreshPluginViewModels(channelIndex);
@@ -1765,37 +2467,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         if (openWindow)
         {
-            OpenContainerWindow(channelIndex, container.Id);
+            OpenContainerWindow(channelIndex, containerId);
         }
     }
 
     private void RemoveContainer(int channelIndex, int containerId)
     {
-        var config = GetOrCreateChannelConfig(channelIndex);
-        int index = config.Containers.FindIndex(c => c.Id == containerId);
-        if (index < 0)
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
         {
             return;
         }
 
-        var removed = config.Containers[index];
-        config.Containers.RemoveAt(index);
-
-        if (config.Containers.Count > 0 && removed.PluginInstanceIds.Count > 0)
+        if (!graph.RemoveContainer(containerId))
         {
-            int targetIndex = Math.Clamp(index - 1, 0, config.Containers.Count - 1);
-            var target = config.Containers[targetIndex];
-            for (int i = 0; i < removed.PluginInstanceIds.Count; i++)
-            {
-                int instanceId = removed.PluginInstanceIds[i];
-                if (!target.PluginInstanceIds.Contains(instanceId))
-                {
-                    target.PluginInstanceIds.Add(instanceId);
-                }
-            }
+            return;
         }
 
-        NormalizeContainers(config, _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot());
+        var config = GetOrCreateChannelConfig(channelIndex);
         MarkChannelPresetCustom(config);
         _configManager.Save(_config);
         CloseContainerWindow(channelIndex, containerId);
@@ -1805,26 +2494,57 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void SetContainerBypass(int channelIndex, int containerId, bool bypassed)
     {
-        var config = GetOrCreateChannelConfig(channelIndex);
-        var container = config.Containers.FirstOrDefault(c => c.Id == containerId);
-        if (container is null)
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
         {
             return;
         }
 
-        container.IsBypassed = bypassed;
-        for (int i = 0; i < container.PluginInstanceIds.Count; i++)
+        if (!graph.SetContainerBypass(containerId, bypassed))
         {
-            SetPluginBypass(channelIndex, container.PluginInstanceIds[i], bypassed);
+            return;
         }
 
+        var config = GetOrCreateChannelConfig(channelIndex);
         MarkChannelPresetCustom(config);
         _configManager.Save(_config);
+    }
+
+    private void ReorderContainer(int channelIndex, int containerId, int targetChainIndex)
+    {
+        if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count || containerId <= 0)
+        {
+            return;
+        }
+
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
+        {
+            return;
+        }
+
+        if (!graph.MoveContainer(containerId, targetChainIndex))
+        {
+            return;
+        }
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        MarkChannelPresetCustom(config);
+        _configManager.Save(_config);
+
+        RefreshPluginViewModels(channelIndex);
+        UpdateDynamicWindowWidth();
     }
 
     private void OpenContainerWindow(int channelIndex, int containerId)
     {
         if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
+        {
+            return;
+        }
+
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
         {
             return;
         }
@@ -1836,8 +2556,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var config = GetOrCreateChannelConfig(channelIndex);
-        var container = config.Containers.FirstOrDefault(c => c.Id == containerId);
+        var container = graph.GetContainers().FirstOrDefault(c => c.Id == containerId);
         if (container is null)
         {
             return;
@@ -1849,9 +2568,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             container.Name,
             (instanceId, insertIndex) => HandleContainerPluginAction(channelIndex, containerId, instanceId, insertIndex),
             instanceId => RemovePlugin(channelIndex, instanceId),
-            (instanceId, toIndex) => ReorderPlugins(channelIndex, instanceId, toIndex),
+            (instanceId, toIndex) => ReorderContainerPlugin(channelIndex, containerId, instanceId, toIndex),
             EnqueueParameterChange,
-            (instanceId, bypass) => UpdatePluginBypassConfig(channelIndex, instanceId, bypass));
+            (instanceId, bypass) => UpdatePluginBypassConfig(channelIndex, instanceId, bypass),
+            MeterScaleVox);
 
         UpdateContainerWindowViewModel(viewModel, channelIndex, container);
 
@@ -1886,6 +2606,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             string pluginId = string.Empty;
             float[] elevatedValues = [];
             int instanceId = slot?.InstanceId ?? 0;
+            int copyTargetChannelId = 0;
+            string displayName = slot?.Plugin.Name ?? string.Empty;
 
             if (slot is not null)
             {
@@ -1916,18 +2638,29 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 }
             }
 
+            if (slot?.Plugin is CopyToChannelPlugin copy)
+            {
+                copyTargetChannelId = copy.TargetChannelId;
+                if (copyTargetChannelId > 0)
+                {
+                    displayName = $"Copy to Ch {copyTargetChannelId}";
+                }
+            }
+
             slotInfos.Add(new PluginSlotInfo
             {
                 PluginId = pluginId,
-                Name = slot?.Plugin.Name ?? string.Empty,
+                Name = displayName,
                 IsBypassed = slot?.Plugin.IsBypassed ?? false,
                 LatencyMs = latencyMs,
                 InstanceId = instanceId,
-                ElevatedParamValues = elevatedValues
+                ElevatedParamValues = elevatedValues,
+                CopyTargetChannelId = copyTargetChannelId
             });
         }
 
         viewModel.UpdateName(container.Name);
+        viewModel.MeterScaleVox = MeterScaleVox;
         viewModel.UpdatePlugins(slotInfos, container.PluginInstanceIds);
     }
 
@@ -1938,7 +2671,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var config = GetOrCreateChannelConfig(channelIndex);
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
+        {
+            return;
+        }
+
+        var containers = graph.GetContainers();
         var keys = _containerWindows.Keys.ToArray();
         for (int i = 0; i < keys.Length; i++)
         {
@@ -1948,7 +2687,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 continue;
             }
 
-            var container = config.Containers.FirstOrDefault(c => c.Id == key.ContainerId);
+            var container = containers.FirstOrDefault(c => c.Id == key.ContainerId);
             if (container is null)
             {
                 CloseContainerWindow(key.ChannelIndex, key.ContainerId);
@@ -1993,6 +2732,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var choices = new List<PluginChoice>
         {
             new() { Id = ContainerChoiceId, Name = "Plugin Container", IsVst3 = false, Category = PluginCategory.Utility, Description = "Create a visual container to group plugins on the main strip" },
+            new() { Id = "builtin:input", Name = "Input Source", IsVst3 = false, Category = PluginCategory.Routing, Description = "Read a microphone input into this channel" },
+            new() { Id = "builtin:copy", Name = "Copy to Channel", IsVst3 = false, Category = PluginCategory.Routing, Description = "Duplicate audio + sidechain into a new channel" },
+            new() { Id = "builtin:merge", Name = "Merge", IsVst3 = false, Category = PluginCategory.Routing, Description = "Merge 2-N channels into the current chain with alignment" },
+            new() { Id = "builtin:output-send", Name = "Output Send", IsVst3 = false, Category = PluginCategory.Routing, Description = "Send this chain to the main output (left/right/both)" },
             // Dynamics
             new() { Id = "builtin:gain", Name = "Gain", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Simple gain and phase control" },
             new() { Id = "builtin:compressor", Name = "Compressor", IsVst3 = false, Category = PluginCategory.Dynamics, Description = "Dynamic range compression with soft knee" },
@@ -2062,6 +2805,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void ShowPluginParameters(int channelIndex, int pluginInstanceId, IPlugin plugin)
     {
+        // Routing plugins with no UI - just inline controls
+        if (plugin is BusInputPlugin or CopyToChannelPlugin or MergePlugin)
+        {
+            return;
+        }
+
+        // Use specialized window for Input Source
+        if (plugin is InputPlugin inputPlugin)
+        {
+            ShowInputSourceWindow(channelIndex, pluginInstanceId, inputPlugin);
+            return;
+        }
+
+        // Use specialized window for Output Send
+        if (plugin is OutputSendPlugin outputSend)
+        {
+            ShowOutputSendWindow(channelIndex, pluginInstanceId, outputSend);
+            return;
+        }
+
         // Use specialized window for noise gate
         if (plugin is NoiseGatePlugin noiseGate)
         {
@@ -2240,8 +3003,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var parameterViewModels = plugin.Parameters.Select(parameter =>
         {
             float currentValue = GetPluginParameterValue(channelIndex, pluginInstanceId, parameter.Name, parameter.DefaultValue);
-            return new PluginParameterViewModel(parameter.Index, parameter.Name, parameter.MinValue, parameter.MaxValue, currentValue, parameter.Unit,
-                value => ApplyPluginParameter(channelIndex, pluginInstanceId, parameter.Index, parameter.Name, value));
+            return new PluginParameterViewModel(
+                parameter.Index,
+                parameter.Name,
+                parameter.MinValue,
+                parameter.MaxValue,
+                currentValue,
+                parameter.Unit,
+                value => ApplyPluginParameter(channelIndex, pluginInstanceId, parameter.Index, parameter.Name, value),
+                parameter.FormatValue);
         }).ToList();
 
         Action? learnNoiseAction = plugin is FFTNoiseRemovalPlugin ? () => RequestNoiseLearn(channelIndex, pluginInstanceId) : null;
@@ -2312,6 +3082,67 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void ShowGainWindow(int channelIndex, int pluginInstanceId, GainPlugin plugin)
     {
         var window = new GainWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = plugin.Parameters[paramIndex].Name;
+                ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
+            },
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowInputSourceWindow(int channelIndex, int pluginInstanceId, InputPlugin plugin)
+    {
+        if ((uint)channelIndex >= (uint)Channels.Count)
+            return;
+
+        var channel = Channels[channelIndex];
+        var devices = InputDevices
+            .Select(d => new UI.PluginComponents.InputSourceDevice(d.Id, d.Name))
+            .ToList();
+
+        var window = new InputSourceWindow(
+            devices,
+            () => channel.InputDeviceId,
+            () => channel.InputChannelMode,
+            () => channel.InputGainDb,
+            () => channel.InputPeakLevel,
+            () => plugin.IsBypassed,
+            deviceId => SetChannelInputDevice(channelIndex, deviceId),
+            mode =>
+            {
+                channel.InputChannelMode = mode;
+                _audioEngine.ConfigureChannelInput(channelIndex, channel.InputDeviceId, mode);
+                var config = GetOrCreateChannelConfig(channelIndex);
+                config.InputChannelMode = mode;
+                _configManager.Save(_config);
+            },
+            gainDb =>
+            {
+                channel.InputGainDb = gainDb;
+            },
+            bypassed => SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowOutputSendWindow(int channelIndex, int pluginInstanceId, OutputSendPlugin plugin)
+    {
+        if ((uint)channelIndex >= (uint)Channels.Count)
+            return;
+
+        var channel = Channels[channelIndex];
+        string outputDeviceName = SelectedOutputDevice?.Name ?? "No Output";
+
+        var window = new OutputSendWindow(
+            plugin,
+            outputDeviceName,
+            () => channel.OutputPeakLevel,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;
@@ -2642,11 +3473,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void SetPluginBypass(int channelIndex, int pluginInstanceId, bool bypassed)
     {
-        var channel = channelIndex == 0 ? Channel1 : Channel2;
+        if ((uint)channelIndex >= (uint)Channels.Count)
+        {
+            return;
+        }
+
+        var channel = Channels[channelIndex];
         int slotIndex = FindPluginSlotIndex(channel, pluginInstanceId);
         if (slotIndex >= 0 && slotIndex < channel.PluginSlots.Count)
         {
-            channel.PluginSlots[slotIndex].IsBypassed = bypassed;
+            channel.PluginSlots[slotIndex].SetBypassSilent(bypassed);
         }
     }
 
@@ -2684,6 +3520,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         UpdatePluginParameterConfig(channelIndex, pluginInstanceId, parameterName, value, markPresetDirty);
         UpdatePluginStateConfig(channelIndex, pluginInstanceId);
+
+        var strip = _audioEngine.Channels.ElementAtOrDefault(channelIndex);
+        if (strip is not null && strip.PluginChain.TryGetSlotById(pluginInstanceId, out var slot, out _))
+        {
+            if (slot?.Plugin is MergePlugin)
+            {
+                _audioEngine.RebuildRoutingGraph();
+            }
+
+            if (slot?.Plugin is OutputSendPlugin)
+            {
+                RefreshPluginViewModels(channelIndex);
+            }
+        }
     }
 
     private void RefreshPluginViewModels(int channelIndex)
@@ -2698,6 +3548,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             string pluginId = string.Empty;
             float[] elevatedValues = [];
             int instanceId = slot?.InstanceId ?? 0;
+            int copyTargetChannelId = 0;
+            string displayName = slot?.Plugin.Name ?? string.Empty;
 
             if (slot is not null)
             {
@@ -2706,6 +3558,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 if (_audioEngine.SampleRate > 0)
                 {
                     latencyMs = plugin.LatencySamples * 1000f / _audioEngine.SampleRate;
+                }
+
+                if (plugin is InputPlugin)
+                {
+                    string deviceLabel = GetInputDeviceLabel(GetOrCreateChannelConfig(channelIndex).InputDeviceId);
+                    displayName = $"Input ({deviceLabel})";
+                }
+                else if (plugin is BusInputPlugin)
+                {
+                    displayName = "Bus Input";
+                }
+                else if (plugin is OutputSendPlugin send)
+                {
+                    string modeLabel = send.Mode switch
+                    {
+                        OutputSendMode.Left => "Left",
+                        OutputSendMode.Right => "Right",
+                        _ => "Both"
+                    };
+                    displayName = $"Output Send ({modeLabel})";
                 }
 
                 // Get elevated parameter values
@@ -2730,47 +3602,54 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 }
             }
 
+            if (slot?.Plugin is CopyToChannelPlugin copy)
+            {
+                copyTargetChannelId = copy.TargetChannelId;
+                if (copyTargetChannelId > 0)
+                {
+                    displayName = $"Copy to Ch {copyTargetChannelId}";
+                }
+            }
+
             slotInfos.Add(new PluginSlotInfo
             {
                 PluginId = pluginId,
-                Name = slot?.Plugin.Name ?? string.Empty,
+                Name = displayName,
                 IsBypassed = slot?.Plugin.IsBypassed ?? false,
                 LatencyMs = latencyMs,
                 InstanceId = instanceId,
-                ElevatedParamValues = elevatedValues
+                ElevatedParamValues = elevatedValues,
+                CopyTargetChannelId = copyTargetChannelId
             });
         }
-        if (channelIndex == 0)
+        if ((uint)channelIndex < (uint)Channels.Count)
         {
-            Channel1.UpdatePlugins(slotInfos);
-            Channel1.UpdateContainers(BuildContainerInfos(channelIndex, slots));
-        }
-        else
-        {
-            Channel2.UpdatePlugins(slotInfos);
-            Channel2.UpdateContainers(BuildContainerInfos(channelIndex, slots));
+            var viewModel = Channels[channelIndex];
+            viewModel.UpdatePlugins(slotInfos);
+            viewModel.UpdateContainers(BuildContainerInfos(channelIndex));
         }
 
         UpdateOpenContainerWindows(channelIndex, slotInfos);
     }
 
-    private IReadOnlyList<PluginContainerInfo> BuildContainerInfos(int channelIndex, PluginSlot?[] slots)
+    private IReadOnlyList<PluginContainerInfo> BuildContainerInfos(int channelIndex)
     {
-        if (channelIndex >= _config.Channels.Count)
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
         {
             return Array.Empty<PluginContainerInfo>();
         }
 
-        var config = _config.Channels[channelIndex];
-        if (config.Containers.Count == 0)
+        var containers = graph.GetContainers();
+        if (containers.Count == 0)
         {
             return Array.Empty<PluginContainerInfo>();
         }
 
-        var list = new List<PluginContainerInfo>(config.Containers.Count);
-        for (int i = 0; i < config.Containers.Count; i++)
+        var list = new List<PluginContainerInfo>(containers.Count);
+        for (int i = 0; i < containers.Count; i++)
         {
-            var container = config.Containers[i];
+            var container = containers[i];
             list.Add(new PluginContainerInfo
             {
                 ContainerId = container.Id,
@@ -2805,363 +3684,60 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         while (_config.Channels.Count <= channelIndex)
         {
-            _config.Channels.Add(new ChannelConfig { Id = _config.Channels.Count + 1, Name = $"Mic {_config.Channels.Count + 1}" });
+            _config.Channels.Add(CreateDefaultChannelConfig(_config.Channels.Count + 1));
         }
 
         return _config.Channels[channelIndex];
     }
 
-    private void EnsurePluginListCapacity(ChannelConfig config, int requiredCapacity)
-    {
-        while (config.Plugins.Count < requiredCapacity)
-        {
-            config.Plugins.Add(new PluginConfig());
-        }
-    }
-
-    private Dictionary<int, int> GetPluginIndexMap(int channelIndex)
-    {
-        return channelIndex == 0 ? _channel1PluginIndexMap : _channel2PluginIndexMap;
-    }
-
-    private int GetPluginConfigIndex(int channelIndex, int instanceId)
-    {
-        if (instanceId <= 0)
-        {
-            return -1;
-        }
-
-        var config = GetOrCreateChannelConfig(channelIndex);
-        var map = GetPluginIndexMap(channelIndex);
-        if (map.TryGetValue(instanceId, out int index) &&
-            index >= 0 &&
-            index < config.Plugins.Count &&
-            config.Plugins[index].InstanceId == instanceId)
-        {
-            return index;
-        }
-
-        RebuildPluginIndexMap(config, map);
-        return map.TryGetValue(instanceId, out index) ? index : -1;
-    }
-
-    private static void RebuildPluginIndexMap(ChannelConfig config, Dictionary<int, int> map)
-    {
-        map.Clear();
-        for (int i = 0; i < config.Plugins.Count; i++)
-        {
-            int instanceId = config.Plugins[i].InstanceId;
-            if (instanceId > 0 && !map.ContainsKey(instanceId))
-            {
-                map[instanceId] = i;
-            }
-        }
-    }
-
-    private bool NormalizeContainers(ChannelConfig config, PluginSlot?[] slots)
-    {
-        bool changed = false;
-        var indexMap = new Dictionary<int, int>(slots.Length);
-        for (int i = 0; i < slots.Length; i++)
-        {
-            if (slots[i] is { } slot)
-            {
-                indexMap[slot.InstanceId] = i;
-            }
-        }
-
-        int nextContainerId = 0;
-        for (int i = 0; i < config.Containers.Count; i++)
-        {
-            var container = config.Containers[i];
-            if (container.Id > nextContainerId)
-            {
-                nextContainerId = container.Id;
-            }
-        }
-
-        var assigned = new HashSet<int>();
-        for (int i = 0; i < config.Containers.Count; i++)
-        {
-            var container = config.Containers[i];
-            if (container.Id <= 0)
-            {
-                container.Id = ++nextContainerId;
-                changed = true;
-            }
-
-            var ordered = new List<int>();
-            for (int j = 0; j < container.PluginInstanceIds.Count; j++)
-            {
-                int instanceId = container.PluginInstanceIds[j];
-                if (!indexMap.ContainsKey(instanceId))
-                {
-                    changed = true;
-                    continue;
-                }
-                if (!assigned.Add(instanceId))
-                {
-                    changed = true;
-                    continue;
-                }
-
-                ordered.Add(instanceId);
-            }
-
-            ordered.Sort((a, b) => indexMap[a].CompareTo(indexMap[b]));
-
-            if (!ordered.SequenceEqual(container.PluginInstanceIds))
-            {
-                container.PluginInstanceIds.Clear();
-                container.PluginInstanceIds.AddRange(ordered);
-                changed = true;
-            }
-        }
-
-        if (config.Containers.Count > 0)
-        {
-            var target = config.Containers[^1];
-            bool appended = false;
-            for (int i = 0; i < slots.Length; i++)
-            {
-                if (slots[i] is not { } slot)
-                {
-                    continue;
-                }
-
-                if (assigned.Add(slot.InstanceId))
-                {
-                    target.PluginInstanceIds.Add(slot.InstanceId);
-                    appended = true;
-                }
-            }
-
-            if (appended)
-            {
-                target.PluginInstanceIds.Sort((a, b) => indexMap[a].CompareTo(indexMap[b]));
-                changed = true;
-            }
-        }
-
-        return changed;
-    }
-
-    private void AssignPluginToContainer(int channelIndex, int instanceId)
-    {
-        if (instanceId <= 0)
-        {
-            return;
-        }
-
-        var config = GetOrCreateChannelConfig(channelIndex);
-        if (config.Containers.Count == 0)
-        {
-            return;
-        }
-
-        var container = config.Containers[^1];
-        if (!container.PluginInstanceIds.Contains(instanceId))
-        {
-            container.PluginInstanceIds.Add(instanceId);
-            NormalizeContainers(config, _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot());
-            MarkChannelPresetCustom(config);
-            _configManager.Save(_config);
-        }
-    }
-
-    private void AssignPluginToContainer(int channelIndex, int instanceId, int containerId)
-    {
-        if (instanceId <= 0 || containerId <= 0)
-        {
-            return;
-        }
-
-        var config = GetOrCreateChannelConfig(channelIndex);
-        var container = config.Containers.FirstOrDefault(c => c.Id == containerId);
-        if (container is null)
-        {
-            return;
-        }
-
-        if (!container.PluginInstanceIds.Contains(instanceId))
-        {
-            container.PluginInstanceIds.Add(instanceId);
-            NormalizeContainers(config, _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot());
-            MarkChannelPresetCustom(config);
-            _configManager.Save(_config);
-        }
-    }
-
-    private void RemovePluginFromContainers(int channelIndex, int instanceId)
-    {
-        if (instanceId <= 0)
-        {
-            return;
-        }
-
-        var config = GetOrCreateChannelConfig(channelIndex);
-        if (config.Containers.Count == 0)
-        {
-            return;
-        }
-
-        bool changed = false;
-        for (int i = 0; i < config.Containers.Count; i++)
-        {
-            var container = config.Containers[i];
-            if (container.PluginInstanceIds.Remove(instanceId))
-            {
-                changed = true;
-            }
-        }
-
-        if (changed)
-        {
-            NormalizeContainers(config, _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot());
-            MarkChannelPresetCustom(config);
-            _configManager.Save(_config);
-        }
-    }
-
-    private void UpdatePluginConfig(int channelIndex, int slotIndex, int instanceId, IPlugin plugin)
-    {
-        var config = GetOrCreateChannelConfig(channelIndex);
-
-        var pluginConfig = new PluginConfig
-        {
-            InstanceId = instanceId,
-            Type = plugin.Id,
-            IsBypassed = plugin.IsBypassed,
-            PresetName = PluginPresetManager.CustomPresetName,
-            Parameters = plugin.Parameters.ToDictionary(p => p.Name, p => p.DefaultValue, StringComparer.OrdinalIgnoreCase),
-            State = plugin.GetState()
-        };
-
-        if (slotIndex < 0)
-        {
-            slotIndex = 0;
-        }
-
-        if (slotIndex >= config.Plugins.Count)
-        {
-            EnsurePluginListCapacity(config, slotIndex + 1);
-            config.Plugins[slotIndex] = pluginConfig;
-        }
-        else
-        {
-            config.Plugins.Insert(slotIndex, pluginConfig);
-        }
-        RebuildPluginIndexMap(config, GetPluginIndexMap(channelIndex));
-        MarkChannelPresetCustom(config);
-        _configManager.Save(_config);
-    }
-
-    private void RemovePluginConfig(int channelIndex, int instanceId)
-    {
-        var config = GetOrCreateChannelConfig(channelIndex);
-        int slotIndex = GetPluginConfigIndex(channelIndex, instanceId);
-        if (slotIndex >= 0 && slotIndex < config.Plugins.Count)
-        {
-            config.Plugins.RemoveAt(slotIndex);
-        }
-        RebuildPluginIndexMap(config, GetPluginIndexMap(channelIndex));
-        MarkChannelPresetCustom(config);
-        _configManager.Save(_config);
-    }
-
-    private void MovePluginConfig(int channelIndex, int instanceId, int toIndex)
-    {
-        var config = GetOrCreateChannelConfig(channelIndex);
-        int fromIndex = GetPluginConfigIndex(channelIndex, instanceId);
-        if ((uint)fromIndex >= (uint)config.Plugins.Count)
-        {
-            return;
-        }
-
-        if (toIndex < 0)
-        {
-            toIndex = 0;
-        }
-        else if (toIndex >= config.Plugins.Count)
-        {
-            toIndex = config.Plugins.Count - 1;
-        }
-
-        if (fromIndex == toIndex)
-        {
-            return;
-        }
-
-        var item = config.Plugins[fromIndex];
-        config.Plugins.RemoveAt(fromIndex);
-        config.Plugins.Insert(toIndex, item);
-        RebuildPluginIndexMap(config, GetPluginIndexMap(channelIndex));
-        MarkChannelPresetCustom(config);
-        _configManager.Save(_config);
-    }
-
     private void UpdatePluginParameterConfig(int channelIndex, int instanceId, string parameterName, float value, bool markPresetDirty)
     {
-        var config = GetOrCreateChannelConfig(channelIndex);
-        int slotIndex = GetPluginConfigIndex(channelIndex, instanceId);
-        if (slotIndex < 0 || slotIndex >= config.Plugins.Count)
-        {
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(config.Plugins[slotIndex].Type))
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
         {
             return;
         }
 
-        config.Plugins[slotIndex].Parameters[parameterName] = value;
+        graph.SetPluginParameter(instanceId, parameterName, value);
 
         if (markPresetDirty)
         {
-            MarkPluginPresetCustom(config, slotIndex);
+            MarkPluginPresetCustom(channelIndex, instanceId);
         }
         _configManager.Save(_config);
     }
 
     private void UpdatePluginStateConfig(int channelIndex, int instanceId)
     {
-        if ((uint)channelIndex >= (uint)_audioEngine.Channels.Count)
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
         {
             return;
         }
 
-        var strip = _audioEngine.Channels[channelIndex];
-        if (!strip.PluginChain.TryGetSlotById(instanceId, out var slot, out _)
-            || slot is null)
-        {
-            return;
-        }
-
-        var config = GetOrCreateChannelConfig(channelIndex);
-        int slotIndex = GetPluginConfigIndex(channelIndex, instanceId);
-        if (slotIndex >= config.Plugins.Count)
-        {
-            return;
-        }
-        config.Plugins[slotIndex].State = slot.Plugin.GetState();
+        graph.SetPluginState(instanceId);
         _configManager.Save(_config);
     }
 
     private void UpdatePluginBypassConfig(int channelIndex, int instanceId, bool bypass)
     {
-        var config = GetOrCreateChannelConfig(channelIndex);
-        int slotIndex = GetPluginConfigIndex(channelIndex, instanceId);
-        if (slotIndex < 0 || slotIndex >= config.Plugins.Count)
-        {
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(config.Plugins[slotIndex].Type))
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
         {
             return;
         }
 
-        config.Plugins[slotIndex].IsBypassed = bypass;
-        MarkPluginPresetCustom(config, slotIndex);
+        graph.SetPluginBypass(instanceId, bypass);
+        MarkPluginPresetCustom(channelIndex, instanceId);
         _configManager.Save(_config);
+
+        var strip = _audioEngine.Channels.ElementAtOrDefault(channelIndex);
+        if (strip is not null &&
+            strip.PluginChain.TryGetSlotById(instanceId, out var slot, out _) &&
+            slot?.Plugin is OutputSendPlugin)
+        {
+            NormalizeOutputSendPlugins();
+        }
     }
 
     public void UpdateWindowPosition(double x, double y)
@@ -3185,6 +3761,205 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
+    }
+
+    public void AddChannel()
+    {
+        int channelIndex = _config.Channels.Count;
+        var config = CreateDefaultChannelConfig(channelIndex + 1);
+        _config.Channels.Add(config);
+
+        _audioEngine.EnsureChannelCount(_config.Channels.Count);
+        InitializePluginGraphs();
+
+        var viewModel = CreateChannelViewModel(channelIndex, config.Name);
+        Channels.Add(viewModel);
+        int capturedIndex = channelIndex;
+        viewModel.PropertyChanged += (_, e) => UpdateChannelConfig(capturedIndex, viewModel, e.PropertyName);
+
+        _suppressChannelConfig = true;
+        viewModel.InputGainDb = config.InputGainDb;
+        viewModel.OutputGainDb = config.OutputGainDb;
+        viewModel.IsMuted = config.IsMuted;
+        viewModel.IsSoloed = config.IsSoloed;
+        viewModel.InputDeviceId = config.InputDeviceId;
+        viewModel.InputChannelMode = config.InputChannel;
+        viewModel.InputDeviceLabel = GetInputDeviceLabel(config.InputDeviceId);
+        _suppressChannelConfig = false;
+
+        LoadChannelPlugins(channelIndex, config);
+        ApplyChannelInput(channelIndex, viewModel, config);
+        RefreshPluginViewModels(channelIndex);
+        UpdateDynamicWindowWidth();
+        _configManager.Save(_config);
+
+        ActiveChannelIndex = channelIndex;
+    }
+
+    public void RemoveChannel(int channelIndex)
+    {
+        if (_config.Channels.Count <= 1)
+        {
+            return;
+        }
+
+        if ((uint)channelIndex >= (uint)_config.Channels.Count)
+        {
+            return;
+        }
+
+        SyncGraphsWithConfig();
+
+        int removedChannelId = channelIndex + 1;
+        _config.Channels.RemoveAt(channelIndex);
+        ResequenceChannelIds();
+        NormalizeChannelReferencesAfterRemoval(removedChannelId, _config.Channels.Count);
+        _configManager.Save(_config);
+
+        int nextActive = Math.Clamp(channelIndex, 0, _config.Channels.Count - 1);
+        RebuildForChannelTopologyChange(nextActive);
+    }
+
+    public void SetChannelInputDevice(int channelIndex, string deviceId)
+    {
+        if ((uint)channelIndex >= (uint)Channels.Count)
+        {
+            return;
+        }
+
+        var viewModel = Channels[channelIndex];
+        var config = GetOrCreateChannelConfig(channelIndex);
+
+        string resolved = _audioEngine.ConfigureChannelInput(channelIndex, deviceId, viewModel.InputChannelMode);
+        viewModel.InputDeviceId = resolved;
+        viewModel.InputDeviceLabel = GetInputDeviceLabel(resolved);
+        config.InputDeviceId = resolved;
+
+        _configManager.Save(_config);
+    }
+
+    private void RebuildForChannelTopologyChange(int desiredActiveIndex)
+    {
+        _isInitializing = true;
+        CloseAllContainerWindows();
+
+        _audioEngine.Stop();
+        _audioEngine.Dispose();
+
+        _audioEngine = new AudioEngine(_config.AudioSettings, Math.Max(1, _config.Channels.Count));
+        _analysisOrchestrator.Initialize(_config.AudioSettings.SampleRate);
+        _analysisOrchestrator.Reset();
+        _audioEngine.AnalysisTap.Orchestrator = _analysisOrchestrator;
+        _analysisOrchestrator.DebugTap = _audioEngine.AnalysisTap;
+
+        BuildChannelViewModels();
+        ApplyConfigToViewModels();
+        InitializePluginGraphs();
+        LoadPluginsFromConfig();
+        UpdateDynamicWindowWidth();
+
+        if ((uint)desiredActiveIndex < (uint)Channels.Count)
+        {
+            ActiveChannelIndex = desiredActiveIndex;
+        }
+
+        _isInitializing = false;
+        ApplyDeviceSelection();
+    }
+
+    private void CloseAllContainerWindows()
+    {
+        if (_containerWindows.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var window in _containerWindows.Values.ToArray())
+        {
+            window.Close();
+        }
+
+        _containerWindows.Clear();
+    }
+
+    private void ResequenceChannelIds()
+    {
+        for (int i = 0; i < _config.Channels.Count; i++)
+        {
+            _config.Channels[i].Id = i + 1;
+        }
+    }
+
+    private void NormalizeChannelReferencesAfterRemoval(int removedChannelId, int newChannelCount)
+    {
+        if (newChannelCount < 1)
+        {
+            return;
+        }
+
+        for (int i = 0; i < _config.Channels.Count; i++)
+        {
+            var channel = _config.Channels[i];
+            for (int j = 0; j < channel.Plugins.Count; j++)
+            {
+                var pluginConfig = channel.Plugins[j];
+                if (string.Equals(pluginConfig.Type, "builtin:copy", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (pluginConfig.State is { Length: >= 4 } state)
+                    {
+                        int target = BitConverter.ToInt32(state, 0);
+                        int remapped = RemapChannelId(target, removedChannelId, newChannelCount);
+                        if (remapped != target)
+                        {
+                            pluginConfig.State = BitConverter.GetBytes(remapped);
+                        }
+                    }
+                    continue;
+                }
+
+                if (string.Equals(pluginConfig.Type, "builtin:merge", StringComparison.OrdinalIgnoreCase))
+                {
+                    bool changed = false;
+                    for (int sourceIndex = 1; sourceIndex <= 16; sourceIndex++)
+                    {
+                        string key = $"Source {sourceIndex}";
+                        if (!pluginConfig.Parameters.TryGetValue(key, out var value))
+                        {
+                            continue;
+                        }
+
+                        int channelId = (int)MathF.Round(value);
+                        int remapped = RemapChannelId(channelId, removedChannelId, newChannelCount);
+                        if (remapped != channelId)
+                        {
+                            pluginConfig.Parameters[key] = remapped;
+                            changed = true;
+                        }
+                    }
+
+                    if (changed && pluginConfig.State is { Length: > 0 })
+                    {
+                        pluginConfig.State = null;
+                    }
+                }
+            }
+        }
+    }
+
+    private static int RemapChannelId(int channelId, int removedChannelId, int newChannelCount)
+    {
+        if (channelId <= 0)
+        {
+            return channelId;
+        }
+
+        int remapped = channelId > removedChannelId ? channelId - 1 : channelId;
+        if (remapped > newChannelCount)
+        {
+            remapped = newChannelCount;
+        }
+
+        return remapped < 1 ? 1 : remapped;
     }
 
     public void AddContainer(int channelIndex)
@@ -3274,8 +4049,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var config = GetOrCreateChannelConfig(channelIndex);
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
+        {
+            return;
+        }
+
         var plugins = new List<(string pluginId, Dictionary<string, float> parameters)>();
-        var containers = new List<ChainPresetContainer>();
 
         foreach (var pluginConfig in config.Plugins)
         {
@@ -3288,33 +4068,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             plugins.Add((pluginConfig.Type, parameters));
         }
 
-        if (config.Containers.Count > 0)
-        {
-            var indexMap = new Dictionary<int, int>();
-            for (int i = 0; i < config.Plugins.Count; i++)
-            {
-                int instanceId = config.Plugins[i].InstanceId;
-                if (instanceId > 0 && !indexMap.ContainsKey(instanceId))
-                {
-                    indexMap[instanceId] = i;
-                }
-            }
-
-            foreach (var container in config.Containers)
-            {
-                var indices = new List<int>();
-                foreach (var instanceId in container.PluginInstanceIds)
-                {
-                    if (indexMap.TryGetValue(instanceId, out int index))
-                    {
-                        indices.Add(index);
-                    }
-                }
-
-                containers.Add(new ChainPresetContainer(container.Name, indices, container.IsBypassed));
-            }
-        }
-
+        var containers = graph.BuildPresetContainers();
         if (_presetManager.SaveChainPreset(presetName, plugins, containers))
         {
             config.PresetName = presetName;
@@ -3349,21 +4103,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_presetManager.DeleteChainPreset(presetName))
         {
             // Reset any channels using this preset to Custom
-            var channel1Name = GetChannelPresetName(0);
-            var channel2Name = GetChannelPresetName(1);
-
-            if (string.Equals(channel1Name, presetName, StringComparison.OrdinalIgnoreCase))
+            for (int i = 0; i < _config.Channels.Count; i++)
             {
-                var config = GetOrCreateChannelConfig(0);
-                config.PresetName = PluginPresetManager.CustomPresetName;
-                Channel1PresetName = PluginPresetManager.CustomPresetName;
-            }
-
-            if (string.Equals(channel2Name, presetName, StringComparison.OrdinalIgnoreCase))
-            {
-                var config = GetOrCreateChannelConfig(1);
-                config.PresetName = PluginPresetManager.CustomPresetName;
-                Channel2PresetName = PluginPresetManager.CustomPresetName;
+                var channelName = GetChannelPresetName(i);
+                if (string.Equals(channelName, presetName, StringComparison.OrdinalIgnoreCase))
+                {
+                    var config = GetOrCreateChannelConfig(i);
+                    config.PresetName = PluginPresetManager.CustomPresetName;
+                    if (i == ActiveChannelIndex)
+                    {
+                        ActiveChannelPresetName = PluginPresetManager.CustomPresetName;
+                    }
+                }
             }
 
             _configManager.Save(_config);
@@ -3376,32 +4127,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void UpdatePresetNameProperty(int channelIndex)
     {
         var presetName = GetChannelPresetName(channelIndex);
-        if (channelIndex == 0)
+        if (channelIndex == ActiveChannelIndex)
         {
-            Channel1PresetName = presetName;
-        }
-        else
-        {
-            Channel2PresetName = presetName;
+            ActiveChannelPresetName = presetName;
         }
     }
 
     private float GetPluginParameterValue(int channelIndex, int instanceId, string parameterName, float fallback)
     {
-        if (channelIndex >= _config.Channels.Count)
-        {
-            return fallback;
-        }
-
-        var channel = _config.Channels[channelIndex];
-        int slotIndex = GetPluginConfigIndex(channelIndex, instanceId);
-        if (slotIndex < 0 || slotIndex >= channel.Plugins.Count)
-        {
-            return fallback;
-        }
-
-        var pluginConfig = channel.Plugins[slotIndex];
-        if (string.IsNullOrWhiteSpace(pluginConfig.Type))
+        var graph = GetGraph(channelIndex);
+        if (graph is null || !graph.TryGetPluginConfig(instanceId, out var pluginConfig))
         {
             return fallback;
         }

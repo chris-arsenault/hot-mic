@@ -10,11 +10,6 @@ namespace HotMic.App.Controls;
 /// </summary>
 public class MeterControl : SkiaControl
 {
-    public static readonly DependencyProperty LevelProperty =
-        DependencyProperty.Register(nameof(Level), typeof(float), typeof(MeterControl),
-            new FrameworkPropertyMetadata(0f, FrameworkPropertyMetadataOptions.AffectsRender));
-
-    // Keep legacy properties for compatibility but they now feed into ballistics
     public static readonly DependencyProperty PeakLevelProperty =
         DependencyProperty.Register(nameof(PeakLevel), typeof(float), typeof(MeterControl),
             new FrameworkPropertyMetadata(0f, FrameworkPropertyMetadataOptions.AffectsRender));
@@ -24,16 +19,7 @@ public class MeterControl : SkiaControl
             new FrameworkPropertyMetadata(0f, FrameworkPropertyMetadataOptions.AffectsRender));
 
     /// <summary>
-    /// The input level (linear 0-1). Ballistics are applied internally.
-    /// </summary>
-    public float Level
-    {
-        get => (float)GetValue(LevelProperty);
-        set => SetValue(LevelProperty, value);
-    }
-
-    /// <summary>
-    /// Legacy peak level property. If Level is 0, this is used instead.
+    /// The peak level (linear 0-1).
     /// </summary>
     public float PeakLevel
     {
@@ -42,7 +28,7 @@ public class MeterControl : SkiaControl
     }
 
     /// <summary>
-    /// Legacy RMS level property. If Level is 0, this is used instead.
+    /// The RMS level (linear 0-1).
     /// </summary>
     public float RmsLevel
     {
@@ -68,7 +54,7 @@ public class MeterControl : SkiaControl
 
         // MeterProcessor already applies ballistics (peak hold, RMS smoothing)
         // Just convert to normalized dB and display directly
-        float peakLinear = Level > 0 ? Level : PeakLevel;
+        float peakLinear = PeakLevel;
         float rmsLinear = RmsLevel;
 
         // Convert to normalized (using -60dB to 0dB range)

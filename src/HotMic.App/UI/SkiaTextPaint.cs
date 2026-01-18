@@ -3,7 +3,7 @@ using SkiaSharp;
 
 namespace HotMic.App.UI;
 
-internal sealed class SkiaTextPaint : IDisposable
+public sealed class SkiaTextPaint : IDisposable
 {
     private readonly SKTypeface _typeface;
 

@@ -1567,9 +1567,10 @@ public partial class VocalSpectrographWindow : Window
     {
         FormantProfile next = _plugin.FormantProfile switch
         {
-            FormantProfile.Male => FormantProfile.Female,
-            FormantProfile.Female => FormantProfile.Child,
-            _ => FormantProfile.Male
+            FormantProfile.BassBaritone => FormantProfile.Tenor,
+            FormantProfile.Tenor => FormantProfile.Alto,
+            FormantProfile.Alto => FormantProfile.Soprano,
+            _ => FormantProfile.BassBaritone
         };
         _parameterCallback(VocalSpectrographPlugin.FormantProfileIndex, (float)next);
         _presetHelper.MarkAsCustom();

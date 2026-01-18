@@ -131,6 +131,7 @@ public partial class AnalyzerWindow : Window
     private int _uiCopyUs;
     private int _uiMapUs;
     private bool _applyingPreset;
+    private int _debugLogCounter;
 
     private static readonly double TicksToMicroseconds = 1_000_000.0 / Stopwatch.Frequency;
 
@@ -162,7 +163,6 @@ public partial class AnalyzerWindow : Window
 
     private static readonly float[] OverlapOptions = { 0.5f, 0.75f, 0.875f, 0.9375f, 0.96875f };
 
-    // Parameter indices (local to AnalyzerWindow, decoupled from legacy plugin)
     private const int ParamFftSize = 0;
     private const int ParamWindowFunction = 1;
     private const int ParamOverlap = 2;
@@ -243,16 +243,7 @@ public partial class AnalyzerWindow : Window
         _renderTimer.Tick += OnRenderTick;
         Loaded += (_, _) =>
         {
-            // Subscribe to all analysis capabilities
-            _subscription = _orchestrator.Subscribe(
-                AnalysisCapabilities.Spectrogram |
-                AnalysisCapabilities.Pitch |
-                AnalysisCapabilities.Formants |
-                AnalysisCapabilities.Harmonics |
-                AnalysisCapabilities.VoicingState |
-                AnalysisCapabilities.Waveform |
-                AnalysisCapabilities.SpectralFeatures |
-                AnalysisCapabilities.SpeechMetrics);
+            UpdateSubscription();
             _renderTimer.Start();
         };
         Closed += (_, _) =>
@@ -356,20 +347,20 @@ public partial class AnalyzerWindow : Window
         else if (index == ParamHarmonicDisplayMode) _harmonicDisplayMode = (HarmonicDisplayMode)(int)value;
         else if (index == ParamDynamicRangeMode) _dynamicRangeMode = (SpectrogramDynamicRangeMode)(int)value;
 
-        // Toggle overlays/views (local)
-        else if (index == ParamShowPitch) _showPitch = value > 0.5f;
-        else if (index == ParamShowFormants) _showFormants = value > 0.5f;
+        // Toggle overlays/views (local) - these affect required capabilities
+        else if (index == ParamShowPitch) { _showPitch = value > 0.5f; UpdateSubscription(); }
+        else if (index == ParamShowFormants) { _showFormants = value > 0.5f; UpdateSubscription(); }
         else if (index == ParamShowFormantBandwidths) _showFormantBandwidths = value > 0.5f;
-        else if (index == ParamShowHarmonics) _showHarmonics = value > 0.5f;
-        else if (index == ParamShowVoicing) _showVoicing = value > 0.5f;
+        else if (index == ParamShowHarmonics) { _showHarmonics = value > 0.5f; UpdateSubscription(); }
+        else if (index == ParamShowVoicing) { _showVoicing = value > 0.5f; UpdateSubscription(); }
         else if (index == ParamShowRange) _showRange = value > 0.5f;
         else if (index == ParamShowGuides) _showGuides = value > 0.5f;
-        else if (index == ParamShowWaveform) _showWaveform = value > 0.5f;
-        else if (index == ParamShowSpectrum) _showSpectrum = value > 0.5f;
-        else if (index == ParamShowPitchMeter) _showPitchMeter = value > 0.5f;
-        else if (index == ParamShowVowelSpace) _showVowelSpace = value > 0.5f;
-        else if (index == ParamSpeechCoachEnabled) _speechCoachEnabled = value > 0.5f;
-        else if (index == ParamShowSpeechMetrics) _showSpeechMetrics = value > 0.5f;
+        else if (index == ParamShowWaveform) { _showWaveform = value > 0.5f; UpdateSubscription(); }
+        else if (index == ParamShowSpectrum) { _showSpectrum = value > 0.5f; UpdateSubscription(); }
+        else if (index == ParamShowPitchMeter) { _showPitchMeter = value > 0.5f; UpdateSubscription(); }
+        else if (index == ParamShowVowelSpace) { _showVowelSpace = value > 0.5f; UpdateSubscription(); }
+        else if (index == ParamSpeechCoachEnabled) { _speechCoachEnabled = value > 0.5f; UpdateSubscription(); }
+        else if (index == ParamShowSpeechMetrics) { _showSpeechMetrics = value > 0.5f; UpdateSubscription(); }
         else if (index == ParamShowSyllableMarkers) _showSyllableMarkers = value > 0.5f;
         else if (index == ParamShowPauseOverlay) _showPauseOverlay = value > 0.5f;
         else if (index == ParamShowFillerMarkers) _showFillerMarkers = value > 0.5f;
@@ -769,6 +760,48 @@ public partial class AnalyzerWindow : Window
         }
 
         InvalidateRenderSurface();
+
+        // Debug logging - every ~60 ticks (~1 second)
+        _debugLogCounter++;
+        if (_debugLogCounter >= 60)
+        {
+            _debugLogCounter = 0;
+            var tap = _orchestrator.DebugTap;
+            Console.WriteLine("=== ANALYZER DEBUG ===");
+            Console.WriteLine($"TAP: calls={tap?.DebugCaptureCallCount ?? 0} noOrc={tap?.DebugSkippedNoOrchestrator ?? 0} noCons={tap?.DebugSkippedNoConsumers ?? 0} fwd={tap?.DebugForwardedCount ?? 0} buf={tap?.DebugLastBufferLength ?? 0}");
+            Console.WriteLine($"ENQ: calls={_orchestrator.DebugEnqueueCalls} skipCh={_orchestrator.DebugEnqueueSkippedChannel} skipE={_orchestrator.DebugEnqueueSkippedEmpty} written={_orchestrator.DebugEnqueueWritten} samp={_orchestrator.DebugEnqueueSamplesWritten}");
+            Console.WriteLine($"LOOP: iter={_orchestrator.DebugLoopIterations} noCons={_orchestrator.DebugLoopNoConsumers} noData={_orchestrator.DebugLoopNotEnoughData} proc={_orchestrator.DebugLoopFramesProcessed} written={_orchestrator.DebugLoopFramesWritten}");
+            Console.WriteLine($"ORC: capBuf={_orchestrator.DebugCaptureBufferAvailable} hop={_orchestrator.DebugActiveHopSize} frames={_orchestrator.DebugActiveFrameCapacity} disp={_orchestrator.DebugActiveDisplayBins} anl={_orchestrator.DebugActiveAnalysisBins} cons={_orchestrator.DebugConsumerCount}");
+            Console.WriteLine($"VALUES: hopMax={_orchestrator.DebugLastHopMax:F6} fftMax={_orchestrator.DebugLastFftMax:F6} displayMax={_orchestrator.DebugLastDisplayMax:F6}");
+            string transformName = _orchestrator.DebugTransformPath switch { 0 => "FFT", 1 => "CQT", 2 => "ZoomFFT", _ => "?" };
+            Console.WriteLine($"FFT: analysisBuf={_orchestrator.DebugLastAnalysisBufMax:F6} window={_orchestrator.DebugLastWindowMax:F6} fftReal={_orchestrator.DebugLastFftRealMax:F6} fftNull={_orchestrator.DebugFftNull} transform={transformName}");
+            Console.WriteLine($"PROC: processedMax={_orchestrator.DebugLastProcessedMax:F6} filled={_orchestrator.DebugAnalysisFilled} sampleRate={_orchestrator.SampleRate}");
+            Console.WriteLine($"STORE: latest={_store.LatestFrameId} avail={_store.AvailableFrames} cap={_store.FrameCapacity} disp={_store.DisplayBins} anl={_store.AnalysisBins} ver={_store.DataVersion}");
+            Console.WriteLine($"PIPE: configured={_displayPipeline.IsConfigured} dispBins={_displayPipeline.DisplayBins}");
+            Console.WriteLine($"LOCAL: latestFrame={_latestFrameId} availFrames={_availableFrames} lastDataVer={_lastDataVersion} lastCopied={_lastCopiedFrameId} lastMapped={_lastMappedFrameId}");
+
+            // Check actual data values
+            float maxDisplayMag = 0f, maxAnalysisMag = 0f, maxSpectrogram = 0f;
+            int nonZeroDisplay = 0, nonZeroAnalysis = 0, nonZeroSpectro = 0;
+            for (int i = 0; i < Math.Min(10000, _displayMagnitudes.Length); i++)
+            {
+                if (_displayMagnitudes[i] != 0) { nonZeroDisplay++; maxDisplayMag = MathF.Max(maxDisplayMag, MathF.Abs(_displayMagnitudes[i])); }
+            }
+            for (int i = 0; i < Math.Min(10000, _analysisMagnitudes.Length); i++)
+            {
+                if (_analysisMagnitudes[i] != 0) { nonZeroAnalysis++; maxAnalysisMag = MathF.Max(maxAnalysisMag, MathF.Abs(_analysisMagnitudes[i])); }
+            }
+            for (int i = 0; i < Math.Min(10000, _spectrogram.Length); i++)
+            {
+                if (_spectrogram[i] != 0) { nonZeroSpectro++; maxSpectrogram = MathF.Max(maxSpectrogram, MathF.Abs(_spectrogram[i])); }
+            }
+            Console.WriteLine($"DATA: displayMag[nonZero={nonZeroDisplay} max={maxDisplayMag:F4}] analysisMag[nonZero={nonZeroAnalysis} max={maxAnalysisMag:F4}] spectro[nonZero={nonZeroSpectro} max={maxSpectrogram:F4}]");
+
+            // Check TryGet return values
+            bool spectroCopied = _store.TryGetSpectrogramRange(-1, _displayMagnitudes, out long specLatest, out int specAvail, out bool specFull);
+            bool linearCopied = _store.TryGetLinearMagnitudes(-1, _analysisMagnitudes, out _, out _, out _, out long linLatest, out int linAvail, out bool linFull);
+            Console.WriteLine($"TRYGET: spectro={spectroCopied}(latest={specLatest} avail={specAvail} full={specFull}) linear={linearCopied}(latest={linLatest} avail={linAvail} full={linFull})");
+        }
     }
 
     private void MapUpdatedFrames(bool reassignActive, bool forceFullMap)
@@ -1735,9 +1768,10 @@ public partial class AnalyzerWindow : Window
     {
         FormantProfile next = _orchestrator.Config.FormantProfile switch
         {
-            FormantProfile.Male => FormantProfile.Female,
-            FormantProfile.Female => FormantProfile.Child,
-            _ => FormantProfile.Male
+            FormantProfile.BassBaritone => FormantProfile.Tenor,
+            FormantProfile.Tenor => FormantProfile.Alto,
+            FormantProfile.Alto => FormantProfile.Soprano,
+            _ => FormantProfile.BassBaritone
         };
         SetParameter(ParamFormantProfile, (float)next);
         // Preset tracking removed - using shared orchestrator config
@@ -2019,6 +2053,7 @@ public partial class AnalyzerWindow : Window
         finally
         {
             _applyingPreset = false;
+            UpdateSubscription();
         }
     }
 
@@ -2078,4 +2113,42 @@ public partial class AnalyzerWindow : Window
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
     }
+
+    private AnalysisCapabilities ComputeRequiredCapabilities()
+    {
+        var caps = AnalysisCapabilities.Spectrogram;
+
+        if (_showPitch || _showPitchMeter)
+            caps |= AnalysisCapabilities.Pitch;
+
+        if (_showFormants || _showVowelSpace)
+            caps |= AnalysisCapabilities.Formants;
+
+        if (_showHarmonics)
+            caps |= AnalysisCapabilities.Harmonics;
+
+        if (_showVoicing)
+            caps |= AnalysisCapabilities.VoicingState;
+
+        if (_showWaveform)
+            caps |= AnalysisCapabilities.Waveform;
+
+        if (_showSpectrum)
+            caps |= AnalysisCapabilities.SpectralFeatures;
+
+        if (_speechCoachEnabled || _showSpeechMetrics)
+            caps |= AnalysisCapabilities.SpeechMetrics;
+
+        return caps;
+    }
+
+    private void UpdateSubscription()
+    {
+        var requiredCaps = ComputeRequiredCapabilities();
+
+        // Dispose old subscription and create new one with updated capabilities
+        _subscription?.Dispose();
+        _subscription = _orchestrator.Subscribe(requiredCaps);
+    }
+
 }

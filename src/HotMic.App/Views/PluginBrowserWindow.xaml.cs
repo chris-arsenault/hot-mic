@@ -72,6 +72,22 @@ public partial class PluginBrowserWindow : Window
 
         _isSearchFocused = false;
 
+        if (_renderer.HitTestBuiltInTab(x, y))
+        {
+            viewModel.SelectedTab = PluginBrowserTab.BuiltIn;
+            _scrollOffset = 0f;
+            e.Handled = true;
+            return;
+        }
+
+        if (_renderer.HitTestVstTab(x, y))
+        {
+            viewModel.SelectedTab = PluginBrowserTab.Vst;
+            _scrollOffset = 0f;
+            e.Handled = true;
+            return;
+        }
+
         if (_renderer.HitTestAdd(x, y))
         {
             if (viewModel.SelectedChoice is not null)

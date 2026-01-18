@@ -89,7 +89,7 @@ public sealed class AnalyzerRenderer : IDisposable
 
         // View Options Panel - Overlays
         ["PitchOverlay"] = ("Pitch Track", "Yellow line showing detected fundamental frequency (F0). Pitch/voicing work is skipped when Pitch/Meter/Harmonics/Voicing/Clarity are all off."),
-        ["FormantOverlay"] = ("Formants", "Colored lines showing F1/F2/F3 vocal resonances"),
+        ["FormantOverlay"] = ("Formants", "Colored lines showing F1/F2 vocal resonances"),
         ["HarmonicOverlay"] = ("Harmonics", "Dots marking detected harmonic peaks"),
         ["HarmonicMode"] = ("Harmonic Mode", "D=Detected only, T=Theoretical positions, B=Both"),
         ["VoicingOverlay"] = ("Voicing", "Lane showing voiced/unvoiced/silence segments"),
@@ -104,7 +104,7 @@ public sealed class AnalyzerRenderer : IDisposable
 
         // Other buttons
         ["VoiceRange"] = ("Voice Range", "Select Bass/Baritone/Tenor/Alto/MezzoSoprano/Soprano"),
-        ["FormantProfile"] = ("Formant Profile", "Presets for male/female/child formant ceilings and LPC settings"),
+        ["FormantProfile"] = ("Formant Profile", "Presets for Bass/Baritone/Tenor/Alto/Soprano formant ranges and LPC order"),
         ["PitchAlgo"] = ("Pitch Algorithm", "YIN/PYIN/Autocorr/Cepstral are time-domain; SWIPE uses FFT. With CQT, SWIPE is forced to YIN. Pitch/voicing work runs only when Pitch/Meter/Harmonics/Voicing/Clarity are enabled."),
         ["Pause"] = ("Pause/Run", "Pause or resume the spectrograph visualization"),
     };
@@ -3109,9 +3109,10 @@ public sealed class AnalyzerRenderer : IDisposable
     {
         return profile switch
         {
-            FormantProfile.Female => "Female",
-            FormantProfile.Child => "Child",
-            _ => "Male"
+            FormantProfile.BassBaritone => "Bass/Bari",
+            FormantProfile.Alto => "Alto",
+            FormantProfile.Soprano => "Sop",
+            _ => "Tenor"
         };
     }
 

@@ -3,7 +3,6 @@ using System.Windows.Input;
 using System.Windows.Media;
 using HotMic.App.UI;
 using HotMic.App.ViewModels;
-using HotMic.Common.Configuration;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
 
@@ -135,14 +134,6 @@ public partial class SettingsWindow : Window
     {
         switch (hit.Field)
         {
-            case SettingsField.Input1:
-                if ((uint)hit.Index < (uint)_viewModel.InputDevices.Count)
-                    _viewModel.SelectedInputDevice1 = _viewModel.InputDevices[hit.Index];
-                break;
-            case SettingsField.Input2:
-                if ((uint)hit.Index < (uint)_viewModel.InputDevices.Count)
-                    _viewModel.SelectedInputDevice2 = _viewModel.InputDevices[hit.Index];
-                break;
             case SettingsField.Output:
                 if ((uint)hit.Index < (uint)_viewModel.OutputDevices.Count)
                     _viewModel.SelectedOutputDevice = _viewModel.OutputDevices[hit.Index];
@@ -158,18 +149,6 @@ public partial class SettingsWindow : Window
             case SettingsField.BufferSize:
                 if ((uint)hit.Index < (uint)_viewModel.BufferSizeOptions.Count)
                     _viewModel.SelectedBufferSize = _viewModel.BufferSizeOptions[hit.Index];
-                break;
-            case SettingsField.Input1Channel:
-                if ((uint)hit.Index < (uint)_viewModel.InputChannelOptions.Count)
-                    _viewModel.SelectedInput1Channel = _viewModel.InputChannelOptions[hit.Index];
-                break;
-            case SettingsField.Input2Channel:
-                if ((uint)hit.Index < (uint)_viewModel.InputChannelOptions.Count)
-                    _viewModel.SelectedInput2Channel = _viewModel.InputChannelOptions[hit.Index];
-                break;
-            case SettingsField.OutputRouting:
-                if ((uint)hit.Index < (uint)_viewModel.OutputRoutingOptions.Count)
-                    _viewModel.SelectedOutputRouting = _viewModel.OutputRoutingOptions[hit.Index];
                 break;
             case SettingsField.MidiDevice:
                 if ((uint)hit.Index < (uint)_viewModel.MidiDevices.Count)

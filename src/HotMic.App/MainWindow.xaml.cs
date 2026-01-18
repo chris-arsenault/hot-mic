@@ -7,7 +7,6 @@ using System.Windows.Threading;
 using HotMic.App.Models;
 using HotMic.App.UI;
 using HotMic.App.ViewModels;
-using HotMic.Common.Configuration;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
 using ContextMenu = System.Windows.Controls.ContextMenu;
@@ -80,6 +79,21 @@ public partial class MainWindow : Window
             return;
         }
 
+        int deleteIndex = _renderer.HitTestChannelDelete(x, y);
+        if (deleteIndex >= 0)
+        {
+            viewModel.RemoveChannel(deleteIndex);
+            e.Handled = true;
+            return;
+        }
+
+        if (_renderer.HitTestAddChannel(x, y))
+        {
+            viewModel.AddChannel();
+            e.Handled = true;
+            return;
+        }
+
         if (viewModel.IsMinimalView)
         {
             return;
@@ -125,10 +139,30 @@ public partial class MainWindow : Window
         }
 
         // Preset dropdown clicks
-        int presetChannel = _renderer.HitTestPresetDropdown(x, y);
-        if (presetChannel >= 0)
+        if (_renderer.HitTestPresetDropdown(x, y))
         {
-            ShowPresetDropdownMenu(viewModel, presetChannel);
+            ShowPresetDropdownMenu(viewModel);
+            e.Handled = true;
+            return;
+        }
+
+        // Check routing badges first (mode toggles L/R/Sum)
+        var routingBadgeHit = _renderer.HitTestRoutingBadge(x, y);
+        if (routingBadgeHit.HasValue)
+        {
+            SetActiveChannel(viewModel, routingBadgeHit.Value.ChannelIndex);
+            HandleRoutingBadgeClick(viewModel, routingBadgeHit.Value);
+            e.Handled = true;
+            return;
+        }
+
+        // Check routing knobs first (they're on top of routing slots)
+        var routingKnobHit = _renderer.HitTestRoutingKnob(x, y);
+        if (routingKnobHit.HasValue)
+        {
+            SetActiveChannel(viewModel, routingKnobHit.Value.ChannelIndex);
+            StartRoutingKnobDrag(viewModel, routingKnobHit.Value, y);
+            SkiaCanvas.CaptureMouse();
             e.Handled = true;
             return;
         }
@@ -137,6 +171,7 @@ public partial class MainWindow : Window
         var pluginKnobHit = _renderer.HitTestPluginKnob(x, y);
         if (pluginKnobHit.HasValue)
         {
+            SetActiveChannel(viewModel, pluginKnobHit.Value.ChannelIndex);
             StartPluginKnobDrag(viewModel, pluginKnobHit.Value, y);
             SkiaCanvas.CaptureMouse();
             e.Handled = true;
@@ -146,6 +181,7 @@ public partial class MainWindow : Window
         var knobHit = _renderer.HitTestKnob(x, y);
         if (knobHit.HasValue)
         {
+            SetActiveChannel(viewModel, knobHit.Value.ChannelIndex);
             StartKnobDrag(viewModel, knobHit.Value, y);
             SkiaCanvas.CaptureMouse();
             e.Handled = true;
@@ -155,7 +191,30 @@ public partial class MainWindow : Window
         var toggleHit = _renderer.HitTestToggle(x, y);
         if (toggleHit.HasValue)
         {
+            if (toggleHit.Value.ChannelIndex >= 0)
+            {
+                SetActiveChannel(viewModel, toggleHit.Value.ChannelIndex);
+            }
             HandleToggle(viewModel, toggleHit.Value);
+            e.Handled = true;
+            return;
+        }
+
+        var containerHit = _renderer.HitTestContainerSlot(x, y, out var containerRegion);
+        if (containerHit.HasValue)
+        {
+            SetActiveChannel(viewModel, containerHit.Value.ChannelIndex);
+            HandleContainerSlotMouseDown(viewModel, containerHit.Value, containerRegion, x, y);
+            e.Handled = true;
+            return;
+        }
+
+        // Check routing slots before standard plugin slots
+        var routingHit = _renderer.HitTestRoutingSlot(x, y, out var routingRegion);
+        if (routingHit.HasValue)
+        {
+            SetActiveChannel(viewModel, routingHit.Value.ChannelIndex);
+            HandleRoutingSlotClick(viewModel, routingHit.Value, routingRegion, x, y);
             e.Handled = true;
             return;
         }
@@ -163,6 +222,7 @@ public partial class MainWindow : Window
         var pluginHit = _renderer.HitTestPluginSlot(x, y, out var region);
         if (pluginHit.HasValue)
         {
+            SetActiveChannel(viewModel, pluginHit.Value.ChannelIndex);
             HandlePluginSlotClick(viewModel, pluginHit.Value, region, x, y);
             e.Handled = true;
         }
@@ -182,6 +242,15 @@ public partial class MainWindow : Window
         if (_uiState.KnobDrag is { } knobDrag && e.LeftButton == MouseButtonState.Pressed)
         {
             UpdateKnobDrag(viewModel, knobDrag, y);
+            e.Handled = true;
+        }
+
+        if (_uiState.ContainerDrag is { } containerDrag && e.LeftButton == MouseButtonState.Pressed)
+        {
+            float dx = MathF.Abs(x - containerDrag.StartX);
+            float dy = MathF.Abs(y - containerDrag.StartY);
+            bool isDragging = containerDrag.IsDragging || dx > DragThreshold || dy > DragThreshold;
+            _uiState.ContainerDrag = containerDrag with { CurrentX = x, CurrentY = y, IsDragging = isDragging };
             e.Handled = true;
         }
 
@@ -210,6 +279,34 @@ public partial class MainWindow : Window
             e.Handled = true;
         }
 
+        if (_uiState.ContainerDrag is { } containerDrag)
+        {
+            var pos = e.GetPosition(SkiaCanvas);
+            float x = (float)pos.X;
+            float y = (float)pos.Y;
+
+            if (containerDrag.IsDragging)
+            {
+                int targetIndex = ResolveContainerDropTarget(viewModel, containerDrag.ChannelIndex, containerDrag.ContainerId, x, y);
+                if (targetIndex >= 0)
+                {
+                    var channel = GetChannel(viewModel, containerDrag.ChannelIndex);
+                    if (channel is not null)
+                    {
+                        channel.MoveContainer(containerDrag.ContainerId, targetIndex);
+                    }
+                }
+            }
+            else
+            {
+                HandleContainerSlotClick(viewModel, new MainContainerSlotHit(containerDrag.ChannelIndex, containerDrag.ContainerId, containerDrag.SlotIndex));
+            }
+
+            _uiState.ContainerDrag = null;
+            e.Handled = true;
+            return;
+        }
+
         if (_uiState.PluginDrag is { } pluginDrag)
         {
             var pos = e.GetPosition(SkiaCanvas);
@@ -221,13 +318,16 @@ public partial class MainWindow : Window
                 var target = _renderer.HitTestPluginSlot(x, y, out _);
                 if (target.HasValue && !(target.Value.ChannelIndex == pluginDrag.ChannelIndex && target.Value.SlotIndex == pluginDrag.SlotIndex))
                 {
-                    var channel = pluginDrag.ChannelIndex == 0 ? viewModel.Channel1 : viewModel.Channel2;
-                    channel.MovePlugin(pluginDrag.SlotIndex, target.Value.SlotIndex);
+                    var channel = GetChannel(viewModel, pluginDrag.ChannelIndex);
+                    if (channel is not null)
+                    {
+                        channel.MovePlugin(pluginDrag.PluginInstanceId, target.Value.SlotIndex);
+                    }
                 }
             }
             else
             {
-                ExecutePluginAction(viewModel, pluginDrag.ChannelIndex, pluginDrag.SlotIndex);
+                ExecutePluginAction(viewModel, pluginDrag.ChannelIndex, pluginDrag.PluginInstanceId, pluginDrag.SlotIndex);
             }
 
             _uiState.PluginDrag = null;
@@ -266,25 +366,32 @@ public partial class MainWindow : Window
         {
             ShowGainKnobContextMenu(viewModel, knobHit.Value, pos);
             e.Handled = true;
+            return;
         }
+
     }
 
     private void ShowKnobContextMenu(MainViewModel viewModel, PluginKnobHit hit, System.Windows.Point position)
     {
         var channel = GetChannel(viewModel, hit.ChannelIndex);
-        if ((uint)hit.SlotIndex >= (uint)channel.PluginSlots.Count)
+        if (channel is null)
+        {
+            return;
+        }
+        int slotIndex = FindPluginSlotIndex(channel, hit.PluginInstanceId);
+        if ((uint)slotIndex >= (uint)channel.PluginSlots.Count)
         {
             return;
         }
 
-        var slot = channel.PluginSlots[hit.SlotIndex];
+        var slot = channel.PluginSlots[slotIndex];
         if (slot.ElevatedParams is null || slot.ElevatedParams.Length <= hit.ParamIndex)
         {
             return;
         }
 
         var paramDef = slot.ElevatedParams[hit.ParamIndex];
-        string targetPath = $"channel{hit.ChannelIndex + 1}.plugin.{hit.SlotIndex}.{paramDef.Index}";
+        string targetPath = $"channel{hit.ChannelIndex + 1}.plugin.{hit.PluginInstanceId}.{paramDef.Index}";
         string paramLabel = $"{slot.DisplayName} - {paramDef.Name}";
 
         ShowMidiContextMenu(viewModel, targetPath, paramLabel, paramDef.Min, paramDef.Max, position);
@@ -297,7 +404,12 @@ public partial class MainWindow : Window
             : $"channel{hit.ChannelIndex + 1}.outputGain";
 
         string label = hit.KnobType == KnobType.InputGain ? "Input Gain" : "Output Gain";
-        string channelName = hit.ChannelIndex == 0 ? "Ch 1" : "Ch 2";
+        string channelName = "Channel";
+        var channel = GetChannel(viewModel, hit.ChannelIndex);
+        if (channel is not null)
+        {
+            channelName = string.IsNullOrWhiteSpace(channel.Name) ? $"Ch {hit.ChannelIndex + 1}" : channel.Name;
+        }
 
         ShowMidiContextMenu(viewModel, targetPath, $"{channelName} {label}", -60f, 12f, position);
     }
@@ -380,24 +492,28 @@ public partial class MainWindow : Window
             case MainButton.Close:
                 Close();
                 break;
-            case MainButton.SavePreset1:
-                ShowSavePresetMenu(viewModel, 0);
-                break;
-            case MainButton.SavePreset2:
-                ShowSavePresetMenu(viewModel, 1);
+            case MainButton.SavePreset:
+                ShowSavePresetMenu(viewModel, viewModel.ActiveChannelIndex);
                 break;
         }
     }
 
     private void HandlePluginSlotClick(MainViewModel viewModel, PluginSlotHit hit, PluginSlotRegion region, float x, float y)
     {
-        var channel = hit.ChannelIndex == 0 ? viewModel.Channel1 : viewModel.Channel2;
-        if (hit.SlotIndex >= channel.PluginSlots.Count)
+        var channel = GetChannel(viewModel, hit.ChannelIndex);
+        if (channel is null)
+        {
+            return;
+        }
+        int slotIndex = hit.PluginInstanceId > 0
+            ? FindPluginSlotIndex(channel, hit.PluginInstanceId)
+            : hit.SlotIndex;
+        if (slotIndex < 0 || slotIndex >= channel.PluginSlots.Count)
         {
             return;
         }
 
-        var slot = channel.PluginSlots[hit.SlotIndex];
+        var slot = channel.PluginSlots[slotIndex];
         if (region == PluginSlotRegion.Bypass)
         {
             if (!slot.IsEmpty)
@@ -431,25 +547,201 @@ public partial class MainWindow : Window
             return;
         }
 
-        _uiState.PluginDrag = new PluginDragState(hit.ChannelIndex, hit.SlotIndex, x, y, x, y, false);
+        if (slot.PluginId == "builtin:input" || slot.PluginId == "builtin:bus-input")
+        {
+            ExecutePluginAction(viewModel, hit.ChannelIndex, slot.InstanceId, slotIndex);
+            return;
+        }
+
+        _uiState.PluginDrag = new PluginDragState(hit.ChannelIndex, slot.InstanceId, slotIndex, x, y, x, y, false);
     }
 
-    private void ExecutePluginAction(MainViewModel viewModel, int channelIndex, int slotIndex)
+    private void HandleRoutingSlotClick(MainViewModel viewModel, RoutingSlotHit hit, RoutingSlotRegion region, float x, float y)
     {
-        var channel = channelIndex == 0 ? viewModel.Channel1 : viewModel.Channel2;
-        if ((uint)slotIndex >= (uint)channel.PluginSlots.Count)
+        var channel = GetChannel(viewModel, hit.ChannelIndex);
+        if (channel is null)
         {
             return;
         }
 
-        channel.PluginSlots[slotIndex].ActionCommand.Execute(null);
+        int slotIndex = FindPluginSlotIndex(channel, hit.PluginInstanceId);
+        if (slotIndex < 0 || slotIndex >= channel.PluginSlots.Count)
+        {
+            return;
+        }
+
+        var slot = channel.PluginSlots[slotIndex];
+
+        if (region == RoutingSlotRegion.Remove)
+        {
+            if (!slot.IsEmpty)
+            {
+                slot.RemoveCommand.Execute(null);
+            }
+            return;
+        }
+
+        // For routing plugins, start drag to allow reordering in the chain
+        // The actual action (popup) will execute on mouse up if no drag occurred
+        _uiState.PluginDrag = new PluginDragState(hit.ChannelIndex, hit.PluginInstanceId, slotIndex, x, y, x, y, false);
+        SkiaCanvas.CaptureMouse();
+    }
+
+    private void HandleRoutingBadgeClick(MainViewModel viewModel, RoutingBadgeHit hit)
+    {
+        var channel = GetChannel(viewModel, hit.ChannelIndex);
+        if (channel is null)
+        {
+            return;
+        }
+
+        switch (hit.BadgeType)
+        {
+            case RoutingBadgeType.InputChannelMode:
+                // Cycle: Left -> Right -> Sum -> Left
+                channel.InputChannelMode = channel.InputChannelMode switch
+                {
+                    HotMic.Common.Configuration.InputChannelMode.Left => HotMic.Common.Configuration.InputChannelMode.Right,
+                    HotMic.Common.Configuration.InputChannelMode.Right => HotMic.Common.Configuration.InputChannelMode.Sum,
+                    _ => HotMic.Common.Configuration.InputChannelMode.Left
+                };
+                break;
+            case RoutingBadgeType.OutputSendMode:
+                // Cycle through output send mode parameter
+                int slotIndex = FindPluginSlotIndex(channel, hit.PluginInstanceId);
+                if ((uint)slotIndex < (uint)channel.PluginSlots.Count)
+                {
+                    var slot = channel.PluginSlots[slotIndex];
+                    // Cycle: 0 (Left) -> 1 (Right) -> 2 (Both) -> 0
+                    slot.Param0Value = slot.Param0Value switch
+                    {
+                        0f => 1f,
+                        1f => 2f,
+                        _ => 0f
+                    };
+                }
+                break;
+        }
+    }
+
+    private void StartRoutingKnobDrag(MainViewModel viewModel, RoutingKnobHit hit, float startY)
+    {
+        var channel = GetChannel(viewModel, hit.ChannelIndex);
+        if (channel is null)
+        {
+            return;
+        }
+
+        float startValue;
+        KnobType knobType;
+
+        if (hit.KnobType == RoutingKnobType.InputGain)
+        {
+            startValue = channel.InputGainDb;
+            knobType = KnobType.InputGain;
+        }
+        else
+        {
+            startValue = channel.OutputGainDb;
+            knobType = KnobType.OutputGain;
+        }
+
+        _uiState.KnobDrag = new KnobDragState(
+            hit.ChannelIndex,
+            knobType,
+            startValue,
+            startY,
+            hit.PluginInstanceId,
+            hit.MinValue,
+            hit.MaxValue);
+    }
+
+    private void HandleContainerSlotMouseDown(MainViewModel viewModel, MainContainerSlotHit hit, MainContainerSlotRegion region, float x, float y)
+    {
+        var channel = GetChannel(viewModel, hit.ChannelIndex);
+        if (channel is null)
+        {
+            return;
+        }
+        if ((uint)hit.SlotIndex >= (uint)channel.Containers.Count)
+        {
+            return;
+        }
+
+        var container = channel.Containers[hit.SlotIndex];
+        bool isPlaceholder = container.ContainerId <= 0;
+        if (region == MainContainerSlotRegion.Bypass)
+        {
+            if (!isPlaceholder)
+            {
+                container.IsBypassed = !container.IsBypassed;
+            }
+            return;
+        }
+
+        if (region == MainContainerSlotRegion.Remove)
+        {
+            if (!isPlaceholder)
+            {
+                container.RemoveCommand.Execute(null);
+            }
+            return;
+        }
+
+        if (isPlaceholder)
+        {
+            return;
+        }
+
+        _uiState.ContainerDrag = new ContainerDragState(hit.ChannelIndex, container.ContainerId, hit.SlotIndex, x, y, x, y, false);
+        SkiaCanvas.CaptureMouse();
+    }
+
+    private void HandleContainerSlotClick(MainViewModel viewModel, MainContainerSlotHit hit)
+    {
+        var channel = GetChannel(viewModel, hit.ChannelIndex);
+        if (channel is null)
+        {
+            return;
+        }
+        int slotIndex = FindContainerSlotIndex(channel, hit.ContainerId);
+        if ((uint)slotIndex >= (uint)channel.Containers.Count)
+        {
+            return;
+        }
+
+        channel.Containers[slotIndex].ActionCommand.Execute(null);
+    }
+
+    private void ExecutePluginAction(MainViewModel viewModel, int channelIndex, int pluginInstanceId, int slotIndex)
+    {
+        var channel = GetChannel(viewModel, channelIndex);
+        if (channel is null)
+        {
+            return;
+        }
+        int resolvedIndex = pluginInstanceId > 0
+            ? FindPluginSlotIndex(channel, pluginInstanceId)
+            : slotIndex;
+        if (resolvedIndex < 0 || resolvedIndex >= channel.PluginSlots.Count)
+        {
+            return;
+        }
+
+        channel.PluginSlots[resolvedIndex].ActionCommand.Execute(null);
     }
 
     private void StartKnobDrag(MainViewModel viewModel, KnobHit hit, float startY)
     {
+        var channel = GetChannel(viewModel, hit.ChannelIndex);
+        if (channel is null)
+        {
+            return;
+        }
+
         float startValue = hit.KnobType == KnobType.InputGain
-            ? GetChannel(viewModel, hit.ChannelIndex).InputGainDb
-            : GetChannel(viewModel, hit.ChannelIndex).OutputGainDb;
+            ? channel.InputGainDb
+            : channel.OutputGainDb;
 
         _uiState.KnobDrag = new KnobDragState(hit.ChannelIndex, hit.KnobType, startValue, startY);
     }
@@ -457,12 +749,17 @@ public partial class MainWindow : Window
     private void StartPluginKnobDrag(MainViewModel viewModel, PluginKnobHit hit, float startY)
     {
         var channel = GetChannel(viewModel, hit.ChannelIndex);
-        if ((uint)hit.SlotIndex >= (uint)channel.PluginSlots.Count)
+        if (channel is null)
+        {
+            return;
+        }
+        int slotIndex = FindPluginSlotIndex(channel, hit.PluginInstanceId);
+        if ((uint)slotIndex >= (uint)channel.PluginSlots.Count)
         {
             return;
         }
 
-        var slot = channel.PluginSlots[hit.SlotIndex];
+        var slot = channel.PluginSlots[slotIndex];
         float startValue = hit.ParamIndex == 0 ? slot.Param0Value : slot.Param1Value;
         var knobType = hit.ParamIndex == 0 ? KnobType.PluginParam0 : KnobType.PluginParam1;
 
@@ -471,7 +768,7 @@ public partial class MainWindow : Window
             knobType,
             startValue,
             startY,
-            hit.SlotIndex,
+            hit.PluginInstanceId,
             hit.MinValue,
             hit.MaxValue);
     }
@@ -487,6 +784,10 @@ public partial class MainWindow : Window
         nextValue = Math.Clamp(nextValue, min, max);
 
         var channel = GetChannel(viewModel, drag.ChannelIndex);
+        if (channel is null)
+        {
+            return;
+        }
 
         switch (drag.KnobType)
         {
@@ -497,18 +798,113 @@ public partial class MainWindow : Window
                 channel.OutputGainDb = nextValue;
                 break;
             case KnobType.PluginParam0:
-                if ((uint)drag.PluginSlotIndex < (uint)channel.PluginSlots.Count)
-                {
-                    channel.PluginSlots[drag.PluginSlotIndex].Param0Value = nextValue;
-                }
+                UpdatePluginKnobValue(channel, drag.PluginInstanceId, isParam0: true, nextValue);
                 break;
             case KnobType.PluginParam1:
-                if ((uint)drag.PluginSlotIndex < (uint)channel.PluginSlots.Count)
-                {
-                    channel.PluginSlots[drag.PluginSlotIndex].Param1Value = nextValue;
-                }
+                UpdatePluginKnobValue(channel, drag.PluginInstanceId, isParam0: false, nextValue);
                 break;
         }
+    }
+
+    private static void UpdatePluginKnobValue(ChannelStripViewModel channel, int instanceId, bool isParam0, float value)
+    {
+        int slotIndex = FindPluginSlotIndex(channel, instanceId);
+        if (slotIndex < 0 || slotIndex >= channel.PluginSlots.Count)
+        {
+            return;
+        }
+
+        if (isParam0)
+        {
+            channel.PluginSlots[slotIndex].Param0Value = value;
+        }
+        else
+        {
+            channel.PluginSlots[slotIndex].Param1Value = value;
+        }
+    }
+
+    private static int FindPluginSlotIndex(ChannelStripViewModel channel, int instanceId)
+    {
+        if (instanceId <= 0)
+        {
+            return -1;
+        }
+
+        int count = Math.Max(0, channel.PluginSlots.Count - 1);
+        for (int i = 0; i < count; i++)
+        {
+            if (channel.PluginSlots[i].InstanceId == instanceId)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int FindContainerSlotIndex(ChannelStripViewModel channel, int containerId)
+    {
+        if (containerId <= 0)
+        {
+            return -1;
+        }
+
+        for (int i = 0; i < channel.Containers.Count; i++)
+        {
+            if (channel.Containers[i].ContainerId == containerId)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private int ResolveContainerDropTarget(MainViewModel viewModel, int channelIndex, int containerId, float x, float y)
+    {
+        var channel = GetChannel(viewModel, channelIndex);
+        if (channel is null)
+        {
+            return -1;
+        }
+
+        var containerHit = _renderer.HitTestContainerSlot(x, y, out _);
+        if (containerHit.HasValue && containerHit.Value.ContainerId != containerId)
+        {
+            return GetContainerInsertIndex(channel, containerHit.Value.SlotIndex);
+        }
+
+        var pluginHit = _renderer.HitTestPluginSlot(x, y, out _);
+        if (pluginHit.HasValue)
+        {
+            if (pluginHit.Value.PluginInstanceId > 0)
+            {
+                return FindPluginSlotIndex(channel, pluginHit.Value.PluginInstanceId);
+            }
+
+            return channel.PluginSlots.Count - 1;
+        }
+
+        return -1;
+    }
+
+    private static int GetContainerInsertIndex(ChannelStripViewModel channel, int containerSlotIndex)
+    {
+        if ((uint)containerSlotIndex >= (uint)channel.Containers.Count)
+        {
+            return channel.PluginSlots.Count - 1;
+        }
+
+        var target = channel.Containers[containerSlotIndex];
+        if (target.PluginInstanceIds.Count == 0)
+        {
+            return channel.PluginSlots.Count - 1;
+        }
+
+        int instanceId = target.PluginInstanceIds[0];
+        int index = FindPluginSlotIndex(channel, instanceId);
+        return index >= 0 ? index : channel.PluginSlots.Count - 1;
     }
 
     private static void HandleToggle(MainViewModel viewModel, ToggleHit toggle)
@@ -517,20 +913,17 @@ public partial class MainWindow : Window
         {
             case ToggleType.Mute:
                 var channel = GetChannel(viewModel, toggle.ChannelIndex);
-                channel.IsMuted = !channel.IsMuted;
+                if (channel is not null)
+                {
+                    channel.IsMuted = !channel.IsMuted;
+                }
                 break;
             case ToggleType.Solo:
                 channel = GetChannel(viewModel, toggle.ChannelIndex);
-                channel.IsSoloed = !channel.IsSoloed;
-                break;
-            case ToggleType.InputStereo when toggle.ChannelIndex == 0:
-                viewModel.Input1IsStereo = !viewModel.Input1IsStereo;
-                break;
-            case ToggleType.InputStereo when toggle.ChannelIndex == 1:
-                viewModel.Input2IsStereo = !viewModel.Input2IsStereo;
-                break;
-            case ToggleType.MasterStereo:
-                viewModel.MasterIsStereo = !viewModel.MasterIsStereo;
+                if (channel is not null)
+                {
+                    channel.IsSoloed = !channel.IsSoloed;
+                }
                 break;
             case ToggleType.MasterMute:
                 viewModel.MasterMuted = !viewModel.MasterMuted;
@@ -538,9 +931,27 @@ public partial class MainWindow : Window
         }
     }
 
-    private static ChannelStripViewModel GetChannel(MainViewModel viewModel, int channelIndex)
+    private static ChannelStripViewModel? GetChannel(MainViewModel viewModel, int channelIndex)
     {
-        return channelIndex == 0 ? viewModel.Channel1 : viewModel.Channel2;
+        if ((uint)channelIndex >= (uint)viewModel.Channels.Count)
+        {
+            return null;
+        }
+
+        return viewModel.Channels[channelIndex];
+    }
+
+    private static void SetActiveChannel(MainViewModel viewModel, int channelIndex)
+    {
+        if ((uint)channelIndex >= (uint)viewModel.Channels.Count)
+        {
+            return;
+        }
+
+        if (viewModel.ActiveChannelIndex != channelIndex)
+        {
+            viewModel.ActiveChannelIndex = channelIndex;
+        }
     }
 
     private float GetDpiScale()
@@ -574,11 +985,16 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ShowPresetDropdownMenu(MainViewModel viewModel, int channelIndex)
+    private void ShowPresetDropdownMenu(MainViewModel viewModel)
     {
         var menu = new ContextMenu();
         var presetOptions = viewModel.GetPresetOptions();
-        string currentPreset = channelIndex == 0 ? viewModel.Channel1PresetName : viewModel.Channel2PresetName;
+        int channelIndex = viewModel.ActiveChannelIndex;
+        if ((uint)channelIndex >= (uint)viewModel.Channels.Count)
+        {
+            return;
+        }
+        string currentPreset = viewModel.ActiveChannelPresetName;
 
         foreach (var presetName in presetOptions)
         {
@@ -599,7 +1015,7 @@ public partial class MainWindow : Window
         }
 
         // Position menu below the dropdown
-        var rect = _renderer.GetPresetDropdownRect(channelIndex);
+        var rect = _renderer.GetPresetDropdownRect();
         menu.PlacementTarget = SkiaCanvas;
         menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Relative;
         menu.HorizontalOffset = rect.Left;
@@ -610,7 +1026,12 @@ public partial class MainWindow : Window
     private void ShowSavePresetMenu(MainViewModel viewModel, int channelIndex)
     {
         var menu = new ContextMenu();
-        string currentPreset = channelIndex == 0 ? viewModel.Channel1PresetName : viewModel.Channel2PresetName;
+        if ((uint)channelIndex >= (uint)viewModel.Channels.Count)
+        {
+            return;
+        }
+
+        string currentPreset = viewModel.ActiveChannelPresetName;
 
         // Save as new option
         var saveNewItem = new MenuItem { Header = "Save as New..." };
@@ -637,6 +1058,11 @@ public partial class MainWindow : Window
 
     private void ShowSavePresetDialog(MainViewModel viewModel, int channelIndex, string? suggestedName)
     {
+        if ((uint)channelIndex >= (uint)viewModel.Channels.Count)
+        {
+            return;
+        }
+
         var dialog = new Views.InputDialog("Save Preset", "Enter preset name:", suggestedName ?? "My Preset")
         {
             Owner = this
