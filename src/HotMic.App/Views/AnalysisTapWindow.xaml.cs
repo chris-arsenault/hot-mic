@@ -97,7 +97,7 @@ public partial class AnalysisTapWindow : Window, IDisposable
         }
     }
 
-    private void SkiaCanvas_PaintSurface(object sender, SkiaSharp.Views.WPF.SKPaintSurfaceEventArgs e)
+    private void SkiaCanvas_PaintSurface(object sender, SKPaintSurfaceEventArgs e)
     {
         var canvas = e.Surface.Canvas;
         var size = new SKSize(e.Info.Width, e.Info.Height);
@@ -152,7 +152,7 @@ public partial class AnalysisTapWindow : Window, IDisposable
         }
     }
 
-    private void SkiaCanvas_MouseMove(object sender, MouseEventArgs e)
+    private void SkiaCanvas_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
         // No knobs to handle
     }
