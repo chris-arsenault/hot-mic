@@ -456,14 +456,14 @@ public partial class MainWindow : Window
 
         string currentName = string.IsNullOrWhiteSpace(channel.Name) ? $"Channel {channelIndex + 1}" : channel.Name;
 
-        string? newName = Microsoft.VisualBasic.Interaction.InputBox(
-            "Enter channel name:",
-            "Rename Channel",
-            currentName);
-
-        if (!string.IsNullOrWhiteSpace(newName) && newName != currentName)
+        var dialog = new Views.SkiaInputDialog("Rename Channel", "Enter channel name:", currentName)
         {
-            viewModel.RenameChannel(channelIndex, newName);
+            Owner = this
+        };
+
+        if (dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(dialog.InputValue) && dialog.InputValue != currentName)
+        {
+            viewModel.RenameChannel(channelIndex, dialog.InputValue);
         }
     }
 
@@ -492,14 +492,14 @@ public partial class MainWindow : Window
 
         string currentName = string.IsNullOrWhiteSpace(container.Name) ? $"Container {containerId}" : container.Name;
 
-        string? newName = Microsoft.VisualBasic.Interaction.InputBox(
-            "Enter container name:",
-            "Rename Container",
-            currentName);
-
-        if (!string.IsNullOrWhiteSpace(newName) && newName != currentName)
+        var dialog = new Views.SkiaInputDialog("Rename Container", "Enter container name:", currentName)
         {
-            viewModel.RenameContainer(channelIndex, containerId, newName);
+            Owner = this
+        };
+
+        if (dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(dialog.InputValue) && dialog.InputValue != currentName)
+        {
+            viewModel.RenameContainer(channelIndex, containerId, dialog.InputValue);
         }
     }
 
@@ -1270,7 +1270,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var dialog = new Views.InputDialog("Save Preset", "Enter preset name:", suggestedName ?? "My Preset")
+        var dialog = new Views.SkiaInputDialog("Save Preset", "Enter preset name:", suggestedName ?? "My Preset")
         {
             Owner = this
         };
@@ -1287,7 +1287,7 @@ public partial class MainWindow : Window
                 var options = viewModel.GetPresetOptions();
                 if (options.Contains(presetName))
                 {
-                    System.Windows.MessageBox.Show($"Cannot overwrite built-in preset \"{presetName}\".", "Save Preset", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    Views.SkiaMessageDialog.ShowWarning(this, $"Cannot overwrite built-in preset \"{presetName}\".", "Save Preset");
                     return;
                 }
             }

@@ -70,16 +70,18 @@ public sealed class SidechainTapProcessor
             return;
         }
 
-        if (_speechBuffer.Length != count)
+        if (_speechBuffer.Length < count)
         {
             // Block size should be fixed during a session. Skip processing if mismatched.
             return;
         }
 
-        if (!writer.IsEnabled || mask == SidechainSignalMask.None)
+        if (mask == SidechainSignalMask.None)
         {
             return;
         }
+
+        bool canWrite = writer.IsEnabled;
 
         for (int i = 0; i < count; i++)
         {
@@ -115,21 +117,26 @@ public sealed class SidechainTapProcessor
             _meterSibilanceEnergy = sibNorm;
         }
 
-        if ((mask & SidechainSignalMask.SpeechPresence) != 0)
+        var speechSpan = _speechBuffer.AsSpan(0, count);
+        var voicedSpan = _voicedBuffer.AsSpan(0, count);
+        var unvoicedSpan = _unvoicedBuffer.AsSpan(0, count);
+        var sibilanceSpan = _sibilanceBuffer.AsSpan(0, count);
+
+        if (canWrite && (mask & SidechainSignalMask.SpeechPresence) != 0)
         {
-            writer.WriteBlock(SidechainSignalId.SpeechPresence, sampleTime, _speechBuffer);
+            writer.WriteBlock(SidechainSignalId.SpeechPresence, sampleTime, speechSpan);
         }
-        if ((mask & SidechainSignalMask.VoicedProbability) != 0)
+        if (canWrite && (mask & SidechainSignalMask.VoicedProbability) != 0)
         {
-            writer.WriteBlock(SidechainSignalId.VoicedProbability, sampleTime, _voicedBuffer);
+            writer.WriteBlock(SidechainSignalId.VoicedProbability, sampleTime, voicedSpan);
         }
-        if ((mask & SidechainSignalMask.UnvoicedEnergy) != 0)
+        if (canWrite && (mask & SidechainSignalMask.UnvoicedEnergy) != 0)
         {
-            writer.WriteBlock(SidechainSignalId.UnvoicedEnergy, sampleTime, _unvoicedBuffer);
+            writer.WriteBlock(SidechainSignalId.UnvoicedEnergy, sampleTime, unvoicedSpan);
         }
-        if ((mask & SidechainSignalMask.SibilanceEnergy) != 0)
+        if (canWrite && (mask & SidechainSignalMask.SibilanceEnergy) != 0)
         {
-            writer.WriteBlock(SidechainSignalId.SibilanceEnergy, sampleTime, _sibilanceBuffer);
+            writer.WriteBlock(SidechainSignalId.SibilanceEnergy, sampleTime, sibilanceSpan);
         }
     }
 

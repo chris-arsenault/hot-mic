@@ -760,7 +760,7 @@ public partial class SignalGeneratorWindow : Window, IDisposable
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"Failed to load sample: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            SkiaMessageDialog.ShowError(this, $"Failed to load sample: {ex.Message}", "Error");
         }
     }
 
@@ -871,7 +871,7 @@ public partial class SignalGeneratorWindow : Window, IDisposable
         var data = _plugin.GetSampleData(slotIndex);
         if (data == null)
         {
-            System.Windows.MessageBox.Show($"No sample loaded in Slot {slotIndex + 1}.", "Save Sample", MessageBoxButton.OK, MessageBoxImage.Information);
+            SkiaMessageDialog.ShowInfo(this, $"No sample loaded in Slot {slotIndex + 1}.", "Save Sample");
             return;
         }
 
@@ -894,7 +894,7 @@ public partial class SignalGeneratorWindow : Window, IDisposable
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"Failed to save sample: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            SkiaMessageDialog.ShowError(this, $"Failed to save sample: {ex.Message}", "Error");
         }
     }
 
@@ -902,7 +902,7 @@ public partial class SignalGeneratorWindow : Window, IDisposable
     {
         if (!File.Exists(_sampleStoragePath))
         {
-            System.Windows.MessageBox.Show("No persisted sample found.", "Reload Sample", MessageBoxButton.OK, MessageBoxImage.Information);
+            SkiaMessageDialog.ShowInfo(this, "No persisted sample found.", "Reload Sample");
             return;
         }
 
@@ -917,7 +917,7 @@ public partial class SignalGeneratorWindow : Window, IDisposable
 
             if (sampleCount <= 0 || sampleCount > 480000)
             {
-                System.Windows.MessageBox.Show("Invalid persisted sample data.", "Reload Sample", MessageBoxButton.OK, MessageBoxImage.Warning);
+                SkiaMessageDialog.ShowWarning(this, "Invalid persisted sample data.", "Reload Sample");
                 return;
             }
 
@@ -935,7 +935,7 @@ public partial class SignalGeneratorWindow : Window, IDisposable
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"Failed to reload sample: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            SkiaMessageDialog.ShowError(this, $"Failed to reload sample: {ex.Message}", "Error");
         }
     }
 

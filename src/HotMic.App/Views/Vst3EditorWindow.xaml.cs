@@ -36,7 +36,7 @@ public partial class Vst3EditorWindow : Window, IDisposable
 
         if (!_plugin.OpenEditor(_panel.Handle))
         {
-            System.Windows.MessageBox.Show(this, "Failed to open VST3 editor.", "HotMic", MessageBoxButton.OK, MessageBoxImage.Error);
+            SkiaMessageDialog.ShowError(this, "Failed to open VST3 editor.", "HotMic");
             Close();
             return;
         }
