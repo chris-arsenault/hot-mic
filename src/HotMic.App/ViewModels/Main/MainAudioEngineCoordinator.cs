@@ -6,6 +6,7 @@ using HotMic.Common.Configuration;
 using HotMic.Core.Analysis;
 using HotMic.Core.Engine;
 using HotMic.Core.Plugins;
+using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Vst3;
 
 namespace HotMic.App.ViewModels;
@@ -22,6 +23,7 @@ internal sealed class MainAudioEngineCoordinator
     private readonly Func<AppConfig> _getConfig;
     private readonly AnalysisOrchestrator _analysisOrchestrator = new();
     private readonly Queue<(long ticks, long inputDrops, long outputUnderflow)> _dropHistory = new();
+    private bool[] _inputUsageScratch = Array.Empty<bool>();
     private long _lastMeterUpdateTicks;
     private long _nextDebugUpdateTicks;
     private static readonly long DebugUpdateIntervalTicks = Math.Max(1, Stopwatch.Frequency / 4);
@@ -94,12 +96,6 @@ internal sealed class MainAudioEngineCoordinator
         {
             _viewModel.StatusMessage = "Output must be set to VB-Cable.";
             return;
-        }
-
-        var profile = AudioQualityProfiles.ForMode(_viewModel.QualityMode, _viewModel.SelectedSampleRate);
-        if (_viewModel.SelectedBufferSize != profile.BufferSize)
-        {
-            _viewModel.SelectedBufferSize = profile.BufferSize;
         }
 
         var config = _getConfig();
@@ -276,11 +272,16 @@ internal sealed class MainAudioEngineCoordinator
         float chainLatencyMs = chainLatencySamples * 1000f / sampleRate;
         _viewModel.LatencyMs = baseLatencyMs + chainLatencyMs;
 
+        var inputUsage = BuildInputUsageMap();
         long inputDrops = 0;
         var inputs = _viewModel.Diagnostics.Inputs;
         for (int i = 0; i < inputs.Count; i++)
         {
-            inputDrops += inputs[i].DroppedSamples;
+            int channelId = inputs[i].ChannelId;
+            if ((uint)channelId < (uint)inputUsage.Length && inputUsage[channelId])
+            {
+                inputDrops += inputs[i].DroppedSamples;
+            }
         }
 
         _viewModel.TotalDrops = inputDrops + _viewModel.Diagnostics.OutputUnderflowSamples;
@@ -301,7 +302,7 @@ internal sealed class MainAudioEngineCoordinator
             _viewModel.Drops30Sec = _viewModel.InputDrops30Sec + _viewModel.OutputUnderflowDrops30Sec;
         }
 
-        UpdateDebugInfo(nowTicks);
+        UpdateDebugInfo(nowTicks, inputUsage);
         AudioEngine.DrainPendingPluginDisposals();
         _lastMeterUpdateTicks = nowTicks;
     }
@@ -516,12 +517,18 @@ internal sealed class MainAudioEngineCoordinator
                 {
                     slotVm.OutputPeakLevel = slot.Meter.GetPeakLevel();
                     slotVm.OutputRmsLevel = slot.Meter.GetRmsLevel();
+                    slotVm.IsClipping = slot.Meter.GetClipHoldActive();
                     slotVm.SetBypassSilent(slot.Plugin.IsBypassed);
 
                     var delta = slot.Delta;
                     if (delta.DisplayMode != slotVm.DeltaDisplayMode)
                     {
                         delta.DisplayMode = slotVm.DeltaDisplayMode;
+                    }
+
+                    if (slotVm.SpectralDelta is null)
+                    {
+                        slotVm.SpectralDelta = delta.BandDeltas;
                     }
 
                     if (delta.TryUpdate())
@@ -533,6 +540,7 @@ internal sealed class MainAudioEngineCoordinator
                 {
                     slotVm.OutputPeakLevel = 0f;
                     slotVm.OutputRmsLevel = 0f;
+                    slotVm.IsClipping = false;
                     slotVm.SpectralDelta = null;
                 }
             }
@@ -553,12 +561,14 @@ internal sealed class MainAudioEngineCoordinator
             {
                 slot.OutputPeakLevel = chainSlot.Meter.GetPeakLevel();
                 slot.OutputRmsLevel = chainSlot.Meter.GetRmsLevel();
+                slot.IsClipping = chainSlot.Meter.GetClipHoldActive();
                 slot.SetBypassSilent(chainSlot.Plugin.IsBypassed);
             }
             else
             {
                 slot.OutputPeakLevel = 0f;
                 slot.OutputRmsLevel = 0f;
+                slot.IsClipping = false;
             }
         }
 
@@ -579,6 +589,11 @@ internal sealed class MainAudioEngineCoordinator
                 delta.DisplayMode = slot.DeltaDisplayMode;
             }
 
+            if (slot.SpectralDelta is null)
+            {
+                slot.SpectralDelta = delta.BandDeltas;
+            }
+
             if (delta.TryUpdate())
             {
                 slot.SpectralDelta = delta.BandDeltas;
@@ -590,6 +605,7 @@ internal sealed class MainAudioEngineCoordinator
             var slot = viewModel.PluginSlots[i];
             slot.OutputPeakLevel = 0f;
             slot.OutputRmsLevel = 0f;
+            slot.IsClipping = false;
             slot.SpectralDelta = null;
         }
     }
@@ -636,7 +652,7 @@ internal sealed class MainAudioEngineCoordinator
         }
     }
 
-    private void UpdateDebugInfo(long nowTicks)
+    private void UpdateDebugInfo(long nowTicks, bool[] inputUsage)
     {
         if (nowTicks < _nextDebugUpdateTicks)
         {
@@ -661,13 +677,23 @@ internal sealed class MainAudioEngineCoordinator
         string bufferSummary = inputs.Count == 0
             ? "n/a"
             : string.Join(" ", inputs.Select(i => $"ch{i.ChannelId + 1} {i.BufferedSamples}/{i.BufferCapacity}"));
+        int[] processingOrder = AudioEngine.GetRoutingProcessingOrder();
+        string graphOrder = processingOrder.Length == 0
+            ? "n/a"
+            : string.Join(" > ", processingOrder.Select(index => $"ch{index + 1}"));
+
+        _viewModel.RoutingGraphOrder = graphOrder;
 
         long inputDrops = 0;
         long inputUnderflows = 0;
         for (int i = 0; i < inputs.Count; i++)
         {
-            inputDrops += inputs[i].DroppedSamples;
-            inputUnderflows += inputs[i].UnderflowSamples;
+            int channelId = inputs[i].ChannelId;
+            if ((uint)channelId < (uint)inputUsage.Length && inputUsage[channelId])
+            {
+                inputDrops += inputs[i].DroppedSamples;
+                inputUnderflows += inputs[i].UnderflowSamples;
+            }
         }
 
         _viewModel.DebugLines =
@@ -675,6 +701,7 @@ internal sealed class MainAudioEngineCoordinator
             $"Audio: out={FormatFlag(diagnostics.OutputActive)} mon={FormatFlag(diagnostics.MonitorActive)} inputs={inputStatus} recov={(diagnostics.IsRecovering ? "yes" : "no")}",
             $"Callbacks(ms): out={outputAge} in={inputAges}",
             $"Buffers: {bufferSummary} mon {diagnostics.MonitorBufferedSamples}/{diagnostics.MonitorBufferCapacity}",
+            $"Graph: {graphOrder}",
             $"Drops: in {inputDrops} under {inputUnderflows} out {diagnostics.OutputUnderflowSamples}",
             $"Formats: out {_viewModel.SelectedSampleRate}Hz/2ch",
             $"UI {uiAge}ms"
@@ -698,6 +725,32 @@ internal sealed class MainAudioEngineCoordinator
     }
 
     private static string FormatFlag(bool value) => value ? "on" : "off";
+
+    private bool[] BuildInputUsageMap()
+    {
+        int channelCount = AudioEngine.Channels.Count;
+        if (_inputUsageScratch.Length < channelCount)
+        {
+            _inputUsageScratch = new bool[channelCount];
+        }
+
+        Array.Clear(_inputUsageScratch, 0, channelCount);
+
+        for (int i = 0; i < channelCount; i++)
+        {
+            var slots = AudioEngine.Channels[i].PluginChain.GetSnapshot();
+            for (int s = 0; s < slots.Length; s++)
+            {
+                if (slots[s]?.Plugin is InputPlugin inputPlugin && !inputPlugin.IsBypassed)
+                {
+                    _inputUsageScratch[i] = true;
+                    break;
+                }
+            }
+        }
+
+        return _inputUsageScratch;
+    }
 
     private void AttachAnalysisOrchestrator(AudioEngine engine, int sampleRate)
     {

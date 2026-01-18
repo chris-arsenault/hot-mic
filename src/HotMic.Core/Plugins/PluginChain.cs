@@ -315,15 +315,6 @@ public sealed class PluginChain
 
             if (shouldCaptureDelta)
             {
-                if (i > 0 && slots[i - 1] is { } previousSlot)
-                {
-                    float rms = previousSlot.Meter.GetRmsLevel();
-                    shouldCaptureDelta = rms > 0.001f;
-                }
-            }
-
-            if (shouldCaptureDelta)
-            {
                 delta.ProcessPre(buffer);
             }
 
@@ -331,6 +322,12 @@ public sealed class PluginChain
             if (plugin is ISidechainProducer producer && isActive)
             {
                 producedSignals = producer.ProducedSignals;
+            }
+
+            SidechainSignalMask blockedSignals = SidechainSignalMask.None;
+            if (plugin is ISidechainSignalBlocker blocker && isActive)
+            {
+                blockedSignals = blocker.BlockedSignals;
             }
 
             if (isActive)
@@ -358,7 +355,7 @@ public sealed class PluginChain
                 delta.ProcessPost(buffer);
             }
 
-            slot.Meter.Process(buffer);
+            slot.Meter.Process(buffer, isActive);
 
             if (isActive)
             {
@@ -368,6 +365,11 @@ public sealed class PluginChain
             if (producedSignals != SidechainSignalMask.None)
             {
                 UpdateLastProducer(lastProducer, producedSignals, i);
+            }
+
+            if (blockedSignals != SidechainSignalMask.None)
+            {
+                ApplySidechainBlocks(lastProducer, blockedSignals);
             }
 
             if (onSplit is not null && i == splitIndex)
@@ -387,7 +389,7 @@ public sealed class PluginChain
             var slot = slots[i];
             if (slot is not null)
             {
-                slot.Meter.Process(buffer);
+                slot.Meter.Process(buffer, trackClip: false);
             }
         }
     }
@@ -585,6 +587,26 @@ public sealed class PluginChain
         if ((producedSignals & SidechainSignalMask.SibilanceEnergy) != 0)
         {
             lastProducer[(int)SidechainSignalId.SibilanceEnergy] = slotIndex;
+        }
+    }
+
+    private static void ApplySidechainBlocks(int[] lastProducer, SidechainSignalMask blockedSignals)
+    {
+        if ((blockedSignals & SidechainSignalMask.SpeechPresence) != 0)
+        {
+            lastProducer[(int)SidechainSignalId.SpeechPresence] = -1;
+        }
+        if ((blockedSignals & SidechainSignalMask.VoicedProbability) != 0)
+        {
+            lastProducer[(int)SidechainSignalId.VoicedProbability] = -1;
+        }
+        if ((blockedSignals & SidechainSignalMask.UnvoicedEnergy) != 0)
+        {
+            lastProducer[(int)SidechainSignalId.UnvoicedEnergy] = -1;
+        }
+        if ((blockedSignals & SidechainSignalMask.SibilanceEnergy) != 0)
+        {
+            lastProducer[(int)SidechainSignalId.SibilanceEnergy] = -1;
         }
     }
 

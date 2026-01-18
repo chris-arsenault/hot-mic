@@ -251,6 +251,12 @@ public partial class MainWindow : Window
             float dy = MathF.Abs(y - containerDrag.StartY);
             bool isDragging = containerDrag.IsDragging || dx > DragThreshold || dy > DragThreshold;
             _uiState.ContainerDrag = containerDrag with { CurrentX = x, CurrentY = y, IsDragging = isDragging };
+
+            // Update drop target when dragging
+            if (isDragging)
+            {
+                _uiState.CurrentDropTarget = ComputeContainerDropTarget(x, y, containerDrag.ChannelIndex, containerDrag.SlotIndex);
+            }
             e.Handled = true;
         }
 
@@ -260,6 +266,12 @@ public partial class MainWindow : Window
             float dy = MathF.Abs(y - pluginDrag.StartY);
             bool isDragging = pluginDrag.IsDragging || dx > DragThreshold || dy > DragThreshold;
             _uiState.PluginDrag = pluginDrag with { CurrentX = x, CurrentY = y, IsDragging = isDragging };
+
+            // Update drop target when dragging
+            if (isDragging)
+            {
+                _uiState.CurrentDropTarget = ComputePluginDropTarget(x, y, pluginDrag.ChannelIndex, pluginDrag.SlotIndex);
+            }
             e.Handled = true;
         }
     }
@@ -303,6 +315,7 @@ public partial class MainWindow : Window
             }
 
             _uiState.ContainerDrag = null;
+            _uiState.CurrentDropTarget = null;
             e.Handled = true;
             return;
         }
@@ -331,6 +344,7 @@ public partial class MainWindow : Window
             }
 
             _uiState.PluginDrag = null;
+            _uiState.CurrentDropTarget = null;
             e.Handled = true;
         }
     }
@@ -356,6 +370,15 @@ public partial class MainWindow : Window
         if (channelIndex >= 0)
         {
             ShowChannelRenameDialog(viewModel, channelIndex);
+            e.Handled = true;
+            return;
+        }
+
+        // Check container slots for rename
+        var containerHit = _renderer.HitTestContainerSlot(x, y, out _);
+        if (containerHit.HasValue && containerHit.Value.ContainerId > 0)
+        {
+            ShowContainerRenameDialog(viewModel, containerHit.Value.ChannelIndex, containerHit.Value.ContainerId);
             e.Handled = true;
             return;
         }
@@ -441,6 +464,42 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(newName) && newName != currentName)
         {
             viewModel.RenameChannel(channelIndex, newName);
+        }
+    }
+
+    private void ShowContainerRenameDialog(MainViewModel viewModel, int channelIndex, int containerId)
+    {
+        var channel = GetChannel(viewModel, channelIndex);
+        if (channel is null)
+        {
+            return;
+        }
+
+        PluginContainerViewModel? container = null;
+        foreach (var c in channel.Containers)
+        {
+            if (c.ContainerId == containerId)
+            {
+                container = c;
+                break;
+            }
+        }
+
+        if (container is null)
+        {
+            return;
+        }
+
+        string currentName = string.IsNullOrWhiteSpace(container.Name) ? $"Container {containerId}" : container.Name;
+
+        string? newName = Microsoft.VisualBasic.Interaction.InputBox(
+            "Enter container name:",
+            "Rename Container",
+            currentName);
+
+        if (!string.IsNullOrWhiteSpace(newName) && newName != currentName)
+        {
+            viewModel.RenameContainer(channelIndex, containerId, newName);
         }
     }
 
@@ -583,7 +642,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        _uiState.PluginDrag = new PluginDragState(hit.ChannelIndex, slot.InstanceId, slotIndex, x, y, x, y, false);
+        // Get source rect for drag visuals
+        var sourceRect = _renderer.GetPluginSlotRect(hit.ChannelIndex, slotIndex);
+        string displayName = slot.DisplayName ?? $"Plugin {slotIndex + 1}";
+
+        _uiState.PluginDrag = new PluginDragState(hit.ChannelIndex, slot.InstanceId, slotIndex, x, y, x, y, false, sourceRect, displayName);
     }
 
     private void HandleRoutingSlotClick(MainViewModel viewModel, RoutingSlotHit hit, RoutingSlotRegion region, float x, float y)
@@ -620,9 +683,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Get source rect for drag visuals
+        var sourceRect = _renderer.GetRoutingSlotRect(hit.ChannelIndex, slotIndex);
+        string displayName = slot.DisplayName ?? hit.PluginId;
+
         // For routing plugins, start drag to allow reordering in the chain
         // The actual action (popup) will execute on mouse up if no drag occurred
-        _uiState.PluginDrag = new PluginDragState(hit.ChannelIndex, hit.PluginInstanceId, slotIndex, x, y, x, y, false);
+        _uiState.PluginDrag = new PluginDragState(hit.ChannelIndex, hit.PluginInstanceId, slotIndex, x, y, x, y, false, sourceRect, displayName);
         SkiaCanvas.CaptureMouse();
     }
 
@@ -732,7 +799,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        _uiState.ContainerDrag = new ContainerDragState(hit.ChannelIndex, container.ContainerId, hit.SlotIndex, x, y, x, y, false);
+        // Get source rect for drag visuals - use hit test to get the rect
+        var hitResult = _renderer.HitTestContainerSlot(x, y, out _, out var sourceRect);
+        string displayName = !string.IsNullOrEmpty(container.Name) ? container.Name : $"Container {hit.SlotIndex + 1}";
+
+        _uiState.ContainerDrag = new ContainerDragState(hit.ChannelIndex, container.ContainerId, hit.SlotIndex, x, y, x, y, false, sourceRect, displayName);
         SkiaCanvas.CaptureMouse();
     }
 
@@ -908,10 +979,11 @@ public partial class MainWindow : Window
             return -1;
         }
 
-        var containerHit = _renderer.HitTestContainerSlot(x, y, out _);
+        var containerHit = _renderer.HitTestContainerSlot(x, y, out _, out var containerRect);
         if (containerHit.HasValue && containerHit.Value.ContainerId != containerId)
         {
-            return GetContainerInsertIndex(channel, containerHit.Value.SlotIndex);
+            bool dropAfter = x > containerRect.MidX;
+            return GetContainerInsertIndex(channel, containerHit.Value.SlotIndex, dropAfter);
         }
 
         var pluginHit = _renderer.HitTestPluginSlot(x, y, out _);
@@ -928,22 +1000,118 @@ public partial class MainWindow : Window
         return -1;
     }
 
-    private static int GetContainerInsertIndex(ChannelStripViewModel channel, int containerSlotIndex)
+    private static int GetContainerInsertIndex(ChannelStripViewModel channel, int containerSlotIndex, bool after)
     {
+        int lastSlotIndex = Math.Max(0, channel.PluginSlots.Count - 1);
         if ((uint)containerSlotIndex >= (uint)channel.Containers.Count)
         {
-            return channel.PluginSlots.Count - 1;
+            return lastSlotIndex;
         }
 
         var target = channel.Containers[containerSlotIndex];
         if (target.PluginInstanceIds.Count == 0)
         {
-            return channel.PluginSlots.Count - 1;
+            return lastSlotIndex;
         }
 
-        int instanceId = target.PluginInstanceIds[0];
+        int instanceId = after
+            ? target.PluginInstanceIds[target.PluginInstanceIds.Count - 1]
+            : target.PluginInstanceIds[0];
         int index = FindPluginSlotIndex(channel, instanceId);
-        return index >= 0 ? index : channel.PluginSlots.Count - 1;
+        if (index < 0)
+        {
+            return lastSlotIndex;
+        }
+
+        return after ? Math.Min(index + 1, lastSlotIndex) : index;
+    }
+
+    private DropTarget? ComputePluginDropTarget(float x, float y, int sourceChannel, int sourceSlot)
+    {
+        // Check if cursor is in the plugin area for the same channel
+        int areaChannel = _renderer.HitTestPluginArea(x, y);
+        if (areaChannel < 0)
+        {
+            return null; // Not over any plugin area
+        }
+
+        if (areaChannel != sourceChannel)
+        {
+            // Invalid: different channel - return invalid drop target with ghost at cursor
+            return new DropTarget(false, SKRect.Empty, 0, 0, 0);
+        }
+
+        // Check specific slot for insertion point
+        var hit = _renderer.HitTestPluginSlot(x, y, out _, out var rect);
+        if (!hit.HasValue)
+        {
+            // Also check routing slots
+            var routingHit = _renderer.HitTestRoutingSlot(x, y, out _, out var routingRect);
+            if (!routingHit.HasValue)
+            {
+                return null; // No slot under cursor
+            }
+
+            // Over a routing slot
+            if (routingHit.Value.SlotIndex == sourceSlot)
+            {
+                return null; // Same slot, no feedback
+            }
+
+            // Compute insertion point
+            bool insertBefore = x < routingRect.MidX;
+            float lineX = insertBefore ? routingRect.Left - 2f : routingRect.Right + 2f;
+
+            return new DropTarget(true, routingRect, lineX, routingRect.Top, routingRect.Bottom);
+        }
+
+        // Over a plugin slot - check if same as source
+        if (hit.Value.SlotIndex == sourceSlot)
+        {
+            return null; // Same slot, no feedback
+        }
+
+        // Compute insertion point based on horizontal position within slot
+        bool insertBeforePlugin = x < rect.MidX;
+        float pluginLineX = insertBeforePlugin ? rect.Left - 2f : rect.Right + 2f;
+
+        return new DropTarget(true, rect, pluginLineX, rect.Top, rect.Bottom);
+    }
+
+    private DropTarget? ComputeContainerDropTarget(float x, float y, int sourceChannel, int sourceSlot)
+    {
+        // Check if cursor is in the plugin area for the same channel
+        int areaChannel = _renderer.HitTestPluginArea(x, y);
+        if (areaChannel < 0)
+        {
+            return null;
+        }
+
+        if (areaChannel != sourceChannel)
+        {
+            // Invalid: different channel
+            return new DropTarget(false, SKRect.Empty, 0, 0, 0);
+        }
+
+        // Check container slots
+        var containerHit = _renderer.HitTestContainerSlot(x, y, out _, out var containerRect);
+        if (containerHit.HasValue && containerHit.Value.SlotIndex != sourceSlot)
+        {
+            bool insertBefore = x < containerRect.MidX;
+            float lineX = insertBefore ? containerRect.Left - 2f : containerRect.Right + 2f;
+            return new DropTarget(true, containerRect, lineX, containerRect.Top, containerRect.Bottom);
+        }
+
+        // Check plugin slots as drop targets
+        var pluginHit = _renderer.HitTestPluginSlot(x, y, out _, out var pluginRect);
+        if (pluginHit.HasValue)
+        {
+            bool insertBefore = x < pluginRect.MidX;
+            float lineX = insertBefore ? pluginRect.Left - 2f : pluginRect.Right + 2f;
+            return new DropTarget(true, pluginRect, lineX, pluginRect.Top, pluginRect.Bottom);
+        }
+
+        return null;
     }
 
     private static void HandleToggle(MainViewModel viewModel, ToggleHit toggle)

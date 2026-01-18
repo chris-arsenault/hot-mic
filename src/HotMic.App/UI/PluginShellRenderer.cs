@@ -19,6 +19,7 @@ public sealed class PluginShellRenderer
     private readonly SKPaint _borderPaint;
     private readonly SKPaint _iconPaint;
     private readonly SkiaTextPaint _tinyTextPaint;
+    private readonly SKPaint _clipPaint;
 
     private readonly List<PluginSlotRect> _pluginSlots = new();
     private readonly List<PluginKnobRect> _pluginKnobs = new();
@@ -31,6 +32,7 @@ public sealed class PluginShellRenderer
         _borderPaint = CreateStrokePaint(_theme.Border, 1f);
         _iconPaint = CreateStrokePaint(_theme.TextSecondary, 1.5f);
         _tinyTextPaint = CreateTextPaint(_theme.TextMuted, 7f);
+        _clipPaint = CreateFillPaint(_theme.MeterClip);
     }
 
     public void ClearHitTargets()
@@ -86,6 +88,14 @@ public sealed class PluginShellRenderer
                 var removeIconPaint = CreateStrokePaint(_theme.TextMuted, 1.2f);
                 canvas.DrawLine(removeX, removeY, removeX + removeSize, removeY + removeSize, removeIconPaint);
                 canvas.DrawLine(removeX + removeSize, removeY, removeX, removeY + removeSize, removeIconPaint);
+            }
+
+            if (slot.IsClipping)
+            {
+                float clipSize = 6f;
+                float clipX = (isPinned ? x + width - clipSize - 4f : removeX - clipSize - 4f);
+                float clipY = topRowY + (topRowH - clipSize) / 2f;
+                canvas.DrawCircle(clipX + clipSize / 2f, clipY + clipSize / 2f, clipSize / 2f, _clipPaint);
             }
 
             string displayText = $"{slotIndex + 1}. {slot.DisplayName}";
@@ -200,6 +210,54 @@ public sealed class PluginShellRenderer
 
         region = PluginSlotRegion.None;
         return null;
+    }
+
+    public PluginSlotHit? HitTestSlot(float x, float y, out PluginSlotRegion region, out SKRect rect)
+    {
+        foreach (var slot in _pluginSlots)
+        {
+            if (!slot.Rect.Contains(x, y))
+            {
+                continue;
+            }
+
+            rect = slot.Rect;
+
+            if (slot.BypassRect.Contains(x, y))
+            {
+                region = PluginSlotRegion.Bypass;
+                return new PluginSlotHit(slot.ChannelIndex, slot.PluginInstanceId, slot.SlotIndex);
+            }
+            if (slot.RemoveRect.Contains(x, y))
+            {
+                region = PluginSlotRegion.Remove;
+                return new PluginSlotHit(slot.ChannelIndex, slot.PluginInstanceId, slot.SlotIndex);
+            }
+            if (slot.DeltaStripRect.Contains(x, y))
+            {
+                region = PluginSlotRegion.DeltaStrip;
+                return new PluginSlotHit(slot.ChannelIndex, slot.PluginInstanceId, slot.SlotIndex);
+            }
+
+            region = PluginSlotRegion.Action;
+            return new PluginSlotHit(slot.ChannelIndex, slot.PluginInstanceId, slot.SlotIndex);
+        }
+
+        region = PluginSlotRegion.None;
+        rect = SKRect.Empty;
+        return null;
+    }
+
+    public SKRect GetSlotRectByIndex(int channelIndex, int slotIndex)
+    {
+        foreach (var slot in _pluginSlots)
+        {
+            if (slot.ChannelIndex == channelIndex && slot.SlotIndex == slotIndex)
+            {
+                return slot.Rect;
+            }
+        }
+        return SKRect.Empty;
     }
 
     private void DrawPluginKnob(SKCanvas canvas, float cx, float cy, float radius, float normalizedValue, string label, bool dimmed)

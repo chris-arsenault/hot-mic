@@ -30,7 +30,7 @@ internal sealed class MainDebugOverlayRenderer
 
         float lineHeight = 14f;
         int inputLines = Math.Max(1, inputCount);
-        int lineCount = 1 + 2 + 1 + inputLines + 1 + 3;
+        int lineCount = 1 + 2 + 1 + inputLines + 1 + 4;
         float overlayHeight = lineCount * lineHeight + 32f;
 
         float overlayX = MainLayoutMetrics.Padding;
@@ -100,6 +100,9 @@ internal sealed class MainDebugOverlayRenderer
         var okColor = _paints.SmallTextPaint;
         string dropLine = $"Drops 30s: in {viewModel.InputDrops30Sec} out {viewModel.OutputUnderflowDrops30Sec} total {viewModel.Drops30Sec}";
         canvas.DrawText(dropLine, col1X, textY, viewModel.Drops30Sec > 0 ? dropColor : okColor);
+        textY += lineHeight;
+
+        canvas.DrawText($"Graph: {viewModel.RoutingGraphOrder}", col1X, textY, _paints.SmallTextPaint);
         textY += lineHeight;
 
         canvas.DrawText($"Output: {diag.OutputCallbackCount} ({diag.LastOutputFrames} frames) under {diag.OutputUnderflowSamples}", col1X, textY, _paints.SmallTextPaint);

@@ -415,6 +415,7 @@ internal sealed class MainPluginCoordinator
             GetPluginParameterValue = GetPluginParameterValue,
             ApplyPluginParameter = ApplyPluginParameter,
             SetPluginBypass = SetPluginBypass,
+            GetSidechainUsageMask = GetSidechainUsageMask,
             RequestNoiseLearn = RequestNoiseLearn,
             SetChannelInputDevice = _setChannelInputDevice,
             SetChannelInputMode = _setChannelInputMode,
@@ -696,6 +697,50 @@ internal sealed class MainPluginCoordinator
         _configManager.Save(Config);
     }
 
+    public void RenameContainer(int channelIndex, int containerId, string newName)
+    {
+        var graph = GetGraph(channelIndex);
+        if (graph is null)
+        {
+            return;
+        }
+
+        if (!graph.RenameContainer(containerId, newName))
+        {
+            return;
+        }
+
+        // Update the view model
+        var channels = _getChannels();
+        if ((uint)channelIndex < (uint)channels.Count)
+        {
+            var channel = channels[channelIndex];
+            foreach (var container in channel.Containers)
+            {
+                if (container.ContainerId == containerId)
+                {
+                    container.Name = newName;
+                    break;
+                }
+            }
+        }
+
+        // Update any open container windows
+        var windows = _containerWindows.GetWindowSnapshot();
+        for (int i = 0; i < windows.Count; i++)
+        {
+            var entry = windows[i];
+            if (entry.ChannelIndex == channelIndex && entry.ContainerId == containerId)
+            {
+                entry.ViewModel.UpdateName(newName);
+            }
+        }
+
+        var config = _getOrCreateChannelConfig(channelIndex);
+        MarkChannelPresetCustom(config);
+        _configManager.Save(Config);
+    }
+
     public void ReorderContainer(int channelIndex, int containerId, int targetChainIndex)
     {
         if ((uint)channelIndex >= (uint)AudioEngine.Channels.Count || containerId <= 0)
@@ -916,6 +961,21 @@ internal sealed class MainPluginCoordinator
 
     public void SetPluginBypass(int channelIndex, int pluginInstanceId, bool bypassed)
     {
+        if (pluginInstanceId <= 0)
+        {
+            return;
+        }
+
+        AudioEngine.EnqueueParameterChange(new ParameterChange
+        {
+            ChannelId = channelIndex,
+            Type = ParameterType.PluginBypass,
+            PluginInstanceId = pluginInstanceId,
+            Value = bypassed ? 1f : 0f
+        });
+
+        UpdatePluginBypassConfig(channelIndex, pluginInstanceId, bypassed);
+
         var channels = _getChannels();
         if ((uint)channelIndex >= (uint)channels.Count)
         {
@@ -1642,6 +1702,45 @@ internal sealed class MainPluginCoordinator
         {
             _setActiveChannelPresetName(PluginPresetManager.CustomPresetName);
         }
+    }
+
+    private SidechainSignalMask GetSidechainUsageMask(int channelIndex, int instanceId)
+    {
+        if ((uint)channelIndex >= (uint)AudioEngine.Channels.Count)
+        {
+            return SidechainSignalMask.None;
+        }
+
+        var chain = AudioEngine.Channels[channelIndex].PluginChain;
+        if (!chain.TryGetSlotById(instanceId, out _, out int slotIndex))
+        {
+            return SidechainSignalMask.None;
+        }
+
+        var slots = chain.GetSnapshot();
+        if ((uint)slotIndex >= (uint)slots.Length)
+        {
+            return SidechainSignalMask.None;
+        }
+
+        SidechainSignalMask used = SidechainSignalMask.None;
+        for (int i = slotIndex + 1; i < slots.Length; i++)
+        {
+            var slot = slots[i];
+            if (slot?.Plugin is not ISidechainConsumer consumer)
+            {
+                continue;
+            }
+
+            if (slot.Plugin.IsBypassed)
+            {
+                continue;
+            }
+
+            used |= consumer.RequiredSignals;
+        }
+
+        return used;
     }
 
     public static int FindPluginSlotIndex(ChannelStripViewModel channel, int instanceId)

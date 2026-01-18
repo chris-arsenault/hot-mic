@@ -17,6 +17,7 @@ public sealed class PluginContainerRenderer
     private readonly SKPaint _iconPaint;
     private readonly SkiaTextPaint _titlePaint;
     private readonly MainRenderer _pluginRenderer = new();
+    private readonly MainDragOverlayRenderer _dragOverlayRenderer = new();
 
     private SKRect _titleBarRect;
     private SKRect _closeRect;
@@ -30,7 +31,7 @@ public sealed class PluginContainerRenderer
         _titlePaint = CreateTextPaint(_theme.TextPrimary, 12f, SKFontStyle.Bold);
     }
 
-    public void Render(SKCanvas canvas, SKSize size, PluginContainerWindowViewModel viewModel, float dpiScale)
+    public void Render(SKCanvas canvas, SKSize size, PluginContainerWindowViewModel viewModel, float dpiScale, PluginStripUiState? uiState = null)
     {
         ClearHitTargets();
         canvas.Clear(SKColors.Transparent);
@@ -41,7 +42,7 @@ public sealed class PluginContainerRenderer
 
         DrawBackground(canvas, size);
         DrawTitleBar(canvas, size, viewModel);
-        DrawPluginStrip(canvas, size, viewModel);
+        DrawPluginStrip(canvas, size, viewModel, uiState);
 
         canvas.Restore();
     }
@@ -52,6 +53,9 @@ public sealed class PluginContainerRenderer
 
     public PluginSlotHit? HitTestPluginSlot(float x, float y, out PluginSlotRegion region) =>
         _pluginRenderer.HitTestPluginSlot(x, y, out region);
+
+    public PluginSlotHit? HitTestPluginSlot(float x, float y, out PluginSlotRegion region, out SKRect rect) =>
+        _pluginRenderer.HitTestPluginSlot(x, y, out region, out rect);
 
     public PluginKnobHit? HitTestPluginKnob(float x, float y) => _pluginRenderer.HitTestPluginKnob(x, y);
 
@@ -83,12 +87,37 @@ public sealed class PluginContainerRenderer
         canvas.DrawLine(closeX + CloseSize, closeY, closeX, closeY + CloseSize, _iconPaint);
     }
 
-    private void DrawPluginStrip(SKCanvas canvas, SKSize size, PluginContainerWindowViewModel viewModel)
+    private void DrawPluginStrip(SKCanvas canvas, SKSize size, PluginContainerWindowViewModel viewModel, PluginStripUiState? uiState)
     {
         float top = TitleBarHeight + Padding;
         var rect = new SKRect(Padding, top, size.Width - Padding, size.Height - Padding);
         _pluginRenderer.RenderPluginStrip(canvas, rect, viewModel.PluginSlots, viewModel.ChannelIndex, viewModel.MeterScaleVox);
+
+        // Render drag overlay on top when dragging
+        if (uiState?.PluginDrag?.IsDragging == true)
+        {
+            // Convert PluginStripDragState to MainUiState for the drag overlay renderer
+            var mainUiState = new MainUiState
+            {
+                PluginDrag = new PluginDragState(
+                    uiState.PluginDrag.Value.ChannelIndex,
+                    uiState.PluginDrag.Value.PluginInstanceId,
+                    uiState.PluginDrag.Value.SlotIndex,
+                    uiState.PluginDrag.Value.StartX,
+                    uiState.PluginDrag.Value.StartY,
+                    uiState.PluginDrag.Value.CurrentX,
+                    uiState.PluginDrag.Value.CurrentY,
+                    uiState.PluginDrag.Value.IsDragging,
+                    uiState.PluginDrag.Value.SourceRect,
+                    uiState.PluginDrag.Value.DisplayName),
+                CurrentDropTarget = uiState.CurrentDropTarget
+            };
+            _dragOverlayRenderer.Render(canvas, mainUiState);
+        }
     }
+
+    public SKRect GetPluginSlotRect(int channelIndex, int slotIndex) =>
+        _pluginRenderer.GetPluginSlotRect(channelIndex, slotIndex);
 
     private static SKPaint CreateFillPaint(SKColor color) => new() { Color = color, IsAntialias = true, Style = SKPaintStyle.Fill };
 

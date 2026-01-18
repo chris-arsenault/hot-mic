@@ -1,3 +1,5 @@
+using SkiaSharp;
+
 namespace HotMic.App.UI;
 
 internal sealed class MainHitTester
@@ -44,14 +46,25 @@ internal sealed class MainHitTester
     public PluginSlotHit? HitTestPluginSlot(float x, float y, out PluginSlotRegion region) =>
         _pluginShellRenderer.HitTestSlot(x, y, out region);
 
+    public PluginSlotHit? HitTestPluginSlot(float x, float y, out PluginSlotRegion region, out SKRect rect) =>
+        _pluginShellRenderer.HitTestSlot(x, y, out region, out rect);
+
     public RoutingSlotHit? HitTestRoutingSlot(float x, float y, out RoutingSlotRegion region) =>
         _routingSlotRenderer.HitTestSlot(x, y, out region);
+
+    public RoutingSlotHit? HitTestRoutingSlot(float x, float y, out RoutingSlotRegion region, out SKRect rect) =>
+        _routingSlotRenderer.HitTestSlot(x, y, out region, out rect);
 
     public RoutingKnobHit? HitTestRoutingKnob(float x, float y) => _routingSlotRenderer.HitTestKnob(x, y);
 
     public RoutingBadgeHit? HitTestRoutingBadge(float x, float y) => _routingSlotRenderer.HitTestBadge(x, y);
 
     public MainContainerSlotHit? HitTestContainerSlot(float x, float y, out MainContainerSlotRegion region)
+    {
+        return HitTestContainerSlot(x, y, out region, out _);
+    }
+
+    public MainContainerSlotHit? HitTestContainerSlot(float x, float y, out MainContainerSlotRegion region, out SKRect rect)
     {
         foreach (var slot in _targets.ContainerSlots)
         {
@@ -63,20 +76,24 @@ internal sealed class MainHitTester
             if (slot.BypassRect.Contains(x, y))
             {
                 region = MainContainerSlotRegion.Bypass;
+                rect = slot.Rect;
                 return new MainContainerSlotHit(slot.ChannelIndex, slot.ContainerId, slot.SlotIndex);
             }
 
             if (slot.RemoveRect.Contains(x, y))
             {
                 region = MainContainerSlotRegion.Remove;
+                rect = slot.Rect;
                 return new MainContainerSlotHit(slot.ChannelIndex, slot.ContainerId, slot.SlotIndex);
             }
 
             region = MainContainerSlotRegion.Action;
+            rect = slot.Rect;
             return new MainContainerSlotHit(slot.ChannelIndex, slot.ContainerId, slot.SlotIndex);
         }
 
         region = MainContainerSlotRegion.None;
+        rect = SKRect.Empty;
         return null;
     }
 

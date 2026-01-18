@@ -54,6 +54,9 @@ public partial class PluginViewModel : ObservableObject
     private float outputRmsLevel;
 
     [ObservableProperty]
+    private bool isClipping;
+
+    [ObservableProperty]
     private int copyTargetChannelId;
 
     // Spectral delta data for the delta strip visualization (32 bands)

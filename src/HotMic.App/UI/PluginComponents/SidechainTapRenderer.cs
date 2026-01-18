@@ -1,3 +1,4 @@
+using HotMic.Core.Plugins;
 using SkiaSharp;
 
 namespace HotMic.App.UI.PluginComponents;
@@ -12,7 +13,16 @@ public sealed class SidechainTapRenderer : IDisposable
     private const float CornerRadius = 10f;
     private const float MeterHeight = 20f;
     private const float MeterSpacing = 8f;
-    private const float ToggleWidth = 40f;
+    private const float LabelWidth = 110f;
+    private const float IndicatorWidth = 36f;
+    private const float IndicatorHeight = 14f;
+    private const float IndicatorGap = 4f;
+    private const float ToggleWidth = 32f;
+    private const float ToggleHeight = 18f;
+    private const float ToggleGap = 4f;
+    private const float ValueWidth = 34f;
+    private const float ColumnGap = 8f;
+    private const int SignalCount = (int)SidechainSignalId.Count;
 
     private readonly PluginComponentTheme _theme;
 
@@ -30,6 +40,10 @@ public sealed class SidechainTapRenderer : IDisposable
     private readonly SKPaint _sibilanceMeterPaint;
     private readonly SKPaint _toggleOnPaint;
     private readonly SKPaint _toggleOffPaint;
+    private readonly SKPaint _modeUsePaint;
+    private readonly SKPaint _modeDisablePaint;
+    private readonly SKPaint _indicatorOnPaint;
+    private readonly SKPaint _indicatorOffPaint;
     private readonly SkiaTextPaint _labelPaint;
     private readonly SkiaTextPaint _valuePaint;
     private readonly SkiaTextPaint _latencyPaint;
@@ -37,10 +51,8 @@ public sealed class SidechainTapRenderer : IDisposable
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
-    private SKRect _speechToggleRect;
-    private SKRect _voicedToggleRect;
-    private SKRect _unvoicedToggleRect;
-    private SKRect _sibilanceToggleRect;
+    private readonly SKRect[,] _modeToggleRects = new SKRect[SignalCount, 3];
+    private static readonly SidechainTapMode[] ModeOrder = [SidechainTapMode.UseExisting, SidechainTapMode.Generate, SidechainTapMode.Disabled];
 
     public SidechainTapRenderer(PluginComponentTheme? theme = null)
     {
@@ -134,6 +146,34 @@ public sealed class SidechainTapRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
+        _modeUsePaint = new SKPaint
+        {
+            Color = new SKColor(0x40, 0x90, 0xFF),
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _modeDisablePaint = new SKPaint
+        {
+            Color = new SKColor(0xD0, 0x50, 0x50),
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _indicatorOnPaint = new SKPaint
+        {
+            Color = new SKColor(0x40, 0x90, 0xFF),
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _indicatorOffPaint = new SKPaint
+        {
+            Color = _theme.GateClosedDim,
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
         _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 11f, SKFontStyle.Normal, SKTextAlign.Left);
         _valuePaint = new SkiaTextPaint(_theme.TextPrimary, 11f, SKFontStyle.Bold, SKTextAlign.Right);
         _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
@@ -153,27 +193,32 @@ public sealed class SidechainTapRenderer : IDisposable
         DrawTitleBar(canvas, size, state);
 
         float y = TitleBarHeight + Padding;
-        float meterWidth = size.Width - Padding * 2 - ToggleWidth - 80f;
-        float meterX = Padding + 80f;
+        float indicatorGroupWidth = IndicatorWidth * 2 + IndicatorGap;
+        float toggleGroupWidth = ToggleWidth * 3 + ToggleGap * 2;
+        float meterX = Padding + LabelWidth + indicatorGroupWidth + ColumnGap;
+        float meterWidth = size.Width - (Padding * 2 + LabelWidth + indicatorGroupWidth + ValueWidth + toggleGroupWidth + ColumnGap * 3);
+        float indicatorX = Padding + LabelWidth;
+        float valueX = meterX + meterWidth + ColumnGap;
+        float toggleX = valueX + ValueWidth + ColumnGap;
 
         // Speech Presence
-        DrawSignalRow(canvas, y, meterX, meterWidth, "Speech Presence",
-            state.SpeechPresence, state.SpeechEnabled, _speechMeterPaint, out _speechToggleRect);
+        DrawSignalRow(canvas, y, indicatorX, meterX, meterWidth, valueX, toggleX, "Speech Presence",
+            state.Speech, _speechMeterPaint, 0);
         y += MeterHeight + MeterSpacing;
 
         // Voiced Probability
-        DrawSignalRow(canvas, y, meterX, meterWidth, "Voiced Prob.",
-            state.VoicedProbability, state.VoicedEnabled, _voicedMeterPaint, out _voicedToggleRect);
+        DrawSignalRow(canvas, y, indicatorX, meterX, meterWidth, valueX, toggleX, "Voiced Prob.",
+            state.Voiced, _voicedMeterPaint, 1);
         y += MeterHeight + MeterSpacing;
 
         // Unvoiced Energy
-        DrawSignalRow(canvas, y, meterX, meterWidth, "Unvoiced Energy",
-            state.UnvoicedEnergy, state.UnvoicedEnabled, _unvoicedMeterPaint, out _unvoicedToggleRect);
+        DrawSignalRow(canvas, y, indicatorX, meterX, meterWidth, valueX, toggleX, "Unvoiced Energy",
+            state.Unvoiced, _unvoicedMeterPaint, 2);
         y += MeterHeight + MeterSpacing;
 
         // Sibilance Energy
-        DrawSignalRow(canvas, y, meterX, meterWidth, "Sibilance",
-            state.SibilanceEnergy, state.SibilanceEnabled, _sibilanceMeterPaint, out _sibilanceToggleRect);
+        DrawSignalRow(canvas, y, indicatorX, meterX, meterWidth, valueX, toggleX, "Sibilance",
+            state.Sibilance, _sibilanceMeterPaint, 3);
 
         canvas.DrawRoundRect(roundRect, _borderPaint);
         canvas.Restore();
@@ -219,19 +264,27 @@ public sealed class SidechainTapRenderer : IDisposable
         canvas.DrawText("\u00D7", _closeButtonRect.MidX, _closeButtonRect.MidY + 6, _closeButtonPaint);
     }
 
-    private void DrawSignalRow(SKCanvas canvas, float y, float meterX, float meterWidth,
-        string label, float value, bool enabled, SKPaint meterPaint, out SKRect toggleRect)
+    private void DrawSignalRow(SKCanvas canvas, float y, float indicatorX, float meterX, float meterWidth, float valueX, float toggleX,
+        string label, in SidechainTapSignalState signal, SKPaint meterPaint, int signalIndex)
     {
         // Label
         canvas.DrawText(label, Padding, y + MeterHeight / 2 + 4, _labelPaint);
+
+        float indicatorY = y + (MeterHeight - IndicatorHeight) / 2f;
+        var preRect = new SKRect(indicatorX, indicatorY, indicatorX + IndicatorWidth, indicatorY + IndicatorHeight);
+        DrawIndicator(canvas, preRect, "PRE", signal.HasUpstream);
+
+        var usedRect = new SKRect(indicatorX + IndicatorWidth + IndicatorGap, indicatorY,
+            indicatorX + IndicatorWidth * 2 + IndicatorGap, indicatorY + IndicatorHeight);
+        DrawIndicator(canvas, usedRect, "USED", signal.UsedLater);
 
         // Meter
         var meterRect = new SKRect(meterX, y, meterX + meterWidth, y + MeterHeight);
         var meterRound = new SKRoundRect(meterRect, 4f);
         canvas.DrawRoundRect(meterRound, _meterBackgroundPaint);
 
-        float fillWidth = (meterRect.Width - 4) * Math.Clamp(value, 0f, 1f);
-        if (fillWidth > 1 && enabled)
+        float fillWidth = (meterRect.Width - 4) * Math.Clamp(signal.Value, 0f, 1f);
+        if (fillWidth > 1 && signal.Mode != SidechainTapMode.Disabled)
         {
             var fillRect = new SKRect(meterRect.Left + 2, meterRect.Top + 2,
                 meterRect.Left + 2 + fillWidth, meterRect.Bottom - 2);
@@ -241,46 +294,85 @@ public sealed class SidechainTapRenderer : IDisposable
         canvas.DrawRoundRect(meterRound, _borderPaint);
 
         // Value display
-        canvas.DrawText($"{value:0.00}", meterRect.Right + 40f, y + MeterHeight / 2 + 4, _valuePaint);
+        canvas.DrawText($"{signal.Value:0.00}", valueX + ValueWidth, y + MeterHeight / 2 + 4, _valuePaint);
 
-        // Toggle button
-        toggleRect = new SKRect(
-            meterRect.Right + 50f,
-            y + (MeterHeight - 18) / 2,
-            meterRect.Right + 50f + ToggleWidth,
-            y + (MeterHeight + 18) / 2);
-        var toggleRound = new SKRoundRect(toggleRect, 4f);
-        canvas.DrawRoundRect(toggleRound, enabled ? _toggleOnPaint : _toggleOffPaint);
-        canvas.DrawRoundRect(toggleRound, _borderPaint);
+        // Mode toggles
+        float toggleY = y + (MeterHeight - ToggleHeight) / 2f;
+        for (int i = 0; i < ModeOrder.Length; i++)
+        {
+            float x = toggleX + i * (ToggleWidth + ToggleGap);
+            var toggleRect = new SKRect(x, toggleY, x + ToggleWidth, toggleY + ToggleHeight);
+            _modeToggleRects[signalIndex, i] = toggleRect;
+            DrawModeToggle(canvas, toggleRect, ModeOrder[i], signal.Mode == ModeOrder[i]);
+        }
+    }
 
-        using var toggleTextPaint = new SkiaTextPaint(enabled ? _theme.PanelBackground : _theme.TextSecondary, 9f, SKFontStyle.Bold, SKTextAlign.Center);
-        canvas.DrawText(enabled ? "ON" : "OFF", toggleRect.MidX, toggleRect.MidY + 3, toggleTextPaint);
+    private void DrawIndicator(SKCanvas canvas, SKRect rect, string label, bool active)
+    {
+        var round = new SKRoundRect(rect, 3f);
+        canvas.DrawRoundRect(round, active ? _indicatorOnPaint : _indicatorOffPaint);
+        canvas.DrawRoundRect(round, _borderPaint);
+
+        using var textPaint = new SkiaTextPaint(active ? _theme.PanelBackground : _theme.TextMuted, 8f, SKFontStyle.Bold, SKTextAlign.Center);
+        canvas.DrawText(label, rect.MidX, rect.MidY + 3, textPaint);
+    }
+
+    private void DrawModeToggle(SKCanvas canvas, SKRect rect, SidechainTapMode mode, bool selected)
+    {
+        var paint = selected ? GetModePaint(mode) : _toggleOffPaint;
+        var round = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(round, paint);
+        canvas.DrawRoundRect(round, _borderPaint);
+
+        string label = mode switch
+        {
+            SidechainTapMode.UseExisting => "USE",
+            SidechainTapMode.Generate => "GEN",
+            SidechainTapMode.Disabled => "OFF",
+            _ => "?"
+        };
+
+        using var textPaint = new SkiaTextPaint(selected ? _theme.PanelBackground : _theme.TextSecondary, 8f, SKFontStyle.Bold, SKTextAlign.Center);
+        canvas.DrawText(label, rect.MidX, rect.MidY + 3, textPaint);
+    }
+
+    private SKPaint GetModePaint(SidechainTapMode mode)
+    {
+        return mode switch
+        {
+            SidechainTapMode.UseExisting => _modeUsePaint,
+            SidechainTapMode.Generate => _toggleOnPaint,
+            SidechainTapMode.Disabled => _modeDisablePaint,
+            _ => _toggleOnPaint
+        };
     }
 
     public SidechainTapHitTest HitTest(float x, float y)
     {
         if (_closeButtonRect.Contains(x, y))
-            return new SidechainTapHitTest(SidechainTapHitArea.CloseButton, -1);
+            return new SidechainTapHitTest(SidechainTapHitArea.CloseButton, -1, SidechainTapMode.Generate);
 
         if (_bypassButtonRect.Contains(x, y))
-            return new SidechainTapHitTest(SidechainTapHitArea.BypassButton, -1);
+            return new SidechainTapHitTest(SidechainTapHitArea.BypassButton, -1, SidechainTapMode.Generate);
 
-        if (_speechToggleRect.Contains(x, y))
-            return new SidechainTapHitTest(SidechainTapHitArea.Toggle, 0);
-        if (_voicedToggleRect.Contains(x, y))
-            return new SidechainTapHitTest(SidechainTapHitArea.Toggle, 1);
-        if (_unvoicedToggleRect.Contains(x, y))
-            return new SidechainTapHitTest(SidechainTapHitArea.Toggle, 2);
-        if (_sibilanceToggleRect.Contains(x, y))
-            return new SidechainTapHitTest(SidechainTapHitArea.Toggle, 3);
+        for (int signalIndex = 0; signalIndex < SignalCount; signalIndex++)
+        {
+            for (int modeIndex = 0; modeIndex < ModeOrder.Length; modeIndex++)
+            {
+                if (_modeToggleRects[signalIndex, modeIndex].Contains(x, y))
+                {
+                    return new SidechainTapHitTest(SidechainTapHitArea.ModeToggle, signalIndex, ModeOrder[modeIndex]);
+                }
+            }
+        }
 
         if (_titleBarRect.Contains(x, y))
-            return new SidechainTapHitTest(SidechainTapHitArea.TitleBar, -1);
+            return new SidechainTapHitTest(SidechainTapHitArea.TitleBar, -1, SidechainTapMode.Generate);
 
-        return new SidechainTapHitTest(SidechainTapHitArea.None, -1);
+        return new SidechainTapHitTest(SidechainTapHitArea.None, -1, SidechainTapMode.Generate);
     }
 
-    public static SKSize GetPreferredSize() => new(380, 200);
+    public static SKSize GetPreferredSize() => new(520, 210);
 
     public void Dispose()
     {
@@ -298,21 +390,27 @@ public sealed class SidechainTapRenderer : IDisposable
         _sibilanceMeterPaint.Dispose();
         _toggleOnPaint.Dispose();
         _toggleOffPaint.Dispose();
+        _modeUsePaint.Dispose();
+        _modeDisablePaint.Dispose();
+        _indicatorOnPaint.Dispose();
+        _indicatorOffPaint.Dispose();
         _labelPaint.Dispose();
         _valuePaint.Dispose();
         _latencyPaint.Dispose();
     }
 }
 
+public readonly record struct SidechainTapSignalState(
+    float Value,
+    SidechainTapMode Mode,
+    bool HasUpstream,
+    bool UsedLater);
+
 public record struct SidechainTapState(
-    float SpeechPresence,
-    float VoicedProbability,
-    float UnvoicedEnergy,
-    float SibilanceEnergy,
-    bool SpeechEnabled,
-    bool VoicedEnabled,
-    bool UnvoicedEnabled,
-    bool SibilanceEnabled,
+    SidechainTapSignalState Speech,
+    SidechainTapSignalState Voiced,
+    SidechainTapSignalState Unvoiced,
+    SidechainTapSignalState Sibilance,
     float LatencyMs,
     bool IsBypassed);
 
@@ -322,7 +420,7 @@ public enum SidechainTapHitArea
     TitleBar,
     CloseButton,
     BypassButton,
-    Toggle
+    ModeToggle
 }
 
-public record struct SidechainTapHitTest(SidechainTapHitArea Area, int ToggleIndex);
+public record struct SidechainTapHitTest(SidechainTapHitArea Area, int SignalIndex, SidechainTapMode Mode);

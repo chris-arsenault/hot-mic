@@ -288,6 +288,9 @@ public sealed class UpwardExpanderPlugin : IPlugin, ISidechainConsumer, IPluginS
             return;
         }
 
+        _lowEnv.Configure(_attackMs, _releaseMs, _sampleRate);
+        _midEnv.Configure(_attackMs, _releaseMs, _sampleRate);
+        _highEnv.Configure(_attackMs, _releaseMs, _sampleRate);
         _attackCoeff = DspUtils.TimeToCoefficient(_attackMs, _sampleRate);
         _releaseCoeff = DspUtils.TimeToCoefficient(_releaseMs, _sampleRate);
         _ratio = 1f + (_amountPct / 100f) * MaxRatioAdd;

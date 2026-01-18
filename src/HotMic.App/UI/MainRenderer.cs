@@ -22,6 +22,7 @@ public sealed class MainRenderer
     private readonly MainMinimalViewRenderer _minimalViewRenderer;
     private readonly MainDebugOverlayRenderer _debugOverlayRenderer;
     private readonly MainPluginStripRenderer _pluginStripRenderer;
+    private readonly MainDragOverlayRenderer _dragOverlayRenderer = new();
 
     public MainRenderer()
     {
@@ -66,6 +67,12 @@ public sealed class MainRenderer
             {
                 _debugOverlayRenderer.Render(canvas, layout, viewModel);
             }
+
+            // Render drag overlay on top when dragging
+            if (uiState.PluginDrag?.IsDragging == true || uiState.ContainerDrag?.IsDragging == true)
+            {
+                _dragOverlayRenderer.Render(canvas, uiState);
+            }
         }
 
         canvas.Restore();
@@ -85,13 +92,22 @@ public sealed class MainRenderer
 
     public PluginSlotHit? HitTestPluginSlot(float x, float y, out PluginSlotRegion region) => _hitTester.HitTestPluginSlot(x, y, out region);
 
+    public PluginSlotHit? HitTestPluginSlot(float x, float y, out PluginSlotRegion region, out SKRect rect) =>
+        _hitTester.HitTestPluginSlot(x, y, out region, out rect);
+
     public RoutingSlotHit? HitTestRoutingSlot(float x, float y, out RoutingSlotRegion region) => _hitTester.HitTestRoutingSlot(x, y, out region);
+
+    public RoutingSlotHit? HitTestRoutingSlot(float x, float y, out RoutingSlotRegion region, out SKRect rect) =>
+        _hitTester.HitTestRoutingSlot(x, y, out region, out rect);
 
     public RoutingKnobHit? HitTestRoutingKnob(float x, float y) => _hitTester.HitTestRoutingKnob(x, y);
 
     public RoutingBadgeHit? HitTestRoutingBadge(float x, float y) => _hitTester.HitTestRoutingBadge(x, y);
 
     public MainContainerSlotHit? HitTestContainerSlot(float x, float y, out MainContainerSlotRegion region) => _hitTester.HitTestContainerSlot(x, y, out region);
+
+    public MainContainerSlotHit? HitTestContainerSlot(float x, float y, out MainContainerSlotRegion region, out SKRect rect) =>
+        _hitTester.HitTestContainerSlot(x, y, out region, out rect);
 
     public int HitTestPluginArea(float x, float y) => _hitTester.HitTestPluginArea(x, y);
 
@@ -118,6 +134,12 @@ public sealed class MainRenderer
     public bool HitTestPresetDropdown(float x, float y) => _hitTester.HitTestPresetDropdown(x, y);
 
     public SKRect GetPresetDropdownRect() => _hitTester.GetPresetDropdownRect();
+
+    public SKRect GetPluginSlotRect(int channelIndex, int slotIndex) =>
+        _pluginShellRenderer.GetSlotRectByIndex(channelIndex, slotIndex);
+
+    public SKRect GetRoutingSlotRect(int channelIndex, int slotIndex) =>
+        _routingSlotRenderer.GetSlotRectByIndex(channelIndex, slotIndex);
 
     private void ResetHitTargets()
     {

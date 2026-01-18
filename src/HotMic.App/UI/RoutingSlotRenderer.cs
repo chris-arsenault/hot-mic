@@ -437,6 +437,56 @@ public sealed class RoutingSlotRenderer
         return null;
     }
 
+    public RoutingSlotHit? HitTestSlot(float x, float y, out RoutingSlotRegion region, out SKRect rect)
+    {
+        foreach (var slot in _routingSlots)
+        {
+            if (!slot.Rect.Contains(x, y))
+            {
+                continue;
+            }
+
+            rect = slot.Rect;
+
+            if (!slot.BypassRect.IsEmpty && slot.BypassRect.Contains(x, y))
+            {
+                region = RoutingSlotRegion.Bypass;
+                return new RoutingSlotHit(slot.ChannelIndex, slot.PluginInstanceId, slot.SlotIndex, slot.PluginId);
+            }
+
+            if (!slot.RemoveRect.IsEmpty && slot.RemoveRect.Contains(x, y))
+            {
+                region = RoutingSlotRegion.Remove;
+                return new RoutingSlotHit(slot.ChannelIndex, slot.PluginInstanceId, slot.SlotIndex, slot.PluginId);
+            }
+
+            if (slot.ActionRect.Contains(x, y))
+            {
+                region = RoutingSlotRegion.Action;
+                return new RoutingSlotHit(slot.ChannelIndex, slot.PluginInstanceId, slot.SlotIndex, slot.PluginId);
+            }
+
+            region = RoutingSlotRegion.None;
+            return new RoutingSlotHit(slot.ChannelIndex, slot.PluginInstanceId, slot.SlotIndex, slot.PluginId);
+        }
+
+        region = RoutingSlotRegion.None;
+        rect = SKRect.Empty;
+        return null;
+    }
+
+    public SKRect GetSlotRectByIndex(int channelIndex, int slotIndex)
+    {
+        foreach (var slot in _routingSlots)
+        {
+            if (slot.ChannelIndex == channelIndex && slot.SlotIndex == slotIndex)
+            {
+                return slot.Rect;
+            }
+        }
+        return SKRect.Empty;
+    }
+
     public RoutingBadgeHit? HitTestBadge(float x, float y)
     {
         foreach (var badge in _routingBadges)

@@ -698,7 +698,8 @@ internal sealed class PluginWindowRouter
                 string paramName = plugin.Parameters[paramIndex].Name;
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
-            bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
+            bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed),
+            () => request.GetSidechainUsageMask(channelIndex, pluginInstanceId))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
@@ -748,6 +749,7 @@ internal sealed record PluginWindowRequest
     public Func<int, int, string, float, float> GetPluginParameterValue { get; init; } = (_, _, _, fallback) => fallback;
     public Action<int, int, int, string, float> ApplyPluginParameter { get; init; } = (_, _, _, _, _) => { };
     public Action<int, int, bool> SetPluginBypass { get; init; } = (_, _, _) => { };
+    public Func<int, int, SidechainSignalMask> GetSidechainUsageMask { get; init; } = (_, _) => SidechainSignalMask.None;
     public Action<int, int> RequestNoiseLearn { get; init; } = (_, _) => { };
     public Action<int, string> SetChannelInputDevice { get; init; } = (_, _) => { };
     public Action<int, InputChannelMode> SetChannelInputMode { get; init; } = (_, _) => { };

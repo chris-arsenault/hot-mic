@@ -157,6 +157,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private IReadOnlyList<string> debugLines = Array.Empty<string>();
 
     [ObservableProperty]
+    private string routingGraphOrder = "n/a";
+
+    [ObservableProperty]
     private double windowX;
 
     [ObservableProperty]
@@ -332,6 +335,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _channelCoordinator.RenameChannel(channelIndex, newName);
     }
 
+    public void RenameContainer(int channelIndex, int containerId, string newName)
+    {
+        _pluginCoordinator.RenameContainer(channelIndex, containerId, newName);
+    }
+
     public void SetChannelInputDevice(int channelIndex, string deviceId)
     {
         _channelCoordinator.SetChannelInputDevice(channelIndex, deviceId);
@@ -444,9 +452,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
             ? _config.AudioSettings.SampleRate
             : SampleRateOptions[0];
         var profile = AudioQualityProfiles.ForMode(QualityMode, SelectedSampleRate);
-        SelectedBufferSize = BufferSizeOptions.Contains(profile.BufferSize)
-            ? profile.BufferSize
-            : BufferSizeOptions[1];
+        int configBufferSize = _config.AudioSettings.BufferSize;
+        int resolvedBufferSize = BufferSizeOptions.Contains(configBufferSize)
+            ? configBufferSize
+            : BufferSizeOptions.Contains(profile.BufferSize)
+                ? profile.BufferSize
+                : BufferSizeOptions[1];
+        SelectedBufferSize = resolvedBufferSize;
         _config.AudioSettings.BufferSize = SelectedBufferSize;
 
         _channelCoordinator.ApplyChannelConfigToViewModels();

@@ -414,6 +414,26 @@ public sealed class PluginGraph
     }
 
     /// <summary>
+    /// Renames the container with the given id.
+    /// </summary>
+    public bool RenameContainer(int containerId, string newName)
+    {
+        if (_config is null || containerId <= 0)
+        {
+            return false;
+        }
+
+        var container = FindContainer(containerId);
+        if (container is null)
+        {
+            return false;
+        }
+
+        container.Name = newName ?? string.Empty;
+        return true;
+    }
+
+    /// <summary>
     /// Assigns a plugin to the requested container (or clears assignment if containerId is 0).
     /// </summary>
     public bool AssignPluginToContainer(int instanceId, int containerId)

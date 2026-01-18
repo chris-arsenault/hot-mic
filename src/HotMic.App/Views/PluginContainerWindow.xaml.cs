@@ -15,7 +15,7 @@ public partial class PluginContainerWindow : Window
     private const float DragThreshold = 6f;
     private readonly PluginContainerRenderer _renderer = new();
     private readonly DispatcherTimer _renderTimer;
-    private ContainerDragState? _dragState;
+    private readonly PluginStripUiState _uiState = new();
     private KnobDragState? _knobDrag;
 
     public PluginContainerWindow(PluginContainerWindowViewModel viewModel)
@@ -39,7 +39,7 @@ public partial class PluginContainerWindow : Window
         var canvas = e.Surface.Canvas;
         var size = new SKSize(e.Info.Width, e.Info.Height);
         float dpiScale = GetDpiScale();
-        _renderer.Render(canvas, size, viewModel, dpiScale);
+        _renderer.Render(canvas, size, viewModel, dpiScale, _uiState);
     }
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
@@ -126,7 +126,13 @@ public partial class PluginContainerWindow : Window
             return;
         }
 
-        _dragState = new ContainerDragState(slot.InstanceId, slotIndex, x, y, x, y, false);
+        // Get source rect for drag visuals
+        var sourceRect = _renderer.GetPluginSlotRect(viewModel.ChannelIndex, slotIndex);
+        string displayName = slot.DisplayName ?? $"Plugin {slotIndex + 1}";
+
+        _uiState.PluginDrag = new PluginStripDragState(
+            viewModel.ChannelIndex, slot.InstanceId, slotIndex,
+            x, y, x, y, false, sourceRect, displayName);
         SkiaCanvas.CaptureMouse();
         e.Handled = true;
     }
@@ -147,7 +153,7 @@ public partial class PluginContainerWindow : Window
             return;
         }
 
-        if (_dragState is not { } drag || e.LeftButton != MouseButtonState.Pressed)
+        if (_uiState.PluginDrag is not { } drag || e.LeftButton != MouseButtonState.Pressed)
         {
             return;
         }
@@ -159,7 +165,13 @@ public partial class PluginContainerWindow : Window
         float dx = MathF.Abs(x - drag.StartX);
         float dy = MathF.Abs(y - drag.StartY);
         bool isDragging = drag.IsDragging || dx > DragThreshold || dy > DragThreshold;
-        _dragState = drag with { CurrentX = x, CurrentY = y, IsDragging = isDragging };
+        _uiState.PluginDrag = drag with { CurrentX = x, CurrentY = y, IsDragging = isDragging };
+
+        // Update drop target when dragging
+        if (isDragging)
+        {
+            _uiState.CurrentDropTarget = ComputeDropTarget(viewModel, x, y, drag.SlotIndex);
+        }
         e.Handled = true;
     }
 
@@ -179,7 +191,7 @@ public partial class PluginContainerWindow : Window
             return;
         }
 
-        if (_dragState is not { } drag)
+        if (_uiState.PluginDrag is not { } drag)
         {
             return;
         }
@@ -209,7 +221,8 @@ public partial class PluginContainerWindow : Window
             }
         }
 
-        _dragState = null;
+        _uiState.PluginDrag = null;
+        _uiState.CurrentDropTarget = null;
         e.Handled = true;
     }
 
@@ -286,5 +299,25 @@ public partial class PluginContainerWindow : Window
         return -1;
     }
 
-    private readonly record struct ContainerDragState(int PluginInstanceId, int SlotIndex, float StartX, float StartY, float CurrentX, float CurrentY, bool IsDragging);
+    private DropTarget? ComputeDropTarget(PluginContainerWindowViewModel viewModel, float x, float y, int sourceSlot)
+    {
+        // Check specific slot for insertion point
+        var hit = _renderer.HitTestPluginSlot(x, y, out _, out SkiaSharp.SKRect rect);
+        if (!hit.HasValue)
+        {
+            return null; // No slot under cursor
+        }
+
+        // Over a plugin slot - check if same as source
+        if (hit.Value.SlotIndex == sourceSlot)
+        {
+            return null; // Same slot, no feedback
+        }
+
+        // All drops within the same container are valid
+        bool insertBefore = x < rect.MidX;
+        float lineX = insertBefore ? rect.Left - 2f : rect.Right + 2f;
+
+        return new DropTarget(true, rect, lineX, rect.Top, rect.Bottom);
+    }
 }

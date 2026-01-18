@@ -49,9 +49,31 @@ public sealed class MainUiState
     public PluginDragState? PluginDrag { get; set; }
     public ContainerDragState? ContainerDrag { get; set; }
     public KnobDragState? KnobDrag { get; set; }
+    public DropTarget? CurrentDropTarget { get; set; }
 }
 
-public readonly record struct PluginDragState(int ChannelIndex, int PluginInstanceId, int SlotIndex, float StartX, float StartY, float CurrentX, float CurrentY, bool IsDragging);
-public readonly record struct ContainerDragState(int ChannelIndex, int ContainerId, int SlotIndex, float StartX, float StartY, float CurrentX, float CurrentY, bool IsDragging);
+public readonly record struct PluginDragState(
+    int ChannelIndex, int PluginInstanceId, int SlotIndex,
+    float StartX, float StartY, float CurrentX, float CurrentY,
+    bool IsDragging,
+    SkiaSharp.SKRect SourceRect,
+    string DisplayName);
+
+public readonly record struct ContainerDragState(
+    int ChannelIndex, int ContainerId, int SlotIndex,
+    float StartX, float StartY, float CurrentX, float CurrentY,
+    bool IsDragging,
+    SkiaSharp.SKRect SourceRect,
+    string DisplayName);
+
+/// <summary>
+/// Represents a valid drop target during drag operations, used for rendering visual feedback.
+/// </summary>
+public readonly record struct DropTarget(
+    bool IsValid,
+    SkiaSharp.SKRect TargetRect,
+    float InsertLineX,
+    float InsertLineTop,
+    float InsertLineBottom);
 
 public readonly record struct KnobDragState(int ChannelIndex, KnobType KnobType, float StartValue, float StartY, int PluginInstanceId = 0, float MinValue = -60f, float MaxValue = 12f);

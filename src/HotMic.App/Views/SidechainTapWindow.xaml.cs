@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using HotMic.App.UI.PluginComponents;
+using HotMic.Core.Plugins;
 using HotMic.Core.Plugins.BuiltIn;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
@@ -17,20 +18,23 @@ public partial class SidechainTapWindow : Window, IDisposable
     private readonly SidechainTapPlugin _plugin;
     private readonly Action<int, float> _parameterCallback;
     private readonly Action<bool> _bypassCallback;
+    private readonly Func<SidechainSignalMask> _usedLaterProvider;
     private readonly DispatcherTimer _renderTimer;
 
     private float _smoothedSpeech;
     private float _smoothedVoiced;
     private float _smoothedUnvoiced;
     private float _smoothedSibilance;
+    private SidechainSignalMask _usedLaterMask;
     private bool _disposed;
 
-    public SidechainTapWindow(SidechainTapPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
+    public SidechainTapWindow(SidechainTapPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback, Func<SidechainSignalMask> usedLaterProvider)
     {
         InitializeComponent();
         _plugin = plugin;
         _parameterCallback = parameterCallback;
         _bypassCallback = bypassCallback;
+        _usedLaterProvider = usedLaterProvider;
 
         var preferredSize = SidechainTapRenderer.GetPreferredSize();
         Width = preferredSize.Width;
@@ -54,6 +58,8 @@ public partial class SidechainTapWindow : Window, IDisposable
         _smoothedUnvoiced = _smoothedUnvoiced * 0.7f + rawUnvoiced * 0.3f;
         _smoothedSibilance = _smoothedSibilance * 0.7f + rawSibilance * 0.3f;
 
+        _usedLaterMask = _usedLaterProvider?.Invoke() ?? SidechainSignalMask.None;
+
         SkiaCanvas.InvalidateVisual();
     }
 
@@ -64,14 +70,26 @@ public partial class SidechainTapWindow : Window, IDisposable
         float dpiScale = GetDpiScale();
 
         var state = new SidechainTapState(
-            SpeechPresence: _smoothedSpeech,
-            VoicedProbability: _smoothedVoiced,
-            UnvoicedEnergy: _smoothedUnvoiced,
-            SibilanceEnergy: _smoothedSibilance,
-            SpeechEnabled: _plugin.SpeechPresenceEnabled,
-            VoicedEnabled: _plugin.VoicedProbabilityEnabled,
-            UnvoicedEnabled: _plugin.UnvoicedEnergyEnabled,
-            SibilanceEnabled: _plugin.SibilanceEnergyEnabled,
+            Speech: new SidechainTapSignalState(
+                Value: _smoothedSpeech,
+                Mode: _plugin.SpeechPresenceMode,
+                HasUpstream: _plugin.SpeechPresenceHasSource,
+                UsedLater: (_usedLaterMask & SidechainSignalMask.SpeechPresence) != 0),
+            Voiced: new SidechainTapSignalState(
+                Value: _smoothedVoiced,
+                Mode: _plugin.VoicedProbabilityMode,
+                HasUpstream: _plugin.VoicedProbabilityHasSource,
+                UsedLater: (_usedLaterMask & SidechainSignalMask.VoicedProbability) != 0),
+            Unvoiced: new SidechainTapSignalState(
+                Value: _smoothedUnvoiced,
+                Mode: _plugin.UnvoicedEnergyMode,
+                HasUpstream: _plugin.UnvoicedEnergyHasSource,
+                UsedLater: (_usedLaterMask & SidechainSignalMask.UnvoicedEnergy) != 0),
+            Sibilance: new SidechainTapSignalState(
+                Value: _smoothedSibilance,
+                Mode: _plugin.SibilanceEnergyMode,
+                HasUpstream: _plugin.SibilanceEnergyHasSource,
+                UsedLater: (_usedLaterMask & SidechainSignalMask.SibilanceEnergy) != 0),
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed
         );
@@ -102,17 +120,23 @@ public partial class SidechainTapWindow : Window, IDisposable
                 _bypassCallback(!_plugin.IsBypassed);
                 e.Handled = true;
                 break;
-            case SidechainTapHitArea.Toggle:
-                // Toggle the enabled state for each signal
-                float newValue = hit.ToggleIndex switch
+            case SidechainTapHitArea.ModeToggle:
+                if (hit.SignalIndex >= 0 && hit.SignalIndex < (int)SidechainSignalId.Count)
                 {
-                    0 => _plugin.SpeechPresenceEnabled ? 0f : 1f,
-                    1 => _plugin.VoicedProbabilityEnabled ? 0f : 1f,
-                    2 => _plugin.UnvoicedEnergyEnabled ? 0f : 1f,
-                    3 => _plugin.SibilanceEnergyEnabled ? 0f : 1f,
-                    _ => 1f
-                };
-                _parameterCallback(hit.ToggleIndex, newValue);
+                    var currentMode = hit.SignalIndex switch
+                    {
+                        SidechainTapPlugin.SpeechPresenceIndex => _plugin.SpeechPresenceMode,
+                        SidechainTapPlugin.VoicedProbabilityIndex => _plugin.VoicedProbabilityMode,
+                        SidechainTapPlugin.UnvoicedEnergyIndex => _plugin.UnvoicedEnergyMode,
+                        SidechainTapPlugin.SibilanceEnergyIndex => _plugin.SibilanceEnergyMode,
+                        _ => SidechainTapMode.Generate
+                    };
+
+                    if (currentMode != hit.Mode)
+                    {
+                        _parameterCallback(hit.SignalIndex, (float)hit.Mode);
+                    }
+                }
                 e.Handled = true;
                 break;
         }

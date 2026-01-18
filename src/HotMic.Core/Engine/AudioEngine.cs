@@ -83,6 +83,20 @@ public sealed class AudioEngine : IDisposable
 
     public int BlockSize => _blockSize;
 
+    public int[] GetRoutingProcessingOrder()
+    {
+        var snapshot = Volatile.Read(ref _routingSnapshot);
+        if (snapshot is null)
+        {
+            return Array.Empty<int>();
+        }
+
+        var order = snapshot.ProcessingOrder;
+        var copy = new int[order.Length];
+        Array.Copy(order, copy, order.Length);
+        return copy;
+    }
+
     /// <summary>
     /// Gets the analysis tap for attaching visualizers.
     /// </summary>
