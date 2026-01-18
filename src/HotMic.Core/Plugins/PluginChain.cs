@@ -15,7 +15,7 @@ public sealed class PluginChain
     private readonly int[] _lastProducerScratch;
     private AnalysisSignalBus? _analysisSignalBus;
     private AnalysisSignalMask[] _downstreamRequiredSignals = Array.Empty<AnalysisSignalMask>();
-    private AnalysisSignalMask _visualRequestedSignals;
+    private int _visualRequestedSignalsRaw;
     private AnalysisCaptureLink? _analysisCapture;
     private int _inputStageIndex = -1;
 
@@ -287,7 +287,7 @@ public sealed class PluginChain
 
     public void SetVisualRequestedSignals(AnalysisSignalMask requestedSignals)
     {
-        Volatile.Write(ref _visualRequestedSignals, requestedSignals);
+        Volatile.Write(ref _visualRequestedSignalsRaw, (int)requestedSignals);
     }
 
     public int Process(Span<float> buffer, long sampleClock, int channelId, IRoutingContext routingContext)
@@ -307,7 +307,7 @@ public sealed class PluginChain
         var slots = Volatile.Read(ref _slots);
         var bus = Volatile.Read(ref _analysisSignalBus);
         var downstreamRequiredSignals = UpdateDownstreamRequiredSignals(slots);
-        var visualRequestedSignals = Volatile.Read(ref _visualRequestedSignals);
+        var visualRequestedSignals = (AnalysisSignalMask)Volatile.Read(ref _visualRequestedSignalsRaw);
         int cumulativeLatency = 0;
         var lastProducer = _lastProducerScratch;
         for (int s = 0; s < lastProducer.Length; s++)

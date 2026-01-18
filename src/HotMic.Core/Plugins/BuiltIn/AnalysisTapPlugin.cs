@@ -182,7 +182,7 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
 
     public static IReadOnlyList<AnalysisTapSignalInfo> Signals => SignalInfos;
 
-    private static IReadOnlyList<PluginParameter> BuildParameters()
+    private static PluginParameter[] BuildParameters()
     {
         var parameters = new PluginParameter[SignalInfos.Length];
         for (int i = 0; i < SignalInfos.Length; i++)

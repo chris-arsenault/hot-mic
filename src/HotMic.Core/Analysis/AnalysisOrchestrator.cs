@@ -37,7 +37,7 @@ public sealed class AnalysisOrchestrator : IDisposable
     private int _sampleRate;
     private int _consumerCount;
     private AnalysisCaptureLink? _captureLink;
-    private AnalysisSignalMask _requestedSignals;
+    private int _requestedSignalsRaw;
     private long _analysisReadSampleTime = long.MinValue;
 
     // FFT/Transform
@@ -185,7 +185,7 @@ public sealed class AnalysisOrchestrator : IDisposable
         set => Volatile.Write(ref _captureLink, value);
     }
 
-    public AnalysisSignalMask RequestedSignals => Volatile.Read(ref _requestedSignals);
+    public AnalysisSignalMask RequestedSignals => (AnalysisSignalMask)Volatile.Read(ref _requestedSignalsRaw);
 
     public event Action<AnalysisSignalMask>? RequestedSignalsChanged;
 
@@ -309,13 +309,13 @@ public sealed class AnalysisOrchestrator : IDisposable
 
     private void UpdateRequestedSignals(AnalysisSignalMask requestedSignals)
     {
-        AnalysisSignalMask previous = Volatile.Read(ref _requestedSignals);
+        AnalysisSignalMask previous = (AnalysisSignalMask)Volatile.Read(ref _requestedSignalsRaw);
         if (previous == requestedSignals)
         {
             return;
         }
 
-        Volatile.Write(ref _requestedSignals, requestedSignals);
+        Volatile.Write(ref _requestedSignalsRaw, (int)requestedSignals);
         RequestedSignalsChanged?.Invoke(requestedSignals);
     }
 
@@ -611,9 +611,12 @@ public sealed class AnalysisOrchestrator : IDisposable
         bool wantFricative = (requestedSignals & AnalysisSignalMask.FricativeActivity) != 0;
         bool wantSibilance = (requestedSignals & AnalysisSignalMask.SibilanceEnergy) != 0;
 
-        bool hasSpeech = wantSpeech && TryGetSource(bus, producers, AnalysisSignalId.SpeechPresence, out var speechSource);
-        bool hasFricative = wantFricative && TryGetSource(bus, producers, AnalysisSignalId.FricativeActivity, out var fricativeSource);
-        bool hasSibilance = wantSibilance && TryGetSource(bus, producers, AnalysisSignalId.SibilanceEnergy, out var sibilanceSource);
+        AnalysisSignalSource speechSource = default;
+        AnalysisSignalSource fricativeSource = default;
+        AnalysisSignalSource sibilanceSource = default;
+        bool hasSpeech = wantSpeech && TryGetSource(bus, producers, AnalysisSignalId.SpeechPresence, out speechSource);
+        bool hasFricative = wantFricative && TryGetSource(bus, producers, AnalysisSignalId.FricativeActivity, out fricativeSource);
+        bool hasSibilance = wantSibilance && TryGetSource(bus, producers, AnalysisSignalId.SibilanceEnergy, out sibilanceSource);
 
         if (hasSpeech || hasFricative || hasSibilance)
         {

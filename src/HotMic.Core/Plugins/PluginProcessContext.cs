@@ -1,3 +1,4 @@
+using HotMic.Core.Analysis;
 using HotMic.Core.Engine;
 
 namespace HotMic.Core.Plugins;
