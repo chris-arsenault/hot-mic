@@ -3,7 +3,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class LimiterPlugin : IContextualPlugin
+public sealed class LimiterPlugin : IPlugin
 {
     public const int CeilingIndex = 0;
     public const int ReleaseIndex = 1;

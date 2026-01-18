@@ -5,7 +5,7 @@ namespace HotMic.Core.Plugins.BuiltIn;
 /// <summary>
 /// Sends the current buffer to the main output bus.
 /// </summary>
-public sealed class OutputSendPlugin : IContextualPlugin
+public sealed class OutputSendPlugin : IPlugin, IChannelOutputPlugin
 {
     private static readonly PluginParameter[] ParametersDefinition =
     [
@@ -32,6 +32,8 @@ public sealed class OutputSendPlugin : IContextualPlugin
     /// Gets the current output routing mode.
     /// </summary>
     public OutputSendMode Mode => _mode;
+
+    public OutputSendMode OutputMode => _mode;
 
     public string Id => "builtin:output-send";
 

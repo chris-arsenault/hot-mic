@@ -2,7 +2,7 @@ using System.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class RoomTonePlugin : IContextualPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class RoomTonePlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
 {
     public const int LevelIndex = 0;
     public const int DuckIndex = 1;

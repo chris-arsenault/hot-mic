@@ -3,7 +3,6 @@ using System.Threading;
 using HotMic.Core.Dsp;
 using HotMic.Core.Metering;
 using HotMic.Core.Plugins;
-using HotMic.Core.Plugins.BuiltIn;
 
 namespace HotMic.Core.Engine;
 
@@ -81,7 +80,7 @@ public sealed class ChannelStrip
             return 0;
         }
 
-        int inputSplitIndex = FindInputSplitIndex();
+        int inputSplitIndex = _pluginChain.InputStageIndex;
         int latencySamples;
         if (inputSplitIndex >= 0)
         {
@@ -112,26 +111,6 @@ public sealed class ChannelStrip
         return latencySamples;
     }
 
-    private int FindInputSplitIndex()
-    {
-        var slots = _pluginChain.GetSnapshot();
-        for (int i = 0; i < slots.Length; i++)
-        {
-            var slot = slots[i];
-            if (slot is null)
-            {
-                continue;
-            }
-
-            if (slot.Plugin is InputPlugin or BusInputPlugin)
-            {
-                return i;
-            }
-        }
-
-        return -1;
-    }
-
     private void ProcessInputSplit(Span<float> buffer)
     {
         ApplyGain(buffer, ref _inputGainSmoother);
@@ -149,9 +128,9 @@ public sealed class ChannelStrip
                 continue;
             }
 
-            if (slot.Plugin is OutputSendPlugin send && !send.IsBypassed)
+            if (slot.Plugin is IChannelOutputPlugin send && !slot.Plugin.IsBypassed)
             {
-                mode = send.Mode;
+                mode = send.OutputMode;
                 return true;
             }
         }

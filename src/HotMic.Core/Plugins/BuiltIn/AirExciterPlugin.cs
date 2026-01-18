@@ -2,7 +2,7 @@ using System.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class AirExciterPlugin : IContextualPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class AirExciterPlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
 {
     public const int DriveIndex = 0;
     public const int MixIndex = 1;

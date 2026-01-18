@@ -3,7 +3,7 @@ namespace HotMic.Core.Plugins.BuiltIn;
 /// <summary>
 /// Copies audio and sidechain data at the current slot into a copy bus for another channel.
 /// </summary>
-public sealed class CopyToChannelPlugin : IContextualPlugin
+public sealed class CopyToChannelPlugin : IPlugin, IRoutingDependencyProvider
 {
     private static readonly PluginParameter[] EmptyParameters = Array.Empty<PluginParameter>();
     private int _targetChannelId;
@@ -23,6 +23,8 @@ public sealed class CopyToChannelPlugin : IContextualPlugin
         get => _targetChannelId;
         set => _targetChannelId = value;
     }
+
+    public int MaxRoutingDependencies => 1;
 
     public void Initialize(int sampleRate, int blockSize)
     {
@@ -47,6 +49,23 @@ public sealed class CopyToChannelPlugin : IContextualPlugin
 
         var bus = context.Routing.GetCopyBus(targetIndex);
         bus.Write(buffer, context);
+    }
+
+    public int GetRoutingDependencies(int channelId, Span<RoutingDependency> dependencies)
+    {
+        if (dependencies.IsEmpty)
+        {
+            return 0;
+        }
+
+        int targetChannelId = _targetChannelId;
+        if (channelId <= 0 || targetChannelId <= 0 || targetChannelId == channelId)
+        {
+            return 0;
+        }
+
+        dependencies[0] = new RoutingDependency(channelId, targetChannelId);
+        return 1;
     }
 
     public void SetParameter(int index, float value)

@@ -159,7 +159,7 @@ public partial class InputSourceWindow : Window
         }
     }
 
-    private void SkiaCanvas_MouseMove(object sender, MouseEventArgs e)
+    private void SkiaCanvas_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;

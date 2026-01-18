@@ -9,7 +9,7 @@ using Jacobi.Vst.Interop.Host;
 
 namespace HotMic.Vst3;
 
-public sealed class Vst3PluginWrapper : IContextualPlugin
+public sealed class Vst3PluginWrapper : IPlugin
 {
     private readonly Vst3PluginInfo _info;
     private VstPluginContext? _context;

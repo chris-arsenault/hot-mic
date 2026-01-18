@@ -1104,8 +1104,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return false;
         }
 
-        int inputIndex = -1;
-        int busIndex = -1;
+        int selectedIndex = -1;
+        int selectedPriority = int.MinValue;
+        int selectedInstanceId = 0;
+        var toRemove = new List<int>();
         for (int i = 0; i < slots.Length; i++)
         {
             var slot = slots[i];
@@ -1114,51 +1116,51 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 continue;
             }
 
-            if (busIndex < 0 && slot.Plugin is BusInputPlugin)
+            if (slot.Plugin is not IChannelInputPlugin input)
             {
-                busIndex = i;
                 continue;
             }
 
-            if (inputIndex < 0 && slot.Plugin is InputPlugin)
+            int priority = (int)input.InputKind;
+            if (selectedIndex < 0 || priority > selectedPriority)
             {
-                inputIndex = i;
+                if (selectedIndex >= 0)
+                {
+                    toRemove.Add(selectedInstanceId);
+                }
+
+                selectedIndex = i;
+                selectedPriority = priority;
+                selectedInstanceId = slot.InstanceId;
+            }
+            else
+            {
+                toRemove.Add(slot.InstanceId);
             }
         }
 
         bool changed = false;
-        if (busIndex >= 0)
+        if (selectedIndex < 0)
         {
-            var busSlot = slots[busIndex];
-            if (busSlot is not null && busIndex != 0)
-            {
-                graph.MovePlugin(busSlot.InstanceId, 0);
-                changed = true;
-            }
+            return false;
+        }
 
-            if (inputIndex >= 0)
-            {
-                var inputSlot = slots[inputIndex];
-                if (inputSlot is not null)
-                {
-                    if (graph.RemovePlugin(inputSlot.InstanceId, out var removedSlot) && removedSlot is not null)
-                    {
-                        _audioEngine.QueuePluginDisposal(removedSlot.Plugin);
-                        changed = true;
-                    }
-                }
-            }
-        }
-        else if (inputIndex >= 0)
+        for (int i = 0; i < toRemove.Count; i++)
         {
-            var inputSlot = slots[inputIndex];
-            if (inputSlot is not null && inputIndex != 0)
+            if (graph.RemovePlugin(toRemove[i], out var removedSlot) && removedSlot is not null)
             {
-                graph.MovePlugin(inputSlot.InstanceId, 0);
+                _audioEngine.QueuePluginDisposal(removedSlot.Plugin);
                 changed = true;
             }
         }
-        if (changed && slots.Length > 0)
+
+        if (selectedIndex != 0)
+        {
+            graph.MovePlugin(selectedInstanceId, 0);
+            changed = true;
+        }
+
+        if (changed)
         {
             graph.SyncWithChain(config);
         }
@@ -1173,7 +1175,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             var slots = _audioEngine.Channels[i].PluginChain.GetSnapshot();
             for (int j = 0; j < slots.Length; j++)
             {
-                if (slots[j]?.Plugin is OutputSendPlugin)
+                if (slots[j]?.Plugin is IChannelOutputPlugin)
                 {
                     return true;
                 }
@@ -1193,7 +1195,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var slots = _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot();
         for (int i = 0; i < slots.Length; i++)
         {
-            if (slots[i]?.Plugin is InputPlugin)
+            if (slots[i]?.Plugin is IChannelInputPlugin)
             {
                 return true;
             }
@@ -1212,7 +1214,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var slots = _audioEngine.Channels[channelIndex].PluginChain.GetSnapshot();
         for (int i = 0; i < slots.Length; i++)
         {
-            if (slots[i]?.Plugin is BusInputPlugin)
+            if (slots[i]?.Plugin is IChannelInputPlugin input && input.InputKind == ChannelInputKind.Bus)
             {
                 return true;
             }
@@ -1274,7 +1276,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             for (int j = 0; j < slots.Length; j++)
             {
                 var slot = slots[j];
-                if (slot?.Plugin is not OutputSendPlugin)
+                if (slot?.Plugin is not IChannelOutputPlugin)
                 {
                     continue;
                 }
@@ -1453,24 +1455,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var strip = _audioEngine.Channels[channelIndex];
         var oldSlots = strip.PluginChain.GetSnapshot();
         PluginSlot? preservedInputSlot = null;
+        int preservedPriority = int.MinValue;
         for (int i = 0; i < oldSlots.Length; i++)
         {
-            if (oldSlots[i]?.Plugin is BusInputPlugin)
+            var slot = oldSlots[i];
+            if (slot?.Plugin is not IChannelInputPlugin input)
             {
-                preservedInputSlot = oldSlots[i];
-                break;
+                continue;
             }
-        }
 
-        if (preservedInputSlot is null)
-        {
-            for (int i = 0; i < oldSlots.Length; i++)
+            int priority = (int)input.InputKind;
+            if (preservedInputSlot is null || priority > preservedPriority)
             {
-                if (oldSlots[i]?.Plugin is InputPlugin)
-                {
-                    preservedInputSlot = oldSlots[i];
-                    break;
-                }
+                preservedInputSlot = slot;
+                preservedPriority = priority;
             }
         }
 
@@ -1780,10 +1778,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             for (int j = 0; j < slots.Length; j++)
             {
                 var slot = slots[j];
-                if (slot?.Plugin is OutputSendPlugin send && !send.IsBypassed)
+                if (slot?.Plugin is IChannelOutputPlugin send && !slot.Plugin.IsBypassed)
                 {
                     channelIndex = i;
-                    mode = send.Mode;
+                    mode = send.OutputMode;
                     return true;
                 }
             }
@@ -2156,7 +2154,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 qualityPlugin.ApplyQuality(GetQualityProfile());
             }
 
-            if (newPlugin is OutputSendPlugin && HasOutputSendPlugin())
+            if (newPlugin is IChannelOutputPlugin && HasOutputSendPlugin())
             {
                 StatusMessage = "Only one Output Send plugin is allowed.";
                 newPlugin.Dispose();
@@ -2164,9 +2162,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             bool forceInputFirst = false;
-            if (newPlugin is InputPlugin)
+            if (newPlugin is IChannelInputPlugin inputPlugin)
             {
-                if (ChannelHasBusInputPlugin(channelIndex))
+                if (inputPlugin.InputKind == ChannelInputKind.Device && ChannelHasBusInputPlugin(channelIndex))
                 {
                     StatusMessage = "Bus input channels cannot add an Input Source plugin.";
                     newPlugin.Dispose();
@@ -2295,14 +2293,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             qualityPlugin.ApplyQuality(GetQualityProfile());
         }
 
-        if (newPlugin is OutputSendPlugin && HasOutputSendPlugin())
+        if (newPlugin is IChannelOutputPlugin && HasOutputSendPlugin())
         {
             StatusMessage = "Only one Output Send plugin is allowed.";
             newPlugin.Dispose();
             return;
         }
 
-        if (newPlugin is InputPlugin)
+        if (newPlugin is IChannelInputPlugin)
         {
             StatusMessage = "Input Source plugins must be added to the main chain.";
             newPlugin.Dispose();
@@ -2343,7 +2341,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var strip = _audioEngine.Channels[channelIndex];
         if (strip.PluginChain.TryGetSlotById(pluginInstanceId, out var existingSlot, out _) &&
-            existingSlot?.Plugin is BusInputPlugin)
+            existingSlot?.Plugin is IChannelInputPlugin input &&
+            input.InputKind == ChannelInputKind.Bus)
         {
             return;
         }
@@ -2383,7 +2382,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var strip = _audioEngine.Channels[channelIndex];
         if (strip.PluginChain.TryGetSlotById(pluginInstanceId, out var existingSlot, out _) &&
-            existingSlot?.Plugin is BusInputPlugin)
+            existingSlot?.Plugin is IChannelInputPlugin)
         {
             return;
         }
@@ -2395,7 +2394,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var slots = strip.PluginChain.GetSnapshot();
-        if (slots.Length > 0 && slots[0]?.Plugin is InputPlugin or BusInputPlugin)
+        if (slots.Length > 0 && slots[0]?.Plugin is IChannelInputPlugin)
         {
             toIndex = Math.Max(1, toIndex);
         }
@@ -2421,7 +2420,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         var strip = _audioEngine.Channels[channelIndex];
         if (strip.PluginChain.TryGetSlotById(pluginInstanceId, out var existingSlot, out _) &&
-            existingSlot?.Plugin is InputPlugin or BusInputPlugin)
+            existingSlot?.Plugin is IChannelInputPlugin)
         {
             return;
         }
@@ -3117,7 +3116,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 channel.InputChannelMode = mode;
                 _audioEngine.ConfigureChannelInput(channelIndex, channel.InputDeviceId, mode);
                 var config = GetOrCreateChannelConfig(channelIndex);
-                config.InputChannelMode = mode;
+                config.InputChannel = mode;
                 _configManager.Save(_config);
             },
             gainDb =>
@@ -3522,17 +3521,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         UpdatePluginStateConfig(channelIndex, pluginInstanceId);
 
         var strip = _audioEngine.Channels.ElementAtOrDefault(channelIndex);
-        if (strip is not null && strip.PluginChain.TryGetSlotById(pluginInstanceId, out var slot, out _))
+        if (strip is not null && strip.PluginChain.TryGetSlotById(pluginInstanceId, out var slot, out _) &&
+            slot?.Plugin is IChannelOutputPlugin)
         {
-            if (slot?.Plugin is MergePlugin)
-            {
-                _audioEngine.RebuildRoutingGraph();
-            }
-
-            if (slot?.Plugin is OutputSendPlugin)
-            {
-                RefreshPluginViewModels(channelIndex);
-            }
+            RefreshPluginViewModels(channelIndex);
         }
     }
 
@@ -3717,6 +3709,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         graph.SetPluginState(instanceId);
         _configManager.Save(_config);
+
+        var strip = _audioEngine.Channels.ElementAtOrDefault(channelIndex);
+        if (strip is not null &&
+            strip.PluginChain.TryGetSlotById(instanceId, out var slot, out _) &&
+            slot?.Plugin is IRoutingDependencyProvider)
+        {
+            _audioEngine.RebuildRoutingGraph();
+        }
     }
 
     private void UpdatePluginBypassConfig(int channelIndex, int instanceId, bool bypass)
@@ -3734,7 +3734,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var strip = _audioEngine.Channels.ElementAtOrDefault(channelIndex);
         if (strip is not null &&
             strip.PluginChain.TryGetSlotById(instanceId, out var slot, out _) &&
-            slot?.Plugin is OutputSendPlugin)
+            slot?.Plugin is IChannelOutputPlugin)
         {
             NormalizeOutputSendPlugins();
         }

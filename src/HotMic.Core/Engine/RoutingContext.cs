@@ -6,7 +6,7 @@ namespace HotMic.Core.Engine;
 /// <summary>
 /// Holds per-block routing state for channel inputs, copies, and output send.
 /// </summary>
-public sealed class RoutingContext
+public sealed class RoutingContext : IRoutingContext
 {
     private readonly ChannelRoutingState[] _channels;
     private readonly OutputBus _outputBus;

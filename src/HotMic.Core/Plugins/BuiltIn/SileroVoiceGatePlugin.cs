@@ -7,7 +7,7 @@ using HotMic.Core.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class SileroVoiceGatePlugin : IContextualPlugin, IPluginStatusProvider, ISidechainProducer
+public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, ISidechainProducer
 {
     public const int ThresholdIndex = 0;
     public const int AttackIndex = 1;

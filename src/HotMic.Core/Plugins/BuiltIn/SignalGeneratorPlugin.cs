@@ -84,7 +84,7 @@ public enum OutputPreset
 /// Test signal generator plugin with 3 independent generator slots.
 /// Designed for testing vocal processing chains with oscillators, noise, impulse, chirp, and sample playback.
 /// </summary>
-public sealed class SignalGeneratorPlugin : IContextualPlugin
+public sealed class SignalGeneratorPlugin : IPlugin
 {
     public const int SlotCount = 3;
     private const int ParamsPerSlot = 20;

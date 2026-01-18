@@ -11,7 +11,7 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class SpeechDenoiserPlugin : IContextualPlugin, IPluginStatusProvider
+public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
 {
     public const int DryWetIndex = 0;
     public const int AttenLimitIndex = 1;

@@ -2,7 +2,7 @@ using System.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class FormantEnhancerPlugin : IContextualPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class FormantEnhancerPlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
 {
     public const int AmountIndex = 0;
     public const int BoostIndex = 1;

@@ -10,7 +10,7 @@ public interface IPlugin : IDisposable
     IReadOnlyList<PluginParameter> Parameters { get; }
 
     void Initialize(int sampleRate, int blockSize);
-    void Process(Span<float> buffer);
+    void Process(Span<float> buffer, in PluginProcessContext context);
     void SetParameter(int index, float value);
 
     byte[] GetState();

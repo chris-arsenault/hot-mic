@@ -5,7 +5,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class RNNoisePlugin : IContextualPlugin, IQualityConfigurablePlugin, IPluginStatusProvider, ISidechainProducer
+public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPluginStatusProvider, ISidechainProducer
 {
     public const int ReductionIndex = 0;
     public const int VadThresholdIndex = 1;

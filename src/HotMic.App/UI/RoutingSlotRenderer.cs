@@ -164,7 +164,7 @@ public sealed class RoutingSlotRenderer
         // Hit region for the entire slot (opens popup)
         var actionRect = new SKRect(x, y, x + width - MeterWidth - 2f, y + height);
         _routingSlots.Add(new RoutingSlotRect(channelIndex, slot.InstanceId, slotIndex,
-            slot.PluginId, rect, actionRect, SKRect.Empty));
+            slot.PluginId, rect, actionRect, SKRect.Empty, SKRect.Empty));
     }
 
     private void DrawOutputSlot(SKCanvas canvas, SKRect rect, PluginViewModel slot,
@@ -218,7 +218,7 @@ public sealed class RoutingSlotRenderer
         // Hit region
         var actionRect = new SKRect(x, y, x + width - MeterWidth - 2f, y + height);
         _routingSlots.Add(new RoutingSlotRect(channelIndex, slot.InstanceId, slotIndex,
-            slot.PluginId, rect, actionRect, SKRect.Empty));
+            slot.PluginId, rect, actionRect, SKRect.Empty, SKRect.Empty));
     }
 
     private void DrawCopySlot(SKCanvas canvas, SKRect rect, PluginViewModel slot,
@@ -267,7 +267,7 @@ public sealed class RoutingSlotRenderer
         }
 
         _routingSlots.Add(new RoutingSlotRect(channelIndex, slot.InstanceId, slotIndex,
-            slot.PluginId, rect, rect, removeRect));
+            slot.PluginId, rect, rect, removeRect, SKRect.Empty));
     }
 
     private void DrawMergeSlot(SKCanvas canvas, SKRect rect, PluginViewModel slot,
@@ -336,7 +336,7 @@ public sealed class RoutingSlotRenderer
         canvas.DrawLine(removeX + removeSize, removeY, removeX, removeY + removeSize, removePaint);
 
         _routingSlots.Add(new RoutingSlotRect(channelIndex, slot.InstanceId, slotIndex,
-            slot.PluginId, rect, rect, removeRect));
+            slot.PluginId, rect, rect, removeRect, bypassRect));
     }
 
     private void DrawMiniKnob(SKCanvas canvas, float cx, float cy, float radius, float normalizedValue, bool dimmed)
@@ -417,6 +417,12 @@ public sealed class RoutingSlotRenderer
                 continue;
             }
 
+            if (!slot.BypassRect.IsEmpty && slot.BypassRect.Contains(x, y))
+            {
+                region = RoutingSlotRegion.Bypass;
+                return new RoutingSlotHit(slot.ChannelIndex, slot.PluginInstanceId, slot.SlotIndex, slot.PluginId);
+            }
+
             if (!slot.RemoveRect.IsEmpty && slot.RemoveRect.Contains(x, y))
             {
                 region = RoutingSlotRegion.Remove;
@@ -480,7 +486,7 @@ public sealed class RoutingSlotRenderer
     private static SkiaTextPaint CreateCenteredTextPaint(SKColor color, float size, SKFontStyle? style = null) =>
         new(color, size, style, SKTextAlign.Center);
 
-    private sealed record RoutingSlotRect(int ChannelIndex, int PluginInstanceId, int SlotIndex, string PluginId, SKRect Rect, SKRect ActionRect, SKRect RemoveRect);
+    private sealed record RoutingSlotRect(int ChannelIndex, int PluginInstanceId, int SlotIndex, string PluginId, SKRect Rect, SKRect ActionRect, SKRect RemoveRect, SKRect BypassRect);
 
     private sealed record RoutingKnobRect(int ChannelIndex, int PluginInstanceId, RoutingKnobType KnobType, SKRect Rect, float MinValue, float MaxValue);
 
@@ -497,7 +503,8 @@ public enum RoutingSlotRegion
 {
     None,
     Action,
-    Remove
+    Remove,
+    Bypass
 }
 
 public readonly record struct RoutingKnobHit(int ChannelIndex, int PluginInstanceId, RoutingKnobType KnobType, float MinValue, float MaxValue);

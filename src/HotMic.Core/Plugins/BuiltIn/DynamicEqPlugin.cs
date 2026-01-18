@@ -2,7 +2,7 @@ using System.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class DynamicEqPlugin : IContextualPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class DynamicEqPlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
 {
     public const int LowBoostIndex = 0;
     public const int HighBoostIndex = 1;

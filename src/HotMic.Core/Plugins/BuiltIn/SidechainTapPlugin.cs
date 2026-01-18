@@ -1,6 +1,6 @@
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class SidechainTapPlugin : IContextualPlugin, ISidechainProducer
+public sealed class SidechainTapPlugin : IPlugin, ISidechainProducer
 {
     public const int SpeechPresenceIndex = 0;
     public const int VoicedProbabilityIndex = 1;

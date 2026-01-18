@@ -3,7 +3,7 @@ namespace HotMic.Core.Plugins.BuiltIn;
 /// <summary>
 /// Input source plugin that reads mono audio for the channel from the routing context.
 /// </summary>
-public sealed class InputPlugin : IContextualPlugin
+public sealed class InputPlugin : IPlugin, IChannelInputPlugin
 {
     private static readonly PluginParameter[] EmptyParameters = Array.Empty<PluginParameter>();
 
@@ -16,6 +16,8 @@ public sealed class InputPlugin : IContextualPlugin
     public int LatencySamples => 0;
 
     public IReadOnlyList<PluginParameter> Parameters => EmptyParameters;
+
+    public ChannelInputKind InputKind => ChannelInputKind.Device;
 
     public void Initialize(int sampleRate, int blockSize)
     {

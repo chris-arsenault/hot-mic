@@ -3,7 +3,7 @@ using HotMic.Core.Dsp.Fft;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class SpectralContrastPlugin : IContextualPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class SpectralContrastPlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
 {
     public const int StrengthIndex = 0;
     public const int MixIndex = 1;

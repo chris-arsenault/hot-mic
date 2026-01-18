@@ -4,7 +4,7 @@ using HotMic.Core.Dsp.Filters;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class UpwardExpanderPlugin : IContextualPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class UpwardExpanderPlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
 {
     public const int AmountIndex = 0;
     public const int ThresholdIndex = 1;

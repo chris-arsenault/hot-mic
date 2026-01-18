@@ -3,7 +3,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class DeEsserPlugin : IContextualPlugin, ISidechainProducer
+public sealed class DeEsserPlugin : IPlugin, ISidechainProducer
 {
     public const int CenterFreqIndex = 0;
     public const int BandwidthIndex = 1;

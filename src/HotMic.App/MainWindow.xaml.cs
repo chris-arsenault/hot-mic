@@ -581,6 +581,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (region == RoutingSlotRegion.Bypass)
+        {
+            if (!slot.IsEmpty)
+            {
+                slot.IsBypassed = !slot.IsBypassed;
+            }
+            return;
+        }
+
         // For routing plugins, start drag to allow reordering in the chain
         // The actual action (popup) will execute on mouse up if no drag occurred
         _uiState.PluginDrag = new PluginDragState(hit.ChannelIndex, hit.PluginInstanceId, slotIndex, x, y, x, y, false);

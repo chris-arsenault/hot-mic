@@ -13,6 +13,7 @@ public sealed class PluginChain
     private readonly int _sidechainCapacity;
     private readonly int[] _lastProducerScratch;
     private SidechainBus? _sidechainBus;
+    private int _inputStageIndex = -1;
 
     public PluginChain(int sampleRate, int blockSize, int initialCapacity = 0)
     {
@@ -23,6 +24,7 @@ public sealed class PluginChain
         _lastProducerScratch = new int[(int)SidechainSignalId.Count];
         RebuildIdIndexMap(_slots);
         RebuildSidechainBus();
+        RebuildInputStageIndex(_slots);
     }
 
     public int Count => Volatile.Read(ref _slots).Length;
@@ -48,6 +50,8 @@ public sealed class PluginChain
     {
         return Volatile.Read(ref _slots);
     }
+
+    public int InputStageIndex => Volatile.Read(ref _inputStageIndex);
 
     public bool TryGetSlotById(int instanceId, out PluginSlot? slot, out int index)
     {
@@ -94,6 +98,7 @@ public sealed class PluginChain
         Interlocked.Exchange(ref _slots, newSlots);
         RebuildIdIndexMap(newSlots);
         RebuildSidechainBus();
+        RebuildInputStageIndex(newSlots);
         return createdId;
     }
 
@@ -132,6 +137,7 @@ public sealed class PluginChain
         Interlocked.Exchange(ref _slots, newSlots);
         RebuildIdIndexMap(newSlots);
         RebuildSidechainBus();
+        RebuildInputStageIndex(newSlots);
         return createdId;
     }
 
@@ -156,6 +162,7 @@ public sealed class PluginChain
         Interlocked.Exchange(ref _slots, newSlots);
         RebuildIdIndexMap(newSlots);
         RebuildSidechainBus();
+        RebuildInputStageIndex(newSlots);
         return removed;
     }
 
@@ -183,6 +190,7 @@ public sealed class PluginChain
         Interlocked.Exchange(ref _slots, newSlots);
         RebuildIdIndexMap(newSlots);
         RebuildSidechainBus();
+        RebuildInputStageIndex(newSlots);
         return previous;
     }
 
@@ -199,6 +207,7 @@ public sealed class PluginChain
         Interlocked.Exchange(ref _slots, newSlots);
         RebuildIdIndexMap(newSlots);
         RebuildSidechainBus();
+        RebuildInputStageIndex(newSlots);
     }
 
     public void Swap(int indexA, int indexB)
@@ -216,6 +225,7 @@ public sealed class PluginChain
         Interlocked.Exchange(ref _slots, newSlots);
         RebuildIdIndexMap(newSlots);
         RebuildSidechainBus();
+        RebuildInputStageIndex(newSlots);
     }
 
     public void ReplaceAll(PluginSlot?[] newSlots)
@@ -224,6 +234,7 @@ public sealed class PluginChain
         UpdateNextInstanceId(newSlots);
         RebuildIdIndexMap(newSlots);
         RebuildSidechainBus();
+        RebuildInputStageIndex(newSlots);
     }
 
     public PluginSlot?[] DetachAll()
@@ -232,15 +243,16 @@ public sealed class PluginChain
         Interlocked.Exchange(ref _slots, Array.Empty<PluginSlot?>());
         RebuildIdIndexMap(Array.Empty<PluginSlot?>());
         RebuildSidechainBus();
+        RebuildInputStageIndex(Array.Empty<PluginSlot?>());
         return oldSlots;
     }
 
-    public int Process(Span<float> buffer, long sampleClock, int channelId, RoutingContext routingContext)
+    public int Process(Span<float> buffer, long sampleClock, int channelId, IRoutingContext routingContext)
     {
         return ProcessInternal(buffer, sampleClock, channelId, routingContext, splitIndex: -1, onSplit: null);
     }
 
-    public int ProcessWithSplit(Span<float> buffer, long sampleClock, int channelId, RoutingContext routingContext, int splitIndex, Action<Span<float>> onSplit)
+    public int ProcessWithSplit(Span<float> buffer, long sampleClock, int channelId, IRoutingContext routingContext, int splitIndex, Action<Span<float>> onSplit)
     {
         if (onSplit is null)
         {
@@ -250,7 +262,7 @@ public sealed class PluginChain
         return ProcessInternal(buffer, sampleClock, channelId, routingContext, splitIndex, onSplit);
     }
 
-    private int ProcessInternal(Span<float> buffer, long sampleClock, int channelId, RoutingContext routingContext, int splitIndex, Action<Span<float>>? onSplit)
+    private int ProcessInternal(Span<float> buffer, long sampleClock, int channelId, IRoutingContext routingContext, int splitIndex, Action<Span<float>>? onSplit)
     {
         var slots = Volatile.Read(ref _slots);
         var bus = Volatile.Read(ref _sidechainBus);
@@ -304,7 +316,7 @@ public sealed class PluginChain
                 producedSignals = producer.ProducedSignals;
             }
 
-            if (plugin is IContextualPlugin contextual && isActive)
+            if (isActive)
             {
                 var context = new PluginProcessContext(
                     _sampleRate,
@@ -321,7 +333,7 @@ public sealed class PluginChain
                     lastProducer[(int)SidechainSignalId.UnvoicedEnergy],
                     lastProducer[(int)SidechainSignalId.SibilanceEnergy],
                     producedSignals);
-                contextual.Process(buffer, context);
+                plugin.Process(buffer, context);
             }
 
             if (shouldCaptureDelta)
@@ -378,6 +390,29 @@ public sealed class PluginChain
 
         var newBus = hasProducer ? new SidechainBus(slots.Length, _sidechainCapacity) : null;
         Interlocked.Exchange(ref _sidechainBus, newBus);
+    }
+
+    private void RebuildInputStageIndex(PluginSlot?[] slots)
+    {
+        int index = -1;
+        int priority = int.MinValue;
+        for (int i = 0; i < slots.Length; i++)
+        {
+            var slot = slots[i];
+            if (slot?.Plugin is not IChannelInputPlugin input)
+            {
+                continue;
+            }
+
+            int inputPriority = (int)input.InputKind;
+            if (index < 0 || inputPriority > priority)
+            {
+                index = i;
+                priority = inputPriority;
+            }
+        }
+
+        Volatile.Write(ref _inputStageIndex, index);
     }
 
     private PluginSlot CreateSlot(IPlugin plugin, int instanceId)

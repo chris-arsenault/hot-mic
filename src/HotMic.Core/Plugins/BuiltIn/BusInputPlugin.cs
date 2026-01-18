@@ -6,7 +6,7 @@ namespace HotMic.Core.Plugins.BuiltIn;
 /// <summary>
 /// Input plugin for copy-created channels that reads from a copy bus and re-emits sidechain signals.
 /// </summary>
-public sealed class BusInputPlugin : IContextualPlugin, ISidechainProducer
+public sealed class BusInputPlugin : IPlugin, IChannelInputPlugin, ISidechainProducer
 {
     private static readonly PluginParameter[] EmptyParameters = Array.Empty<PluginParameter>();
     private int _latencySamples;
@@ -20,6 +20,8 @@ public sealed class BusInputPlugin : IContextualPlugin, ISidechainProducer
     public int LatencySamples => Volatile.Read(ref _latencySamples);
 
     public IReadOnlyList<PluginParameter> Parameters => EmptyParameters;
+
+    public ChannelInputKind InputKind => ChannelInputKind.Bus;
 
     public SidechainSignalMask ProducedSignals => SidechainSignalMask.All;
 

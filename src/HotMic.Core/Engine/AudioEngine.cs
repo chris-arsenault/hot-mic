@@ -280,6 +280,27 @@ public sealed class AudioEngine : IDisposable
         var edges = new bool[count, count];
         var indegree = new int[count];
 
+        int maxDependencies = 0;
+        for (int i = 0; i < count; i++)
+        {
+            var slots = channels[i].PluginChain.GetSnapshot();
+            for (int s = 0; s < slots.Length; s++)
+            {
+                var slot = slots[s];
+                if (slot?.Plugin is IRoutingDependencyProvider provider)
+                {
+                    if (provider.MaxRoutingDependencies > maxDependencies)
+                    {
+                        maxDependencies = provider.MaxRoutingDependencies;
+                    }
+                }
+            }
+        }
+
+        var dependencyBuffer = maxDependencies > 0
+            ? new RoutingDependency[maxDependencies]
+            : Array.Empty<RoutingDependency>();
+
         for (int i = 0; i < count; i++)
         {
             var slots = channels[i].PluginChain.GetSnapshot();
@@ -291,18 +312,34 @@ public sealed class AudioEngine : IDisposable
                     continue;
                 }
 
-                if (slot.Plugin is CopyToChannelPlugin copy)
+                if (slot.Plugin is IRoutingDependencyProvider provider)
                 {
-                    int targetIndex = copy.TargetChannelId - 1;
-                    AddEdge(edges, indegree, i, targetIndex);
-                }
-                else if (slot.Plugin is MergePlugin merge)
-                {
-                    int sourceCount = merge.SourceCount;
-                    for (int m = 0; m < sourceCount; m++)
+                    int maxDeps = provider.MaxRoutingDependencies;
+                    if (maxDeps <= 0)
                     {
-                        int sourceIndex = merge.GetSourceChannelId(m) - 1;
-                        AddEdge(edges, indegree, sourceIndex, i);
+                        continue;
+                    }
+
+                    if (maxDeps > dependencyBuffer.Length)
+                    {
+                        maxDeps = dependencyBuffer.Length;
+                    }
+                    if (maxDeps == 0)
+                    {
+                        continue;
+                    }
+
+                    int channelId = i + 1;
+                    int depCount = provider.GetRoutingDependencies(channelId, dependencyBuffer.AsSpan(0, maxDeps));
+                    if (depCount > maxDeps)
+                    {
+                        depCount = maxDeps;
+                    }
+
+                    for (int d = 0; d < depCount; d++)
+                    {
+                        var dependency = dependencyBuffer[d];
+                        AddEdge(edges, indegree, dependency.SourceChannelId - 1, dependency.TargetChannelId - 1);
                     }
                 }
             }

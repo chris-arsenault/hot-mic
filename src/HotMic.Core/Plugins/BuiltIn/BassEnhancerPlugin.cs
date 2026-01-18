@@ -2,7 +2,7 @@ using System.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class BassEnhancerPlugin : IContextualPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class BassEnhancerPlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
 {
     public const int AmountIndex = 0;
     public const int DriveIndex = 1;

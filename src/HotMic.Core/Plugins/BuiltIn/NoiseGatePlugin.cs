@@ -5,7 +5,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class NoiseGatePlugin : IContextualPlugin, IQualityConfigurablePlugin
+public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
 {
     public const int ThresholdIndex = 0;
     public const int HysteresisIndex = 1;

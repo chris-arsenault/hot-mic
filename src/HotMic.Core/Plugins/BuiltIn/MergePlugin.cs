@@ -6,7 +6,7 @@ namespace HotMic.Core.Plugins.BuiltIn;
 /// <summary>
 /// Merges audio from multiple source channels into the current buffer with optional alignment.
 /// </summary>
-public sealed class MergePlugin : IContextualPlugin
+public sealed class MergePlugin : IPlugin, IRoutingDependencyProvider
 {
     private const int SumModeIndex = 0;
     private const int PhaseModeIndex = 1;
@@ -52,6 +52,8 @@ public sealed class MergePlugin : IContextualPlugin
 
     public int SourceCount => _sourceCount;
 
+    public int MaxRoutingDependencies => _sourceCount;
+
     public int GetSourceChannelId(int index)
     {
         if ((uint)index >= (uint)_sourceCount)
@@ -60,6 +62,29 @@ public sealed class MergePlugin : IContextualPlugin
         }
 
         return _sourceChannels[index];
+    }
+
+    public int GetRoutingDependencies(int channelId, Span<RoutingDependency> dependencies)
+    {
+        if (dependencies.IsEmpty || channelId <= 0)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        int sourceCount = Math.Min(_sourceCount, _sourceChannels.Length);
+        for (int i = 0; i < sourceCount && count < dependencies.Length; i++)
+        {
+            int sourceChannelId = _sourceChannels[i];
+            if (sourceChannelId <= 0 || sourceChannelId == channelId)
+            {
+                continue;
+            }
+
+            dependencies[count++] = new RoutingDependency(sourceChannelId, channelId);
+        }
+
+        return count;
     }
 
     public void Initialize(int sampleRate, int blockSize)

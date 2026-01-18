@@ -5,7 +5,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class GainPlugin : IContextualPlugin, IQualityConfigurablePlugin
+public sealed class GainPlugin : IPlugin, IQualityConfigurablePlugin
 {
     public const int GainIndex = 0;
     public const int PhaseInvertIndex = 1;

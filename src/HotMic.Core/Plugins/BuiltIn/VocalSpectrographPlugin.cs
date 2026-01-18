@@ -12,7 +12,7 @@ namespace HotMic.Core.Plugins.BuiltIn;
 /// Vocal-focused spectrograph analysis with pitch, formant, voicing, and harmonic overlays.
 /// Pass-through plugin (no audio modification).
 /// </summary>
-public sealed partial class VocalSpectrographPlugin : IContextualPlugin
+public sealed partial class VocalSpectrographPlugin : IPlugin
 {
     public const int FftSizeIndex = 0;
     public const int WindowFunctionIndex = 1;

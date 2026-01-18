@@ -2,7 +2,7 @@ using System.Threading;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class ConsonantTransientPlugin : IContextualPlugin, ISidechainConsumer, IPluginStatusProvider
+public sealed class ConsonantTransientPlugin : IPlugin, ISidechainConsumer, IPluginStatusProvider
 {
     public const int AmountIndex = 0;
     public const int ThresholdIndex = 1;

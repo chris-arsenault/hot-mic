@@ -5,7 +5,7 @@ namespace HotMic.Core.Plugins;
 public readonly struct PluginProcessContext
 {
     public PluginProcessContext(int sampleRate, int blockSize, long sampleClock, long sampleTime,
-        int slotIndex, int cumulativeLatencySamples, int channelId, RoutingContext routingContext, SidechainBus? sidechainBus,
+        int slotIndex, int cumulativeLatencySamples, int channelId, IRoutingContext routingContext, SidechainBus? sidechainBus,
         int speechProducer, int voicedProducer, int unvoicedProducer, int sibilanceProducer,
         SidechainSignalMask producedSignals)
     {
@@ -32,7 +32,7 @@ public readonly struct PluginProcessContext
     public int SlotIndex { get; }
     public int CumulativeLatencySamples { get; }
     public int ChannelId { get; }
-    public RoutingContext Routing { get; }
+    public IRoutingContext Routing { get; }
     public SidechainBus? SidechainBus { get; }
     public SidechainWriter SidechainWriter { get; }
 

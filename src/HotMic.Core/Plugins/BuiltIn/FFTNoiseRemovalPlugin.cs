@@ -5,7 +5,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class FFTNoiseRemovalPlugin : IContextualPlugin, IQualityConfigurablePlugin
+public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
 {
     public const int ReductionIndex = 0;
 

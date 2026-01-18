@@ -3,7 +3,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class HighPassFilterPlugin : IContextualPlugin
+public sealed class HighPassFilterPlugin : IPlugin
 {
     public const int CutoffIndex = 0;
     public const int SlopeIndex = 1;

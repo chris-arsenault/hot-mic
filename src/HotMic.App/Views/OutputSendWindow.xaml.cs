@@ -120,7 +120,7 @@ public partial class OutputSendWindow : Window
         }
     }
 
-    private void SkiaCanvas_MouseMove(object sender, MouseEventArgs e)
+    private void SkiaCanvas_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
         // No drag interactions in this window
     }

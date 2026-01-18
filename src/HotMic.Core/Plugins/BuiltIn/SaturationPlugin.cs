@@ -4,7 +4,7 @@ using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class SaturationPlugin : IContextualPlugin, IQualityConfigurablePlugin
+public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
 {
     public const int WarmthIndex = 0;
     public const int BlendIndex = 1;
