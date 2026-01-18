@@ -12,9 +12,9 @@ public sealed class ChannelStrip
     private readonly MeterProcessor _inputMeter;
     private readonly MeterProcessor _outputMeter;
     private readonly Action<Span<float>> _inputSplitAction;
-    private LinearSmoother _inputGainSmoother = new();
-    private LinearSmoother _outputGainSmoother = new();
-    private LinearSmoother _muteSmoother = new();
+    private LinearSmoother _inputGainSmoother;
+    private LinearSmoother _outputGainSmoother;
+    private LinearSmoother _muteSmoother;
     private int _isMuted;
     private int _isSoloed;
     private float _muteTarget = 1f;

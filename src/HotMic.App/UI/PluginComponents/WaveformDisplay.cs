@@ -8,6 +8,8 @@ namespace HotMic.App.UI.PluginComponents;
 /// </summary>
 public sealed class WaveformDisplay : IDisposable
 {
+    private static readonly float[] ThresholdDash = [6f, 4f];
+
     private readonly PluginComponentTheme _theme;
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _gridPaint;
@@ -67,7 +69,7 @@ public sealed class WaveformDisplay : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 2f,
-            PathEffect = SKPathEffect.CreateDash(new[] { 6f, 4f }, 0)
+            PathEffect = SKPathEffect.CreateDash(ThresholdDash, 0)
         };
 
         _thresholdGlowPaint = new SKPaint

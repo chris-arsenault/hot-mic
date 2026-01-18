@@ -8,15 +8,8 @@ public sealed class SidechainBus
 
     public SidechainBus(int producerCount, int capacitySamples)
     {
-        if (producerCount < 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(producerCount));
-        }
-
-        if (capacitySamples <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(capacitySamples));
-        }
+        ArgumentOutOfRangeException.ThrowIfNegative(producerCount);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacitySamples);
 
         int size = NextPowerOfTwo(capacitySamples);
         _capacity = size;

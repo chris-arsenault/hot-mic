@@ -732,25 +732,25 @@ public class SignalGeneratorState
 
 public struct SlotRenderState
 {
-    public GeneratorType Type;
-    public float Frequency;
-    public float GainDb;
-    public bool IsMuted;
-    public bool IsSolo;
-    public bool SweepEnabled;
-    public float SweepStartHz;
-    public float SweepEndHz;
-    public float SweepDurationMs;
-    public float PulseWidth;
-    public float ImpulseIntervalMs;
-    public float ChirpDurationMs;
-    public SampleLoopMode LoopMode;
-    public float SampleSpeed;
-    public float TrimStart;
-    public float TrimEnd;
-    public float Level;
-    public bool IsRecording;
-    public bool HasSample;
+    public GeneratorType Type { get; set; }
+    public float Frequency { get; set; }
+    public float GainDb { get; set; }
+    public bool IsMuted { get; set; }
+    public bool IsSolo { get; set; }
+    public bool SweepEnabled { get; set; }
+    public float SweepStartHz { get; set; }
+    public float SweepEndHz { get; set; }
+    public float SweepDurationMs { get; set; }
+    public float PulseWidth { get; set; }
+    public float ImpulseIntervalMs { get; set; }
+    public float ChirpDurationMs { get; set; }
+    public SampleLoopMode LoopMode { get; set; }
+    public float SampleSpeed { get; set; }
+    public float TrimStart { get; set; }
+    public float TrimEnd { get; set; }
+    public float Level { get; set; }
+    public bool IsRecording { get; set; }
+    public bool HasSample { get; set; }
 }
 
 public enum SignalGeneratorHitArea

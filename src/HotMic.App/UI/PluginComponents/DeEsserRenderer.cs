@@ -14,6 +14,7 @@ public sealed class DeEsserRenderer : IDisposable
     private const float MeterHeight = 120f;
     private const float FreqDisplayHeight = 70f;
     private const float CornerRadius = 10f;
+    private static readonly float[] ThresholdDash = [4f, 4f];
 
     private readonly PluginComponentTheme _theme;
     private readonly PluginPresetBar _presetBar;
@@ -183,7 +184,7 @@ public sealed class DeEsserRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1.5f,
-            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0)
+            PathEffect = SKPathEffect.CreateDash(ThresholdDash, 0)
         };
 
         _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);

@@ -19,7 +19,7 @@ public sealed class AudioEngine : IDisposable
     private const int AudclntEDeviceInvalidated = unchecked((int)0x88890004);
 
     private readonly DeviceManager _deviceManager = new();
-    private readonly LockFreeQueue<ParameterChange> _parameterQueue = new();
+    private readonly LockFreeChannel<ParameterChange> _parameterQueue = new();
     private readonly List<PendingPluginDisposal> _pendingPluginDisposals = new();
     private readonly List<IPlugin> _disposeBuffer = new();
     private readonly object _pendingPluginDisposalsLock = new();
@@ -1196,7 +1196,7 @@ public sealed class AudioEngine : IDisposable
 
     private sealed class OutputMixProvider : IWaveProvider
     {
-        private readonly LockFreeQueue<ParameterChange> _parameterQueue;
+        private readonly LockFreeChannel<ParameterChange> _parameterQueue;
         private readonly int _blockSize;
         private readonly Action<int> _reportOutput;
         private readonly Action<int> _reportUnderflow;
@@ -1211,7 +1211,7 @@ public sealed class AudioEngine : IDisposable
 
         public OutputMixProvider(
             RoutingSnapshot snapshot,
-            LockFreeQueue<ParameterChange> parameterQueue,
+            LockFreeChannel<ParameterChange> parameterQueue,
             int blockSize,
             Action<int> reportOutput,
             Action<int> reportUnderflow,

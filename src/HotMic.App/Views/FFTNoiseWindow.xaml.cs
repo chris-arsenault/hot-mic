@@ -11,7 +11,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class FFTNoiseWindow : Window
+public partial class FFTNoiseWindow : Window, IDisposable
 {
     private readonly FFTNoiseRenderer _renderer = new();
     private readonly FFTNoiseRemovalPlugin _plugin;
@@ -27,6 +27,7 @@ public partial class FFTNoiseWindow : Window
     private readonly float[] _outputSpectrum = new float[FFTNoiseRemovalPlugin.DisplayBins];
     private readonly float[] _outputPeaks = new float[FFTNoiseRemovalPlugin.DisplayBins];
     private readonly float[] _noiseProfile = new float[FFTNoiseRemovalPlugin.DisplayBins];
+    private bool _disposed;
 
     public FFTNoiseWindow(FFTNoiseRemovalPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback, Action learnToggleCallback)
     {
@@ -56,11 +57,7 @@ public partial class FFTNoiseWindow : Window
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += OnRenderTick;
         Loaded += (_, _) => _renderTimer.Start();
-        Closed += (_, _) =>
-        {
-            _renderTimer.Stop();
-            _renderer.Dispose();
-        };
+        Closed += (_, _) => Dispose();
     }
 
     private void OnRenderTick(object? sender, EventArgs e)
@@ -198,5 +195,18 @@ public partial class FFTNoiseWindow : Window
     {
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _renderer.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

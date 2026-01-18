@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace HotMic.Core.Threading;
 
-public sealed class LockFreeQueue<T>
+public sealed class LockFreeChannel<T>
 {
     private readonly ConcurrentQueue<T> _queue = new();
 

@@ -224,11 +224,11 @@ public sealed class AnalysisConfiguration
         };
     }
 
-    private static int SelectDiscrete(int value, IReadOnlyList<int> options)
+    private static int SelectDiscrete(int value, int[] options)
     {
         int best = options[0];
         int bestDelta = Math.Abs(options[0] - value);
-        for (int i = 1; i < options.Count; i++)
+        for (int i = 1; i < options.Length; i++)
         {
             int delta = Math.Abs(options[i] - value);
             if (delta < bestDelta)

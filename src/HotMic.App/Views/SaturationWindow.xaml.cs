@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class SaturationWindow : Window
+public partial class SaturationWindow : Window, IDisposable
 {
     private readonly SaturationRenderer _renderer = new();
     private readonly SaturationPlugin _plugin;
@@ -22,6 +22,7 @@ public partial class SaturationWindow : Window
     private readonly PluginPresetHelper _presetHelper;
 
     private float _smoothedInputLevel;
+    private bool _disposed;
     private float _smoothedOutputLevel;
 
     public SaturationWindow(SaturationPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
@@ -56,11 +57,7 @@ public partial class SaturationWindow : Window
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += OnRenderTick;
         Loaded += (_, _) => _renderTimer.Start();
-        Closed += (_, _) =>
-        {
-            _renderTimer.Stop();
-            _renderer.Dispose();
-        };
+        Closed += (_, _) => Dispose();
     }
 
     private void OnRenderTick(object? sender, EventArgs e)
@@ -208,5 +205,18 @@ public partial class SaturationWindow : Window
     {
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _renderer.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

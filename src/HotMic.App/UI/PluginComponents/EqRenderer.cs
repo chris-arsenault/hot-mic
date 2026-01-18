@@ -18,6 +18,7 @@ public sealed class EqRenderer : IDisposable
 
     // Knob section layout
     private const float KnobRadius = 24f;
+    private static readonly float[] ZeroLineDash = [4f, 4f];
     private const float BandLabelHeight = 16f;
     private const float KnobValueHeight = 14f;
     private const float KnobGap = 10f;
@@ -168,7 +169,7 @@ public sealed class EqRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f,
-            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0)
+            PathEffect = SKPathEffect.CreateDash(ZeroLineDash, 0)
         };
 
         _curvePaint = new SKPaint

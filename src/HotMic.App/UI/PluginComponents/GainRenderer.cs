@@ -13,9 +13,11 @@ public sealed class GainRenderer : IDisposable
     private const float MeterWidth = 24f;
     private const float MeterHeight = 140f;
     private const float CornerRadius = 10f;
+    private static readonly float[] MeterGradientStops = [0f, 0.6f, 0.85f, 1f];
 
     private readonly PluginComponentTheme _theme;
     private readonly PluginPresetBar _presetBar;
+    private readonly SKColor[] _meterGradientColors;
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
@@ -51,6 +53,13 @@ public sealed class GainRenderer : IDisposable
     {
         _theme = theme ?? PluginComponentTheme.Default;
         _presetBar = new PluginPresetBar(_theme);
+        _meterGradientColors =
+        [
+            _theme.WaveformLine,
+            _theme.WaveformLine,
+            new SKColor(0xFF, 0xD7, 0x00),
+            new SKColor(0xFF, 0x50, 0x50)
+        ];
 
         _backgroundPaint = new SKPaint
         {
@@ -286,14 +295,8 @@ public sealed class GainRenderer : IDisposable
                 Shader = SKShader.CreateLinearGradient(
                     new SKPoint(0, rect.Bottom),
                     new SKPoint(0, rect.Top),
-                    new[]
-                    {
-                        _theme.WaveformLine,           // Green at bottom
-                        _theme.WaveformLine,           // Green
-                        new SKColor(0xFF, 0xD7, 0x00), // Yellow
-                        new SKColor(0xFF, 0x50, 0x50)  // Red at top
-                    },
-                    new[] { 0f, 0.6f, 0.85f, 1f },
+                    _meterGradientColors,
+                    MeterGradientStops,
                     SKShaderTileMode.Clamp)
             };
             canvas.DrawRect(fillRect, gradientPaint);

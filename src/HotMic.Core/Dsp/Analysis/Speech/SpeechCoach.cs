@@ -8,32 +8,32 @@ namespace HotMic.Core.Dsp.Analysis.Speech;
 public struct SpeechMetrics
 {
     // Rate metrics (updated periodically, not every frame)
-    public float SyllableRate;        // syllables/min (including pauses)
-    public float ArticulationRate;    // syllables/min (excluding pauses)
-    public float PauseRatio;          // fraction of time in pauses (0-1)
-    public float MeanPauseDurationMs; // average pause duration
-    public float PausesPerMinute;     // pause frequency
-    public float FilledPauseRatio;    // ratio of filled to total pauses
+    public float SyllableRate { get; set; }        // syllables/min (including pauses)
+    public float ArticulationRate { get; set; }    // syllables/min (excluding pauses)
+    public float PauseRatio { get; set; }          // fraction of time in pauses (0-1)
+    public float MeanPauseDurationMs { get; set; } // average pause duration
+    public float PausesPerMinute { get; set; }     // pause frequency
+    public float FilledPauseRatio { get; set; }    // ratio of filled to total pauses
 
     // Prosody metrics
-    public float PitchRangeSemitones;      // max - min pitch
-    public float PitchVariationSemitones;  // stddev of pitch
-    public float PitchSlopeSemitones;      // rising/falling tendency
-    public float MonotoneScore;            // 0-1, 1 = highly monotone
-    public float MeanPitchHz;              // average pitch
+    public float PitchRangeSemitones { get; set; }      // max - min pitch
+    public float PitchVariationSemitones { get; set; }  // stddev of pitch
+    public float PitchSlopeSemitones { get; set; }      // rising/falling tendency
+    public float MonotoneScore { get; set; }            // 0-1, 1 = highly monotone
+    public float MeanPitchHz { get; set; }              // average pitch
 
     // Clarity metrics
-    public float VowelClarity;        // 0-100
-    public float ConsonantClarity;    // 0-100
-    public float TransitionSharpness; // 0-100
-    public float OverallClarity;      // 0-100
-    public float IntelligibilityScore;// 0-100
+    public float VowelClarity { get; set; }        // 0-100
+    public float ConsonantClarity { get; set; }    // 0-100
+    public float TransitionSharpness { get; set; } // 0-100
+    public float OverallClarity { get; set; }      // 0-100
+    public float IntelligibilityScore { get; set; }// 0-100
 
     // Per-frame state
-    public SpeakingState CurrentState;     // Speaking/SilentPause/FilledPause
-    public bool SyllableDetected;          // True if syllable at this frame
-    public StressLevel LastStressLevel;    // Stress of most recent syllable
-    public int FillerCount;                // Total fillers detected in window
+    public SpeakingState CurrentState { get; set; }     // Speaking/SilentPause/FilledPause
+    public bool SyllableDetected { get; set; }          // True if syllable at this frame
+    public StressLevel LastStressLevel { get; set; }    // Stress of most recent syllable
+    public int FillerCount { get; set; }                // Total fillers detected in window
 }
 
 /// <summary>
@@ -184,34 +184,49 @@ public sealed class SpeechCoach
         // Rate metrics
         _rateCalculator.Compute(
             frameId, _hopSize, _sampleRate,
-            out _cachedMetrics.SyllableRate,
-            out _cachedMetrics.ArticulationRate,
-            out _cachedMetrics.PauseRatio,
-            out _cachedMetrics.MeanPauseDurationMs,
-            out _cachedMetrics.PausesPerMinute,
-            out _cachedMetrics.FilledPauseRatio);
+            out var syllableRate,
+            out var articulationRate,
+            out var pauseRatio,
+            out var meanPauseDurationMs,
+            out var pausesPerMinute,
+            out var filledPauseRatio);
+
+        _cachedMetrics.SyllableRate = syllableRate;
+        _cachedMetrics.ArticulationRate = articulationRate;
+        _cachedMetrics.PauseRatio = pauseRatio;
+        _cachedMetrics.MeanPauseDurationMs = meanPauseDurationMs;
+        _cachedMetrics.PausesPerMinute = pausesPerMinute;
+        _cachedMetrics.FilledPauseRatio = filledPauseRatio;
 
         // Prosody metrics
         _pitchAnalyzer.Compute(
             frameId, _hopSize, _sampleRate,
-            out _cachedMetrics.PitchRangeSemitones,
-            out _cachedMetrics.PitchVariationSemitones,
-            out _cachedMetrics.PitchSlopeSemitones,
-            out _cachedMetrics.MonotoneScore,
-            out _cachedMetrics.MeanPitchHz);
+            out var pitchRangeSemitones,
+            out var pitchVariationSemitones,
+            out var pitchSlopeSemitones,
+            out var monotoneScore,
+            out var meanPitchHz);
+
+        _cachedMetrics.PitchRangeSemitones = pitchRangeSemitones;
+        _cachedMetrics.PitchVariationSemitones = pitchVariationSemitones;
+        _cachedMetrics.PitchSlopeSemitones = pitchSlopeSemitones;
+        _cachedMetrics.MonotoneScore = monotoneScore;
+        _cachedMetrics.MeanPitchHz = meanPitchHz;
 
         // Clarity metrics
-        _clarityAnalyzer.Compute(
-            out _cachedMetrics.VowelClarity,
-            out _cachedMetrics.ConsonantClarity,
-            out _cachedMetrics.TransitionSharpness,
-            out _cachedMetrics.OverallClarity);
+        _clarityAnalyzer.Compute(out var vowelClarity,
+            out var consonantClarity,
+            out var transitionSharpness,
+            out var overallClarity);
+
+        _cachedMetrics.VowelClarity = vowelClarity;
+        _cachedMetrics.ConsonantClarity = consonantClarity;
+        _cachedMetrics.TransitionSharpness = transitionSharpness;
+        _cachedMetrics.OverallClarity = overallClarity;
 
         // Intelligibility metrics
-        _intelligibilityAnalyzer.Compute(
-            out _,
-            out _,
-            out _cachedMetrics.IntelligibilityScore);
+        _intelligibilityAnalyzer.Compute(out _, out _, out var intelligibilityScore);
+        _cachedMetrics.IntelligibilityScore = intelligibilityScore;
 
         // Filler count
         _cachedMetrics.FillerCount = _fillerCountInWindow;

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using HotMic.App.ViewModels;
 using HotMic.Common.Models;
 using SkiaSharp;
@@ -244,7 +245,7 @@ public sealed class SettingsRenderer
         canvas.Restore();
     }
 
-    private static IReadOnlyList<string> GetDropdownItems(SettingsViewModel viewModel, SettingsField field, out int selectedIndex)
+    private static List<string> GetDropdownItems(SettingsViewModel viewModel, SettingsField field, out int selectedIndex)
     {
         selectedIndex = -1;
         return field switch
@@ -258,7 +259,7 @@ public sealed class SettingsRenderer
         };
     }
 
-    private static IReadOnlyList<string> BuildMidiDeviceList(IReadOnlyList<string> devices, string? selected, out int selectedIndex)
+    private static List<string> BuildMidiDeviceList(ObservableCollection<string> devices, string? selected, out int selectedIndex)
     {
         selectedIndex = -1;
         var list = new List<string>(devices.Count);
@@ -273,7 +274,7 @@ public sealed class SettingsRenderer
         return list;
     }
 
-    private static IReadOnlyList<string> BuildDeviceList(IReadOnlyList<AudioDevice> devices, AudioDevice? selected, out int selectedIndex)
+    private static List<string> BuildDeviceList(ObservableCollection<AudioDevice> devices, AudioDevice? selected, out int selectedIndex)
     {
         selectedIndex = -1;
         var list = new List<string>(devices.Count);
@@ -288,7 +289,7 @@ public sealed class SettingsRenderer
         return list;
     }
 
-    private static IReadOnlyList<string> BuildOptionList(IReadOnlyList<int> options, int selected, Func<int, string> format, out int selectedIndex)
+    private static List<string> BuildOptionList(List<int> options, int selected, Func<int, string> format, out int selectedIndex)
     {
         selectedIndex = -1;
         var list = new List<string>(options.Count);

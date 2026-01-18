@@ -24,7 +24,7 @@ using WpfToolTip = System.Windows.Controls.ToolTip;
 
 namespace HotMic.App.Views;
 
-public partial class AnalyzerWindow : Window
+public partial class AnalyzerWindow : Window, IDisposable
 {
     private const int WmNcLButtonDown = 0x00A1;
     private const int HtCaption = 0x0002;
@@ -35,6 +35,7 @@ public partial class AnalyzerWindow : Window
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
     private IDisposable? _subscription;
+    private bool _disposed;
 
     private FrameworkElement? _skiaCanvas;
     private WindowsFormsHost? _glHost;
@@ -100,7 +101,7 @@ public partial class AnalyzerWindow : Window
 
     // Display state (local to this window, not shared via orchestrator)
     private float _minDb = -80f;
-    private float _maxDb = 0f;
+    private float _maxDb;
     private float _brightness = 1f;
     private float _gamma = 0.8f;
     private float _contrast = 1.2f;
@@ -246,26 +247,7 @@ public partial class AnalyzerWindow : Window
             UpdateSubscription();
             _renderTimer.Start();
         };
-        Closed += (_, _) =>
-        {
-            _renderTimer.Stop();
-            _subscription?.Dispose();
-            _subscription = null;
-            _renderer.Dispose();
-            if (_glControl is not null)
-            {
-                DetachWinFormsInputHandlers(_glControl);
-                _glControl.PaintSurface -= SkiaCanvas_PaintSurfaceGpu;
-                _glControl.Dispose();
-                _glControl = null;
-            }
-            if (_glHost is not null)
-            {
-                _glHost.Child = null;
-                _glHost.Dispose();
-                _glHost = null;
-            }
-        };
+        Closed += (_, _) => Dispose();
     }
 
     private void InitializeSkiaSurface()
@@ -2149,6 +2131,34 @@ public partial class AnalyzerWindow : Window
         // Dispose old subscription and create new one with updated capabilities
         _subscription?.Dispose();
         _subscription = _orchestrator.Subscribe(requiredCaps);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _subscription?.Dispose();
+        _subscription = null;
+        _renderer.Dispose();
+        if (_glControl is not null)
+        {
+            DetachWinFormsInputHandlers(_glControl);
+            _glControl.PaintSurface -= SkiaCanvas_PaintSurfaceGpu;
+            _glControl.Dispose();
+            _glControl = null;
+        }
+        if (_glHost is not null)
+        {
+            _glHost.Child = null;
+            _glHost.Dispose();
+            _glHost = null;
+        }
+        GC.SuppressFinalize(this);
     }
 
 }

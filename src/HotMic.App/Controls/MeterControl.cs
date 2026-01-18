@@ -8,7 +8,7 @@ namespace HotMic.App.Controls;
 /// Shows RMS level as filled bar and peak level as line marker.
 /// Ballistics (peak hold, RMS smoothing) are handled by MeterProcessor.
 /// </summary>
-public class MeterControl : SkiaControl
+public class MeterControl : SkiaControl, IDisposable
 {
     public static readonly DependencyProperty PeakLevelProperty =
         DependencyProperty.Register(nameof(PeakLevel), typeof(float), typeof(MeterControl),
@@ -43,6 +43,12 @@ public class MeterControl : SkiaControl
     private readonly SKPaint _greenPaint = new() { Color = new SKColor(0x40, 0xC0, 0x40) };
     private readonly SKPaint _yellowPaint = new() { Color = new SKColor(0xFF, 0xC0, 0x40) };
     private readonly SKPaint _redPaint = new() { Color = new SKColor(0xFF, 0x50, 0x50) };
+    private bool _disposed;
+
+    public MeterControl()
+    {
+        Unloaded += (_, _) => Dispose();
+    }
 
     // dB thresholds for color changes (normalized values)
     private const float YellowThreshold = 0.5f;  // ~-6dB
@@ -137,5 +143,23 @@ public class MeterControl : SkiaControl
             canvas.DrawLine(0, y, width, y, _tickPaint);
             canvas.DrawText($"{db:0}dB", 4, y - 2, _tickLabelPaint);
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _backgroundPaint.Dispose();
+        _peakPaint.Dispose();
+        _tickPaint.Dispose();
+        _tickLabelPaint.Dispose();
+        _greenPaint.Dispose();
+        _yellowPaint.Dispose();
+        _redPaint.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

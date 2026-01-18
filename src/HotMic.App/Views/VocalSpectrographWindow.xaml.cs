@@ -24,7 +24,7 @@ using WpfToolTip = System.Windows.Controls.ToolTip;
 
 namespace HotMic.App.Views;
 
-public partial class VocalSpectrographWindow : Window
+public partial class VocalSpectrographWindow : Window, IDisposable
 {
     private const int WmNcLButtonDown = 0x00A1;
     private const int HtCaption = 0x0002;
@@ -35,6 +35,7 @@ public partial class VocalSpectrographWindow : Window
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
+    private bool _disposed;
 
     private FrameworkElement? _skiaCanvas;
     private WindowsFormsHost? _glHost;
@@ -162,25 +163,7 @@ public partial class VocalSpectrographWindow : Window
             _plugin.SetVisualizationActive(true);
             _renderTimer.Start();
         };
-        Closed += (_, _) =>
-        {
-            _renderTimer.Stop();
-            _plugin.SetVisualizationActive(false);
-            _renderer.Dispose();
-            if (_glControl is not null)
-            {
-                DetachWinFormsInputHandlers(_glControl);
-                _glControl.PaintSurface -= SkiaCanvas_PaintSurfaceGpu;
-                _glControl.Dispose();
-                _glControl = null;
-            }
-            if (_glHost is not null)
-            {
-                _glHost.Child = null;
-                _glHost.Dispose();
-                _glHost = null;
-            }
-        };
+        Closed += (_, _) => Dispose();
     }
 
     private void InitializeSkiaSurface()
@@ -1905,5 +1888,32 @@ public partial class VocalSpectrographWindow : Window
     {
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _plugin.SetVisualizationActive(false);
+        _renderer.Dispose();
+        if (_glControl is not null)
+        {
+            DetachWinFormsInputHandlers(_glControl);
+            _glControl.PaintSurface -= SkiaCanvas_PaintSurfaceGpu;
+            _glControl.Dispose();
+            _glControl = null;
+        }
+        if (_glHost is not null)
+        {
+            _glHost.Child = null;
+            _glHost.Dispose();
+            _glHost = null;
+        }
+        GC.SuppressFinalize(this);
     }
 }

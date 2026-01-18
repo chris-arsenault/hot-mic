@@ -119,9 +119,9 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private readonly HarmonicCombEnhancer _harmonicComb = new(MaxHarmonics);
     private readonly SpectralFeatureExtractor _featureExtractor = new();
     private readonly SpectrographTimingCollector _timing = new();
-    private OnePoleHighPass _dcHighPass = new();
-    private PreEmphasisFilter _preEmphasisFilter = new();
-    private PreEmphasisFilter _lpcPreEmphasisFilter = new(); // Always-on pre-emphasis for LPC
+    private OnePoleHighPass _dcHighPass;
+    private PreEmphasisFilter _preEmphasisFilter;
+    private PreEmphasisFilter _lpcPreEmphasisFilter; // Always-on pre-emphasis for LPC
     private float[] _lpcInputBuffer = Array.Empty<float>();
     private float[] _lpcWindowedBuffer = Array.Empty<float>();
     private float[] _lpcWindow = Array.Empty<float>();
@@ -267,7 +267,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private int _requestedShowFormants = 1;
     private int _requestedShowHarmonics = 1;
     private int _requestedHarmonicDisplayMode = (int)HarmonicDisplayMode.Detected;
-    private int _requestedShowFormantBandwidths = 0; // Default to dots-only (like Praat)
+    private int _requestedShowFormantBandwidths; // Default to dots-only (like Praat)
     private int _requestedShowVoicing = 1;
     private int _requestedPreEmphasis = 1;
     private int _requestedHighPassEnabled = 1;
@@ -302,7 +302,7 @@ public sealed partial class VocalSpectrographPlugin : IPlugin
     private SpectrogramReassignMode _activeReassignMode;
 
     // Speech Coach requested parameters
-    private int _requestedSpeechCoachEnabled = 0;
+    private int _requestedSpeechCoachEnabled;
     private int _requestedSpeechRateWindow = 10; // seconds
     private int _requestedShowSpeechMetrics = 1;
     private int _requestedShowSyllableMarkers = 1;

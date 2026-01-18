@@ -1,4 +1,5 @@
 using System.Threading;
+using System.Globalization;
 using HotMic.Core.Dsp.Spectrogram;
 
 namespace HotMic.Core.Plugins.BuiltIn;
@@ -102,7 +103,7 @@ public sealed partial class VocalSpectrographPlugin
                 MaxValue = 6f,
                 DefaultValue = 6f,
                 Unit = "",
-                FormatValue = value => ((int)MathF.Round(value)).ToString()
+                FormatValue = value => ((int)MathF.Round(value)).ToString(CultureInfo.InvariantCulture)
             },
             new PluginParameter
             {

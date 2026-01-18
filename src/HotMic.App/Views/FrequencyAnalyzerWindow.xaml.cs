@@ -11,7 +11,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class FrequencyAnalyzerWindow : Window
+public partial class FrequencyAnalyzerWindow : Window, IDisposable
 {
     private readonly FrequencyAnalyzerRenderer _renderer = new(PluginComponentTheme.BlueOnBlack);
     private readonly FrequencyAnalyzerPlugin _plugin;
@@ -20,6 +20,7 @@ public partial class FrequencyAnalyzerWindow : Window
     private readonly DispatcherTimer _renderTimer;
 
     private float[] _spectrum = Array.Empty<float>();
+    private bool _disposed;
 
     private static readonly int[] FftSizes = { 1024, 2048, 4096, 8192 };
     private static readonly int[] DisplayBins = { 32, 64, 128, 256 };
@@ -56,12 +57,7 @@ public partial class FrequencyAnalyzerWindow : Window
             _plugin.SetVisualizationActive(true);
             _renderTimer.Start();
         };
-        Closed += (_, _) =>
-        {
-            _renderTimer.Stop();
-            _plugin.SetVisualizationActive(false);
-            _renderer.Dispose();
-        };
+        Closed += (_, _) => Dispose();
     }
 
     private void OnRenderTick(object? sender, EventArgs e)
@@ -202,5 +198,19 @@ public partial class FrequencyAnalyzerWindow : Window
     {
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _plugin.SetVisualizationActive(false);
+        _renderer.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

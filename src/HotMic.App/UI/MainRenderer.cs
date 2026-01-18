@@ -21,7 +21,7 @@ public sealed class MainRenderer
     private const float ChannelDeleteSize = 14f;
 
     // Section dimensions
-    private const float ChannelHeaderWidth = 90f;
+    private const float ChannelHeaderWidth = 60f;
     private const float PluginSlotWidth = 130f; // 32 bands × 4px = 128px + 2px padding for delta strip
     private const float PluginSlotSpacing = 2f;
     private const float MeterWidth = 16f;
@@ -33,8 +33,10 @@ public sealed class MainRenderer
     // Meter segments
     private const int MeterSegments = 16;
     private const float SegmentGap = 1f;
+    private static readonly float[] MeterGradientStops = [0f, 0.35f, 0.65f, 0.85f, 1f];
 
     private readonly HotMicTheme _theme = HotMicTheme.Default;
+    private readonly SKColor[] _meterGradientColors;
 
     // Pre-allocated paints
     private readonly SKPaint _backgroundPaint;
@@ -71,6 +73,7 @@ public sealed class MainRenderer
     private readonly PluginShellRenderer _pluginShellRenderer = new();
     private readonly RoutingSlotRenderer _routingSlotRenderer = new();
     private readonly Dictionary<int, SKRect> _channelHeaderRects = new();
+    private readonly Dictionary<int, SKRect> _channelNameRects = new();
     private readonly List<CopyBridgeRect> _copyBridgeRects = new();
     private readonly List<MergeBridgeRect> _mergeBridgeRects = new();
     private readonly List<ChannelDeleteRect> _channelDeleteRects = new();
@@ -85,6 +88,14 @@ public sealed class MainRenderer
 
     public MainRenderer()
     {
+        _meterGradientColors =
+        [
+            _theme.MeterLow,
+            _theme.MeterMid,
+            _theme.MeterHigh,
+            _theme.MeterWarn,
+            _theme.MeterClip
+        ];
         _backgroundPaint = CreateFillPaint(_theme.BackgroundPrimary);
         _titleBarPaint = CreateFillPaint(_theme.BackgroundSecondary);
         _hotbarPaint = CreateFillPaint(new SKColor(0x16, 0x16, 0x1A));
@@ -388,24 +399,35 @@ public sealed class MainRenderer
         canvas.DrawRoundRect(roundRect, CreateFillPaint(_theme.ChannelInput));
         canvas.DrawRoundRect(roundRect, _borderPaint);
 
-        string displayName = string.IsNullOrWhiteSpace(channel.Name) ? $"Channel {channelIndex + 1}" : channel.Name;
-        float nameMaxWidth = width - (ChannelDeleteSize + 10f);
-        DrawTruncatedText(canvas, displayName, x + width / 2f, y + 14f, nameMaxWidth, CreateCenteredTextPaint(_theme.TextSecondary, 9f));
-        canvas.DrawText($"CH {channelIndex + 1}", x + 4f, y + 26f, _tinyTextPaint);
+        // Channel name at top (right-click to rename)
+        string displayName = string.IsNullOrWhiteSpace(channel.Name) ? $"CH{channelIndex + 1}" : channel.Name;
+        float nameMaxWidth = width - 8f;
+        var nameRect = new SKRect(x + 2f, y + 2f, x + width - 2f, y + 18f);
+        DrawTruncatedText(canvas, displayName, x + width / 2f, y + 13f, nameMaxWidth, CreateCenteredTextPaint(_theme.TextSecondary, 8f));
+        _channelNameRects[channelIndex] = nameRect;
 
-        float deleteX = x + width - ChannelDeleteSize - 4f;
-        float deleteY = y + 4f;
-        var deleteRect = new SKRect(deleteX, deleteY, deleteX + ChannelDeleteSize, deleteY + ChannelDeleteSize);
-        DrawDeleteButton(canvas, deleteRect, canDelete);
+        // Delete button at top right (small)
+        float deleteSize = 10f;
+        float deleteX = x + width - deleteSize - 2f;
+        float deleteY = y + 2f;
+        var deleteRect = new SKRect(deleteX, deleteY, deleteX + deleteSize, deleteY + deleteSize);
+        if (canDelete)
+        {
+            var deletePaint = CreateStrokePaint(_theme.TextMuted, 1f);
+            canvas.DrawLine(deleteX + 2f, deleteY + 2f, deleteX + deleteSize - 2f, deleteY + deleteSize - 2f, deletePaint);
+            canvas.DrawLine(deleteX + deleteSize - 2f, deleteY + 2f, deleteX + 2f, deleteY + deleteSize - 2f, deletePaint);
+        }
         _channelDeleteRects.Add(new ChannelDeleteRect(channelIndex, deleteRect, canDelete));
 
-        // Mute/Solo
-        float toggleY = y + height - ToggleSize - 2f;
-        var muteRect = new SKRect(x + 4f, toggleY, x + 4f + ToggleSize, toggleY + ToggleSize);
+        // Mute/Solo buttons at bottom (smaller 14px)
+        float smallToggle = 14f;
+        float toggleY = y + height - smallToggle - 2f;
+        float toggleSpacing = (width - 2f * smallToggle - 4f) / 3f;
+        var muteRect = new SKRect(x + toggleSpacing, toggleY, x + toggleSpacing + smallToggle, toggleY + smallToggle);
         DrawToggleButton(canvas, muteRect, "M", channel.IsMuted, _mutePaint);
         _toggleRects.Add(new ToggleRect(channelIndex, ToggleType.Mute, muteRect));
 
-        var soloRect = new SKRect(x + 6f + ToggleSize, toggleY, x + 6f + ToggleSize * 2, toggleY + ToggleSize);
+        var soloRect = new SKRect(muteRect.Right + toggleSpacing, toggleY, muteRect.Right + toggleSpacing + smallToggle, toggleY + smallToggle);
         DrawToggleButton(canvas, soloRect, "S", channel.IsSoloed, _soloPaint);
         _toggleRects.Add(new ToggleRect(channelIndex, ToggleType.Solo, soloRect));
     }
@@ -1194,8 +1216,8 @@ public sealed class MainRenderer
             using var gradient = SKShader.CreateLinearGradient(
                 new SKPoint(x, y),
                 new SKPoint(x + width, y),
-                new[] { _theme.MeterLow, _theme.MeterMid, _theme.MeterHigh, _theme.MeterWarn, _theme.MeterClip },
-                new[] { 0f, 0.35f, 0.65f, 0.85f, 1f },
+                _meterGradientColors,
+                MeterGradientStops,
                 SKShaderTileMode.Clamp);
 
             using var gradientPaint = new SKPaint { Shader = gradient, IsAntialias = true };
@@ -1298,6 +1320,7 @@ public sealed class MainRenderer
         _containerIndexByPluginId.Clear();
         _drawnContainerIndices.Clear();
         _channelHeaderRects.Clear();
+        _channelNameRects.Clear();
         _copyBridgeRects.Clear();
         _mergeBridgeRects.Clear();
         _channelDeleteRects.Clear();
@@ -1391,6 +1414,18 @@ public sealed class MainRenderer
             }
         }
 
+        return -1;
+    }
+
+    public int HitTestChannelName(float x, float y)
+    {
+        foreach (var (channelIndex, rect) in _channelNameRects)
+        {
+            if (rect.Contains(x, y))
+            {
+                return channelIndex;
+            }
+        }
         return -1;
     }
 

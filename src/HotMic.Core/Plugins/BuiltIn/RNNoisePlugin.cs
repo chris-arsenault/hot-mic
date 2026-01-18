@@ -20,7 +20,7 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
     private readonly float[] _dryRing = new float[FrameSize];
     private readonly float[] _frameIn = new float[FrameSize];
     private readonly float[] _frameOut = new float[FrameSize];
-    private LinearSmoother _mixSmoother = new();
+    private LinearSmoother _mixSmoother;
     private float[] _speechBuffer = Array.Empty<float>();
 
     private IntPtr _state = IntPtr.Zero;

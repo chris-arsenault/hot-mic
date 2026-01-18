@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
 using SkiaSharp;
@@ -500,7 +501,7 @@ public sealed class KnobWidget : IDisposable
         }
         else
         {
-            formatted = Value.ToString(ValueFormat);
+            formatted = Value.ToString(ValueFormat, CultureInfo.InvariantCulture);
         }
 
         if (ShowPositiveSign && Value > 0.05f)

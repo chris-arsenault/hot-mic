@@ -21,10 +21,7 @@ public sealed class CopyBus
 
     public CopyBus(int blockSize)
     {
-        if (blockSize <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(blockSize));
-        }
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(blockSize);
 
         _audio = new float[blockSize];
         _speech = new float[blockSize];

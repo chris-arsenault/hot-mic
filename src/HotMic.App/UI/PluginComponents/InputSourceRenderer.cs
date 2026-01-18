@@ -4,25 +4,25 @@ namespace HotMic.App.UI.PluginComponents;
 
 /// <summary>
 /// Renderer for the Input Source plugin window.
-/// Shows device selection list, channel mode, gain knob, and input meter.
+/// Shows device dropdown, channel mode buttons, gain knob, and input meter.
 /// </summary>
 public sealed class InputSourceRenderer : IDisposable
 {
-    private const float TitleBarHeight = 40f;
-    private const float Padding = 12f;
-    private const float CornerRadius = 10f;
-    private const float DeviceListItemHeight = 28f;
-    private const float MeterWidth = 20f;
-    private const float KnobRadius = 32f;
+    private const float TitleBarHeight = 36f;
+    private const float Padding = 10f;
+    private const float CornerRadius = 8f;
+    private const float DropdownHeight = 28f;
+    private const float DropdownItemHeight = 26f;
+    private const float MeterWidth = 16f;
+    private const float KnobRadius = 28f;
 
     private readonly PluginComponentTheme _theme;
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _listBackgroundPaint;
-    private readonly SKPaint _listItemHoverPaint;
-    private readonly SKPaint _listItemSelectedPaint;
+    private readonly SKPaint _dropdownPaint;
+    private readonly SKPaint _dropdownItemHoverPaint;
     private readonly SKPaint _modeButtonPaint;
     private readonly SKPaint _modeButtonActivePaint;
     private readonly SKPaint _bypassPaint;
@@ -30,23 +30,24 @@ public sealed class InputSourceRenderer : IDisposable
     private readonly SkiaTextPaint _titlePaint;
     private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SkiaTextPaint _labelPaint;
-    private readonly SkiaTextPaint _deviceNamePaint;
-    private readonly SkiaTextPaint _deviceNameSelectedPaint;
+    private readonly SkiaTextPaint _dropdownTextPaint;
     private readonly SkiaTextPaint _modeButtonTextPaint;
     private readonly SkiaTextPaint _modeButtonActiveTextPaint;
 
     private SKRect _titleBarRect;
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
-    private SKRect _deviceListRect;
+    private SKRect _deviceDropdownRect;
     private SKRect _modeLeftRect;
     private SKRect _modeRightRect;
     private SKRect _modeSumRect;
-    private readonly List<SKRect> _deviceItemRects = new();
+    private readonly List<SKRect> _dropdownItemRects = new();
+    private SKRect _dropdownListRect;
 
     private readonly LevelMeter _inputMeter;
 
     public KnobWidget GainKnob { get; }
+    public bool IsDropdownExpanded { get; set; }
 
     public InputSourceRenderer(PluginComponentTheme? theme = null)
     {
@@ -74,23 +75,16 @@ public sealed class InputSourceRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _listBackgroundPaint = new SKPaint
+        _dropdownPaint = new SKPaint
         {
             Color = _theme.WaveformBackground,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
-        _listItemHoverPaint = new SKPaint
+        _dropdownItemHoverPaint = new SKPaint
         {
-            Color = _theme.PanelBackgroundLight,
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-
-        _listItemSelectedPaint = new SKPaint
-        {
-            Color = _theme.KnobArc.WithAlpha(80),
+            Color = _theme.KnobArc.WithAlpha(60),
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
@@ -123,17 +117,16 @@ public sealed class InputSourceRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
-        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
-        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal);
-        _deviceNamePaint = new SkiaTextPaint(_theme.TextSecondary, 11f);
-        _deviceNameSelectedPaint = new SkiaTextPaint(_theme.TextPrimary, 11f, SKFontStyle.Bold);
-        _modeButtonTextPaint = new SkiaTextPaint(_theme.TextSecondary, 11f, SKFontStyle.Bold, SKTextAlign.Center);
-        _modeButtonActiveTextPaint = new SkiaTextPaint(_theme.PanelBackground, 11f, SKFontStyle.Bold, SKTextAlign.Center);
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 13f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 16f, SKFontStyle.Normal, SKTextAlign.Center);
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 9f, SKFontStyle.Normal);
+        _dropdownTextPaint = new SkiaTextPaint(_theme.TextPrimary, 10f);
+        _modeButtonTextPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
+        _modeButtonActiveTextPaint = new SkiaTextPaint(_theme.PanelBackground, 10f, SKFontStyle.Bold, SKTextAlign.Center);
 
         GainKnob = new KnobWidget(
             KnobRadius, -60f, 12f, "GAIN", "dB",
-            KnobStyle.Bipolar with { TrackWidth = 6f, ArcWidth = 6f, PointerWidth = 3f },
+            KnobStyle.Bipolar with { TrackWidth = 5f, ArcWidth = 5f, PointerWidth = 2f },
             _theme)
         {
             ShowPositiveSign = true,
@@ -150,7 +143,7 @@ public sealed class InputSourceRenderer : IDisposable
         canvas.Scale(dpiScale);
         size = new SKSize(size.Width / dpiScale, size.Height / dpiScale);
 
-        _deviceItemRects.Clear();
+        _dropdownItemRects.Clear();
 
         // Main background
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
@@ -171,74 +164,66 @@ public sealed class InputSourceRenderer : IDisposable
         canvas.DrawLine(0, TitleBarHeight, size.Width, TitleBarHeight, _borderPaint);
 
         // Title
-        canvas.DrawText("Input Source", Padding, TitleBarHeight / 2f + 5, _titlePaint);
+        canvas.DrawText("Input", Padding, TitleBarHeight / 2f + 4, _titlePaint);
 
         // Bypass button
-        float bypassWidth = 50f;
+        float bypassWidth = 40f;
         _bypassButtonRect = new SKRect(
-            size.Width - Padding - 30 - bypassWidth - 8,
-            (TitleBarHeight - 22) / 2,
-            size.Width - Padding - 30 - 8,
-            (TitleBarHeight + 22) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+            size.Width - Padding - 22 - bypassWidth - 6,
+            (TitleBarHeight - 20) / 2,
+            size.Width - Padding - 22 - 6,
+            (TitleBarHeight + 20) / 2);
+        var bypassRound = new SKRoundRect(_bypassButtonRect, 3f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 9f, SKFontStyle.Bold, SKTextAlign.Center);
-        canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 3, bypassTextPaint);
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 8f, SKFontStyle.Bold, SKTextAlign.Center);
+        canvas.DrawText("BYP", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 3, bypassTextPaint);
 
         // Close button
-        _closeButtonRect = new SKRect(size.Width - Padding - 24, (TitleBarHeight - 24) / 2,
-            size.Width - Padding, (TitleBarHeight + 24) / 2);
-        canvas.DrawText("\u00D7", _closeButtonRect.MidX, _closeButtonRect.MidY + 6, _closeButtonPaint);
+        _closeButtonRect = new SKRect(size.Width - Padding - 20, (TitleBarHeight - 20) / 2,
+            size.Width - Padding, (TitleBarHeight + 20) / 2);
+        canvas.DrawText("\u00D7", _closeButtonRect.MidX, _closeButtonRect.MidY + 5, _closeButtonPaint);
 
         float contentTop = TitleBarHeight + Padding;
+        float rightColumnX = size.Width - Padding - MeterWidth - KnobRadius * 2 - 8;
 
-        // Device list label
-        canvas.DrawText("INPUT DEVICE", Padding, contentTop + 10, _labelPaint);
+        // Device dropdown
+        canvas.DrawText("DEVICE", Padding, contentTop + 8, _labelPaint);
+        float dropdownTop = contentTop + 12;
+        _deviceDropdownRect = new SKRect(Padding, dropdownTop, rightColumnX - 8, dropdownTop + DropdownHeight);
+        var dropdownRound = new SKRoundRect(_deviceDropdownRect, 4f);
+        canvas.DrawRoundRect(dropdownRound, _dropdownPaint);
+        canvas.DrawRoundRect(dropdownRound, _borderPaint);
 
-        // Device list
-        float listTop = contentTop + 18;
-        float listHeight = Math.Min(state.Devices.Count * DeviceListItemHeight + 4, 120f);
-        _deviceListRect = new SKRect(Padding, listTop, size.Width - Padding - MeterWidth - KnobRadius * 2 - 24, listTop + listHeight);
-        var listRound = new SKRoundRect(_deviceListRect, 4f);
-        canvas.DrawRoundRect(listRound, _listBackgroundPaint);
-        canvas.DrawRoundRect(listRound, _borderPaint);
-
-        // Clip to list area for device items
-        canvas.Save();
-        canvas.ClipRect(_deviceListRect);
-
-        float itemY = _deviceListRect.Top + 2;
-        for (int i = 0; i < state.Devices.Count && itemY < _deviceListRect.Bottom; i++)
+        // Selected device text
+        string selectedName = "No Device";
+        foreach (var device in state.Devices)
         {
-            var device = state.Devices[i];
-            var itemRect = new SKRect(_deviceListRect.Left + 2, itemY, _deviceListRect.Right - 2, itemY + DeviceListItemHeight);
-            _deviceItemRects.Add(itemRect);
-
-            bool isSelected = device.Id == state.SelectedDeviceId;
-            if (isSelected)
+            if (device.Id == state.SelectedDeviceId)
             {
-                canvas.DrawRoundRect(new SKRoundRect(itemRect, 3f), _listItemSelectedPaint);
+                selectedName = device.Name;
+                break;
             }
-
-            var textPaint = isSelected ? _deviceNameSelectedPaint : _deviceNamePaint;
-            string displayName = TruncateText(device.Name, itemRect.Width - 8, textPaint);
-            canvas.DrawText(displayName, itemRect.Left + 6, itemRect.MidY + 4, textPaint);
-
-            itemY += DeviceListItemHeight;
         }
+        string truncatedName = TruncateText(selectedName, _deviceDropdownRect.Width - 20, _dropdownTextPaint);
+        canvas.DrawText(truncatedName, _deviceDropdownRect.Left + 6, _deviceDropdownRect.MidY + 4, _dropdownTextPaint);
 
-        canvas.Restore();
+        // Dropdown arrow
+        float arrowX = _deviceDropdownRect.Right - 12;
+        float arrowY = _deviceDropdownRect.MidY;
+        using var arrowPaint = new SKPaint { Color = _theme.TextSecondary, IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f };
+        canvas.DrawLine(arrowX - 4, arrowY - 2, arrowX, arrowY + 2, arrowPaint);
+        canvas.DrawLine(arrowX, arrowY + 2, arrowX + 4, arrowY - 2, arrowPaint);
 
-        // Channel mode section
-        float modeTop = _deviceListRect.Bottom + Padding;
-        canvas.DrawText("CHANNEL", Padding, modeTop + 10, _labelPaint);
+        // Channel mode buttons
+        float modeTop = _deviceDropdownRect.Bottom + Padding;
+        canvas.DrawText("CHANNEL", Padding, modeTop + 8, _labelPaint);
 
-        float modeButtonWidth = 44f;
-        float modeButtonHeight = 26f;
-        float modeY = modeTop + 16;
-        float modeSpacing = 4f;
+        float modeButtonWidth = 36f;
+        float modeButtonHeight = 22f;
+        float modeY = modeTop + 12;
+        float modeSpacing = 3f;
 
         _modeLeftRect = new SKRect(Padding, modeY, Padding + modeButtonWidth, modeY + modeButtonHeight);
         _modeRightRect = new SKRect(_modeLeftRect.Right + modeSpacing, modeY, _modeLeftRect.Right + modeSpacing + modeButtonWidth, modeY + modeButtonHeight);
@@ -249,18 +234,56 @@ public sealed class InputSourceRenderer : IDisposable
         DrawModeButton(canvas, _modeSumRect, "L+R", state.ChannelMode == InputChannelModeValue.Sum);
 
         // Gain knob (right side)
-        float knobX = size.Width - Padding - KnobRadius - MeterWidth - 8;
-        float knobY = contentTop + 60;
+        float knobX = size.Width - Padding - KnobRadius - MeterWidth - 4;
+        float knobY = contentTop + 30;
         GainKnob.Center = new SKPoint(knobX, knobY);
         GainKnob.Value = state.GainDb;
         GainKnob.Render(canvas);
 
         // Input meter (far right)
         float meterX = size.Width - Padding - MeterWidth;
-        float meterHeight = size.Height - TitleBarHeight - Padding * 2 - 20;
+        float meterHeight = size.Height - TitleBarHeight - Padding * 2 - 16;
         var meterRect = new SKRect(meterX, contentTop, meterX + MeterWidth, contentTop + meterHeight);
         _inputMeter.Update(state.InputLevel);
         _inputMeter.Render(canvas, meterRect, MeterOrientation.Vertical);
+
+        // Dropdown list (if expanded)
+        if (IsDropdownExpanded && state.Devices.Count > 0)
+        {
+            float maxListHeight = 150f;
+            float listHeight = Math.Min(state.Devices.Count * DropdownItemHeight, maxListHeight);
+            _dropdownListRect = new SKRect(_deviceDropdownRect.Left, _deviceDropdownRect.Bottom + 2, _deviceDropdownRect.Right, _deviceDropdownRect.Bottom + 2 + listHeight);
+
+            canvas.DrawRoundRect(new SKRoundRect(_dropdownListRect, 4f), _dropdownPaint);
+            canvas.DrawRoundRect(new SKRoundRect(_dropdownListRect, 4f), _borderPaint);
+
+            canvas.Save();
+            canvas.ClipRect(_dropdownListRect);
+
+            float itemY = _dropdownListRect.Top;
+            for (int i = 0; i < state.Devices.Count && itemY < _dropdownListRect.Bottom; i++)
+            {
+                var device = state.Devices[i];
+                var itemRect = new SKRect(_dropdownListRect.Left, itemY, _dropdownListRect.Right, itemY + DropdownItemHeight);
+                _dropdownItemRects.Add(itemRect);
+
+                if (device.Id == state.SelectedDeviceId)
+                {
+                    canvas.DrawRect(itemRect, _dropdownItemHoverPaint);
+                }
+
+                string itemName = TruncateText(device.Name, itemRect.Width - 10, _dropdownTextPaint);
+                canvas.DrawText(itemName, itemRect.Left + 6, itemRect.MidY + 4, _dropdownTextPaint);
+
+                itemY += DropdownItemHeight;
+            }
+
+            canvas.Restore();
+        }
+        else
+        {
+            _dropdownListRect = SKRect.Empty;
+        }
 
         // Outer border
         canvas.DrawRoundRect(roundRect, _borderPaint);
@@ -270,7 +293,7 @@ public sealed class InputSourceRenderer : IDisposable
 
     private void DrawModeButton(SKCanvas canvas, SKRect rect, string label, bool isActive)
     {
-        var roundRect = new SKRoundRect(rect, 4f);
+        var roundRect = new SKRoundRect(rect, 3f);
         canvas.DrawRoundRect(roundRect, isActive ? _modeButtonActivePaint : _modeButtonPaint);
         canvas.DrawRoundRect(roundRect, _borderPaint);
         canvas.DrawText(label, rect.MidX, rect.MidY + 4, isActive ? _modeButtonActiveTextPaint : _modeButtonTextPaint);
@@ -290,11 +313,28 @@ public sealed class InputSourceRenderer : IDisposable
 
     public InputSourceHitTest HitTest(float x, float y)
     {
+        // Check dropdown list items first (if expanded)
+        if (IsDropdownExpanded)
+        {
+            for (int i = 0; i < _dropdownItemRects.Count; i++)
+            {
+                if (_dropdownItemRects[i].Contains(x, y))
+                    return new InputSourceHitTest(InputSourceHitArea.DeviceItem, i);
+            }
+
+            // Click outside dropdown closes it
+            if (!_dropdownListRect.IsEmpty && !_dropdownListRect.Contains(x, y) && !_deviceDropdownRect.Contains(x, y))
+                return new InputSourceHitTest(InputSourceHitArea.CloseDropdown);
+        }
+
         if (_closeButtonRect.Contains(x, y))
             return new InputSourceHitTest(InputSourceHitArea.CloseButton);
 
         if (_bypassButtonRect.Contains(x, y))
             return new InputSourceHitTest(InputSourceHitArea.BypassButton);
+
+        if (_deviceDropdownRect.Contains(x, y))
+            return new InputSourceHitTest(InputSourceHitArea.DeviceDropdown);
 
         if (GainKnob.HitTest(x, y))
             return new InputSourceHitTest(InputSourceHitArea.GainKnob);
@@ -308,19 +348,13 @@ public sealed class InputSourceRenderer : IDisposable
         if (_modeSumRect.Contains(x, y))
             return new InputSourceHitTest(InputSourceHitArea.ModeSum);
 
-        for (int i = 0; i < _deviceItemRects.Count; i++)
-        {
-            if (_deviceItemRects[i].Contains(x, y))
-                return new InputSourceHitTest(InputSourceHitArea.DeviceItem, i);
-        }
-
         if (_titleBarRect.Contains(x, y))
             return new InputSourceHitTest(InputSourceHitArea.TitleBar);
 
         return new InputSourceHitTest(InputSourceHitArea.None);
     }
 
-    public static SKSize GetPreferredSize() => new(300, 220);
+    public static SKSize GetPreferredSize() => new(240, 180);
 
     public void Dispose()
     {
@@ -329,9 +363,8 @@ public sealed class InputSourceRenderer : IDisposable
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
-        _listBackgroundPaint.Dispose();
-        _listItemHoverPaint.Dispose();
-        _listItemSelectedPaint.Dispose();
+        _dropdownPaint.Dispose();
+        _dropdownItemHoverPaint.Dispose();
         _modeButtonPaint.Dispose();
         _modeButtonActivePaint.Dispose();
         _bypassPaint.Dispose();
@@ -339,8 +372,7 @@ public sealed class InputSourceRenderer : IDisposable
         _titlePaint.Dispose();
         _closeButtonPaint.Dispose();
         _labelPaint.Dispose();
-        _deviceNamePaint.Dispose();
-        _deviceNameSelectedPaint.Dispose();
+        _dropdownTextPaint.Dispose();
         _modeButtonTextPaint.Dispose();
         _modeButtonActiveTextPaint.Dispose();
     }
@@ -369,11 +401,13 @@ public enum InputSourceHitArea
     TitleBar,
     CloseButton,
     BypassButton,
+    DeviceDropdown,
+    DeviceItem,
+    CloseDropdown,
     GainKnob,
     ModeLeft,
     ModeRight,
-    ModeSum,
-    DeviceItem
+    ModeSum
 }
 
 public record struct InputSourceHitTest(InputSourceHitArea Area, int DeviceIndex = -1);

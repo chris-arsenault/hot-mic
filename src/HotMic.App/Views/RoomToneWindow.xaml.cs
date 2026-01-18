@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class RoomToneWindow : Window
+public partial class RoomToneWindow : Window, IDisposable
 {
     private readonly RoomToneRenderer _renderer = new();
     private readonly RoomTonePlugin _plugin;
@@ -24,6 +24,7 @@ public partial class RoomToneWindow : Window
     private float _smoothedSpeechPresence;
     private float _smoothedDuckAmount;
     private float _smoothedNoiseLevel;
+    private bool _disposed;
 
     public RoomToneWindow(RoomTonePlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
@@ -61,11 +62,7 @@ public partial class RoomToneWindow : Window
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += OnRenderTick;
         Loaded += (_, _) => _renderTimer.Start();
-        Closed += (_, _) =>
-        {
-            _renderTimer.Stop();
-            _renderer.Dispose();
-        };
+        Closed += (_, _) => Dispose();
     }
 
     private void OnRenderTick(object? sender, EventArgs e)
@@ -207,5 +204,18 @@ public partial class RoomToneWindow : Window
     {
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _renderer.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

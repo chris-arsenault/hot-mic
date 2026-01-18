@@ -33,14 +33,8 @@ public sealed class PluginGraph
     /// </summary>
     public bool LoadFromConfig(ChannelConfig config, Func<PluginConfig, PluginSlot?> slotFactory)
     {
-        if (config is null)
-        {
-            throw new ArgumentNullException(nameof(config));
-        }
-        if (slotFactory is null)
-        {
-            throw new ArgumentNullException(nameof(slotFactory));
-        }
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(slotFactory);
 
         _config = config;
 
@@ -104,10 +98,7 @@ public sealed class PluginGraph
     /// </summary>
     public bool SyncWithChain(ChannelConfig config)
     {
-        if (config is null)
-        {
-            throw new ArgumentNullException(nameof(config));
-        }
+        ArgumentNullException.ThrowIfNull(config);
 
         _config = config;
         bool configChanged = SyncConfigOrder();
@@ -152,10 +143,7 @@ public sealed class PluginGraph
     /// </summary>
     public int InsertPlugin(IPlugin plugin, int insertIndex)
     {
-        if (plugin is null)
-        {
-            throw new ArgumentNullException(nameof(plugin));
-        }
+        ArgumentNullException.ThrowIfNull(plugin);
 
         int instanceId = _chain.InsertSlot(insertIndex, plugin);
         if (instanceId <= 0)
@@ -173,10 +161,7 @@ public sealed class PluginGraph
     /// </summary>
     public int InsertPluginIntoContainer(IPlugin plugin, int containerId, int containerIndex)
     {
-        if (plugin is null)
-        {
-            throw new ArgumentNullException(nameof(plugin));
-        }
+        ArgumentNullException.ThrowIfNull(plugin);
 
         int insertIndex = ResolveContainerInsertIndex(containerId, containerIndex);
         int instanceId = InsertPlugin(plugin, insertIndex);

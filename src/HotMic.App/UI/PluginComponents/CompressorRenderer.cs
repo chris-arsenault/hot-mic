@@ -17,6 +17,7 @@ public sealed class CompressorRenderer : IDisposable
     private const float KnobSpacing = 64f;
     private const float CornerRadius = 10f;
     private const int KnobCount = 6;
+    private static readonly float[] ThresholdDash = [4f, 3f];
 
     private readonly PluginComponentTheme _theme;
     private readonly PluginPresetBar _presetBar;
@@ -158,7 +159,7 @@ public sealed class CompressorRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1.5f,
-            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 3f }, 0)
+            PathEffect = SKPathEffect.CreateDash(ThresholdDash, 0)
         };
 
         _inputMarkerPaint = new SKPaint

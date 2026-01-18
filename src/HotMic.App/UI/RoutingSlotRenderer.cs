@@ -124,23 +124,6 @@ public sealed class RoutingSlotRenderer
         string deviceLabel = isBusInput ? "Bus In" : TruncateText(channel.InputDeviceLabel, width - 4f, _valuePaint);
         canvas.DrawText(deviceLabel, x + 3f, y + 10f, _valuePaint);
 
-        // Channel mode badge (only for regular input, not bus input)
-        if (!isBusInput)
-        {
-            string modeLabel = channel.InputChannelMode switch
-            {
-                HotMic.Common.Configuration.InputChannelMode.Left => "L",
-                HotMic.Common.Configuration.InputChannelMode.Right => "R",
-                _ => "\u03A3" // Sigma for sum
-            };
-            float badgeX = x + width - 14f;
-            float badgeY = y + 4f;
-            var badgeRect = new SKRect(badgeX, badgeY, badgeX + 12f, badgeY + 10f);
-            canvas.DrawRoundRect(new SKRoundRect(badgeRect, 2f), CreateFillPaint(_theme.Accent));
-            canvas.DrawText(modeLabel, badgeRect.MidX, badgeRect.MidY + 3f, _badgePaint);
-            _routingBadges.Add(new RoutingBadgeRect(channelIndex, slot.InstanceId, RoutingBadgeType.InputChannelMode, badgeRect));
-        }
-
         // Input gain knob
         float knobX = x + 4f;
         float knobY = y + 18f;
@@ -157,6 +140,17 @@ public sealed class RoutingSlotRenderer
         float meterHeight = height - 32f;
         DrawMiniMeter(canvas, meterX, meterY, MeterWidth, meterHeight, channel.InputRmsLevel, voxScale);
 
+        SKRect removeRect = SKRect.Empty;
+        if (!isBusInput)
+        {
+            float removeSize = 8f;
+            float removeX = x + width - removeSize - 2f;
+            float removeY = y + 2f;
+            removeRect = new SKRect(removeX - 2f, removeY - 2f, removeX + removeSize + 2f, removeY + removeSize + 2f);
+            canvas.DrawLine(removeX, removeY, removeX + removeSize, removeY + removeSize, _iconPaint);
+            canvas.DrawLine(removeX + removeSize, removeY, removeX, removeY + removeSize, _iconPaint);
+        }
+
         // Gain label at bottom
         string gainLabel = $"{channel.InputGainDb:+0.0;-0.0;0}";
         canvas.DrawText(gainLabel, x + 3f, y + height - 4f, _labelPaint);
@@ -164,7 +158,7 @@ public sealed class RoutingSlotRenderer
         // Hit region for the entire slot (opens popup)
         var actionRect = new SKRect(x, y, x + width - MeterWidth - 2f, y + height);
         _routingSlots.Add(new RoutingSlotRect(channelIndex, slot.InstanceId, slotIndex,
-            slot.PluginId, rect, actionRect, SKRect.Empty, SKRect.Empty));
+            slot.PluginId, rect, actionRect, removeRect, SKRect.Empty));
     }
 
     private void DrawOutputSlot(SKCanvas canvas, SKRect rect, PluginViewModel slot,
@@ -180,23 +174,9 @@ public sealed class RoutingSlotRenderer
         canvas.DrawRoundRect(roundRect, _outputBgPaint);
         canvas.DrawRoundRect(roundRect, _accentBorderPaint);
 
-        // Send mode badge at top
-        string modeLabel = slot.Param0Value switch
-        {
-            0f => "L",
-            1f => "R",
-            _ => "B" // Both
-        };
-        float badgeX = x + (width - 16f) / 2f;
-        float badgeY = y + 3f;
-        var badgeRect = new SKRect(badgeX, badgeY, badgeX + 16f, badgeY + 10f);
-        canvas.DrawRoundRect(new SKRoundRect(badgeRect, 2f), CreateFillPaint(_theme.Accent));
-        canvas.DrawText(modeLabel, badgeRect.MidX, badgeRect.MidY + 3f, _badgePaint);
-        _routingBadges.Add(new RoutingBadgeRect(channelIndex, slot.InstanceId, RoutingBadgeType.OutputSendMode, badgeRect));
-
-        // Output gain knob
+        // Output gain knob at top
         float knobX = x + 3f;
-        float knobY = y + 18f;
+        float knobY = y + 4f;
         float knobRadius = KnobSize / 2f - 1f;
         float normalized = (channel.OutputGainDb + 60f) / 72f; // -60 to +12
         normalized = Math.Clamp(normalized, 0f, 1f);
@@ -204,10 +184,25 @@ public sealed class RoutingSlotRenderer
         _routingKnobs.Add(new RoutingKnobRect(channelIndex, slot.InstanceId, RoutingKnobType.OutputGain,
             new SKRect(knobX, knobY, knobX + KnobSize, knobY + KnobSize), -60f, 12f));
 
+        // Send mode badge below knob (clickable to cycle)
+        string modeLabel = slot.Param0Value switch
+        {
+            0f => "L",
+            1f => "R",
+            _ => "L+R"
+        };
+        float badgeX = x + 2f;
+        float badgeY = knobY + KnobSize + 2f;
+        float badgeWidth = KnobSize + 2f;
+        var badgeRect = new SKRect(badgeX, badgeY, badgeX + badgeWidth, badgeY + 12f);
+        canvas.DrawRoundRect(new SKRoundRect(badgeRect, 2f), CreateFillPaint(_theme.Accent));
+        canvas.DrawText(modeLabel, badgeRect.MidX, badgeRect.MidY + 3f, _badgePaint);
+        _routingBadges.Add(new RoutingBadgeRect(channelIndex, slot.InstanceId, RoutingBadgeType.OutputSendMode, badgeRect));
+
         // Output meter on right side
         float meterX = x + width - MeterWidth - 2f;
-        float meterY = y + 14f;
-        float meterHeight = height - 28f;
+        float meterY = y + 4f;
+        float meterHeight = height - 20f;
         DrawMiniMeter(canvas, meterX, meterY, MeterWidth, meterHeight, channel.OutputRmsLevel, voxScale);
 
         // dB label at bottom
@@ -215,10 +210,9 @@ public sealed class RoutingSlotRenderer
         string dbLabel = $"{db:0.0}";
         canvas.DrawText(dbLabel, x + 3f, y + height - 4f, _labelPaint);
 
-        // Hit region
-        var actionRect = new SKRect(x, y, x + width - MeterWidth - 2f, y + height);
+        // No action rect - clicks on badge cycle mode, knob adjusts gain
         _routingSlots.Add(new RoutingSlotRect(channelIndex, slot.InstanceId, slotIndex,
-            slot.PluginId, rect, actionRect, SKRect.Empty, SKRect.Empty));
+            slot.PluginId, rect, SKRect.Empty, SKRect.Empty, SKRect.Empty));
     }
 
     private void DrawCopySlot(SKCanvas canvas, SKRect rect, PluginViewModel slot,

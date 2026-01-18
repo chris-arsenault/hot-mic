@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using HotMic.Core.Dsp.Analysis.Formants;
@@ -1505,7 +1506,9 @@ public sealed partial class VocalSpectrographPlugin
     private static string FormatDiscrete(float value, IReadOnlyList<int> options, string suffix)
     {
         int selected = SelectDiscrete(value, options);
-        return string.IsNullOrWhiteSpace(suffix) ? selected.ToString() : $"{selected}{suffix}";
+        return string.IsNullOrWhiteSpace(suffix)
+            ? selected.ToString(CultureInfo.InvariantCulture)
+            : string.Concat(selected.ToString(CultureInfo.InvariantCulture), suffix);
     }
 
     private static void CopyRing(float[] source, float[] destination, int framesToCopy, int stride, int startIndex, int destOffsetFrames)

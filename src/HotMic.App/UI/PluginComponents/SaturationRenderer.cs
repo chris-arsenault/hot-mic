@@ -18,6 +18,7 @@ public sealed class SaturationRenderer : IDisposable
     private const float CornerRadius = 10f;
     private const float WarmthPivotPct = 50f;
     private const float WarmthOverdriveMax = 2f;
+    private static readonly float[] LinearDash = [4f, 4f];
 
     private readonly PluginComponentTheme _theme;
     private readonly PluginPresetBar _presetBar;
@@ -139,7 +140,7 @@ public sealed class SaturationRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f,
-            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0)
+            PathEffect = SKPathEffect.CreateDash(LinearDash, 0)
         };
 
         _gridPaint = new SKPaint

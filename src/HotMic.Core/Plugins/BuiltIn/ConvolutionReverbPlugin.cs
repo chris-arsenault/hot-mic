@@ -48,7 +48,7 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
     // Parameters
     private float _dryWet = 0.3f;
     private float _decay = 1.0f;
-    private float _preDelayMs = 0f;
+    private float _preDelayMs;
     private int _irPreset;
 
     private int _sampleRate;

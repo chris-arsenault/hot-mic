@@ -24,6 +24,9 @@ public sealed class AnalyzerRenderer : IDisposable
     private const float TimeAxisHeight = 22f;
     private const float WaveformHeight = 80f;
     private const float VoicingLaneHeight = 8f;
+    private static readonly float[] PitchLowDash = [6f, 4f];
+    private static readonly float[] DiscontinuityDash = [4f, 4f];
+    private static readonly float[] SpectrumFillStops = [0f, 1f];
 
     // New layout structure
     private const float SidebarWidth = 220f;
@@ -43,6 +46,7 @@ public sealed class AnalyzerRenderer : IDisposable
     private const float SpeechPanelWidth = 200f;
 
     private readonly PluginComponentTheme _theme;
+    private readonly SKColor[] _spectrumFillColors;
     private readonly PluginPresetBar _presetBar;
     private readonly TooltipManager _tooltip;
     private readonly SkiaTextPaint _panelHeaderPaint;
@@ -327,6 +331,11 @@ public sealed class AnalyzerRenderer : IDisposable
     public AnalyzerRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
+        _spectrumFillColors =
+        [
+            _theme.AccentSecondary.WithAlpha(80),
+            _theme.AccentSecondary.WithAlpha(10)
+        ];
         _presetBar = new PluginPresetBar(_theme);
         _tooltip = new TooltipManager(_theme);
         _panelHeaderPaint = new SkiaTextPaint(_theme.TextMuted, 11f, SKFontStyle.Bold);
@@ -410,7 +419,7 @@ public sealed class AnalyzerRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 2f,
-            PathEffect = SKPathEffect.CreateDash(new[] { 6f, 4f }, 0)
+            PathEffect = SKPathEffect.CreateDash(PitchLowDash, 0)
         };
         _formantPaint1 = new SKPaint { Color = new SKColor(0xFF, 0x4B, 0x4B), IsAntialias = true, Style = SKPaintStyle.Fill };
         _formantPaint2 = new SKPaint { Color = new SKColor(0xFF, 0x96, 0x2A), IsAntialias = true, Style = SKPaintStyle.Fill };
@@ -497,7 +506,7 @@ public sealed class AnalyzerRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1.5f,
-            PathEffect = SKPathEffect.CreateDash(new float[] { 4f, 4f }, 0f)
+            PathEffect = SKPathEffect.CreateDash(DiscontinuityDash, 0f)
         };
         _syllableMarkerPaint = new SKPaint
         {
@@ -1697,8 +1706,8 @@ public sealed class AnalyzerRenderer : IDisposable
             var gradientShader = SKShader.CreateLinearGradient(
                 new SKPoint(0, rect.Top),
                 new SKPoint(0, rect.Bottom),
-                new[] { _theme.AccentSecondary.WithAlpha(80), _theme.AccentSecondary.WithAlpha(10) },
-                new[] { 0f, 1f },
+                _spectrumFillColors,
+                SpectrumFillStops,
                 SKShaderTileMode.Clamp);
             _spectrumFillPaint.Shader = gradientShader;
             canvas.DrawPath(_spectrumFillPath, _spectrumFillPaint);

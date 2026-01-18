@@ -10,6 +10,10 @@ namespace HotMic.Core.Plugins.BuiltIn;
 internal sealed class SileroVadInference : IDisposable
 {
     private const int DefaultFrameSize = 512;
+    private const int ModelSampleRate = 16000;
+    private static readonly long[] SampleRateLong = [ModelSampleRate];
+    private static readonly int[] SampleRateInt = [ModelSampleRate];
+    private static readonly float[] SampleRateFloat = [ModelSampleRate];
 
     private readonly InferenceSession _session;
     private readonly string _inputName;
@@ -347,15 +351,15 @@ internal sealed class SileroVadInference : IDisposable
         int[] dims = shape is null || shape.Length == 0 ? Array.Empty<int>() : shape;
         if (type == typeof(long))
         {
-            return NamedOnnxValue.CreateFromTensor(name, new DenseTensor<long>(new[] { 16000L }, dims));
+            return NamedOnnxValue.CreateFromTensor(name, new DenseTensor<long>(SampleRateLong, dims));
         }
 
         if (type == typeof(int))
         {
-            return NamedOnnxValue.CreateFromTensor(name, new DenseTensor<int>(new[] { 16000 }, dims));
+            return NamedOnnxValue.CreateFromTensor(name, new DenseTensor<int>(SampleRateInt, dims));
         }
 
-        return NamedOnnxValue.CreateFromTensor(name, new DenseTensor<float>(new[] { 16000f }, dims));
+        return NamedOnnxValue.CreateFromTensor(name, new DenseTensor<float>(SampleRateFloat, dims));
     }
 
     private static float ReadScalar(IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results, string name)

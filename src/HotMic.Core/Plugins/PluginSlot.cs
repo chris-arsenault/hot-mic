@@ -10,10 +10,7 @@ public sealed class PluginSlot
 {
     public PluginSlot(int instanceId, IPlugin plugin, int sampleRate)
     {
-        if (instanceId <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(instanceId));
-        }
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(instanceId);
 
         Plugin = plugin ?? throw new ArgumentNullException(nameof(plugin));
         InstanceId = instanceId;

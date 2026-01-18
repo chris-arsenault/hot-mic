@@ -26,7 +26,7 @@ public sealed class HighPassFilterPlugin : IPlugin
     private SpectrumDisplayWorker? _spectrumWorker;
 
     private readonly BiquadFilter _highPass = new();
-    private OnePoleHighPass _firstOrder = new();
+    private OnePoleHighPass _firstOrder;
 
     public HighPassFilterPlugin()
     {

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -36,8 +37,8 @@ public partial class SettingsViewModel : ObservableObject
     public ObservableCollection<AudioDevice> OutputDevices { get; }
     public ObservableCollection<string> MidiDevices { get; }
 
-    public IReadOnlyList<int> SampleRateOptions { get; } = [44100, 48000];
-    public IReadOnlyList<int> BufferSizeOptions { get; } = [128, 256, 512, 1024];
+    public List<int> SampleRateOptions { get; } = [44100, 48000];
+    public List<int> BufferSizeOptions { get; } = [128, 256, 512, 1024];
 
     [ObservableProperty]
     private AudioDevice? _selectedOutputDevice;

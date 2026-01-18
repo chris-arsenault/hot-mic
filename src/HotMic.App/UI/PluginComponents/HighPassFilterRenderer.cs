@@ -14,6 +14,7 @@ public sealed class HighPassFilterRenderer : IDisposable
     private const float MeterHeight = 100f;
     private const float CurveHeight = 80f;
     private const float CornerRadius = 10f;
+    private static readonly float[] CutoffDash = [4f, 4f];
 
     private readonly PluginComponentTheme _theme;
     private readonly PluginPresetBar _presetBar;
@@ -140,7 +141,7 @@ public sealed class HighPassFilterRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1.5f,
-            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0)
+            PathEffect = SKPathEffect.CreateDash(CutoffDash, 0)
         };
 
         _gridPaint = new SKPaint

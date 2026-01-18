@@ -49,8 +49,8 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
     private int _diagnosticDecimator;
     private const int DiagnosticDecimation = 8; // Capture every Nth sample to reduce overhead
 
-    private LinearSmoother _warmthSmoother = new();
-    private LinearSmoother _blendSmoother = new();
+    private LinearSmoother _warmthSmoother;
+    private LinearSmoother _blendSmoother;
 
     private readonly EnvelopeFollower _envelope = new();
     private readonly BiquadFilter _preEmphasis = new();

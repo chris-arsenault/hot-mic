@@ -213,9 +213,13 @@ public sealed class PluginChain
     public void Swap(int indexA, int indexB)
     {
         var oldSlots = Volatile.Read(ref _slots);
-        if ((uint)indexA >= (uint)oldSlots.Length || (uint)indexB >= (uint)oldSlots.Length)
+        if ((uint)indexA >= (uint)oldSlots.Length)
         {
-            throw new ArgumentOutOfRangeException();
+            throw new ArgumentOutOfRangeException(nameof(indexA));
+        }
+        if ((uint)indexB >= (uint)oldSlots.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(indexB));
         }
 
         var newSlots = new PluginSlot?[oldSlots.Length];
@@ -254,10 +258,7 @@ public sealed class PluginChain
 
     public int ProcessWithSplit(Span<float> buffer, long sampleClock, int channelId, IRoutingContext routingContext, int splitIndex, Action<Span<float>> onSplit)
     {
-        if (onSplit is null)
-        {
-            throw new ArgumentNullException(nameof(onSplit));
-        }
+        ArgumentNullException.ThrowIfNull(onSplit);
 
         return ProcessInternal(buffer, sampleClock, channelId, routingContext, splitIndex, onSplit);
     }

@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class SignalGeneratorWindow : Window
+public partial class SignalGeneratorWindow : Window, IDisposable
 {
     private readonly SignalGeneratorRenderer _renderer;
     private readonly SignalGeneratorPlugin _plugin;
@@ -22,6 +22,7 @@ public partial class SignalGeneratorWindow : Window
     private readonly PluginPresetHelper _presetHelper;
 
     private float _smoothedOutputLevel;
+    private bool _disposed;
     private readonly float[] _smoothedSlotLevels = new float[3];
 
     // Sample persistence
@@ -63,12 +64,7 @@ public partial class SignalGeneratorWindow : Window
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += OnRenderTick;
         Loaded += (_, _) => _renderTimer.Start();
-        Closed += (_, _) =>
-        {
-            _renderTimer.Stop();
-            _renderer.Dispose();
-            _plugin.SampleLoaded -= OnSampleLoaded;
-        };
+        Closed += (_, _) => Dispose();
     }
 
     private void WireUpKnobEvents()
@@ -941,6 +937,20 @@ public partial class SignalGeneratorWindow : Window
         {
             System.Windows.MessageBox.Show($"Failed to reload sample: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _renderer.Dispose();
+        _plugin.SampleLoaded -= OnSampleLoaded;
+        GC.SuppressFinalize(this);
     }
 
     #endregion

@@ -371,7 +371,7 @@ public sealed class Vst3PluginWrapper : IPlugin
 
         try
         {
-            return (T)method.CreateDelegate(typeof(T), target);
+            return method.CreateDelegate<T>(target);
         }
         catch (Exception ex)
         {

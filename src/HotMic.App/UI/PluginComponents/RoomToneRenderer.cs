@@ -13,6 +13,7 @@ public sealed class RoomToneRenderer : IDisposable
     private const float KnobSpacing = 72f;
     private const float CornerRadius = 10f;
     private const float SpectrumHeight = 60f;
+    private static readonly float[] ToneDash = [3f, 3f];
 
     private readonly PluginComponentTheme _theme;
     private readonly PluginPresetBar _presetBar;
@@ -340,7 +341,7 @@ public sealed class RoomToneRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1.5f,
-            PathEffect = SKPathEffect.CreateDash(new[] { 3f, 3f }, 0)
+            PathEffect = SKPathEffect.CreateDash(ToneDash, 0)
         };
         canvas.DrawLine(toneX, rect.Top + padding, toneX, rect.Bottom - padding, tonePaint);
 

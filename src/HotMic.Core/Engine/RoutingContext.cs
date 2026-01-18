@@ -14,10 +14,7 @@ public sealed class RoutingContext : IRoutingContext
 
     public RoutingContext(int channelCount, int sampleRate, int blockSize)
     {
-        if (channelCount <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(channelCount));
-        }
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(channelCount);
 
         ChannelCount = channelCount;
         SampleRate = sampleRate;

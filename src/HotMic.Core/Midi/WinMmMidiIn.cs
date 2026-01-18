@@ -127,10 +127,7 @@ internal sealed class WinMmMidiIn : IDisposable
 
     private void ThrowIfDisposed()
     {
-        if (_disposed)
-        {
-            throw new ObjectDisposedException(nameof(WinMmMidiIn));
-        }
+        ObjectDisposedException.ThrowIf(_disposed, this);
     }
 
     private static class WinMmMidiInterop

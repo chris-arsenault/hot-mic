@@ -11,7 +11,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class CompressorWindow : Window
+public partial class CompressorWindow : Window, IDisposable
 {
     private readonly CompressorRenderer _renderer = new();
     private readonly CompressorPlugin _plugin;
@@ -21,6 +21,7 @@ public partial class CompressorWindow : Window
     private readonly PluginPresetHelper _presetHelper;
 
     private float _smoothedInputLevel;
+    private bool _disposed;
 
     public CompressorWindow(CompressorPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
@@ -74,11 +75,7 @@ public partial class CompressorWindow : Window
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += OnRenderTick;
         Loaded += (_, _) => _renderTimer.Start();
-        Closed += (_, _) =>
-        {
-            _renderTimer.Stop();
-            _renderer.Dispose();
-        };
+        Closed += (_, _) => Dispose();
     }
 
     private void OnRenderTick(object? sender, EventArgs e)
@@ -266,5 +263,18 @@ public partial class CompressorWindow : Window
     {
         _parameterCallback(CompressorPlugin.SidechainIndex, _plugin.IsSidechainHpfEnabled ? 0f : 1f);
         _presetHelper.MarkAsCustom();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _renderer.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

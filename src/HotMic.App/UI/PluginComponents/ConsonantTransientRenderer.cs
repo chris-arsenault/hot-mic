@@ -13,6 +13,7 @@ public sealed class ConsonantTransientRenderer : IDisposable
     private const float KnobSpacing = 72f;
     private const float CornerRadius = 10f;
     private const float EnvelopeHeight = 80f;
+    private static readonly float[] ThresholdDash = [4f, 3f];
 
     private readonly PluginComponentTheme _theme;
     private readonly PluginPresetBar _presetBar;
@@ -348,7 +349,7 @@ public sealed class ConsonantTransientRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f,
-            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 3f }, 0)
+            PathEffect = SKPathEffect.CreateDash(ThresholdDash, 0)
         };
         canvas.DrawLine(rect.Left + padding, threshY, rect.Right - padding, threshY, threshPaint);
 

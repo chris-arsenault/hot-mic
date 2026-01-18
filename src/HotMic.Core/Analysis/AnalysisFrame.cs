@@ -8,20 +8,20 @@ namespace HotMic.Core.Analysis;
 public struct AnalysisFrame
 {
     // Pitch
-    public float PitchHz;
-    public float PitchConfidence;
-    public VoicingState VoicingState;
+    public float PitchHz { get; set; }
+    public float PitchConfidence { get; set; }
+    public VoicingState VoicingState { get; set; }
 
     // Waveform
-    public float WaveformMin;
-    public float WaveformMax;
+    public float WaveformMin { get; set; }
+    public float WaveformMax { get; set; }
 
     // Spectral features
-    public float SpectralCentroid;
-    public float SpectralSlope;
-    public float SpectralFlux;
-    public float Hnr;
-    public float Cpp;
+    public float SpectralCentroid { get; set; }
+    public float SpectralSlope { get; set; }
+    public float SpectralFlux { get; set; }
+    public float Hnr { get; set; }
+    public float Cpp { get; set; }
 }
 
 /// <summary>
@@ -29,8 +29,16 @@ public struct AnalysisFrame
 /// </summary>
 public struct FormantFrame
 {
-    public float F1, F2, F3, F4, F5;
-    public float B1, B2, B3, B4, B5;
+    public float F1 { get; set; }
+    public float F2 { get; set; }
+    public float F3 { get; set; }
+    public float F4 { get; set; }
+    public float F5 { get; set; }
+    public float B1 { get; set; }
+    public float B2 { get; set; }
+    public float B3 { get; set; }
+    public float B4 { get; set; }
+    public float B5 { get; set; }
 
     public float GetFrequency(int index) => index switch
     {
@@ -85,12 +93,56 @@ public struct HarmonicFrame
     public const int MaxHarmonics = 24;
 
     // Store harmonics as inline fields to avoid array allocation
-    public float F0, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11;
-    public float F12, F13, F14, F15, F16, F17, F18, F19, F20, F21, F22, F23;
-    public float M0, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11;
-    public float M12, M13, M14, M15, M16, M17, M18, M19, M20, M21, M22, M23;
+    public float F0 { get; set; }
+    public float F1 { get; set; }
+    public float F2 { get; set; }
+    public float F3 { get; set; }
+    public float F4 { get; set; }
+    public float F5 { get; set; }
+    public float F6 { get; set; }
+    public float F7 { get; set; }
+    public float F8 { get; set; }
+    public float F9 { get; set; }
+    public float F10 { get; set; }
+    public float F11 { get; set; }
+    public float F12 { get; set; }
+    public float F13 { get; set; }
+    public float F14 { get; set; }
+    public float F15 { get; set; }
+    public float F16 { get; set; }
+    public float F17 { get; set; }
+    public float F18 { get; set; }
+    public float F19 { get; set; }
+    public float F20 { get; set; }
+    public float F21 { get; set; }
+    public float F22 { get; set; }
+    public float F23 { get; set; }
+    public float M0 { get; set; }
+    public float M1 { get; set; }
+    public float M2 { get; set; }
+    public float M3 { get; set; }
+    public float M4 { get; set; }
+    public float M5 { get; set; }
+    public float M6 { get; set; }
+    public float M7 { get; set; }
+    public float M8 { get; set; }
+    public float M9 { get; set; }
+    public float M10 { get; set; }
+    public float M11 { get; set; }
+    public float M12 { get; set; }
+    public float M13 { get; set; }
+    public float M14 { get; set; }
+    public float M15 { get; set; }
+    public float M16 { get; set; }
+    public float M17 { get; set; }
+    public float M18 { get; set; }
+    public float M19 { get; set; }
+    public float M20 { get; set; }
+    public float M21 { get; set; }
+    public float M22 { get; set; }
+    public float M23 { get; set; }
 
-    public int Count;
+    public int Count { get; set; }
 
     public float GetFrequency(int index) => index switch
     {
@@ -154,12 +206,12 @@ public struct HarmonicFrame
 /// </summary>
 public struct SpeechMetricsFrame
 {
-    public float SyllableRate;
-    public float ArticulationRate;
-    public float PauseRatio;
-    public float MonotoneScore;
-    public float ClarityScore;
-    public float IntelligibilityScore;
-    public byte SpeakingState;
-    public bool SyllableDetected;
+    public float SyllableRate { get; set; }
+    public float ArticulationRate { get; set; }
+    public float PauseRatio { get; set; }
+    public float MonotoneScore { get; set; }
+    public float ClarityScore { get; set; }
+    public float IntelligibilityScore { get; set; }
+    public byte SpeakingState { get; set; }
+    public bool SyllableDetected { get; set; }
 }

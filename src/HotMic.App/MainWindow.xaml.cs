@@ -351,6 +351,15 @@ public partial class MainWindow : Window
         float x = (float)pos.X;
         float y = (float)pos.Y;
 
+        // Check channel name for rename
+        int channelIndex = _renderer.HitTestChannelName(x, y);
+        if (channelIndex >= 0)
+        {
+            ShowChannelRenameDialog(viewModel, channelIndex);
+            e.Handled = true;
+            return;
+        }
+
         // Check plugin knobs first
         var pluginKnobHit = _renderer.HitTestPluginKnob(x, y);
         if (pluginKnobHit.HasValue)
@@ -412,6 +421,27 @@ public partial class MainWindow : Window
         }
 
         ShowMidiContextMenu(viewModel, targetPath, $"{channelName} {label}", -60f, 12f, position);
+    }
+
+    private void ShowChannelRenameDialog(MainViewModel viewModel, int channelIndex)
+    {
+        var channel = GetChannel(viewModel, channelIndex);
+        if (channel is null)
+        {
+            return;
+        }
+
+        string currentName = string.IsNullOrWhiteSpace(channel.Name) ? $"Channel {channelIndex + 1}" : channel.Name;
+
+        string? newName = Microsoft.VisualBasic.Interaction.InputBox(
+            "Enter channel name:",
+            "Rename Channel",
+            currentName);
+
+        if (!string.IsNullOrWhiteSpace(newName) && newName != currentName)
+        {
+            viewModel.RenameChannel(channelIndex, newName);
+        }
     }
 
     private void ShowMidiContextMenu(MainViewModel viewModel, string targetPath, string label, float minValue, float maxValue, System.Windows.Point position)

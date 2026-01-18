@@ -17,10 +17,7 @@ public sealed class OutputBus
 
     public OutputBus(int blockSize)
     {
-        if (blockSize <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(blockSize));
-        }
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(blockSize);
 
         _left = new float[blockSize];
         _right = new float[blockSize];

@@ -12,10 +12,7 @@ public sealed class LockFreeRingBuffer
 
     public LockFreeRingBuffer(int capacity)
     {
-        if (capacity <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(capacity));
-        }
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
 
         int size = NextPowerOfTwo(capacity);
         _buffer = new float[size];

@@ -69,7 +69,7 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
     private int _modelLatencySamples = StartupSkipSamples;
     private int _pendingReset;
     private int _latencyLearningActive;
-    private LinearSmoother _mixSmoother = new();
+    private LinearSmoother _mixSmoother;
     private string _statusMessage = string.Empty;
     private string _latencyReport = string.Empty;
 

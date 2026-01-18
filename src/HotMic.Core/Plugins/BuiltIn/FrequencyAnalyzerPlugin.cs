@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Threading;
 using HotMic.Core.Dsp;
 using HotMic.Core.Threading;
@@ -466,6 +467,8 @@ public sealed class FrequencyAnalyzerPlugin : IPlugin
     private static string FormatDiscrete(float value, IReadOnlyList<int> options, string suffix)
     {
         int selected = SelectDiscrete(value, options);
-        return string.IsNullOrWhiteSpace(suffix) ? selected.ToString() : $"{selected}{suffix}";
+        return string.IsNullOrWhiteSpace(suffix)
+            ? selected.ToString(CultureInfo.InvariantCulture)
+            : string.Concat(selected.ToString(CultureInfo.InvariantCulture), suffix);
     }
 }

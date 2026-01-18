@@ -88,12 +88,12 @@ public sealed class AnalysisOrchestrator : IDisposable
     private readonly SpectralFeatureExtractor _featureExtractor = new();
 
     // Filters (not readonly - these are mutable structs)
-    private OnePoleHighPass _dcHighPass = new();
+    private OnePoleHighPass _dcHighPass;
     private BiquadFilter _rumbleHighPass = new();
-    private PreEmphasisFilter _preEmphasisFilter = new();
+    private PreEmphasisFilter _preEmphasisFilter;
     private DecimatingFilter _lpcDecimator1 = new();
     private DecimatingFilter _lpcDecimator2 = new();
-    private PreEmphasisFilter _lpcPreEmphasisFilter = new();
+    private PreEmphasisFilter _lpcPreEmphasisFilter;
 
     // Pitch detection
     private YinPitchDetector? _yinPitchDetector;
@@ -1406,11 +1406,11 @@ public sealed class AnalysisOrchestrator : IDisposable
         Array.Clear(_hopBuffer);
     }
 
-    private static int SelectDiscrete(int value, IReadOnlyList<int> options)
+    private static int SelectDiscrete(int value, int[] options)
     {
         int best = options[0];
         int bestDelta = Math.Abs(options[0] - value);
-        for (int i = 1; i < options.Count; i++)
+        for (int i = 1; i < options.Length; i++)
         {
             int delta = Math.Abs(options[i] - value);
             if (delta < bestDelta)

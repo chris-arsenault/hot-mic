@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class BassEnhancerWindow : Window
+public partial class BassEnhancerWindow : Window, IDisposable
 {
     private readonly BassEnhancerRenderer _renderer = new();
     private readonly BassEnhancerPlugin _plugin;
@@ -24,6 +24,7 @@ public partial class BassEnhancerWindow : Window
     private float _smoothedVoicedGate;
     private float _smoothedBassEnergy;
     private float _smoothedHarmonicAmount;
+    private bool _disposed;
 
     public BassEnhancerWindow(BassEnhancerPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
@@ -66,11 +67,7 @@ public partial class BassEnhancerWindow : Window
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += OnRenderTick;
         Loaded += (_, _) => _renderTimer.Start();
-        Closed += (_, _) =>
-        {
-            _renderTimer.Stop();
-            _renderer.Dispose();
-        };
+        Closed += (_, _) => Dispose();
     }
 
     private void OnRenderTick(object? sender, EventArgs e)
@@ -223,5 +220,18 @@ public partial class BassEnhancerWindow : Window
     {
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _renderer.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

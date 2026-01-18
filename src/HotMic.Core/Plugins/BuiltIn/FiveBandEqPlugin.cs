@@ -52,17 +52,17 @@ public sealed class FiveBandEqPlugin : IPlugin, IQualityConfigurablePlugin
     private float _parameterSmoothingMs = DefaultSmoothingMs;
     private int _coefficientUpdateStride = DefaultCoefficientUpdateStride;
 
-    private LinearSmoother _hpfFreqSmoother = new();
-    private LinearSmoother _lowShelfGainSmoother = new();
-    private LinearSmoother _lowShelfFreqSmoother = new();
-    private LinearSmoother _mid1GainSmoother = new();
-    private LinearSmoother _mid1FreqSmoother = new();
-    private LinearSmoother _mid1QSmoother = new();
-    private LinearSmoother _mid2GainSmoother = new();
-    private LinearSmoother _mid2FreqSmoother = new();
-    private LinearSmoother _mid2QSmoother = new();
-    private LinearSmoother _highShelfGainSmoother = new();
-    private LinearSmoother _highShelfFreqSmoother = new();
+    private LinearSmoother _hpfFreqSmoother;
+    private LinearSmoother _lowShelfGainSmoother;
+    private LinearSmoother _lowShelfFreqSmoother;
+    private LinearSmoother _mid1GainSmoother;
+    private LinearSmoother _mid1FreqSmoother;
+    private LinearSmoother _mid1QSmoother;
+    private LinearSmoother _mid2GainSmoother;
+    private LinearSmoother _mid2FreqSmoother;
+    private LinearSmoother _mid2QSmoother;
+    private LinearSmoother _highShelfGainSmoother;
+    private LinearSmoother _highShelfFreqSmoother;
 
     // Spectrum analysis - 32 bands with peak hold (computed on UI thread).
     public const int SpectrumBins = 32;

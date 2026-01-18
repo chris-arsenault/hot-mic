@@ -265,9 +265,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<AudioDevice> OutputDevices { get; }
 
-    public IReadOnlyList<int> SampleRateOptions { get; } = [44100, 48000];
+    public List<int> SampleRateOptions { get; } = [44100, 48000];
 
-    public IReadOnlyList<int> BufferSizeOptions { get; } = [128, 256, 512, 1024];
+    public List<int> BufferSizeOptions { get; } = [128, 256, 512, 1024];
 
     [ObservableProperty]
     private AudioDevice? selectedOutputDevice;
@@ -2166,14 +2166,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 if (inputPlugin.InputKind == ChannelInputKind.Device && ChannelHasBusInputPlugin(channelIndex))
                 {
-                    StatusMessage = "Bus input channels cannot add an Input Source plugin.";
+                    StatusMessage = "Bus input channels cannot add a device input plugin.";
                     newPlugin.Dispose();
                     return;
                 }
 
                 if (ChannelHasInputPlugin(channelIndex))
                 {
-                    StatusMessage = "Only one Input Source plugin is allowed per channel.";
+                    StatusMessage = "Only one input plugin is allowed per channel.";
                     newPlugin.Dispose();
                     return;
                 }
@@ -2300,12 +2300,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (newPlugin is IChannelInputPlugin)
-        {
-            StatusMessage = "Input Source plugins must be added to the main chain.";
-            newPlugin.Dispose();
-            return;
-        }
+            if (newPlugin is IChannelInputPlugin)
+            {
+                StatusMessage = "Input plugins must be added to the main chain.";
+                newPlugin.Dispose();
+                return;
+            }
 
         newPlugin.Initialize(_audioEngine.SampleRate, _audioEngine.BlockSize);
 
@@ -2755,7 +2755,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // Analysis
             new() { Id = "builtin:freq-analyzer", Name = "Frequency Analyzer", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Real-time spectrum view with tunable bins" },
             new() { Id = "builtin:vocal-spectrograph", Name = "Vocal Spectrograph", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Vocal-focused spectrogram with overlays" },
-            new() { Id = "builtin:signal-generator", Name = "Signal Generator", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Test tones, noise, and sample playback" },
+            new() { Id = "builtin:signal-generator", Name = "Signal Generator", IsVst3 = false, Category = PluginCategory.Routing, Description = "Generate test tones/noise as the channel input" },
             new() { Id = "builtin:sidechain-tap", Name = "Sidechain Tap", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Sidechain signal source for downstream plugins" },
 
             // AI/ML
@@ -2805,7 +2805,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private void ShowPluginParameters(int channelIndex, int pluginInstanceId, IPlugin plugin)
     {
         // Routing plugins with no UI - just inline controls
-        if (plugin is BusInputPlugin or CopyToChannelPlugin or MergePlugin)
+        if (plugin is BusInputPlugin or CopyToChannelPlugin or MergePlugin or OutputSendPlugin)
         {
             return;
         }
@@ -2814,13 +2814,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (plugin is InputPlugin inputPlugin)
         {
             ShowInputSourceWindow(channelIndex, pluginInstanceId, inputPlugin);
-            return;
-        }
-
-        // Use specialized window for Output Send
-        if (plugin is OutputSendPlugin outputSend)
-        {
-            ShowOutputSendWindow(channelIndex, pluginInstanceId, outputSend);
             return;
         }
 
@@ -3838,6 +3831,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _configManager.Save(_config);
     }
 
+    public void RenameChannel(int channelIndex, string newName)
+    {
+        if ((uint)channelIndex >= (uint)Channels.Count)
+        {
+            return;
+        }
+
+        var viewModel = Channels[channelIndex];
+        viewModel.UpdateName(newName);
+
+        var config = GetOrCreateChannelConfig(channelIndex);
+        config.Name = newName;
+        _configManager.Save(_config);
+    }
+
     private void RebuildForChannelTopologyChange(int desiredActiveIndex)
     {
         _isInitializing = true;
@@ -3978,6 +3986,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _midiManager?.Dispose();
         _audioEngine.Dispose();
         _analysisOrchestrator.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     public void AddMidiBinding(string targetPath, int ccNumber, int? channel, float minValue, float maxValue)
