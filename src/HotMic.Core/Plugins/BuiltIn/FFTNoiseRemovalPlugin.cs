@@ -1,11 +1,12 @@
 using System.Threading;
 using HotMic.Common.Configuration;
+using HotMic.Core.Engine;
 using HotMic.Core.Dsp;
 using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
+public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin, IPluginCommandHandler
 {
     public const int ReductionIndex = 0;
 
@@ -140,6 +141,19 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin
         else
         {
             StartLearning();
+        }
+    }
+
+    public void HandleCommand(PluginCommandType command)
+    {
+        switch (command)
+        {
+            case PluginCommandType.LearnNoiseProfile:
+                LearnNoiseProfile();
+                break;
+            case PluginCommandType.ToggleNoiseLearn:
+                ToggleLearning();
+                break;
         }
     }
 

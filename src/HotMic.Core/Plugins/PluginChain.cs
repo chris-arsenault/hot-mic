@@ -81,6 +81,22 @@ public sealed class PluginChain
         return true;
     }
 
+    public bool TryHandleCommand(int instanceId, PluginCommandType command)
+    {
+        if (!TryGetSlotById(instanceId, out var slot, out _))
+        {
+            return false;
+        }
+
+        if (slot?.Plugin is IPluginCommandHandler handler)
+        {
+            handler.HandleCommand(command);
+            return true;
+        }
+
+        return false;
+    }
+
     public int AddSlot(IPlugin? plugin = null, int instanceId = 0)
     {
         var oldSlots = Volatile.Read(ref _slots);
