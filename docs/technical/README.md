@@ -25,3 +25,5 @@ are intentionally omitted.
 - `docs/technical/Vocal-Reference.md` - vocal ranges and reference bands.
 - `docs/technical/Presets.md` - preset definitions and intent.
 - `docs/technical/SignalGenerator.md` - test signal generator plugin.
+- `docs/technical/Enhance-Plugins-Design.md` - architecture and timing design for ENHANCE plugins.
+- `docs/technical/MultiChannel-Routing.md` - multi-channel routing, copy/merge, and output send design.
