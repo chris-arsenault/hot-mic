@@ -66,12 +66,11 @@ Minimal set to support all 8 plugins:
 - FricativeActivity (HF aperiodic activity, 0..1)
 - SibilanceEnergy (narrow HF band energy)
 - OnsetFluxHigh (HF spectral flux, 0..1)
-- PitchHz (Hz)
-- PitchConfidence (0..1)
 - FormantF1/F2/F3 (Hz)
 - FormantConfidence (0..1)
-- SpectralFlux (full-band)
-- HnrDb (dB)
+
+Note: the analysis bus may carry additional signals for visuals; this list only
+captures what the enhance plugins require.
 
 Producers should write each signal at their slot's `sampleTime` and maintain
 stable definitions for the shared signals.
@@ -84,7 +83,7 @@ consumers stay aligned. IDs are illustrative and should be finalized later.
 1) Multiband Upward Expander
 - Id: builtin:upward-expander
 - Domain: filterbank or STFT (single domain for analysis + gain)
-- Analysis signal: SpeechPresence
+- Analysis signal: SpeechPresence + VoicingState
 - Notes: per-band expansion with gated detector; smooth attacks/releases.
 
 2) Spectral Contrast Enhancer (lateral inhibition)
@@ -97,7 +96,7 @@ consumers stay aligned. IDs are illustrative and should be finalized later.
 - Id: builtin:dynamic-eq
 - Domain: time-domain biquads
 - Analysis signal: VoicingScore, FricativeActivity
-- Notes: small, fast dynamic moves; keep average spectrum stable.
+- Notes: voiced drives low-mid warmth; fricatives drive 2–6k edge + 8–14k air.
 
 4) Room Tone / Ambience Bed
 - Id: builtin:room-tone
@@ -108,25 +107,25 @@ consumers stay aligned. IDs are illustrative and should be finalized later.
 5) Keyed Air Exciter (de-ess aware)
 - Id: builtin:air-exciter
 - Domain: time-domain oversampled harmonic generation
-- Analysis signal: VoicingScore, SibilanceEnergy
+- Analysis signal: VoicingScore + SibilanceEnergy
 - Notes: excite on voiced regions, clamp on sibilance.
 
 6) Psychoacoustic Bass Enhancer
 - Id: builtin:bass-enhancer
 - Domain: time-domain (bandpass + harmonic synthesis)
-- Analysis signal: VoicingScore (optional)
+- Analysis signal: VoicingScore
 - Notes: subtle harmonics for LF perception; avoid LF boost.
 
 7) Consonant Transient Emphasis
 - Id: builtin:consonant-transient
 - Domain: time-domain HF transient shaper OR STFT flux
-- Analysis signal: FricativeActivity or OnsetFluxHigh
+- Analysis signal: OnsetFluxHigh
 - Notes: short window emphasis with hard ceiling.
 
 8) Formant-Aware Enhancement
 - Id: builtin:formant-enhance
 - Domain: time-domain EQ steered by formants
-- Analysis signal: FormantF1/F2/F3 + FormantConfidence
+- Analysis signal: SpeechPresence + FormantF1/F2/F3 + FormantConfidence
 - Notes: light tracking; boost near moving formants, avoid in-between.
 
 ## Alignment Rules

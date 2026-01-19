@@ -139,7 +139,7 @@ public sealed class ConsonantTransientRenderer : IDisposable
 
         _gateLedOnPaint = new SKPaint
         {
-            Color = new SKColor(0xFF, 0x80, 0x40), // Orange for unvoiced
+            Color = new SKColor(0xFF, 0x80, 0x40), // Orange for onset gate
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
@@ -192,10 +192,10 @@ public sealed class ConsonantTransientRenderer : IDisposable
             y += 24;
         }
 
-        // Fricative gate LED + transient indicator
+        // Onset gate LED + transient indicator
         float gateX = Padding + 20f;
         float gateY = y + 20f;
-        bool gateOpen = state.FricativeGate > 0.3f;
+        bool gateOpen = state.OnsetGate > 0.3f;
 
         if (gateOpen)
         {
@@ -206,7 +206,7 @@ public sealed class ConsonantTransientRenderer : IDisposable
         {
             canvas.DrawCircle(gateX, gateY, 6f, _gateLedOffPaint);
         }
-        canvas.DrawText("FRIC", gateX, gateY + 18f, _labelPaint);
+        canvas.DrawText("ONSET", gateX, gateY + 18f, _labelPaint);
 
         // Transient indicator
         float transX = gateX + 60f;
@@ -417,7 +417,7 @@ public record struct ConsonantTransientState(
     float Amount,
     float Threshold,
     float HighCutHz,
-    float FricativeGate,
+    float OnsetGate,
     float FastEnvelope,
     float SlowEnvelope,
     float TransientDetected,

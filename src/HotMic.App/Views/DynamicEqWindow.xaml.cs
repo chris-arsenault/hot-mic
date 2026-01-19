@@ -24,7 +24,8 @@ public partial class DynamicEqWindow : Window, IDisposable
     private float _smoothedVoicingLevel;
     private float _smoothedFricativeLevel;
     private float _smoothedLowGain;
-    private float _smoothedHighGain;
+    private float _smoothedEdgeGain;
+    private float _smoothedAirGain;
     private bool _disposed;
 
     public DynamicEqWindow(DynamicEqPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
@@ -71,12 +72,14 @@ public partial class DynamicEqWindow : Window, IDisposable
         float rawVoicing = _plugin.GetVoicingLevel();
         float rawFricative = _plugin.GetFricativeLevel();
         float rawLow = _plugin.GetLowGainDb();
-        float rawHigh = _plugin.GetHighGainDb();
+        float rawEdge = _plugin.GetEdgeGainDb();
+        float rawAir = _plugin.GetAirGainDb();
 
         _smoothedVoicingLevel = _smoothedVoicingLevel * 0.7f + rawVoicing * 0.3f;
         _smoothedFricativeLevel = _smoothedFricativeLevel * 0.7f + rawFricative * 0.3f;
         _smoothedLowGain = _smoothedLowGain * 0.8f + rawLow * 0.2f;
-        _smoothedHighGain = _smoothedHighGain * 0.8f + rawHigh * 0.2f;
+        _smoothedEdgeGain = _smoothedEdgeGain * 0.8f + rawEdge * 0.2f;
+        _smoothedAirGain = _smoothedAirGain * 0.8f + rawAir * 0.2f;
 
         SkiaCanvas.InvalidateVisual();
     }
@@ -94,7 +97,8 @@ public partial class DynamicEqWindow : Window, IDisposable
             VoicingLevel: _smoothedVoicingLevel,
             FricativeLevel: _smoothedFricativeLevel,
             LowGainDb: _smoothedLowGain,
-            HighGainDb: _smoothedHighGain,
+            EdgeGainDb: _smoothedEdgeGain,
+            AirGainDb: _smoothedAirGain,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
             StatusMessage: _plugin.StatusMessage,

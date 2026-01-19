@@ -27,6 +27,10 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
 
     private float _attackCoeff;
     private float _releaseCoeff;
+    private float _lowAttackCoeff;
+    private float _lowReleaseCoeff;
+    private float _highAttackCoeff;
+    private float _highReleaseCoeff;
     private float _ratio = 1.06f;
 
     private float _lowGain = 1f;
@@ -77,7 +81,7 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
-    public AnalysisSignalMask RequiredSignals => AnalysisSignalMask.SpeechPresence;
+    public AnalysisSignalMask RequiredSignals => AnalysisSignalMask.SpeechPresence | AnalysisSignalMask.VoicingState;
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
@@ -115,7 +119,8 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
             return;
         }
 
-        if (!context.TryGetAnalysisSignalSource(AnalysisSignalId.SpeechPresence, out var speechSource))
+        if (!context.TryGetAnalysisSignalSource(AnalysisSignalId.SpeechPresence, out var speechSource)
+            || !context.TryGetAnalysisSignalSource(AnalysisSignalId.VoicingState, out var voicingSource))
         {
             return;
         }
@@ -131,15 +136,20 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
             float mid = input - low - high;
 
             float presence = speechSource.ReadSample(baseTime + i);
-            float gate = 1f - _gateStrength + _gateStrength * presence;
+            float voicingState = voicingSource.ReadSample(baseTime + i);
+            GetVoicingWeights(voicingState, out float voicedWeight, out float unvoicedWeight);
+            float gateBase = Math.Clamp(presence, 0f, 1f) * _gateStrength;
+            float lowGate = gateBase * voicedWeight;
+            float midGate = gateBase * (0.6f * voicedWeight + 0.4f * unvoicedWeight);
+            float highGate = gateBase * unvoicedWeight;
 
             float lowEnv = _lowEnv.Process(low);
             float midEnv = _midEnv.Process(mid);
             float highEnv = _highEnv.Process(high);
 
-            _lowGain = UpdateGain(lowEnv, _lowGain, gate);
-            _midGain = UpdateGain(midEnv, _midGain, gate);
-            _highGain = UpdateGain(highEnv, _highGain, gate);
+            _lowGain = UpdateGain(lowEnv, _lowGain, lowGate, _lowAttackCoeff, _lowReleaseCoeff);
+            _midGain = UpdateGain(midEnv, _midGain, midGate, _attackCoeff, _releaseCoeff);
+            _highGain = UpdateGain(highEnv, _highGain, highGate, _highAttackCoeff, _highReleaseCoeff);
 
             buffer[i] = low * _lowGain + mid * _midGain + high * _highGain;
 
@@ -189,9 +199,9 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
             float high = _highPass.Process(input);
             float mid = input - low - high;
 
-            _lowGain = UpdateGain(_lowEnv.Process(low), _lowGain, 1f);
-            _midGain = UpdateGain(_midEnv.Process(mid), _midGain, 1f);
-            _highGain = UpdateGain(_highEnv.Process(high), _highGain, 1f);
+            _lowGain = UpdateGain(_lowEnv.Process(low), _lowGain, 1f, _lowAttackCoeff, _lowReleaseCoeff);
+            _midGain = UpdateGain(_midEnv.Process(mid), _midGain, 1f, _attackCoeff, _releaseCoeff);
+            _highGain = UpdateGain(_highEnv.Process(high), _highGain, 1f, _highAttackCoeff, _highReleaseCoeff);
 
             buffer[i] = low * _lowGain + mid * _midGain + high * _highGain;
         }
@@ -293,6 +303,10 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
         _highEnv.Configure(_attackMs, _releaseMs, _sampleRate);
         _attackCoeff = DspUtils.TimeToCoefficient(_attackMs, _sampleRate);
         _releaseCoeff = DspUtils.TimeToCoefficient(_releaseMs, _sampleRate);
+        _lowAttackCoeff = DspUtils.TimeToCoefficient(_attackMs * 1.4f, _sampleRate);
+        _lowReleaseCoeff = DspUtils.TimeToCoefficient(_releaseMs * 1.6f, _sampleRate);
+        _highAttackCoeff = DspUtils.TimeToCoefficient(MathF.Max(1f, _attackMs * 0.6f), _sampleRate);
+        _highReleaseCoeff = DspUtils.TimeToCoefficient(_releaseMs * 0.8f, _sampleRate);
         _ratio = 1f + (_amountPct / 100f) * MaxRatioAdd;
     }
 
@@ -307,7 +321,7 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
         _highPass.SetHighPass(_sampleRate, _highSplitHz, 0.707f);
     }
 
-    private float UpdateGain(float env, float current, float gate)
+    private float UpdateGain(float env, float current, float gate, float attackCoeff, float releaseCoeff)
     {
         float levelDb = DspUtils.LinearToDb(env);
         float gainDb = 0f;
@@ -318,7 +332,27 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
 
         float target = DspUtils.DbToLinear(gainDb);
         target = 1f + (target - 1f) * gate;
-        float coeff = target > current ? _attackCoeff : _releaseCoeff;
+        float coeff = target > current ? attackCoeff : releaseCoeff;
         return current + coeff * (target - current);
+    }
+
+    private static void GetVoicingWeights(float voicingState, out float voicedWeight, out float unvoicedWeight)
+    {
+        if (voicingState >= 1.5f)
+        {
+            voicedWeight = 1f;
+            unvoicedWeight = 0.35f;
+            return;
+        }
+
+        if (voicingState >= 0.5f)
+        {
+            voicedWeight = 0.35f;
+            unvoicedWeight = 1f;
+            return;
+        }
+
+        voicedWeight = 0f;
+        unvoicedWeight = 0f;
     }
 }

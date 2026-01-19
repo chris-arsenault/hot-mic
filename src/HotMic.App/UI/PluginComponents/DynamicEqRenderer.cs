@@ -186,7 +186,7 @@ public sealed class DynamicEqRenderer : IDisposable
         float eqX = unvoicedRect.Right + 12f;
         float eqWidth = size.Width - eqX - Padding;
         var eqRect = new SKRect(eqX, y, eqX + eqWidth, y + EqDisplayHeight);
-        DrawEqCurve(canvas, eqRect, state.LowGainDb, state.HighGainDb);
+        DrawEqCurve(canvas, eqRect, state.LowGainDb, state.EdgeGainDb, state.AirGainDb);
 
         y += EqDisplayHeight + Padding + 10f;
 
@@ -271,7 +271,7 @@ public sealed class DynamicEqRenderer : IDisposable
         canvas.DrawText(label, rect.MidX, rect.Bottom + 12, _labelPaint);
     }
 
-    private void DrawEqCurve(SKCanvas canvas, SKRect rect, float lowGainDb, float highGainDb)
+    private void DrawEqCurve(SKCanvas canvas, SKRect rect, float lowGainDb, float edgeGainDb, float airGainDb)
     {
         var roundRect = new SKRoundRect(rect, 6f);
         canvas.DrawRoundRect(roundRect, _eqBackgroundPaint);
@@ -284,7 +284,7 @@ public sealed class DynamicEqRenderer : IDisposable
         // Grid lines
         canvas.DrawLine(rect.Left + padding, centerY, rect.Right - padding, centerY, _eqGridPaint);
 
-        // Draw 3-band EQ curve (low shelf + flat mid + high shelf)
+        // Draw 3-band EQ curve (low shelf + edge peak + air shelf)
         using var path = new SKPath();
         int steps = 40;
 
@@ -296,7 +296,8 @@ public sealed class DynamicEqRenderer : IDisposable
             // Simplified shelf response curve
             float freq = 20f * MathF.Pow(1000f, t); // 20Hz to 20kHz
             float lowShelfFreq = 220f;
-            float highShelfFreq = 4200f;
+            float edgeFreq = 3400f;
+            float airShelfFreq = 9000f;
 
             float gain = 0f;
 
@@ -307,11 +308,16 @@ public sealed class DynamicEqRenderer : IDisposable
                 gain += lowGainDb * lowT;
             }
 
-            // High shelf contribution
-            if (freq > highShelfFreq / 2f)
+            // Edge peak contribution (approximate)
+            float edgeDistance = MathF.Abs(MathF.Log2(freq / edgeFreq));
+            float edgeWeight = Math.Clamp(1f - edgeDistance / 1.2f, 0f, 1f);
+            gain += edgeGainDb * edgeWeight;
+
+            // Air shelf contribution
+            if (freq > airShelfFreq / 2f)
             {
-                float highT = Math.Clamp((freq - highShelfFreq / 2f) / highShelfFreq, 0f, 1f);
-                gain += highGainDb * highT;
+                float highT = Math.Clamp((freq - airShelfFreq / 2f) / airShelfFreq, 0f, 1f);
+                gain += airGainDb * highT;
             }
 
             // Scale to pixels (6dB = half height)
@@ -404,7 +410,8 @@ public record struct DynamicEqState(
     float VoicingLevel,
     float FricativeLevel,
     float LowGainDb,
-    float HighGainDb,
+    float EdgeGainDb,
+    float AirGainDb,
     float LatencyMs,
     bool IsBypassed,
     string StatusMessage = "",

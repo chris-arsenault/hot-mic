@@ -43,7 +43,9 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
-    public AnalysisSignalMask RequiredSignals => AnalysisSignalMask.VoicingScore | AnalysisSignalMask.SibilanceEnergy;
+    public AnalysisSignalMask RequiredSignals =>
+        AnalysisSignalMask.VoicingScore |
+        AnalysisSignalMask.SibilanceEnergy;
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
@@ -178,4 +180,5 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
 
         _highPass.SetHighPass(_sampleRate, _cutoffHz, 0.707f);
     }
+
 }

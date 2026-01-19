@@ -194,4 +194,5 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
         _bandPass.SetBandPass(_sampleRate, _centerHz, 0.8f);
         _highPass.SetHighPass(_sampleRate, _centerHz * 1.8f, 0.707f);
     }
+
 }

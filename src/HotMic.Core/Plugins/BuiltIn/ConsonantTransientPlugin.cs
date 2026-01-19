@@ -15,13 +15,15 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
     private string _statusMessage = string.Empty;
 
     private const string MissingSidechainMessage = "Missing analysis data.";
+    private const float BandLowCutHz = 2000f;
 
     private readonly BiquadFilter _highPass = new();
+    private readonly BiquadFilter _lowPass = new();
     private readonly EnvelopeFollower _fastEnv = new();
     private readonly EnvelopeFollower _slowEnv = new();
 
     // Metering
-    private float _meterFricativeGate;
+    private float _meterOnsetGate;
     private float _meterFastEnvelope;
     private float _meterSlowEnvelope;
     private float _meterTransientDetected;
@@ -46,7 +48,7 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
-    public AnalysisSignalMask RequiredSignals => AnalysisSignalMask.FricativeActivity;
+    public AnalysisSignalMask RequiredSignals => AnalysisSignalMask.OnsetFluxHigh;
 
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
@@ -75,7 +77,7 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
             return;
         }
 
-        if (!context.TryGetAnalysisSignalSource(AnalysisSignalId.FricativeActivity, out var fricativeSource))
+        if (!context.TryGetAnalysisSignalSource(AnalysisSignalId.OnsetFluxHigh, out var onsetFluxSource))
         {
             return;
         }
@@ -85,28 +87,29 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
         for (int i = 0; i < buffer.Length; i++)
         {
             float input = buffer[i];
-            float high = _highPass.Process(input);
-            float fast = _fastEnv.Process(high);
-            float slow = _slowEnv.Process(high);
+            float band = _lowPass.Process(_highPass.Process(input));
+            float fast = _fastEnv.Process(band);
+            float slow = _slowEnv.Process(band);
 
             float transient = MathF.Max(0f, fast - slow);
             float norm = slow > 1e-6f ? transient / slow : 0f;
 
-            float gate = fricativeSource.ReadSample(baseTime + i);
+            float flux = onsetFluxSource.ReadSample(baseTime + i);
+            float gate = FluxToGate(flux);
 
             float gain = norm > _threshold ? 1f + _amount * gate * MathF.Min(1.5f, norm * 2f) : 1f;
-            buffer[i] = input + high * (gain - 1f);
+            buffer[i] = input + band * (gain - 1f);
 
             // Update metering
-            _meterFricativeGate = gate;
+            _meterOnsetGate = gate;
             _meterFastEnvelope = fast;
             _meterSlowEnvelope = slow;
-            _meterTransientDetected = norm > _threshold ? 1f : 0f;
+            _meterTransientDetected = norm > _threshold && gate > 0.1f ? 1f : 0f;
         }
     }
 
-    /// <summary>Gets the current fricative gate level (0-1).</summary>
-    public float GetFricativeGate() => Volatile.Read(ref _meterFricativeGate);
+    /// <summary>Gets the current onset gate level (0-1).</summary>
+    public float GetOnsetGate() => Volatile.Read(ref _meterOnsetGate);
 
     /// <summary>Gets the fast envelope level.</summary>
     public float GetFastEnvelope() => Volatile.Read(ref _meterFastEnvelope);
@@ -127,13 +130,13 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
         for (int i = 0; i < buffer.Length; i++)
         {
             float input = buffer[i];
-            float high = _highPass.Process(input);
-            float fast = _fastEnv.Process(high);
-            float slow = _slowEnv.Process(high);
+            float band = _lowPass.Process(_highPass.Process(input));
+            float fast = _fastEnv.Process(band);
+            float slow = _slowEnv.Process(band);
             float transient = MathF.Max(0f, fast - slow);
             float norm = slow > 1e-6f ? transient / slow : 0f;
             float gain = norm > _threshold ? 1f + _amount * MathF.Min(1.5f, norm * 2f) : 1f;
-            buffer[i] = input + high * (gain - 1f);
+            buffer[i] = input + band * (gain - 1f);
         }
     }
 
@@ -191,6 +194,18 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
             return;
         }
 
-        _highPass.SetHighPass(_sampleRate, _highCutHz, 0.707f);
+        _highPass.SetHighPass(_sampleRate, BandLowCutHz, 0.707f);
+        _lowPass.SetLowPass(_sampleRate, _highCutHz, 0.707f);
+    }
+
+    private static float FluxToGate(float flux)
+    {
+        if (flux <= 0f)
+        {
+            return 0f;
+        }
+
+        const float Knee = 0.02f;
+        return flux / (flux + Knee);
     }
 }

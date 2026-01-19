@@ -13,15 +13,14 @@ Proposed Analysis Signals (initial)
 - VoicingState (0=Silence, 1=Unvoiced, 2=Voiced as float)
 - FricativeActivity (HF aperiodic activity, 0..1)
 - SibilanceEnergy (narrow HF band, 0..1)
-- OnsetFluxHF (HF spectral flux, 0..1)
-- PitchHz (Hz)
-- PitchConfidence (0..1)
+- OnsetFluxHigh (HF spectral flux, 0..1)
 - FormantF1Hz (Hz)
 - FormantF2Hz (Hz)
 - FormantF3Hz (Hz)
 - FormantConfidence (0..1)
-- SpectralFlux (full-band)
-- HnrDb (dB)
+
+Note: the visualization pipeline may still compute additional analysis signals
+outside this list; those are out of scope for the enhance plugins.
 
 Architecture
 - AnalysisSignalBus: time-aligned ring buffers per producer, SidechainBus replacement.
@@ -48,7 +47,7 @@ Progress Tracker
 - [x] Step 2: Plugin chain/context updates
 - [x] Step 3: Shared analysis processor
 - [x] Step 4: Analysis tap plugin + UI
-- [x] Step 5: Producer/consumer updates
+- [x] Step 5: Producer/consumer updates (enhance plugins now consuming new signals)
 - [x] Step 6: Orchestrator integration + result store
 - [x] Step 7: Remove output analysis tap
 - [x] Step 8: UI/visual updates

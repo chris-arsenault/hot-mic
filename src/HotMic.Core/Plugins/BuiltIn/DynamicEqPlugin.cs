@@ -9,14 +9,19 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
     public const int SmoothingIndex = 2;
 
     private const float LowShelfHz = 220f;
-    private const float HighShelfHz = 4200f;
+    private const float EdgePeakHz = 3400f;
+    private const float AirShelfHz = 9000f;
+    private const float EdgeQ = 1.1f;
+    private const float AirShelfQ = 0.707f;
+    private const float AirWeight = 0.6f;
 
     private float _lowBoostDb = 2f;
     private float _highBoostDb = 2f;
     private float _smoothingMs = 80f;
 
     private float _lowGainDb;
-    private float _highGainDb;
+    private float _edgeGainDb;
+    private float _airGainDb;
     private float _smoothingCoeff;
 
     private float _lastVoicing;
@@ -29,13 +34,15 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
     private const string MissingSidechainMessage = "Missing analysis data.";
 
     private readonly BiquadFilter _lowShelf = new();
-    private readonly BiquadFilter _highShelf = new();
+    private readonly BiquadFilter _edgePeak = new();
+    private readonly BiquadFilter _airShelf = new();
 
     // Metering
     private float _meterVoicingLevel;
     private float _meterFricativeLevel;
     private float _meterLowGainDb;
-    private float _meterHighGainDb;
+    private float _meterEdgeGainDb;
+    private float _meterAirGainDb;
 
     public DynamicEqPlugin()
     {
@@ -76,9 +83,10 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
         _sampleRate = sampleRate;
         _blockSize = blockSize;
         UpdateSmoothing();
-        UpdateFilters(0f, 0f);
+        UpdateFilters(0f, 0f, 0f);
         _lowGainDb = 0f;
-        _highGainDb = 0f;
+        _edgeGainDb = 0f;
+        _airGainDb = 0f;
     }
 
     public void Process(Span<float> buffer, in PluginProcessContext context)
@@ -90,8 +98,9 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
 
         // Apply gains from previous block.
         _lowGainDb += _smoothingCoeff * (_lastVoicing * _lowBoostDb - _lowGainDb);
-        _highGainDb += _smoothingCoeff * (_lastFricative * _highBoostDb - _highGainDb);
-        UpdateFilters(_lowGainDb, _highGainDb);
+        _edgeGainDb += _smoothingCoeff * (_lastFricative * _highBoostDb - _edgeGainDb);
+        _airGainDb += _smoothingCoeff * (_lastFricative * _highBoostDb * AirWeight - _airGainDb);
+        UpdateFilters(_lowGainDb, _edgeGainDb, _airGainDb);
 
         if (!context.TryGetAnalysisSignalSource(AnalysisSignalId.VoicingScore, out var voicingSource)
             || !context.TryGetAnalysisSignalSource(AnalysisSignalId.FricativeActivity, out var fricativeSource))
@@ -107,11 +116,15 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
         {
             float sample = buffer[i];
             float processed = _lowShelf.Process(sample);
-            processed = _highShelf.Process(processed);
+            processed = _edgePeak.Process(processed);
+            processed = _airShelf.Process(processed);
             buffer[i] = processed;
 
-            voicingSum += voicingSource.ReadSample(baseTime + i);
-            fricativeSum += fricativeSource.ReadSample(baseTime + i);
+            float voicing = voicingSource.ReadSample(baseTime + i);
+            float fricative = fricativeSource.ReadSample(baseTime + i);
+            // Unvoiced detector = HF energy weighted by low periodicity.
+            voicingSum += voicing;
+            fricativeSum += fricative * (1f - voicing);
         }
 
         float inv = 1f / buffer.Length;
@@ -122,7 +135,8 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
         _meterVoicingLevel = _lastVoicing;
         _meterFricativeLevel = _lastFricative;
         _meterLowGainDb = _lowGainDb;
-        _meterHighGainDb = _highGainDb;
+        _meterEdgeGainDb = _edgeGainDb;
+        _meterAirGainDb = _airGainDb;
     }
 
     /// <summary>Gets the current voicing score level (0-1).</summary>
@@ -134,8 +148,11 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
     /// <summary>Gets the current low shelf gain in dB.</summary>
     public float GetLowGainDb() => Volatile.Read(ref _meterLowGainDb);
 
-    /// <summary>Gets the current high shelf gain in dB.</summary>
-    public float GetHighGainDb() => Volatile.Read(ref _meterHighGainDb);
+    /// <summary>Gets the current edge peak gain in dB.</summary>
+    public float GetEdgeGainDb() => Volatile.Read(ref _meterEdgeGainDb);
+
+    /// <summary>Gets the current air shelf gain in dB.</summary>
+    public float GetAirGainDb() => Volatile.Read(ref _meterAirGainDb);
 
     public void Process(Span<float> buffer)
     {
@@ -144,12 +161,13 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
             return;
         }
 
-        UpdateFilters(_lowGainDb, _highGainDb);
+        UpdateFilters(_lowGainDb, _edgeGainDb, _airGainDb);
         for (int i = 0; i < buffer.Length; i++)
         {
             float sample = buffer[i];
             sample = _lowShelf.Process(sample);
-            sample = _highShelf.Process(sample);
+            sample = _edgePeak.Process(sample);
+            sample = _airShelf.Process(sample);
             buffer[i] = sample;
         }
     }
@@ -201,7 +219,7 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
     {
     }
 
-    private void UpdateFilters(float lowGainDb, float highGainDb)
+    private void UpdateFilters(float lowGainDb, float edgeGainDb, float airGainDb)
     {
         if (_sampleRate <= 0)
         {
@@ -209,7 +227,8 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
         }
 
         _lowShelf.SetLowShelf(_sampleRate, LowShelfHz, lowGainDb, 0.707f);
-        _highShelf.SetHighShelf(_sampleRate, HighShelfHz, highGainDb, 0.707f);
+        _edgePeak.SetPeaking(_sampleRate, EdgePeakHz, edgeGainDb, EdgeQ);
+        _airShelf.SetHighShelf(_sampleRate, AirShelfHz, airGainDb, AirShelfQ);
     }
 
     private void UpdateSmoothing()

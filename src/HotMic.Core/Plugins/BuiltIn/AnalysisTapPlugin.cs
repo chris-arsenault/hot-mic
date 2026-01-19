@@ -12,7 +12,7 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
         new AnalysisTapSignalInfo(AnalysisSignalId.VoicingState, "Voicing State"),
         new AnalysisTapSignalInfo(AnalysisSignalId.FricativeActivity, "Fricative Activity"),
         new AnalysisTapSignalInfo(AnalysisSignalId.SibilanceEnergy, "Sibilance Energy"),
-        new AnalysisTapSignalInfo(AnalysisSignalId.OnsetFluxHigh, "Onset Flux HF"),
+        new AnalysisTapSignalInfo(AnalysisSignalId.OnsetFluxHigh, "Onset Flux High"),
         new AnalysisTapSignalInfo(AnalysisSignalId.PitchHz, "Pitch (Hz)"),
         new AnalysisTapSignalInfo(AnalysisSignalId.PitchConfidence, "Pitch Confidence"),
         new AnalysisTapSignalInfo(AnalysisSignalId.FormantF1Hz, "Formant F1 (Hz)"),
