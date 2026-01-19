@@ -112,7 +112,7 @@ consumers stay aligned. IDs are illustrative and should be finalized later.
 - Id: builtin:bass-enhancer
 - Domain: time-domain (bandpass + harmonic synthesis)
 - Analysis signal: VoicingScore
-- Notes: subtle harmonics for LF perception; avoid LF boost.
+- Notes: subtle harmonics for LF perception; avoid LF boost. Asymmetric waveshaping (bias) adds even harmonics.
 
 7) Consonant Transient Emphasis
 - Id: builtin:consonant-transient

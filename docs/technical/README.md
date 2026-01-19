@@ -25,4 +25,11 @@ are intentionally omitted.
 - `docs/technical/Presets.md` - preset definitions and intent.
 - `docs/technical/SignalGenerator.md` - test signal generator plugin.
 - `docs/technical/Enhance-Plugins-Design.md` - architecture and timing design for ENHANCE plugins.
+- `docs/technical/Enhance-Bass-Enhancer.md` - psychoacoustic bass enhancer details.
+- `docs/technical/Enhance-Consonant-Transient.md` - consonant transient emphasis details.
+- `docs/technical/Enhance-Air-Exciter.md` - placeholder (air exciter).
+- `docs/technical/Enhance-Dynamic-EQ.md` - placeholder (dynamic EQ).
+- `docs/technical/Enhance-Room-Tone.md` - placeholder (room tone).
+- `docs/technical/Enhance-Spectral-Contrast.md` - placeholder (spectral contrast).
+- `docs/technical/Enhance-Upward-Expander.md` - placeholder (upward expander).
 - `docs/technical/MultiChannel-Routing.md` - multi-channel routing, copy/merge, and output send design.

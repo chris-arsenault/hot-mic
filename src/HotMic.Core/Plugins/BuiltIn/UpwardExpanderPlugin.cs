@@ -329,8 +329,7 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
         _lowReleaseCoeff = DspUtils.TimeToCoefficient(_releaseMs * 1.6f, _sampleRate);
         _highAttackCoeff = DspUtils.TimeToCoefficient(MathF.Max(1f, _attackMs * 0.6f), _sampleRate);
         _highReleaseCoeff = DspUtils.TimeToCoefficient(_releaseMs * 0.8f, _sampleRate);
-        float scale = EnhanceAmountScale.FromIndex(_amountScaleIndex);
-        float effectivePct = MathF.Min(1000f, _amountPct * scale);
+        float effectivePct = MathF.Min(1000f, _amountPct);
         _ratio = 1f + (effectivePct / 100f) * MaxRatioAdd;
     }
 
@@ -356,6 +355,8 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
 
         float target = DspUtils.DbToLinear(gainDb);
         target = 1f + (target - 1f) * gate;
+        float scale = EnhanceAmountScale.FromIndex(_amountScaleIndex);
+        target = 1f + (target - 1f) * scale;
         float coeff = target > current ? attackCoeff : releaseCoeff;
         return current + coeff * (target - current);
     }

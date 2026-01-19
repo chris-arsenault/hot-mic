@@ -95,17 +95,21 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
         }
 
         long baseTime = context.SampleTime;
+        float driveGain = 1f + _drive * 6f;
+        float bias = _drive * 0.18f;
+        float biasTanh = MathF.Tanh(bias * driveGain);
+        float amount = _amount * EnhanceAmountScale.FromIndex(_amountScaleIndex);
 
         for (int i = 0; i < buffer.Length; i++)
         {
             float input = buffer[i];
             float low = _bandPass.Process(input);
-            float shaped = MathF.Tanh(low * (1f + _drive * 6f)) - low;
+            // Asymmetric waveshaping (bias) introduces even harmonics for stronger LF perception.
+            float shaped = MathF.Tanh((low + bias) * driveGain) - biasTanh - low;
             float harmonic = _highPass.Process(shaped);
 
             float gate = voicedSource.ReadSample(baseTime + i);
 
-            float amount = _amount * EnhanceAmountScale.FromIndex(_amountScaleIndex);
             float wet = harmonic * amount * gate;
             buffer[i] = input * (1f - _mix) + (input + wet) * _mix;
 
@@ -132,13 +136,17 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
             return;
         }
 
+        float driveGain = 1f + _drive * 6f;
+        float bias = _drive * 0.18f;
+        float biasTanh = MathF.Tanh(bias * driveGain);
+        float amount = _amount * EnhanceAmountScale.FromIndex(_amountScaleIndex);
+
         for (int i = 0; i < buffer.Length; i++)
         {
             float input = buffer[i];
             float low = _bandPass.Process(input);
-            float shaped = MathF.Tanh(low * (1f + _drive * 6f)) - low;
+            float shaped = MathF.Tanh((low + bias) * driveGain) - biasTanh - low;
             float harmonic = _highPass.Process(shaped);
-            float amount = _amount * EnhanceAmountScale.FromIndex(_amountScaleIndex);
             float wet = harmonic * amount;
             buffer[i] = input * (1f - _mix) + (input + wet) * _mix;
         }
