@@ -38,6 +38,7 @@ public sealed class BassEnhancerRenderer : IDisposable
     private readonly SkiaTextPaint _labelPaint;
     private readonly SkiaTextPaint _latencyPaint;
     private readonly SkiaTextPaint _statusPaint;
+    private readonly ScaleToggleGroup _scaleToggle;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
@@ -150,6 +151,7 @@ public sealed class BassEnhancerRenderer : IDisposable
         _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
         _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
         _statusPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _scaleToggle = new ScaleToggleGroup(_theme);
     }
 
     public void Render(SKCanvas canvas, SKSize size, float dpiScale, BassEnhancerState state)
@@ -197,7 +199,19 @@ public sealed class BassEnhancerRenderer : IDisposable
         var meterRect = new SKRect(meterX, y, meterX + meterWidth, y + MeterHeight);
         DrawBassHarmonicMeter(canvas, meterRect, state.BassEnergy, state.HarmonicAmount, state.CenterHz);
 
-        y += MeterHeight + Padding + 10f;
+        y += MeterHeight + Padding;
+
+        // Scale toggle row
+        float scaleRowY = y;
+        const string scaleLabel = "SCALE";
+        float scaleLabelWidth = _labelPaint.MeasureText(scaleLabel);
+        float scaleRowWidth = scaleLabelWidth + 6f + _scaleToggle.Width;
+        float scaleRowX = (size.Width - scaleRowWidth) / 2f;
+        float scaleLabelY = scaleRowY + _scaleToggle.Height / 2f + 3f;
+        _labelPaint.DrawText(canvas, scaleLabel, scaleRowX, scaleLabelY, SKTextAlign.Left);
+        _scaleToggle.Render(canvas, scaleRowX + scaleLabelWidth + 6f, scaleRowY, state.ScaleIndex);
+
+        y += _scaleToggle.Height + 10f;
 
         // Knobs
         float knobsY = y + KnobRadius + 10;
@@ -326,6 +340,10 @@ public sealed class BassEnhancerRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new BassEnhancerHitTest(BassEnhancerHitArea.PresetSave, -1);
 
+        int scaleIndex = _scaleToggle.HitTest(x, y);
+        if (scaleIndex >= 0)
+            return new BassEnhancerHitTest(BassEnhancerHitArea.ScaleToggle, scaleIndex);
+
         if (AmountKnob.HitTest(x, y))
             return new BassEnhancerHitTest(BassEnhancerHitArea.Knob, 0);
         if (DriveKnob.HitTest(x, y))
@@ -343,7 +361,7 @@ public sealed class BassEnhancerRenderer : IDisposable
 
     public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
 
-    public static SKSize GetPreferredSize() => new(340, 280);
+    public static SKSize GetPreferredSize() => new(340, 300);
 
     public void Dispose()
     {
@@ -368,6 +386,7 @@ public sealed class BassEnhancerRenderer : IDisposable
         _labelPaint.Dispose();
         _latencyPaint.Dispose();
         _statusPaint.Dispose();
+        _scaleToggle.Dispose();
     }
 }
 
@@ -376,6 +395,7 @@ public record struct BassEnhancerState(
     float Drive,
     float Mix,
     float CenterHz,
+    int ScaleIndex,
     float VoicedGate,
     float BassEnergy,
     float HarmonicAmount,
@@ -390,6 +410,7 @@ public enum BassEnhancerHitArea
     TitleBar,
     CloseButton,
     BypassButton,
+    ScaleToggle,
     Knob,
     PresetDropdown,
     PresetSave

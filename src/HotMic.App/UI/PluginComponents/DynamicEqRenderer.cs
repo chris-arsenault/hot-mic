@@ -38,6 +38,7 @@ public sealed class DynamicEqRenderer : IDisposable
     private readonly SkiaTextPaint _freqLabelPaint;
     private readonly SkiaTextPaint _latencyPaint;
     private readonly SkiaTextPaint _statusPaint;
+    private readonly ScaleToggleGroup _scaleToggle;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
@@ -148,6 +149,7 @@ public sealed class DynamicEqRenderer : IDisposable
         _freqLabelPaint = new SkiaTextPaint(_theme.TextMuted, 8f, SKFontStyle.Normal, SKTextAlign.Center);
         _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
         _statusPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _scaleToggle = new ScaleToggleGroup(_theme);
     }
 
     public void Render(SKCanvas canvas, SKSize size, float dpiScale, DynamicEqState state)
@@ -188,7 +190,19 @@ public sealed class DynamicEqRenderer : IDisposable
         var eqRect = new SKRect(eqX, y, eqX + eqWidth, y + EqDisplayHeight);
         DrawEqCurve(canvas, eqRect, state.LowGainDb, state.EdgeGainDb, state.AirGainDb);
 
-        y += EqDisplayHeight + Padding + 10f;
+        y += EqDisplayHeight + Padding;
+
+        // Scale toggle row
+        float scaleRowY = y;
+        const string scaleLabel = "SCALE";
+        float scaleLabelWidth = _labelPaint.MeasureText(scaleLabel);
+        float scaleRowWidth = scaleLabelWidth + 6f + _scaleToggle.Width;
+        float scaleRowX = (size.Width - scaleRowWidth) / 2f;
+        float scaleLabelY = scaleRowY + _scaleToggle.Height / 2f + 3f;
+        _labelPaint.DrawText(canvas, scaleLabel, scaleRowX, scaleLabelY, SKTextAlign.Left);
+        _scaleToggle.Render(canvas, scaleRowX + scaleLabelWidth + 6f, scaleRowY, state.ScaleIndex);
+
+        y += _scaleToggle.Height + 10f;
 
         // Knobs
         float knobsY = y + KnobRadius + 10;
@@ -360,6 +374,10 @@ public sealed class DynamicEqRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new DynamicEqHitTest(DynamicEqHitArea.PresetSave, -1);
 
+        int scaleIndex = _scaleToggle.HitTest(x, y);
+        if (scaleIndex >= 0)
+            return new DynamicEqHitTest(DynamicEqHitArea.ScaleToggle, scaleIndex);
+
         if (LowBoostKnob.HitTest(x, y))
             return new DynamicEqHitTest(DynamicEqHitArea.Knob, 0);
         if (HighBoostKnob.HitTest(x, y))
@@ -375,7 +393,7 @@ public sealed class DynamicEqRenderer : IDisposable
 
     public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
 
-    public static SKSize GetPreferredSize() => new(340, 290);
+    public static SKSize GetPreferredSize() => new(340, 310);
 
     public void Dispose()
     {
@@ -400,6 +418,7 @@ public sealed class DynamicEqRenderer : IDisposable
         _freqLabelPaint.Dispose();
         _latencyPaint.Dispose();
         _statusPaint.Dispose();
+        _scaleToggle.Dispose();
     }
 }
 
@@ -407,6 +426,7 @@ public record struct DynamicEqState(
     float LowBoostDb,
     float HighBoostDb,
     float SmoothingMs,
+    int ScaleIndex,
     float VoicingLevel,
     float FricativeLevel,
     float LowGainDb,
@@ -423,6 +443,7 @@ public enum DynamicEqHitArea
     TitleBar,
     CloseButton,
     BypassButton,
+    ScaleToggle,
     Knob,
     PresetDropdown,
     PresetSave

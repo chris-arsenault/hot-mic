@@ -46,6 +46,7 @@ public sealed class UpwardExpanderRenderer : IDisposable
     private readonly SkiaTextPaint _gainValuePaint;
     private readonly SkiaTextPaint _latencyPaint;
     private readonly SkiaTextPaint _statusPaint;
+    private readonly ScaleToggleGroup _scaleToggle;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
@@ -195,6 +196,7 @@ public sealed class UpwardExpanderRenderer : IDisposable
         _gainValuePaint = new SkiaTextPaint(_theme.TextPrimary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
         _statusPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _scaleToggle = new ScaleToggleGroup(_theme);
     }
 
     public void Render(SKCanvas canvas, SKSize size, float dpiScale, UpwardExpanderState state)
@@ -252,7 +254,19 @@ public sealed class UpwardExpanderRenderer : IDisposable
         var highRect = new SKRect(midRect.Right + meterSpacing, y, midRect.Right + meterSpacing + meterWidth, y + BandMeterHeight);
         DrawBandMeter(canvas, highRect, state.HighLevel, state.HighGainDb, state.ThresholdDb, "HIGH", _highBandPaint);
 
-        y += BandMeterHeight + Padding + 8f;
+        y += BandMeterHeight + Padding;
+
+        // Scale toggle row
+        float scaleRowY = y;
+        const string scaleLabel = "SCALE";
+        float scaleLabelWidth = _labelPaint.MeasureText(scaleLabel);
+        float scaleRowWidth = scaleLabelWidth + 6f + _scaleToggle.Width;
+        float scaleRowX = (size.Width - scaleRowWidth) / 2f;
+        float scaleLabelY = scaleRowY + _scaleToggle.Height / 2f + 3f;
+        _labelPaint.DrawText(canvas, scaleLabel, scaleRowX, scaleLabelY, SKTextAlign.Left);
+        _scaleToggle.Render(canvas, scaleRowX + scaleLabelWidth + 6f, scaleRowY, state.ScaleIndex);
+
+        y += _scaleToggle.Height + 10f;
 
         // Knobs (7 knobs in two rows)
         float knobsY1 = y + KnobRadius + 8;
@@ -406,6 +420,10 @@ public sealed class UpwardExpanderRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new UpwardExpanderHitTest(UpwardExpanderHitArea.PresetSave, -1);
 
+        int scaleIndex = _scaleToggle.HitTest(x, y);
+        if (scaleIndex >= 0)
+            return new UpwardExpanderHitTest(UpwardExpanderHitArea.ScaleToggle, scaleIndex);
+
         if (AmountKnob.HitTest(x, y))
             return new UpwardExpanderHitTest(UpwardExpanderHitArea.Knob, 0);
         if (ThresholdKnob.HitTest(x, y))
@@ -429,7 +447,7 @@ public sealed class UpwardExpanderRenderer : IDisposable
 
     public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
 
-    public static SKSize GetPreferredSize() => new(320, 340);
+    public static SKSize GetPreferredSize() => new(320, 360);
 
     public void Dispose()
     {
@@ -461,6 +479,7 @@ public sealed class UpwardExpanderRenderer : IDisposable
         _gainValuePaint.Dispose();
         _latencyPaint.Dispose();
         _statusPaint.Dispose();
+        _scaleToggle.Dispose();
     }
 }
 
@@ -479,6 +498,7 @@ public record struct UpwardExpanderState(
     float MidGainDb,
     float HighGainDb,
     float SpeechPresence,
+    int ScaleIndex,
     float LatencyMs,
     bool IsBypassed,
     string StatusMessage = "",
@@ -490,6 +510,7 @@ public enum UpwardExpanderHitArea
     TitleBar,
     CloseButton,
     BypassButton,
+    ScaleToggle,
     Knob,
     PresetDropdown,
     PresetSave

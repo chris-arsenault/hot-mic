@@ -7,10 +7,12 @@ public sealed class RoomTonePlugin : IPlugin, IAnalysisSignalConsumer, IPluginSt
     public const int LevelIndex = 0;
     public const int DuckIndex = 1;
     public const int ToneIndex = 2;
+    public const int ScaleIndex = 3;
 
     private float _levelDb = -45f;
     private float _duckStrength = 0.8f;
     private float _toneHz = 8000f;
+    private int _levelScaleIndex;
 
     private float _levelLinear = 0.0056f;
     private float _duckCoeff;
@@ -34,6 +36,16 @@ public sealed class RoomTonePlugin : IPlugin, IAnalysisSignalConsumer, IPluginSt
         Parameters =
         [
             new PluginParameter { Index = LevelIndex, Name = "Level", MinValue = -60f, MaxValue = -20f, DefaultValue = -45f, Unit = "dB" },
+            new PluginParameter
+            {
+                Index = ScaleIndex,
+                Name = "Scale",
+                MinValue = 0f,
+                MaxValue = 3f,
+                DefaultValue = 0f,
+                Unit = string.Empty,
+                FormatValue = EnhanceAmountScale.FormatLabel
+            },
             new PluginParameter { Index = DuckIndex, Name = "Duck", MinValue = 0f, MaxValue = 1f, DefaultValue = 0.8f, Unit = string.Empty },
             new PluginParameter { Index = ToneIndex, Name = "Tone", MinValue = 3000f, MaxValue = 12000f, DefaultValue = 8000f, Unit = "Hz" }
         ];
@@ -56,6 +68,7 @@ public sealed class RoomTonePlugin : IPlugin, IAnalysisSignalConsumer, IPluginSt
     public float LevelDb => _levelDb;
     public float DuckStrength => _duckStrength;
     public float ToneHz => _toneHz;
+    public int LevelScaleIndex => _levelScaleIndex;
     public int SampleRate => _sampleRate;
 
     public void SetAnalysisSignalsAvailable(bool available)
@@ -90,7 +103,8 @@ public sealed class RoomTonePlugin : IPlugin, IAnalysisSignalConsumer, IPluginSt
         {
             float speech = speechSource.ReadSample(baseTime + i);
 
-            float target = _levelLinear * (1f - _duckStrength * speech);
+            float scale = EnhanceAmountScale.FromIndex(_levelScaleIndex);
+            float target = _levelLinear * scale * (1f - _duckStrength * speech);
             _currentLevel += _duckCoeff * (target - _currentLevel);
 
             float noise = NextNoise();
@@ -101,7 +115,7 @@ public sealed class RoomTonePlugin : IPlugin, IAnalysisSignalConsumer, IPluginSt
 
             // Update metering
             _meterSpeechPresence = speech;
-            _meterDuckAmount = 1f - (_currentLevel / _levelLinear);
+            _meterDuckAmount = 1f - (_currentLevel / MathF.Max(1e-6f, _levelLinear * scale));
             _meterNoiseLevel = _currentLevel;
         }
     }
@@ -127,7 +141,8 @@ public sealed class RoomTonePlugin : IPlugin, IAnalysisSignalConsumer, IPluginSt
             float noise = NextNoise();
             float shaped = _highPass.Process(noise);
             shaped = _lowPass.Process(shaped);
-            buffer[i] += shaped * _currentLevel;
+            float scale = EnhanceAmountScale.FromIndex(_levelScaleIndex);
+            buffer[i] += shaped * _currentLevel * scale;
         }
     }
 
@@ -146,15 +161,19 @@ public sealed class RoomTonePlugin : IPlugin, IAnalysisSignalConsumer, IPluginSt
                 _toneHz = Math.Clamp(value, 3000f, 12000f);
                 UpdateFilters();
                 break;
+            case ScaleIndex:
+                _levelScaleIndex = EnhanceAmountScale.ClampIndex(value);
+                break;
         }
     }
 
     public byte[] GetState()
     {
-        var bytes = new byte[sizeof(float) * 3];
+        var bytes = new byte[sizeof(float) * 4];
         Buffer.BlockCopy(BitConverter.GetBytes(_levelDb), 0, bytes, 0, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_duckStrength), 0, bytes, 4, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_toneHz), 0, bytes, 8, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_levelScaleIndex), 0, bytes, 12, 4);
         return bytes;
     }
 
@@ -170,6 +189,10 @@ public sealed class RoomTonePlugin : IPlugin, IAnalysisSignalConsumer, IPluginSt
         if (state.Length >= sizeof(float) * 3)
         {
             _toneHz = BitConverter.ToSingle(state, 8);
+        }
+        if (state.Length >= sizeof(float) * 4)
+        {
+            _levelScaleIndex = EnhanceAmountScale.ClampIndex(BitConverter.ToSingle(state, 12));
         }
 
         UpdateFilters();

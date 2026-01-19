@@ -39,6 +39,7 @@ public sealed class AirExciterRenderer : IDisposable
     private readonly SkiaTextPaint _labelPaint;
     private readonly SkiaTextPaint _latencyPaint;
     private readonly SkiaTextPaint _statusPaint;
+    private readonly ScaleToggleGroup _scaleToggle;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
@@ -157,6 +158,7 @@ public sealed class AirExciterRenderer : IDisposable
         _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
         _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
         _statusPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _scaleToggle = new ScaleToggleGroup(_theme);
     }
 
     public void Render(SKCanvas canvas, SKSize size, float dpiScale, AirExciterState state)
@@ -212,6 +214,18 @@ public sealed class AirExciterRenderer : IDisposable
         DrawSaturationCurve(canvas, curveRect, state.Drive);
 
         y += MeterHeight + Padding;
+
+        // Scale toggle row
+        float scaleRowY = y;
+        const string scaleLabel = "SCALE";
+        float scaleLabelWidth = _labelPaint.MeasureText(scaleLabel);
+        float scaleRowWidth = scaleLabelWidth + 6f + _scaleToggle.Width;
+        float scaleRowX = (size.Width - scaleRowWidth) / 2f;
+        float scaleLabelY = scaleRowY + _scaleToggle.Height / 2f + 3f;
+        _labelPaint.DrawText(canvas, scaleLabel, scaleRowX, scaleLabelY, SKTextAlign.Left);
+        _scaleToggle.Render(canvas, scaleRowX + scaleLabelWidth + 6f, scaleRowY, state.ScaleIndex);
+
+        y += _scaleToggle.Height + 10f;
 
         // Knobs
         float knobsY = y + KnobRadius + 10;
@@ -370,6 +384,10 @@ public sealed class AirExciterRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new AirExciterHitTest(AirExciterHitArea.PresetSave, -1);
 
+        int scaleIndex = _scaleToggle.HitTest(x, y);
+        if (scaleIndex >= 0)
+            return new AirExciterHitTest(AirExciterHitArea.ScaleToggle, scaleIndex);
+
         if (DriveKnob.HitTest(x, y))
             return new AirExciterHitTest(AirExciterHitArea.Knob, 0);
         if (MixKnob.HitTest(x, y))
@@ -385,7 +403,7 @@ public sealed class AirExciterRenderer : IDisposable
 
     public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
 
-    public static SKSize GetPreferredSize() => new(300, 280);
+    public static SKSize GetPreferredSize() => new(300, 300);
 
     public void Dispose()
     {
@@ -410,6 +428,7 @@ public sealed class AirExciterRenderer : IDisposable
         _labelPaint.Dispose();
         _latencyPaint.Dispose();
         _statusPaint.Dispose();
+        _scaleToggle.Dispose();
     }
 }
 
@@ -417,6 +436,7 @@ public record struct AirExciterState(
     float Drive,
     float Mix,
     float CutoffHz,
+    int ScaleIndex,
     float GateLevel,
     float HfEnergy,
     float SaturationAmount,
@@ -431,6 +451,7 @@ public enum AirExciterHitArea
     TitleBar,
     CloseButton,
     BypassButton,
+    ScaleToggle,
     Knob,
     PresetDropdown,
     PresetSave

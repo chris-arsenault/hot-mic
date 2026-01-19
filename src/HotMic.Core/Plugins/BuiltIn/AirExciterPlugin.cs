@@ -7,10 +7,12 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
     public const int DriveIndex = 0;
     public const int MixIndex = 1;
     public const int CutoffIndex = 2;
+    public const int ScaleIndex = 3;
 
     private float _drive = 0.6f;
     private float _mix = 0.4f;
     private float _cutoffHz = 4500f;
+    private int _amountScaleIndex;
     private int _sampleRate;
     private string _statusMessage = string.Empty;
 
@@ -38,6 +40,16 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
         Parameters =
         [
             new PluginParameter { Index = DriveIndex, Name = "Drive", MinValue = 0f, MaxValue = 1f, DefaultValue = 0.6f, Unit = string.Empty },
+            new PluginParameter
+            {
+                Index = ScaleIndex,
+                Name = "Scale",
+                MinValue = 0f,
+                MaxValue = 3f,
+                DefaultValue = 0f,
+                Unit = string.Empty,
+                FormatValue = EnhanceAmountScale.FormatLabel
+            },
             new PluginParameter { Index = MixIndex, Name = "Mix", MinValue = 0f, MaxValue = 1f, DefaultValue = 0.4f, Unit = string.Empty },
             new PluginParameter { Index = CutoffIndex, Name = "Cutoff", MinValue = 3000f, MaxValue = 10000f, DefaultValue = 4500f, Unit = "Hz" }
         ];
@@ -62,6 +74,7 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
     public float Drive => _drive;
     public float Mix => _mix;
     public float CutoffHz => _cutoffHz;
+    public int AmountScaleIndex => _amountScaleIndex;
     public int SampleRate => _sampleRate;
 
     public void SetAnalysisSignalsAvailable(bool available)
@@ -101,7 +114,8 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
             float sib = sibilanceSource.ReadSample(baseTime + i);
             float gate = Math.Clamp(voiced * (1f - sib), 0f, 1f);
             float mod = lfo * LfoDepth * (1f - sib);
-            float drive = Math.Clamp(_drive * (1f + mod), 0f, 1f);
+            float scale = EnhanceAmountScale.FromIndex(_amountScaleIndex);
+            float drive = Math.Clamp(_drive * scale * (1f + mod), 0f, 10f);
             float shaped = MathF.Tanh(high * (1.5f + drive * 4f));
 
             buffer[i] = input + shaped * (_mix * gate);
@@ -135,7 +149,8 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
             float high = _highPass.Process(input);
             float lfo = UpdateLfoValue();
             float mod = lfo * LfoDepth;
-            float drive = Math.Clamp(_drive * (1f + mod), 0f, 1f);
+            float scale = EnhanceAmountScale.FromIndex(_amountScaleIndex);
+            float drive = Math.Clamp(_drive * scale * (1f + mod), 0f, 10f);
             float shaped = MathF.Tanh(high * (1.5f + drive * 4f));
             buffer[i] = input + shaped * _mix;
         }
@@ -155,15 +170,19 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
                 _cutoffHz = Math.Clamp(value, 3000f, 10000f);
                 UpdateFilter();
                 break;
+            case ScaleIndex:
+                _amountScaleIndex = EnhanceAmountScale.ClampIndex(value);
+                break;
         }
     }
 
     public byte[] GetState()
     {
-        var bytes = new byte[sizeof(float) * 3];
+        var bytes = new byte[sizeof(float) * 4];
         Buffer.BlockCopy(BitConverter.GetBytes(_drive), 0, bytes, 0, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_mix), 0, bytes, 4, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_cutoffHz), 0, bytes, 8, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_amountScaleIndex), 0, bytes, 12, 4);
         return bytes;
     }
 
@@ -179,6 +198,10 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
         if (state.Length >= sizeof(float) * 3)
         {
             _cutoffHz = BitConverter.ToSingle(state, 8);
+        }
+        if (state.Length >= sizeof(float) * 4)
+        {
+            _amountScaleIndex = EnhanceAmountScale.ClampIndex(BitConverter.ToSingle(state, 12));
         }
 
         UpdateFilter();

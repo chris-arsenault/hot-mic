@@ -8,6 +8,7 @@ public sealed class SpectralContrastPlugin : IPlugin, IAnalysisSignalConsumer, I
     public const int StrengthIndex = 0;
     public const int MixIndex = 1;
     public const int GateStrengthIndex = 2;
+    public const int ScaleIndex = 3;
 
     private const int FftSize = 512;
     private const int HopSize = 128;
@@ -15,6 +16,7 @@ public sealed class SpectralContrastPlugin : IPlugin, IAnalysisSignalConsumer, I
     private float _strength = 0.3f;
     private float _mix = 1f;
     private float _gateStrength = 1f;
+    private int _strengthScaleIndex;
 
     private float[] _inputRing = Array.Empty<float>();
     private float[] _outputRing = Array.Empty<float>();
@@ -44,6 +46,16 @@ public sealed class SpectralContrastPlugin : IPlugin, IAnalysisSignalConsumer, I
         Parameters =
         [
             new PluginParameter { Index = StrengthIndex, Name = "Strength", MinValue = 0f, MaxValue = 100f, DefaultValue = 30f, Unit = "%" },
+            new PluginParameter
+            {
+                Index = ScaleIndex,
+                Name = "Scale",
+                MinValue = 0f,
+                MaxValue = 3f,
+                DefaultValue = 0f,
+                Unit = string.Empty,
+                FormatValue = EnhanceAmountScale.FormatLabel
+            },
             new PluginParameter { Index = MixIndex, Name = "Mix", MinValue = 0f, MaxValue = 100f, DefaultValue = 100f, Unit = "%" },
             new PluginParameter { Index = GateStrengthIndex, Name = "Gate Strength", MinValue = 0f, MaxValue = 1f, DefaultValue = 1f, Unit = string.Empty }
         ];
@@ -66,6 +78,7 @@ public sealed class SpectralContrastPlugin : IPlugin, IAnalysisSignalConsumer, I
     public float StrengthPct => _strength * 100f;
     public float MixPct => _mix * 100f;
     public float GateStrength => _gateStrength;
+    public int StrengthScaleIndex => _strengthScaleIndex;
     public int SampleRate => _sampleRate;
 
     public void SetAnalysisSignalsAvailable(bool available)
@@ -186,15 +199,19 @@ public sealed class SpectralContrastPlugin : IPlugin, IAnalysisSignalConsumer, I
             case GateStrengthIndex:
                 _gateStrength = Math.Clamp(value, 0f, 1f);
                 break;
+            case ScaleIndex:
+                _strengthScaleIndex = EnhanceAmountScale.ClampIndex(value);
+                break;
         }
     }
 
     public byte[] GetState()
     {
-        var bytes = new byte[sizeof(float) * 3];
+        var bytes = new byte[sizeof(float) * 4];
         Buffer.BlockCopy(BitConverter.GetBytes(_strength), 0, bytes, 0, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_mix), 0, bytes, 4, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_gateStrength), 0, bytes, 8, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_strengthScaleIndex), 0, bytes, 12, 4);
         return bytes;
     }
 
@@ -210,6 +227,10 @@ public sealed class SpectralContrastPlugin : IPlugin, IAnalysisSignalConsumer, I
         if (state.Length >= sizeof(float) * 3)
         {
             _gateStrength = BitConverter.ToSingle(state, 8);
+        }
+        if (state.Length >= sizeof(float) * 4)
+        {
+            _strengthScaleIndex = EnhanceAmountScale.ClampIndex(BitConverter.ToSingle(state, 12));
         }
     }
 
@@ -255,7 +276,7 @@ public sealed class SpectralContrastPlugin : IPlugin, IAnalysisSignalConsumer, I
             _meterSpeechGate = speech;
         }
 
-        float strength = _strength * gate;
+        float strength = _strength * EnhanceAmountScale.FromIndex(_strengthScaleIndex) * gate;
         _meterContrastStrength = strength;
 
         // Copy magnitudes for UI display

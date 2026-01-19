@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using HotMic.App.Diagnostics;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Presets;
@@ -24,6 +25,7 @@ public partial class BassEnhancerWindow : Window, IDisposable
     private float _smoothedVoicedGate;
     private float _smoothedBassEnergy;
     private float _smoothedHarmonicAmount;
+    private long _lastDebugTick;
     private bool _disposed;
 
     public BassEnhancerWindow(BassEnhancerPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
@@ -80,6 +82,14 @@ public partial class BassEnhancerWindow : Window, IDisposable
         _smoothedBassEnergy = _smoothedBassEnergy * 0.7f + rawBass * 0.3f;
         _smoothedHarmonicAmount = _smoothedHarmonicAmount * 0.8f + rawHarmonic * 0.2f;
 
+        if (EnhanceDebug.ShouldLog(ref _lastDebugTick))
+        {
+            float scale = EnhanceDebug.ScaleFactor(_plugin.AmountScaleIndex);
+            EnhanceDebug.Log("BassEnhancer",
+                $"scale=x{scale:0} idx={_plugin.AmountScaleIndex} amount={_plugin.Amount:0.00} drive={_plugin.Drive:0.00} mix={_plugin.Mix:0.00} center={_plugin.CenterHz:0} " +
+                $"gate={rawGate:0.000} bass={rawBass:0.000} harm={rawHarmonic:0.000} status=\"{_plugin.StatusMessage}\"");
+        }
+
         SkiaCanvas.InvalidateVisual();
     }
 
@@ -94,6 +104,7 @@ public partial class BassEnhancerWindow : Window, IDisposable
             Drive: _plugin.Drive,
             Mix: _plugin.Mix,
             CenterHz: _plugin.CenterHz,
+            ScaleIndex: _plugin.AmountScaleIndex,
             VoicedGate: _smoothedVoicedGate,
             BassEnergy: _smoothedBassEnergy,
             HarmonicAmount: _smoothedHarmonicAmount,
@@ -162,6 +173,11 @@ public partial class BassEnhancerWindow : Window, IDisposable
                 _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
+            case BassEnhancerHitArea.ScaleToggle:
+                _parameterCallback(BassEnhancerPlugin.ScaleIndex, hit.KnobIndex);
+                _presetHelper.MarkAsCustom();
+                e.Handled = true;
+                break;
         }
     }
 
@@ -196,6 +212,7 @@ public partial class BassEnhancerWindow : Window, IDisposable
             int paramIndex = name switch
             {
                 "Amount" => BassEnhancerPlugin.AmountIndex,
+                "Scale" => BassEnhancerPlugin.ScaleIndex,
                 "Drive" => BassEnhancerPlugin.DriveIndex,
                 "Mix" => BassEnhancerPlugin.MixIndex,
                 "Center" => BassEnhancerPlugin.CenterIndex,
@@ -210,6 +227,7 @@ public partial class BassEnhancerWindow : Window, IDisposable
         return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
         {
             ["Amount"] = _plugin.Amount,
+            ["Scale"] = _plugin.AmountScaleIndex,
             ["Drive"] = _plugin.Drive,
             ["Mix"] = _plugin.Mix,
             ["Center"] = _plugin.CenterHz

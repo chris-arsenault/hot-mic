@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using HotMic.Core.Dsp;
 using HotMic.Core.Dsp.Filters;
 using HotMic.Core.Dsp.Generators;
@@ -14,6 +15,9 @@ internal sealed class SignalGeneratorSlot
     private readonly SignalGeneratorSample _sample = new();
     private readonly SampleBuffer _sampleBuffer = new();
     private LinearSmoother _gainSmoother;
+    private int _sampleStartCount;
+    private int _sampleLoopCount;
+    private int _sampleStopCount;
 
     internal GeneratorType Type;
     internal float Frequency;
@@ -88,10 +92,32 @@ internal sealed class SignalGeneratorSlot
             GeneratorType.WhiteNoise or GeneratorType.PinkNoise or GeneratorType.BrownNoise or GeneratorType.BlueNoise => _noise.Next(Type),
             GeneratorType.Impulse => _impulse.Next(),
             GeneratorType.Chirp => _chirp.Next(),
-            GeneratorType.Sample => _sample.Next(_sampleBuffer),
+            GeneratorType.Sample => NextSampleWithEvents(),
             GeneratorType.DcTest => 0.5f,
             _ => 0f
         };
+    }
+
+    private float NextSampleWithEvents()
+    {
+        float sample = _sample.Next(_sampleBuffer, out var flags);
+
+        if ((flags & SamplePlaybackFlags.Started) != 0)
+        {
+            Interlocked.Increment(ref _sampleStartCount);
+        }
+
+        if ((flags & SamplePlaybackFlags.LoopRestart) != 0)
+        {
+            Interlocked.Increment(ref _sampleLoopCount);
+        }
+
+        if ((flags & SamplePlaybackFlags.Stopped) != 0)
+        {
+            Interlocked.Increment(ref _sampleStopCount);
+        }
+
+        return sample;
     }
 
     public void SetParameter(int paramIndex, float value)
@@ -226,5 +252,20 @@ internal sealed class SignalGeneratorSlot
     public void SetGainSmootherTarget(float target)
     {
         _gainSmoother.SetTarget(target);
+    }
+
+    public int ConsumeSampleStartCount()
+    {
+        return Interlocked.Exchange(ref _sampleStartCount, 0);
+    }
+
+    public int ConsumeSampleLoopCount()
+    {
+        return Interlocked.Exchange(ref _sampleLoopCount, 0);
+    }
+
+    public int ConsumeSampleStopCount()
+    {
+        return Interlocked.Exchange(ref _sampleStopCount, 0);
     }
 }

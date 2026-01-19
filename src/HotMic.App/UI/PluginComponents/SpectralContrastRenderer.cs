@@ -39,6 +39,7 @@ public sealed class SpectralContrastRenderer : IDisposable
     private readonly SkiaTextPaint _freqLabelPaint;
     private readonly SkiaTextPaint _latencyPaint;
     private readonly SkiaTextPaint _statusPaint;
+    private readonly ScaleToggleGroup _scaleToggle;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
@@ -161,6 +162,7 @@ public sealed class SpectralContrastRenderer : IDisposable
         _freqLabelPaint = new SkiaTextPaint(_theme.TextMuted, 8f, SKFontStyle.Normal, SKTextAlign.Center);
         _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
         _statusPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _scaleToggle = new ScaleToggleGroup(_theme);
     }
 
     public void Render(SKCanvas canvas, SKSize size, float dpiScale, SpectralContrastState state)
@@ -208,7 +210,19 @@ public sealed class SpectralContrastRenderer : IDisposable
         var spectrumRect = new SKRect(spectrumX, y, spectrumX + spectrumWidth, y + SpectrumHeight);
         DrawSpectrum(canvas, spectrumRect, state.Magnitudes.Span, state.ContrastStrength);
 
-        y += SpectrumHeight + Padding + 10f;
+        y += SpectrumHeight + Padding;
+
+        // Scale toggle row
+        float scaleRowY = y;
+        const string scaleLabel = "SCALE";
+        float scaleLabelWidth = _labelPaint.MeasureText(scaleLabel);
+        float scaleRowWidth = scaleLabelWidth + 6f + _scaleToggle.Width;
+        float scaleRowX = (size.Width - scaleRowWidth) / 2f;
+        float scaleLabelY = scaleRowY + _scaleToggle.Height / 2f + 3f;
+        _labelPaint.DrawText(canvas, scaleLabel, scaleRowX, scaleLabelY, SKTextAlign.Left);
+        _scaleToggle.Render(canvas, scaleRowX + scaleLabelWidth + 6f, scaleRowY, state.ScaleIndex);
+
+        y += _scaleToggle.Height + 10f;
 
         // Knobs
         float knobsY = y + KnobRadius + 10;
@@ -353,6 +367,10 @@ public sealed class SpectralContrastRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new SpectralContrastHitTest(SpectralContrastHitArea.PresetSave, -1);
 
+        int scaleIndex = _scaleToggle.HitTest(x, y);
+        if (scaleIndex >= 0)
+            return new SpectralContrastHitTest(SpectralContrastHitArea.ScaleToggle, scaleIndex);
+
         if (StrengthKnob.HitTest(x, y))
             return new SpectralContrastHitTest(SpectralContrastHitArea.Knob, 0);
         if (MixKnob.HitTest(x, y))
@@ -368,7 +386,7 @@ public sealed class SpectralContrastRenderer : IDisposable
 
     public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
 
-    public static SKSize GetPreferredSize() => new(360, 300);
+    public static SKSize GetPreferredSize() => new(360, 320);
 
     public void Dispose()
     {
@@ -394,6 +412,7 @@ public sealed class SpectralContrastRenderer : IDisposable
         _freqLabelPaint.Dispose();
         _latencyPaint.Dispose();
         _statusPaint.Dispose();
+        _scaleToggle.Dispose();
     }
 }
 
@@ -401,6 +420,7 @@ public record struct SpectralContrastState(
     float StrengthPct,
     float MixPct,
     float GateStrength,
+    int ScaleIndex,
     float SpeechGate,
     float ContrastStrength,
     ReadOnlyMemory<float> Magnitudes,
@@ -415,6 +435,7 @@ public enum SpectralContrastHitArea
     TitleBar,
     CloseButton,
     BypassButton,
+    ScaleToggle,
     Knob,
     PresetDropdown,
     PresetSave

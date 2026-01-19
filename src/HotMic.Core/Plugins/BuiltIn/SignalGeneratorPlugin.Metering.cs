@@ -109,4 +109,22 @@ public sealed partial class SignalGeneratorPlugin
     {
         return (_masterGainDb, _masterMuted, _headroomMode);
     }
+
+    public int ConsumeSampleStartCount(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= SlotCount) return 0;
+        return _slots[slotIndex].ConsumeSampleStartCount();
+    }
+
+    public int ConsumeSampleLoopCount(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= SlotCount) return 0;
+        return _slots[slotIndex].ConsumeSampleLoopCount();
+    }
+
+    public int ConsumeSampleStopCount(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= SlotCount) return 0;
+        return _slots[slotIndex].ConsumeSampleStopCount();
+    }
 }

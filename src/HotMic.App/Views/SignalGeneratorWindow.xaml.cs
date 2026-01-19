@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
+using HotMic.App.Diagnostics;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Presets;
@@ -161,7 +162,63 @@ public partial class SignalGeneratorWindow : Window, IDisposable
             _smoothedSlotLevels[i] = _smoothedSlotLevels[i] * 0.7f + rawSlot * 0.3f;
         }
 
+        if (EnhanceDebug.IsEnabled)
+        {
+            HandleSampleDebug();
+        }
+
         SkiaCanvas.InvalidateVisual();
+    }
+
+    private void HandleSampleDebug()
+    {
+        int slot0Start = _plugin.ConsumeSampleStartCount(0);
+        int slot1Start = _plugin.ConsumeSampleStartCount(1);
+        int slot2Start = _plugin.ConsumeSampleStartCount(2);
+
+        LogSampleStartEvents(0, slot0Start);
+        LogSampleStartEvents(1, slot1Start);
+        LogSampleStartEvents(2, slot2Start);
+
+        var slot0State = _plugin.GetSlotState(0);
+        bool shouldCollect = slot0State.Type == GeneratorType.Sample && slot0State.LoopMode == SampleLoopMode.Loop;
+
+        if (!shouldCollect)
+        {
+            if (EnhanceDebug.IsCollecting)
+            {
+                EnhanceDebug.EndCollection("slot1 disabled");
+            }
+            return;
+        }
+
+        int slot0Loop = _plugin.ConsumeSampleLoopCount(0);
+        if (slot0Loop > 0)
+        {
+            for (int i = 0; i < slot0Loop; i++)
+            {
+                EnhanceDebug.EndCollection("slot1 loop");
+            }
+        }
+
+        if (slot0Start > 0 && !EnhanceDebug.IsCollecting)
+        {
+            EnhanceDebug.BeginCollection("SignalGen Slot1");
+        }
+    }
+
+    private static void LogSampleStartEvents(int slotIndex, int count)
+    {
+        if (count <= 0)
+        {
+            return;
+        }
+
+        string timestamp = DateTimeOffset.Now.ToString("HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture);
+        for (int i = 0; i < count; i++)
+        {
+            EnhanceDebug.Log("SignalGenerator", $"sample-start slot={slotIndex + 1} time={timestamp}");
+        }
     }
 
     private void SkiaCanvas_PaintSurface(object sender, SKPaintSurfaceEventArgs e)
@@ -948,6 +1005,10 @@ public partial class SignalGeneratorWindow : Window, IDisposable
 
         _disposed = true;
         _renderTimer.Stop();
+        if (EnhanceDebug.IsCollecting)
+        {
+            EnhanceDebug.EndCollection("window closed");
+        }
         _renderer.Dispose();
         _plugin.SampleLoaded -= OnSampleLoaded;
         GC.SuppressFinalize(this);

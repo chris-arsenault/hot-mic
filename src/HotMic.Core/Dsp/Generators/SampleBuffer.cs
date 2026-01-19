@@ -104,6 +104,7 @@ public struct SamplePlayer
     private int _loopMode; // 0=loop, 1=oneshot, 2=pingpong
     private bool _forward;
     private bool _playing;
+    private bool _startPending;
     private int _playbackSampleRate;
 
     public void Initialize(int playbackSampleRate)
@@ -116,6 +117,7 @@ public struct SamplePlayer
         _loopMode = 0;
         _forward = true;
         _playing = true;
+        _startPending = true;
     }
 
     public void SetSpeed(float speed)
@@ -143,10 +145,12 @@ public struct SamplePlayer
         _position = 0;
         _forward = true;
         _playing = true;
+        _startPending = true;
     }
 
-    public float Next(SampleBuffer buffer)
+    public float Next(SampleBuffer buffer, out SamplePlaybackFlags flags)
     {
+        flags = SamplePlaybackFlags.None;
         if (!_playing || !buffer.IsLoaded) return 0f;
 
         int length = buffer.Length;
@@ -156,6 +160,12 @@ public struct SamplePlayer
 
         if (playLength <= 0) return 0f;
 
+        if (_startPending)
+        {
+            flags |= SamplePlaybackFlags.Started;
+            _startPending = false;
+        }
+
         // Calculate actual position in buffer
         double bufferPosition = startSample + _position;
         float sample = buffer.GetSample(bufferPosition);
@@ -163,6 +173,9 @@ public struct SamplePlayer
         // Calculate speed adjustment for sample rate difference
         double speedRatio = (double)buffer.SampleRate / _playbackSampleRate;
         double increment = _speed * speedRatio;
+
+        bool looped = false;
+        bool stopped = false;
 
         // Advance position
         if (_forward)
@@ -174,10 +187,13 @@ public struct SamplePlayer
                 {
                     case 0: // loop
                         _position = _position % playLength;
+                        looped = true;
+                        _startPending = true;
                         break;
                     case 1: // oneshot
                         _position = playLength - 1;
                         _playing = false;
+                        stopped = true;
                         break;
                     case 2: // pingpong
                         _position = playLength - 1;
@@ -196,6 +212,25 @@ public struct SamplePlayer
             }
         }
 
+        if (looped)
+        {
+            flags |= SamplePlaybackFlags.LoopRestart;
+        }
+
+        if (stopped)
+        {
+            flags |= SamplePlaybackFlags.Stopped;
+        }
+
         return sample;
     }
+}
+
+[Flags]
+public enum SamplePlaybackFlags : byte
+{
+    None = 0,
+    Started = 1,
+    LoopRestart = 2,
+    Stopped = 4
 }

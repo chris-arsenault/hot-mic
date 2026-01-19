@@ -8,11 +8,13 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
     public const int DriveIndex = 1;
     public const int MixIndex = 2;
     public const int CenterIndex = 3;
+    public const int ScaleIndex = 4;
 
     private float _amount = 0.4f;
     private float _drive = 0.5f;
     private float _mix = 0.5f;
     private float _centerHz = 110f;
+    private int _amountScaleIndex;
 
     private int _sampleRate;
     private string _statusMessage = string.Empty;
@@ -32,6 +34,16 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
         Parameters =
         [
             new PluginParameter { Index = AmountIndex, Name = "Amount", MinValue = 0f, MaxValue = 1f, DefaultValue = 0.4f, Unit = string.Empty },
+            new PluginParameter
+            {
+                Index = ScaleIndex,
+                Name = "Scale",
+                MinValue = 0f,
+                MaxValue = 3f,
+                DefaultValue = 0f,
+                Unit = string.Empty,
+                FormatValue = EnhanceAmountScale.FormatLabel
+            },
             new PluginParameter { Index = DriveIndex, Name = "Drive", MinValue = 0f, MaxValue = 1f, DefaultValue = 0.5f, Unit = string.Empty },
             new PluginParameter { Index = MixIndex, Name = "Mix", MinValue = 0f, MaxValue = 1f, DefaultValue = 0.5f, Unit = string.Empty },
             new PluginParameter { Index = CenterIndex, Name = "Center", MinValue = 70f, MaxValue = 180f, DefaultValue = 110f, Unit = "Hz" }
@@ -56,6 +68,7 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
     public float Drive => _drive;
     public float Mix => _mix;
     public float CenterHz => _centerHz;
+    public int AmountScaleIndex => _amountScaleIndex;
     public int SampleRate => _sampleRate;
 
     public void SetAnalysisSignalsAvailable(bool available)
@@ -92,7 +105,8 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
 
             float gate = voicedSource.ReadSample(baseTime + i);
 
-            float wet = harmonic * _amount * gate;
+            float amount = _amount * EnhanceAmountScale.FromIndex(_amountScaleIndex);
+            float wet = harmonic * amount * gate;
             buffer[i] = input * (1f - _mix) + (input + wet) * _mix;
 
             // Update metering
@@ -124,7 +138,8 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
             float low = _bandPass.Process(input);
             float shaped = MathF.Tanh(low * (1f + _drive * 6f)) - low;
             float harmonic = _highPass.Process(shaped);
-            float wet = harmonic * _amount;
+            float amount = _amount * EnhanceAmountScale.FromIndex(_amountScaleIndex);
+            float wet = harmonic * amount;
             buffer[i] = input * (1f - _mix) + (input + wet) * _mix;
         }
     }
@@ -146,16 +161,20 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
                 _centerHz = Math.Clamp(value, 70f, 180f);
                 UpdateFilters();
                 break;
+            case ScaleIndex:
+                _amountScaleIndex = EnhanceAmountScale.ClampIndex(value);
+                break;
         }
     }
 
     public byte[] GetState()
     {
-        var bytes = new byte[sizeof(float) * 4];
+        var bytes = new byte[sizeof(float) * 5];
         Buffer.BlockCopy(BitConverter.GetBytes(_amount), 0, bytes, 0, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_drive), 0, bytes, 4, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_mix), 0, bytes, 8, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_centerHz), 0, bytes, 12, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_amountScaleIndex), 0, bytes, 16, 4);
         return bytes;
     }
 
@@ -175,6 +194,10 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
         if (state.Length >= sizeof(float) * 4)
         {
             _centerHz = BitConverter.ToSingle(state, 12);
+        }
+        if (state.Length >= sizeof(float) * 5)
+        {
+            _amountScaleIndex = EnhanceAmountScale.ClampIndex(BitConverter.ToSingle(state, 16));
         }
 
         UpdateFilters();

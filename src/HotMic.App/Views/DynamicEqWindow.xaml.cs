@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using HotMic.App.Diagnostics;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Presets;
@@ -26,6 +27,7 @@ public partial class DynamicEqWindow : Window, IDisposable
     private float _smoothedLowGain;
     private float _smoothedEdgeGain;
     private float _smoothedAirGain;
+    private long _lastDebugTick;
     private bool _disposed;
 
     public DynamicEqWindow(DynamicEqPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
@@ -81,6 +83,14 @@ public partial class DynamicEqWindow : Window, IDisposable
         _smoothedEdgeGain = _smoothedEdgeGain * 0.8f + rawEdge * 0.2f;
         _smoothedAirGain = _smoothedAirGain * 0.8f + rawAir * 0.2f;
 
+        if (EnhanceDebug.ShouldLog(ref _lastDebugTick))
+        {
+            float scale = EnhanceDebug.ScaleFactor(_plugin.BoostScaleIndex);
+            EnhanceDebug.Log("DynamicEq",
+                $"scale=x{scale:0} idx={_plugin.BoostScaleIndex} lowBoost={_plugin.LowBoostDb:0.0} highBoost={_plugin.HighBoostDb:0.0} smooth={_plugin.SmoothingMs:0} " +
+                $"voicing={rawVoicing:0.000} fricative={rawFricative:0.000} lowGain={rawLow:0.00} edgeGain={rawEdge:0.00} airGain={rawAir:0.00} status=\"{_plugin.StatusMessage}\"");
+        }
+
         SkiaCanvas.InvalidateVisual();
     }
 
@@ -94,6 +104,7 @@ public partial class DynamicEqWindow : Window, IDisposable
             LowBoostDb: _plugin.LowBoostDb,
             HighBoostDb: _plugin.HighBoostDb,
             SmoothingMs: _plugin.SmoothingMs,
+            ScaleIndex: _plugin.BoostScaleIndex,
             VoicingLevel: _smoothedVoicingLevel,
             FricativeLevel: _smoothedFricativeLevel,
             LowGainDb: _smoothedLowGain,
@@ -158,6 +169,11 @@ public partial class DynamicEqWindow : Window, IDisposable
                 _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
+            case DynamicEqHitArea.ScaleToggle:
+                _parameterCallback(DynamicEqPlugin.ScaleIndex, hit.KnobIndex);
+                _presetHelper.MarkAsCustom();
+                e.Handled = true;
+                break;
         }
     }
 
@@ -190,6 +206,7 @@ public partial class DynamicEqWindow : Window, IDisposable
             int paramIndex = name switch
             {
                 "Low Boost" or "LowBoost" => DynamicEqPlugin.LowBoostIndex,
+                "Scale" => DynamicEqPlugin.ScaleIndex,
                 "High Boost" or "HighBoost" => DynamicEqPlugin.HighBoostIndex,
                 "Smoothing" => DynamicEqPlugin.SmoothingIndex,
                 _ => -1
@@ -203,6 +220,7 @@ public partial class DynamicEqWindow : Window, IDisposable
         return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
         {
             ["Low Boost"] = _plugin.LowBoostDb,
+            ["Scale"] = _plugin.BoostScaleIndex,
             ["High Boost"] = _plugin.HighBoostDb,
             ["Smoothing"] = _plugin.SmoothingMs
         };

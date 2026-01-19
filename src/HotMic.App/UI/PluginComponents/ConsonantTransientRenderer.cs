@@ -38,16 +38,16 @@ public sealed class ConsonantTransientRenderer : IDisposable
     private readonly SkiaTextPaint _labelPaint;
     private readonly SkiaTextPaint _latencyPaint;
     private readonly SkiaTextPaint _statusPaint;
+    private readonly ScaleToggleGroup _scaleToggle;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
 
     // Flux history for visualization
-    private readonly float[] _fluxHistory = new float[64];
-    private readonly float[] _baselineHistory = new float[64];
+    private readonly float[] _onsetHistory = new float[64];
+    private readonly float[] _boostHistory = new float[64];
     private int _historyIndex;
-    private float _displayMaxDb = 6f;
 
     public ConsonantTransientRenderer(PluginComponentTheme? theme = null)
     {
@@ -116,7 +116,7 @@ public sealed class ConsonantTransientRenderer : IDisposable
 
         _fluxPaint = new SKPaint
         {
-            Color = new SKColor(0xFF, 0xA0, 0x40), // Bright orange for flux
+            Color = new SKColor(0xFF, 0xA0, 0x40), // Bright orange for onset
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 2f
@@ -124,7 +124,7 @@ public sealed class ConsonantTransientRenderer : IDisposable
 
         _baselinePaint = new SKPaint
         {
-            Color = new SKColor(0x80, 0x60, 0x40), // Dim brown for baseline
+            Color = new SKColor(0x80, 0x60, 0x40), // Dim brown for boost
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 2f
@@ -162,6 +162,7 @@ public sealed class ConsonantTransientRenderer : IDisposable
         _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
         _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
         _statusPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _scaleToggle = new ScaleToggleGroup(_theme);
     }
 
     public void Render(SKCanvas canvas, SKSize size, float dpiScale, ConsonantTransientState state)
@@ -171,10 +172,10 @@ public sealed class ConsonantTransientRenderer : IDisposable
         canvas.Scale(dpiScale);
         size = new SKSize(size.Width / dpiScale, size.Height / dpiScale);
 
-        // Update flux history
-        _fluxHistory[_historyIndex] = state.FluxDb;
-        _baselineHistory[_historyIndex] = state.FluxBaselineDb;
-        _historyIndex = (_historyIndex + 1) % _fluxHistory.Length;
+        // Update onset history
+        _onsetHistory[_historyIndex] = state.OnsetDb;
+        _boostHistory[_historyIndex] = state.BoostDb;
+        _historyIndex = (_historyIndex + 1) % _onsetHistory.Length;
 
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
         var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
@@ -232,13 +233,25 @@ public sealed class ConsonantTransientRenderer : IDisposable
         }
         canvas.DrawText("TRANS", transX, gateY + 18f, _labelPaint);
 
-        // Flux display
+        // Onset/boost display
         float envX = transX + 50f;
         float envWidth = size.Width - envX - Padding;
         var envRect = new SKRect(envX, y, envX + envWidth, y + EnvelopeHeight);
-        DrawFluxDisplay(canvas, envRect, state.Threshold);
+        DrawOnsetDisplay(canvas, envRect, state.Threshold);
 
-        y += EnvelopeHeight + Padding + 10f;
+        y += EnvelopeHeight + Padding;
+
+        // Scale toggle row
+        float scaleRowY = y;
+        const string scaleLabel = "SCALE";
+        float scaleLabelWidth = _labelPaint.MeasureText(scaleLabel);
+        float scaleRowWidth = scaleLabelWidth + 6f + _scaleToggle.Width;
+        float scaleRowX = (size.Width - scaleRowWidth) / 2f;
+        float scaleLabelY = scaleRowY + _scaleToggle.Height / 2f + 3f;
+        _labelPaint.DrawText(canvas, scaleLabel, scaleRowX, scaleLabelY, SKTextAlign.Left);
+        _scaleToggle.Render(canvas, scaleRowX + scaleLabelWidth + 6f, scaleRowY, state.ScaleIndex);
+
+        y += _scaleToggle.Height + 10f;
 
         // Knobs
         float knobsY = y + KnobRadius + 10;
@@ -305,7 +318,7 @@ public sealed class ConsonantTransientRenderer : IDisposable
         canvas.DrawText("\u00D7", _closeButtonRect.MidX, _closeButtonRect.MidY + 6, _closeButtonPaint);
     }
 
-    private void DrawFluxDisplay(SKCanvas canvas, SKRect rect, float fluxThresholdDb)
+    private void DrawOnsetDisplay(SKCanvas canvas, SKRect rect, float thresholdDb)
     {
         var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _envelopeBackgroundPaint);
@@ -313,47 +326,43 @@ public sealed class ConsonantTransientRenderer : IDisposable
         float padding = 4f;
         float plotWidth = rect.Width - padding * 2;
         float plotHeight = rect.Height - padding * 2;
-        int count = _fluxHistory.Length;
-        float lastBaseline = _baselineHistory[(_historyIndex - 1 + count) % count];
-        float targetMaxDb = Math.Clamp(lastBaseline + fluxThresholdDb + 1f, 6f, 12f);
-        targetMaxDb = targetMaxDb <= 6f ? 6f : targetMaxDb <= 9f ? 9f : 12f;
-        _displayMaxDb += (targetMaxDb - _displayMaxDb) * 0.05f;
-        float maxDb = Math.Clamp(_displayMaxDb, 4f, 12f);
+        int count = _onsetHistory.Length;
+        const float maxDb = 6f;
 
-        // Draw baseline (background)
-        using var baselinePath = new SKPath();
+        // Draw onset (foreground)
+        using var onsetPath = new SKPath();
         for (int i = 0; i < count; i++)
         {
             int idx = (_historyIndex + i) % count;
             float x = rect.Left + padding + (i / (float)(count - 1)) * plotWidth;
-            float level = Math.Clamp(_baselineHistory[idx] / maxDb, 0f, 1f);
+            float level = Math.Clamp(_onsetHistory[idx] / maxDb, 0f, 1f);
             float y = rect.Bottom - padding - level * plotHeight;
 
             if (i == 0)
-                baselinePath.MoveTo(x, y);
+                onsetPath.MoveTo(x, y);
             else
-                baselinePath.LineTo(x, y);
+                onsetPath.LineTo(x, y);
         }
-        canvas.DrawPath(baselinePath, _baselinePaint);
+        canvas.DrawPath(onsetPath, _fluxPaint);
 
-        // Draw flux (foreground)
-        using var fluxPath = new SKPath();
+        // Draw boost (overlay)
+        using var boostPath = new SKPath();
         for (int i = 0; i < count; i++)
         {
             int idx = (_historyIndex + i) % count;
             float x = rect.Left + padding + (i / (float)(count - 1)) * plotWidth;
-            float level = Math.Clamp(_fluxHistory[idx] / maxDb, 0f, 1f);
+            float level = Math.Clamp(_boostHistory[idx] / maxDb, 0f, 1f);
             float y = rect.Bottom - padding - level * plotHeight;
 
             if (i == 0)
-                fluxPath.MoveTo(x, y);
+                boostPath.MoveTo(x, y);
             else
-                fluxPath.LineTo(x, y);
+                boostPath.LineTo(x, y);
         }
-        canvas.DrawPath(fluxPath, _fluxPaint);
+        canvas.DrawPath(boostPath, _baselinePaint);
 
-        // Threshold line (baseline + threshold)
-        float thresholdLevel = Math.Clamp((lastBaseline + fluxThresholdDb) / maxDb, 0f, 1f);
+        // Threshold line (fixed scale)
+        float thresholdLevel = Math.Clamp(thresholdDb / maxDb, 0f, 1f);
         float threshY = rect.Bottom - padding - thresholdLevel * plotHeight;
         using var threshPaint = new SKPaint
         {
@@ -365,8 +374,15 @@ public sealed class ConsonantTransientRenderer : IDisposable
         };
         canvas.DrawLine(rect.Left + padding, threshY, rect.Right - padding, threshY, threshPaint);
 
-        var scaleLabel = $"{maxDb:0} dB";
+        var scaleLabel = "0-6 dB";
         _labelPaint.DrawText(canvas, scaleLabel, rect.Left + padding + 2f, rect.Top + padding + 10f);
+        _labelPaint.DrawText(canvas, "ONSET", rect.Right - padding - 6f, rect.Top + padding + 10f, SKTextAlign.Right);
+        _labelPaint.DrawText(canvas, "BOOST", rect.Right - padding - 6f, rect.Top + padding + 22f, SKTextAlign.Right);
+
+        float lastOnset = _onsetHistory[(_historyIndex - 1 + count) % count];
+        float lastBoost = _boostHistory[(_historyIndex - 1 + count) % count];
+        _labelPaint.DrawText(canvas, $"{lastOnset:0.0} dB", rect.Left + padding + 2f, rect.Bottom - padding - 6f);
+        _labelPaint.DrawText(canvas, $"+{lastBoost:0.0} dB", rect.Right - padding - 2f, rect.Bottom - padding - 6f, SKTextAlign.Right);
 
         canvas.DrawRoundRect(roundRect, _borderPaint);
     }
@@ -385,6 +401,10 @@ public sealed class ConsonantTransientRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new ConsonantTransientHitTest(ConsonantTransientHitArea.PresetSave, -1);
 
+        int scaleIndex = _scaleToggle.HitTest(x, y);
+        if (scaleIndex >= 0)
+            return new ConsonantTransientHitTest(ConsonantTransientHitArea.ScaleToggle, scaleIndex);
+
         if (AmountKnob.HitTest(x, y))
             return new ConsonantTransientHitTest(ConsonantTransientHitArea.Knob, 0);
         if (ThresholdKnob.HitTest(x, y))
@@ -400,7 +420,7 @@ public sealed class ConsonantTransientRenderer : IDisposable
 
     public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
 
-    public static SKSize GetPreferredSize() => new(360, 280);
+    public static SKSize GetPreferredSize() => new(360, 300);
 
     public void Dispose()
     {
@@ -425,6 +445,7 @@ public sealed class ConsonantTransientRenderer : IDisposable
         _labelPaint.Dispose();
         _latencyPaint.Dispose();
         _statusPaint.Dispose();
+        _scaleToggle.Dispose();
     }
 }
 
@@ -433,9 +454,10 @@ public record struct ConsonantTransientState(
     float Threshold,
     float HighCutHz,
     float OnsetGate,
-    float FluxDb,
-    float FluxBaselineDb,
+    float OnsetDb,
+    float BoostDb,
     float TransientDetected,
+    int ScaleIndex,
     float LatencyMs,
     bool IsBypassed,
     string StatusMessage = "",
@@ -447,6 +469,7 @@ public enum ConsonantTransientHitArea
     TitleBar,
     CloseButton,
     BypassButton,
+    ScaleToggle,
     Knob,
     PresetDropdown,
     PresetSave

@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using HotMic.App.Diagnostics;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Presets;
@@ -24,6 +25,7 @@ public partial class AirExciterWindow : Window, IDisposable
     private float _smoothedGateLevel;
     private float _smoothedHfEnergy;
     private float _smoothedSaturation;
+    private long _lastDebugTick;
     private bool _disposed;
 
     public AirExciterWindow(AirExciterPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
@@ -75,6 +77,14 @@ public partial class AirExciterWindow : Window, IDisposable
         _smoothedHfEnergy = _smoothedHfEnergy * 0.7f + rawHf * 0.3f;
         _smoothedSaturation = _smoothedSaturation * 0.8f + rawSat * 0.2f;
 
+        if (EnhanceDebug.ShouldLog(ref _lastDebugTick))
+        {
+            float scale = EnhanceDebug.ScaleFactor(_plugin.AmountScaleIndex);
+            EnhanceDebug.Log("AirExciter",
+                $"scale=x{scale:0} idx={_plugin.AmountScaleIndex} drive={_plugin.Drive:0.00} mix={_plugin.Mix:0.00} cutoff={_plugin.CutoffHz:0} " +
+                $"gate={rawGate:0.000} hf={rawHf:0.000} sat={rawSat:0.000} status=\"{_plugin.StatusMessage}\"");
+        }
+
         SkiaCanvas.InvalidateVisual();
     }
 
@@ -88,6 +98,7 @@ public partial class AirExciterWindow : Window, IDisposable
             Drive: _plugin.Drive,
             Mix: _plugin.Mix,
             CutoffHz: _plugin.CutoffHz,
+            ScaleIndex: _plugin.AmountScaleIndex,
             GateLevel: _smoothedGateLevel,
             HfEnergy: _smoothedHfEnergy,
             SaturationAmount: _smoothedSaturation,
@@ -150,6 +161,11 @@ public partial class AirExciterWindow : Window, IDisposable
                 _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
+            case AirExciterHitArea.ScaleToggle:
+                _parameterCallback(AirExciterPlugin.ScaleIndex, hit.KnobIndex);
+                _presetHelper.MarkAsCustom();
+                e.Handled = true;
+                break;
         }
     }
 
@@ -182,6 +198,7 @@ public partial class AirExciterWindow : Window, IDisposable
             int paramIndex = name switch
             {
                 "Drive" => AirExciterPlugin.DriveIndex,
+                "Scale" => AirExciterPlugin.ScaleIndex,
                 "Mix" => AirExciterPlugin.MixIndex,
                 "Cutoff" => AirExciterPlugin.CutoffIndex,
                 _ => -1
@@ -195,6 +212,7 @@ public partial class AirExciterWindow : Window, IDisposable
         return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
         {
             ["Drive"] = _plugin.Drive,
+            ["Scale"] = _plugin.AmountScaleIndex,
             ["Mix"] = _plugin.Mix,
             ["Cutoff"] = _plugin.CutoffHz
         };

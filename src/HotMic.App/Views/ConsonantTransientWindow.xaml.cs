@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using HotMic.App.Diagnostics;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Presets;
@@ -23,8 +24,9 @@ public partial class ConsonantTransientWindow : Window, IDisposable
     private bool _disposed;
 
     private float _smoothedOnsetGate;
-    private float _smoothedFlux;
-    private float _smoothedFluxBaseline;
+    private float _smoothedOnsetDb;
+    private float _smoothedBoostDb;
+    private long _lastDebugTick;
 
     public ConsonantTransientWindow(ConsonantTransientPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
@@ -68,12 +70,37 @@ public partial class ConsonantTransientWindow : Window, IDisposable
     private void OnRenderTick(object? sender, EventArgs e)
     {
         float rawGate = _plugin.GetOnsetGate();
-        float rawFlux = _plugin.GetFluxDb();
-        float rawBaseline = _plugin.GetFluxBaselineDb();
+        float rawOnsetDb = _plugin.GetOnsetDb();
+        float rawBoostDb = _plugin.GetBoostDb();
+        float rawTransient = _plugin.GetTransientDetected();
+        float rawTransientRatio = _plugin.GetTransientRatio();
+        float rawTransientRaw = _plugin.GetTransientRaw();
+        float rawFast = _plugin.GetFastEnvelope();
+        float rawSlow = _plugin.GetSlowEnvelope();
+        float rawBaseBoostDb = _plugin.GetBaseBoostDb();
 
         _smoothedOnsetGate = _smoothedOnsetGate * 0.7f + rawGate * 0.3f;
-        _smoothedFlux = _smoothedFlux * 0.9f + rawFlux * 0.1f;
-        _smoothedFluxBaseline = _smoothedFluxBaseline * 0.9f + rawBaseline * 0.1f;
+        _smoothedOnsetDb = _smoothedOnsetDb * 0.6f + rawOnsetDb * 0.4f;
+        _smoothedBoostDb = _smoothedBoostDb * 0.6f + rawBoostDb * 0.4f;
+
+        const int logIntervalMs = 500;
+        if (EnhanceDebug.ShouldLog(ref _lastDebugTick, logIntervalMs))
+        {
+            float scale = EnhanceDebug.ScaleFactor(_plugin.AmountScaleIndex);
+            float gate = _plugin.ConsumeDebugOnsetGate();
+            float onsetDb = _plugin.ConsumeDebugOnsetDb();
+            float baseBoostDb = _plugin.ConsumeDebugBaseBoostDb();
+            float boostDb = _plugin.ConsumeDebugBoostDb();
+            float transient = _plugin.ConsumeDebugTransientDetected();
+            float ratio = _plugin.ConsumeDebugTransientRatio();
+            float fast = _plugin.ConsumeDebugFastEnv();
+            float slow = _plugin.ConsumeDebugSlowEnv();
+            float raw = _plugin.ConsumeDebugTransientRaw();
+            EnhanceDebug.Log("ConsonantTransient",
+                $"scale=x{scale:0} idx={_plugin.AmountScaleIndex} amount={_plugin.Amount:0.00} thresh={_plugin.Threshold:0.00} highCut={_plugin.HighCutHz:0} " +
+                $"gate={gate:0.000} onsetDb={onsetDb:0.00} baseBoostDb={baseBoostDb:0.000} boostDb={boostDb:0.000} transient={transient:0.00} " +
+                $"ratio={ratio:0.000} fast={fast:0.000} slow={slow:0.000} raw={raw:0.000} status=\"{_plugin.StatusMessage}\"");
+        }
 
         SkiaCanvas.InvalidateVisual();
     }
@@ -89,9 +116,10 @@ public partial class ConsonantTransientWindow : Window, IDisposable
             Threshold: _plugin.Threshold,
             HighCutHz: _plugin.HighCutHz,
             OnsetGate: _smoothedOnsetGate,
-            FluxDb: _smoothedFlux,
-            FluxBaselineDb: _smoothedFluxBaseline,
+            OnsetDb: _smoothedOnsetDb,
+            BoostDb: _smoothedBoostDb,
             TransientDetected: _plugin.GetTransientDetected(),
+            ScaleIndex: _plugin.AmountScaleIndex,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
             StatusMessage: _plugin.StatusMessage,
@@ -151,6 +179,11 @@ public partial class ConsonantTransientWindow : Window, IDisposable
                 _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
+            case ConsonantTransientHitArea.ScaleToggle:
+                _parameterCallback(ConsonantTransientPlugin.ScaleIndex, hit.KnobIndex);
+                _presetHelper.MarkAsCustom();
+                e.Handled = true;
+                break;
         }
     }
 
@@ -183,6 +216,7 @@ public partial class ConsonantTransientWindow : Window, IDisposable
             int paramIndex = name switch
             {
                 "Amount" => ConsonantTransientPlugin.AmountIndex,
+                "Scale" => ConsonantTransientPlugin.ScaleIndex,
                 "Threshold" => ConsonantTransientPlugin.ThresholdIndex,
                 "High Cut" or "HighCut" => ConsonantTransientPlugin.HighCutIndex,
                 _ => -1
@@ -196,6 +230,7 @@ public partial class ConsonantTransientWindow : Window, IDisposable
         return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
         {
             ["Amount"] = _plugin.Amount,
+            ["Scale"] = _plugin.AmountScaleIndex,
             ["Threshold"] = _plugin.Threshold,
             ["High Cut"] = _plugin.HighCutHz
         };

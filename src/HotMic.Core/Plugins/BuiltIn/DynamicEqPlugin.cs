@@ -7,6 +7,7 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
     public const int LowBoostIndex = 0;
     public const int HighBoostIndex = 1;
     public const int SmoothingIndex = 2;
+    public const int ScaleIndex = 3;
 
     private const float LowShelfHz = 220f;
     private const float EdgePeakHz = 3400f;
@@ -18,6 +19,7 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
     private float _lowBoostDb = 2f;
     private float _highBoostDb = 2f;
     private float _smoothingMs = 80f;
+    private int _boostScaleIndex;
 
     private float _lowGainDb;
     private float _edgeGainDb;
@@ -50,6 +52,16 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
         [
             new PluginParameter { Index = LowBoostIndex, Name = "Low Boost", MinValue = -6f, MaxValue = 6f, DefaultValue = 2f, Unit = "dB" },
             new PluginParameter { Index = HighBoostIndex, Name = "High Boost", MinValue = -6f, MaxValue = 6f, DefaultValue = 2f, Unit = "dB" },
+            new PluginParameter
+            {
+                Index = ScaleIndex,
+                Name = "Scale",
+                MinValue = 0f,
+                MaxValue = 3f,
+                DefaultValue = 0f,
+                Unit = string.Empty,
+                FormatValue = EnhanceAmountScale.FormatLabel
+            },
             new PluginParameter { Index = SmoothingIndex, Name = "Smoothing", MinValue = 20f, MaxValue = 200f, DefaultValue = 80f, Unit = "ms" }
         ];
     }
@@ -71,6 +83,7 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
     public float LowBoostDb => _lowBoostDb;
     public float HighBoostDb => _highBoostDb;
     public float SmoothingMs => _smoothingMs;
+    public int BoostScaleIndex => _boostScaleIndex;
     public int SampleRate => _sampleRate;
 
     public void SetAnalysisSignalsAvailable(bool available)
@@ -97,9 +110,10 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
         }
 
         // Apply gains from previous block.
-        _lowGainDb += _smoothingCoeff * (_lastVoicing * _lowBoostDb - _lowGainDb);
-        _edgeGainDb += _smoothingCoeff * (_lastFricative * _highBoostDb - _edgeGainDb);
-        _airGainDb += _smoothingCoeff * (_lastFricative * _highBoostDb * AirWeight - _airGainDb);
+        float scale = EnhanceAmountScale.FromIndex(_boostScaleIndex);
+        _lowGainDb += _smoothingCoeff * (_lastVoicing * _lowBoostDb * scale - _lowGainDb);
+        _edgeGainDb += _smoothingCoeff * (_lastFricative * _highBoostDb * scale - _edgeGainDb);
+        _airGainDb += _smoothingCoeff * (_lastFricative * _highBoostDb * scale * AirWeight - _airGainDb);
         UpdateFilters(_lowGainDb, _edgeGainDb, _airGainDb);
 
         if (!context.TryGetAnalysisSignalSource(AnalysisSignalId.VoicingScore, out var voicingSource)
@@ -186,15 +200,19 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
                 _smoothingMs = Math.Clamp(value, 20f, 200f);
                 UpdateSmoothing();
                 break;
+            case ScaleIndex:
+                _boostScaleIndex = EnhanceAmountScale.ClampIndex(value);
+                break;
         }
     }
 
     public byte[] GetState()
     {
-        var bytes = new byte[sizeof(float) * 3];
+        var bytes = new byte[sizeof(float) * 4];
         Buffer.BlockCopy(BitConverter.GetBytes(_lowBoostDb), 0, bytes, 0, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_highBoostDb), 0, bytes, 4, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_smoothingMs), 0, bytes, 8, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_boostScaleIndex), 0, bytes, 12, 4);
         return bytes;
     }
 
@@ -210,6 +228,10 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
         if (state.Length >= sizeof(float) * 3)
         {
             _smoothingMs = BitConverter.ToSingle(state, 8);
+        }
+        if (state.Length >= sizeof(float) * 4)
+        {
+            _boostScaleIndex = EnhanceAmountScale.ClampIndex(BitConverter.ToSingle(state, 12));
         }
 
         UpdateSmoothing();

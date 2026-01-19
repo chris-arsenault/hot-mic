@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using HotMic.App.Diagnostics;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Presets;
@@ -28,6 +29,7 @@ public partial class UpwardExpanderWindow : Window, IDisposable
     private float _smoothedMidGain;
     private float _smoothedHighGain;
     private float _smoothedSpeech;
+    private long _lastDebugTick;
     private bool _disposed;
 
     public UpwardExpanderWindow(UpwardExpanderPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
@@ -107,6 +109,16 @@ public partial class UpwardExpanderWindow : Window, IDisposable
         _smoothedHighGain = _smoothedHighGain * 0.8f + rawHighGain * 0.2f;
         _smoothedSpeech = _smoothedSpeech * 0.7f + rawSpeech * 0.3f;
 
+        if (EnhanceDebug.ShouldLog(ref _lastDebugTick))
+        {
+            float scale = EnhanceDebug.ScaleFactor(_plugin.AmountScaleIndex);
+            EnhanceDebug.Log("UpwardExpander",
+                $"scale=x{scale:0} idx={_plugin.AmountScaleIndex} amount={_plugin.AmountPct:0} thresh={_plugin.ThresholdDb:0} " +
+                $"lowSplit={_plugin.LowSplitHz:0} highSplit={_plugin.HighSplitHz:0} atk={_plugin.AttackMs:0} rel={_plugin.ReleaseMs:0} gate={_plugin.GateStrength:0.00} " +
+                $"speech={rawSpeech:0.000} lowLvl={rawLowLvl:0.000} midLvl={rawMidLvl:0.000} highLvl={rawHighLvl:0.000} " +
+                $"lowGain={rawLowGain:0.00} midGain={rawMidGain:0.00} highGain={rawHighGain:0.00} status=\"{_plugin.StatusMessage}\"");
+        }
+
         SkiaCanvas.InvalidateVisual();
     }
 
@@ -131,6 +143,7 @@ public partial class UpwardExpanderWindow : Window, IDisposable
             MidGainDb: _smoothedMidGain,
             HighGainDb: _smoothedHighGain,
             SpeechPresence: _smoothedSpeech,
+            ScaleIndex: _plugin.AmountScaleIndex,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
             StatusMessage: _plugin.StatusMessage,
@@ -215,6 +228,11 @@ public partial class UpwardExpanderWindow : Window, IDisposable
                 _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
+            case UpwardExpanderHitArea.ScaleToggle:
+                _parameterCallback(UpwardExpanderPlugin.ScaleIndex, hit.KnobIndex);
+                _presetHelper.MarkAsCustom();
+                e.Handled = true;
+                break;
         }
     }
 
@@ -255,6 +273,7 @@ public partial class UpwardExpanderWindow : Window, IDisposable
             int paramIndex = name switch
             {
                 "Amount" => UpwardExpanderPlugin.AmountIndex,
+                "Scale" => UpwardExpanderPlugin.ScaleIndex,
                 "Threshold" => UpwardExpanderPlugin.ThresholdIndex,
                 "Low Split" or "LowSplit" => UpwardExpanderPlugin.LowSplitIndex,
                 "High Split" or "HighSplit" => UpwardExpanderPlugin.HighSplitIndex,
@@ -272,6 +291,7 @@ public partial class UpwardExpanderWindow : Window, IDisposable
         return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
         {
             ["Amount"] = _plugin.AmountPct,
+            ["Scale"] = _plugin.AmountScaleIndex,
             ["Threshold"] = _plugin.ThresholdDb,
             ["Low Split"] = _plugin.LowSplitHz,
             ["High Split"] = _plugin.HighSplitHz,

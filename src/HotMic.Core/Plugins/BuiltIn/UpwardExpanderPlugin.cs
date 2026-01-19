@@ -13,6 +13,7 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
     public const int AttackIndex = 4;
     public const int ReleaseIndex = 5;
     public const int GateStrengthIndex = 6;
+    public const int ScaleIndex = 7;
 
     private const float MaxRatioAdd = 0.3f;
     private const float MaxBoostDb = 6f;
@@ -24,6 +25,7 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
     private float _attackMs = 8f;
     private float _releaseMs = 120f;
     private float _gateStrength = 0.8f;
+    private int _amountScaleIndex;
 
     private float _attackCoeff;
     private float _releaseCoeff;
@@ -62,6 +64,16 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
         Parameters =
         [
             new PluginParameter { Index = AmountIndex, Name = "Amount", MinValue = 0f, MaxValue = 100f, DefaultValue = 20f, Unit = "%" },
+            new PluginParameter
+            {
+                Index = ScaleIndex,
+                Name = "Scale",
+                MinValue = 0f,
+                MaxValue = 3f,
+                DefaultValue = 0f,
+                Unit = string.Empty,
+                FormatValue = EnhanceAmountScale.FormatLabel
+            },
             new PluginParameter { Index = ThresholdIndex, Name = "Threshold", MinValue = -60f, MaxValue = -10f, DefaultValue = -35f, Unit = "dB" },
             new PluginParameter { Index = LowSplitIndex, Name = "Low Split", MinValue = 80f, MaxValue = 400f, DefaultValue = 200f, Unit = "Hz" },
             new PluginParameter { Index = HighSplitIndex, Name = "High Split", MinValue = 1500f, MaxValue = 8000f, DefaultValue = 3500f, Unit = "Hz" },
@@ -92,6 +104,7 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
     public float AttackMs => _attackMs;
     public float ReleaseMs => _releaseMs;
     public float GateStrength => _gateStrength;
+    public int AmountScaleIndex => _amountScaleIndex;
     public int SampleRate => _sampleRate;
 
     public void SetAnalysisSignalsAvailable(bool available)
@@ -237,12 +250,16 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
             case GateStrengthIndex:
                 _gateStrength = Math.Clamp(value, 0f, 1f);
                 break;
+            case ScaleIndex:
+                _amountScaleIndex = EnhanceAmountScale.ClampIndex(value);
+                UpdateCoefficients();
+                break;
         }
     }
 
     public byte[] GetState()
     {
-        var bytes = new byte[sizeof(float) * 7];
+        var bytes = new byte[sizeof(float) * 8];
         Buffer.BlockCopy(BitConverter.GetBytes(_amountPct), 0, bytes, 0, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_thresholdDb), 0, bytes, 4, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_lowSplitHz), 0, bytes, 8, 4);
@@ -250,6 +267,7 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
         Buffer.BlockCopy(BitConverter.GetBytes(_attackMs), 0, bytes, 16, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_releaseMs), 0, bytes, 20, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_gateStrength), 0, bytes, 24, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_amountScaleIndex), 0, bytes, 28, 4);
         return bytes;
     }
 
@@ -282,6 +300,10 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
         {
             _gateStrength = BitConverter.ToSingle(state, 24);
         }
+        if (state.Length >= sizeof(float) * 8)
+        {
+            _amountScaleIndex = EnhanceAmountScale.ClampIndex(BitConverter.ToSingle(state, 28));
+        }
 
         UpdateCoefficients();
         UpdateFilters();
@@ -307,7 +329,9 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
         _lowReleaseCoeff = DspUtils.TimeToCoefficient(_releaseMs * 1.6f, _sampleRate);
         _highAttackCoeff = DspUtils.TimeToCoefficient(MathF.Max(1f, _attackMs * 0.6f), _sampleRate);
         _highReleaseCoeff = DspUtils.TimeToCoefficient(_releaseMs * 0.8f, _sampleRate);
-        _ratio = 1f + (_amountPct / 100f) * MaxRatioAdd;
+        float scale = EnhanceAmountScale.FromIndex(_amountScaleIndex);
+        float effectivePct = MathF.Min(1000f, _amountPct * scale);
+        _ratio = 1f + (effectivePct / 100f) * MaxRatioAdd;
     }
 
     private void UpdateFilters()

@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using HotMic.App.Diagnostics;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Presets;
@@ -24,6 +25,7 @@ public partial class SpectralContrastWindow : Window, IDisposable
     private float _smoothedSpeechGate;
     private float _smoothedContrastStrength;
     private readonly float[] _smoothedMagnitudes = new float[256];
+    private long _lastDebugTick;
     private bool _disposed;
 
     public SpectralContrastWindow(SpectralContrastPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
@@ -83,6 +85,14 @@ public partial class SpectralContrastWindow : Window, IDisposable
             _smoothedMagnitudes[i] = _smoothedMagnitudes[i] * 0.7f + mags[i] * 0.3f;
         }
 
+        if (EnhanceDebug.ShouldLog(ref _lastDebugTick))
+        {
+            float scale = EnhanceDebug.ScaleFactor(_plugin.StrengthScaleIndex);
+            EnhanceDebug.Log("SpectralContrast",
+                $"scale=x{scale:0} idx={_plugin.StrengthScaleIndex} strength={_plugin.StrengthPct:0} mix={_plugin.MixPct:0} gate={_plugin.GateStrength:0.00} " +
+                $"speechGate={rawGate:0.000} contrast={rawStrength:0.000} bins={_plugin.MagnitudeBinCount} status=\"{_plugin.StatusMessage}\"");
+        }
+
         SkiaCanvas.InvalidateVisual();
     }
 
@@ -96,6 +106,7 @@ public partial class SpectralContrastWindow : Window, IDisposable
             StrengthPct: _plugin.StrengthPct,
             MixPct: _plugin.MixPct,
             GateStrength: _plugin.GateStrength,
+            ScaleIndex: _plugin.StrengthScaleIndex,
             SpeechGate: _smoothedSpeechGate,
             ContrastStrength: _smoothedContrastStrength,
             Magnitudes: _smoothedMagnitudes,
@@ -158,6 +169,11 @@ public partial class SpectralContrastWindow : Window, IDisposable
                 _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
+            case SpectralContrastHitArea.ScaleToggle:
+                _parameterCallback(SpectralContrastPlugin.ScaleIndex, hit.KnobIndex);
+                _presetHelper.MarkAsCustom();
+                e.Handled = true;
+                break;
         }
     }
 
@@ -190,6 +206,7 @@ public partial class SpectralContrastWindow : Window, IDisposable
             int paramIndex = name switch
             {
                 "Strength" => SpectralContrastPlugin.StrengthIndex,
+                "Scale" => SpectralContrastPlugin.ScaleIndex,
                 "Mix" => SpectralContrastPlugin.MixIndex,
                 "Gate Strength" or "GateStrength" => SpectralContrastPlugin.GateStrengthIndex,
                 _ => -1
@@ -203,6 +220,7 @@ public partial class SpectralContrastWindow : Window, IDisposable
         return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
         {
             ["Strength"] = _plugin.StrengthPct,
+            ["Scale"] = _plugin.StrengthScaleIndex,
             ["Mix"] = _plugin.MixPct,
             ["Gate Strength"] = _plugin.GateStrength
         };

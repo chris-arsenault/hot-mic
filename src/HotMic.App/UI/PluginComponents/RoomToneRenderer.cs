@@ -38,6 +38,7 @@ public sealed class RoomToneRenderer : IDisposable
     private readonly SkiaTextPaint _labelPaint;
     private readonly SkiaTextPaint _latencyPaint;
     private readonly SkiaTextPaint _statusPaint;
+    private readonly ScaleToggleGroup _scaleToggle;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
@@ -146,6 +147,7 @@ public sealed class RoomToneRenderer : IDisposable
         _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
         _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
         _statusPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _scaleToggle = new ScaleToggleGroup(_theme);
     }
 
     public void Render(SKCanvas canvas, SKSize size, float dpiScale, RoomToneState state)
@@ -187,7 +189,19 @@ public sealed class RoomToneRenderer : IDisposable
         var spectrumRect = new SKRect(spectrumX, y + 10f, spectrumX + spectrumWidth, y + 10f + SpectrumHeight);
         DrawNoiseSpectrum(canvas, spectrumRect, state.ToneHz);
 
-        y += meterHeight + Padding + 10f;
+        y += meterHeight + Padding;
+
+        // Scale toggle row
+        float scaleRowY = y;
+        const string scaleLabel = "SCALE";
+        float scaleLabelWidth = _labelPaint.MeasureText(scaleLabel);
+        float scaleRowWidth = scaleLabelWidth + 6f + _scaleToggle.Width;
+        float scaleRowX = (size.Width - scaleRowWidth) / 2f;
+        float scaleLabelY = scaleRowY + _scaleToggle.Height / 2f + 3f;
+        _labelPaint.DrawText(canvas, scaleLabel, scaleRowX, scaleLabelY, SKTextAlign.Left);
+        _scaleToggle.Render(canvas, scaleRowX + scaleLabelWidth + 6f, scaleRowY, state.ScaleIndex);
+
+        y += _scaleToggle.Height + 10f;
 
         // Knobs
         float knobsY = y + KnobRadius + 10;
@@ -362,6 +376,10 @@ public sealed class RoomToneRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new RoomToneHitTest(RoomToneHitArea.PresetSave, -1);
 
+        int scaleIndex = _scaleToggle.HitTest(x, y);
+        if (scaleIndex >= 0)
+            return new RoomToneHitTest(RoomToneHitArea.ScaleToggle, scaleIndex);
+
         if (LevelKnob.HitTest(x, y))
             return new RoomToneHitTest(RoomToneHitArea.Knob, 0);
         if (DuckKnob.HitTest(x, y))
@@ -377,7 +395,7 @@ public sealed class RoomToneRenderer : IDisposable
 
     public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
 
-    public static SKSize GetPreferredSize() => new(320, 280);
+    public static SKSize GetPreferredSize() => new(320, 300);
 
     public void Dispose()
     {
@@ -401,6 +419,7 @@ public sealed class RoomToneRenderer : IDisposable
         _labelPaint.Dispose();
         _latencyPaint.Dispose();
         _statusPaint.Dispose();
+        _scaleToggle.Dispose();
     }
 }
 
@@ -408,6 +427,7 @@ public record struct RoomToneState(
     float LevelDb,
     float DuckStrength,
     float ToneHz,
+    int ScaleIndex,
     float SpeechPresence,
     float DuckAmount,
     float NoiseLevel,
@@ -422,6 +442,7 @@ public enum RoomToneHitArea
     TitleBar,
     CloseButton,
     BypassButton,
+    ScaleToggle,
     Knob,
     PresetDropdown,
     PresetSave

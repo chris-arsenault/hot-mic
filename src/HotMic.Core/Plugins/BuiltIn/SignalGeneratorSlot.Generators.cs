@@ -147,8 +147,8 @@ internal sealed class SignalGeneratorSample
         _player.Reset();
     }
 
-    public float Next(SampleBuffer buffer)
+    public float Next(SampleBuffer buffer, out SamplePlaybackFlags flags)
     {
-        return _player.Next(buffer);
+        return _player.Next(buffer, out flags);
     }
 }

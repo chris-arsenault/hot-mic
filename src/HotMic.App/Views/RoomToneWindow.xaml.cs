@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using HotMic.App.Diagnostics;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Plugins.BuiltIn;
 using HotMic.Core.Presets;
@@ -24,6 +25,7 @@ public partial class RoomToneWindow : Window, IDisposable
     private float _smoothedSpeechPresence;
     private float _smoothedDuckAmount;
     private float _smoothedNoiseLevel;
+    private long _lastDebugTick;
     private bool _disposed;
 
     public RoomToneWindow(RoomTonePlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
@@ -75,6 +77,14 @@ public partial class RoomToneWindow : Window, IDisposable
         _smoothedDuckAmount = _smoothedDuckAmount * 0.7f + rawDuck * 0.3f;
         _smoothedNoiseLevel = _smoothedNoiseLevel * 0.8f + rawNoise * 0.2f;
 
+        if (EnhanceDebug.ShouldLog(ref _lastDebugTick))
+        {
+            float scale = EnhanceDebug.ScaleFactor(_plugin.LevelScaleIndex);
+            EnhanceDebug.Log("RoomTone",
+                $"scale=x{scale:0} idx={_plugin.LevelScaleIndex} levelDb={_plugin.LevelDb:0.0} duck={_plugin.DuckStrength:0.00} tone={_plugin.ToneHz:0} " +
+                $"speech={rawSpeech:0.000} duckAmt={rawDuck:0.000} noise={rawNoise:0.000} status=\"{_plugin.StatusMessage}\"");
+        }
+
         SkiaCanvas.InvalidateVisual();
     }
 
@@ -88,6 +98,7 @@ public partial class RoomToneWindow : Window, IDisposable
             LevelDb: _plugin.LevelDb,
             DuckStrength: _plugin.DuckStrength,
             ToneHz: _plugin.ToneHz,
+            ScaleIndex: _plugin.LevelScaleIndex,
             SpeechPresence: _smoothedSpeechPresence,
             DuckAmount: _smoothedDuckAmount,
             NoiseLevel: _smoothedNoiseLevel,
@@ -150,6 +161,11 @@ public partial class RoomToneWindow : Window, IDisposable
                 _presetHelper.ShowSaveMenu(SkiaCanvas, this);
                 e.Handled = true;
                 break;
+            case RoomToneHitArea.ScaleToggle:
+                _parameterCallback(RoomTonePlugin.ScaleIndex, hit.KnobIndex);
+                _presetHelper.MarkAsCustom();
+                e.Handled = true;
+                break;
         }
     }
 
@@ -182,6 +198,7 @@ public partial class RoomToneWindow : Window, IDisposable
             int paramIndex = name switch
             {
                 "Level" => RoomTonePlugin.LevelIndex,
+                "Scale" => RoomTonePlugin.ScaleIndex,
                 "Duck" => RoomTonePlugin.DuckIndex,
                 "Tone" => RoomTonePlugin.ToneIndex,
                 _ => -1
@@ -195,6 +212,7 @@ public partial class RoomToneWindow : Window, IDisposable
         return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
         {
             ["Level"] = _plugin.LevelDb,
+            ["Scale"] = _plugin.LevelScaleIndex,
             ["Duck"] = _plugin.DuckStrength,
             ["Tone"] = _plugin.ToneHz
         };
