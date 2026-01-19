@@ -133,7 +133,8 @@ public sealed class FormantEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IP
         float f3 = f3Source.ReadSample(lastTime);
 
         UpdateTargets(f1, f2, f3, confidence);
-        UpdateEnhancers(_boostDb * speechAvg);
+        float confidenceGain = Math.Clamp(confidence, 0f, 1f) * speechAvg;
+        UpdateEnhancers(_boostDb * confidenceGain);
 
         // Update metering
         _meterF1Hz = _currentF1;

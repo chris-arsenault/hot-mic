@@ -48,8 +48,8 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
     {
         Parameters =
         [
-            new PluginParameter { Index = LowBoostIndex, Name = "Low Boost", MinValue = 0f, MaxValue = 6f, DefaultValue = 2f, Unit = "dB" },
-            new PluginParameter { Index = HighBoostIndex, Name = "High Boost", MinValue = 0f, MaxValue = 6f, DefaultValue = 2f, Unit = "dB" },
+            new PluginParameter { Index = LowBoostIndex, Name = "Low Boost", MinValue = -6f, MaxValue = 6f, DefaultValue = 2f, Unit = "dB" },
+            new PluginParameter { Index = HighBoostIndex, Name = "High Boost", MinValue = -6f, MaxValue = 6f, DefaultValue = 2f, Unit = "dB" },
             new PluginParameter { Index = SmoothingIndex, Name = "Smoothing", MinValue = 20f, MaxValue = 200f, DefaultValue = 80f, Unit = "ms" }
         ];
     }
@@ -177,10 +177,10 @@ public sealed class DynamicEqPlugin : IPlugin, IAnalysisSignalConsumer, IPluginS
         switch (index)
         {
             case LowBoostIndex:
-                _lowBoostDb = Math.Clamp(value, 0f, 6f);
+                _lowBoostDb = Math.Clamp(value, -6f, 6f);
                 break;
             case HighBoostIndex:
-                _highBoostDb = Math.Clamp(value, 0f, 6f);
+                _highBoostDb = Math.Clamp(value, -6f, 6f);
                 break;
             case SmoothingIndex:
                 _smoothingMs = Math.Clamp(value, 20f, 200f);

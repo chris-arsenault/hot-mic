@@ -483,7 +483,8 @@ public sealed class AnalysisSignalProcessor
                     bw1 = _formantBwScratch[0];
                     bw2 = count > 1 ? _formantBwScratch[1] : 0f;
                     bw3 = count > 2 ? _formantBwScratch[2] : 0f;
-                    confidence = pitchConfidence;
+                    // Confidence derives from LPC + beam tracking cost, not pitch.
+                    confidence = _beamFormantTracker?.LastConfidence ?? 0f;
                 }
             }
             else

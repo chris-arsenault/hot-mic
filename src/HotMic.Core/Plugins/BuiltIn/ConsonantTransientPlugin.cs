@@ -16,6 +16,7 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
 
     private const string MissingSidechainMessage = "Missing analysis data.";
     private const float BandLowCutHz = 2000f;
+    private const float TransientCeiling = 0.35f;
 
     private readonly BiquadFilter _highPass = new();
     private readonly BiquadFilter _lowPass = new();
@@ -98,7 +99,9 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
             float gate = FluxToGate(flux);
 
             float gain = norm > _threshold ? 1f + _amount * gate * MathF.Min(1.5f, norm * 2f) : 1f;
-            buffer[i] = input + band * (gain - 1f);
+            float boost = band * (gain - 1f);
+            boost = SoftClip(boost, TransientCeiling);
+            buffer[i] = input + boost;
 
             // Update metering
             _meterOnsetGate = gate;
@@ -136,7 +139,9 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
             float transient = MathF.Max(0f, fast - slow);
             float norm = slow > 1e-6f ? transient / slow : 0f;
             float gain = norm > _threshold ? 1f + _amount * MathF.Min(1.5f, norm * 2f) : 1f;
-            buffer[i] = input + band * (gain - 1f);
+            float boost = band * (gain - 1f);
+            boost = SoftClip(boost, TransientCeiling);
+            buffer[i] = input + boost;
         }
     }
 
@@ -207,5 +212,12 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
 
         const float Knee = 0.02f;
         return flux / (flux + Knee);
+    }
+
+    private static float SoftClip(float value, float ceiling)
+    {
+        float scale = MathF.Max(1e-6f, ceiling);
+        float normalized = value / scale;
+        return MathF.Tanh(normalized) * scale;
     }
 }

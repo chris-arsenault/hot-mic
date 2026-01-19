@@ -15,6 +15,9 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
     private string _statusMessage = string.Empty;
 
     private const string MissingSidechainMessage = "Missing analysis data.";
+    private const float LfoRateHz = 0.35f;
+    private const float LfoDepth = 0.08f;
+    private const float LfoSlewMs = 500f;
 
     private readonly BiquadFilter _highPass = new();
 
@@ -22,6 +25,13 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
     private float _meterGateLevel;
     private float _meterHfEnergy;
     private float _meterSaturationAmount;
+
+    private uint _lfoSeed = 0x5A17C0DEu;
+    private float _lfoValue;
+    private float _lfoTarget;
+    private int _lfoCountdown;
+    private int _lfoPeriodSamples;
+    private float _lfoCoeff;
 
     public AirExciterPlugin()
     {
@@ -63,6 +73,7 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
     {
         _sampleRate = sampleRate;
         UpdateFilter();
+        UpdateLfo();
     }
 
     public void Process(Span<float> buffer, in PluginProcessContext context)
@@ -84,11 +95,14 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
         {
             float input = buffer[i];
             float high = _highPass.Process(input);
-            float shaped = MathF.Tanh(high * (1.5f + _drive * 4f));
+            float lfo = UpdateLfoValue();
 
             float voiced = voicedSource.ReadSample(baseTime + i);
             float sib = sibilanceSource.ReadSample(baseTime + i);
             float gate = Math.Clamp(voiced * (1f - sib), 0f, 1f);
+            float mod = lfo * LfoDepth * (1f - sib);
+            float drive = Math.Clamp(_drive * (1f + mod), 0f, 1f);
+            float shaped = MathF.Tanh(high * (1.5f + drive * 4f));
 
             buffer[i] = input + shaped * (_mix * gate);
 
@@ -119,7 +133,10 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
         {
             float input = buffer[i];
             float high = _highPass.Process(input);
-            float shaped = MathF.Tanh(high * (1.5f + _drive * 4f));
+            float lfo = UpdateLfoValue();
+            float mod = lfo * LfoDepth;
+            float drive = Math.Clamp(_drive * (1f + mod), 0f, 1f);
+            float shaped = MathF.Tanh(high * (1.5f + drive * 4f));
             buffer[i] = input + shaped * _mix;
         }
     }
@@ -179,6 +196,40 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
         }
 
         _highPass.SetHighPass(_sampleRate, _cutoffHz, 0.707f);
+    }
+
+    private void UpdateLfo()
+    {
+        if (_sampleRate <= 0)
+        {
+            return;
+        }
+
+        _lfoPeriodSamples = Math.Max(1, (int)MathF.Round(_sampleRate / LfoRateHz));
+        _lfoCountdown = _lfoPeriodSamples;
+        _lfoCoeff = DspUtils.TimeToCoefficient(LfoSlewMs, _sampleRate);
+        _lfoTarget = NextLfoTarget();
+        _lfoValue = 0f;
+    }
+
+    private float UpdateLfoValue()
+    {
+        if (_lfoCountdown <= 0)
+        {
+            _lfoTarget = NextLfoTarget();
+            _lfoCountdown = _lfoPeriodSamples;
+        }
+
+        _lfoCountdown--;
+        _lfoValue += _lfoCoeff * (_lfoTarget - _lfoValue);
+        return _lfoValue;
+    }
+
+    private float NextLfoTarget()
+    {
+        _lfoSeed = _lfoSeed * 1664525u + 1013904223u;
+        uint bits = _lfoSeed >> 9;
+        return (bits / 8388608f) * 2f - 1f;
     }
 
 }

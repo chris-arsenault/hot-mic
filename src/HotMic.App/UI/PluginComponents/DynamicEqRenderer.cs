@@ -48,11 +48,11 @@ public sealed class DynamicEqRenderer : IDisposable
         _theme = theme ?? PluginComponentTheme.Default;
         _presetBar = new PluginPresetBar(_theme);
 
-        LowBoostKnob = new KnobWidget(KnobRadius, 0f, 6f, "LOW", "dB", KnobStyle.Standard, _theme)
+        LowBoostKnob = new KnobWidget(KnobRadius, -6f, 6f, "LOW", "dB", KnobStyle.Standard, _theme)
         {
             ValueFormat = "0.0"
         };
-        HighBoostKnob = new KnobWidget(KnobRadius, 0f, 6f, "HIGH", "dB", KnobStyle.Standard, _theme)
+        HighBoostKnob = new KnobWidget(KnobRadius, -6f, 6f, "HIGH", "dB", KnobStyle.Standard, _theme)
         {
             ValueFormat = "0.0"
         };
@@ -321,7 +321,7 @@ public sealed class DynamicEqRenderer : IDisposable
             }
 
             // Scale to pixels (6dB = half height)
-            float maxDb = 8f;
+            float maxDb = 6f;
             float yOffset = (gain / maxDb) * (plotHeight / 2);
             float y = centerY - yOffset;
 

@@ -30,3 +30,9 @@ Analysis signals exist only to support these plugins.
 - Bass Enhancer: VoicingScore
 - Consonant Transient: OnsetFluxHigh
 - Formant Enhancer: FormantF1/F2/F3 + FormantConfidence (+ SpeechPresence gate)
+
+## Follow-up Adjustments (post-review)
+- [x] Make Dynamic EQ bands bipolar (boost/cut).
+- [x] Scale formant enhancement by formant confidence derived from beam/LPC tracking.
+- [x] Add soft clipping ceiling to consonant transient boost.
+- [x] Add slow random LFO modulation to Air Exciter drive; clamp on sibilance.

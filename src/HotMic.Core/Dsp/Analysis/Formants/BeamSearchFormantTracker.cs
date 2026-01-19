@@ -45,6 +45,7 @@ public sealed class BeamSearchFormantTracker
     private int _beamCount;
     private bool _hasPrevious;
     private int _framesSinceUpdate;
+    private float _lastConfidence;
 
     private static readonly Comparison<BeamState> BeamStateComparison =
         (a, b) => a.Cost.CompareTo(b.Cost);
@@ -58,6 +59,8 @@ public sealed class BeamSearchFormantTracker
     }
 
     public int Order => _order;
+
+    public float LastConfidence => _lastConfidence;
 
     public void Configure(int order, FormantTrackingPreset preset, float frameSeconds = 0.01f, int beamWidth = 5)
     {
@@ -135,6 +138,7 @@ public sealed class BeamSearchFormantTracker
         Span<float> formantFrequencies, Span<float> formantBandwidths,
         float minFormantHz, float maxFormantHz, int maxOutput)
     {
+        _lastConfidence = 0f;
         if (lpcCoefficients.Length < _order + 1 || formantFrequencies.IsEmpty)
             return 0;
 
@@ -182,6 +186,8 @@ public sealed class BeamSearchFormantTracker
             if (ShouldPreferRunnerUp(best, runnerUp))
                 best = runnerUp;
         }
+
+        _lastConfidence = Math.Clamp(CostToConfidence(best.Cost), 0f, 1f);
 
         int outputCount = Math.Min(TrackedFormants, maxOutput);
         if (outputCount > 0)
@@ -481,6 +487,11 @@ public sealed class BeamSearchFormantTracker
 
         float tauSeconds = MathF.Max(0.001f, tauMs * 0.001f);
         return MathF.Exp(-frameSeconds / tauSeconds);
+    }
+
+    private static float CostToConfidence(float cost)
+    {
+        return 1f / (1f + MathF.Max(0f, cost));
     }
 
     private struct FormantCandidate
