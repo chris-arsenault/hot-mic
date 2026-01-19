@@ -13,11 +13,7 @@ Proposed Analysis Signals (initial)
 - VoicingState (0=Silence, 1=Unvoiced, 2=Voiced as float)
 - FricativeActivity (HF aperiodic activity, 0..1)
 - SibilanceEnergy (narrow HF band, 0..1)
-- OnsetFluxHigh (HF spectral flux, 0..1)
-- FormantF1Hz (Hz)
-- FormantF2Hz (Hz)
-- FormantF3Hz (Hz)
-- FormantConfidence (0..1)
+- OnsetFluxHigh (HF spectral flux, mean positive dB change per frame)
 
 Note: the visualization pipeline may still compute additional analysis signals
 outside this list; those are out of scope for the enhance plugins.
@@ -34,7 +30,7 @@ Architecture
 Work Steps
 1) Define new analysis signal IDs, masks, bus, access structs, and interfaces; remove sidechain types.
 2) Refactor PluginProcessContext + PluginChain to use analysis bus and requested-signal masks.
-3) Implement AnalysisSignalProcessor (shared DSP) with preallocated buffers; move pitch/voicing/formants/flux logic here.
+3) Implement AnalysisSignalProcessor (shared DSP) with preallocated buffers; move pitch/voicing/flux logic here.
 4) Replace SidechainTap with AnalysisTapPlugin and updated UI; add per-signal modes and indicators.
 5) Update producers/consumers (VAD plugins, DeEsser, enhance plugins) to new signals + behavior mapping.
 6) Integrate AnalysisCaptureLink + AnalysisOrchestrator fallback reading/writing of analysis signals; add VAD track to result store.

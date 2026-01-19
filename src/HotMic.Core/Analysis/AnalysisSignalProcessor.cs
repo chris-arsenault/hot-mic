@@ -2,7 +2,6 @@ using System;
 using System.Threading;
 using HotMic.Core.Dsp;
 using HotMic.Core.Dsp.Analysis;
-using HotMic.Core.Dsp.Analysis.Formants;
 using HotMic.Core.Dsp.Analysis.Pitch;
 using HotMic.Core.Dsp.Fft;
 using HotMic.Core.Dsp.Filters;
@@ -16,7 +15,7 @@ public readonly record struct AnalysisSignalProcessorSettings
 {
     public int AnalysisSize { get; init; }
     public PitchDetectorType PitchDetector { get; init; }
-    public FormantProfile FormantProfile { get; init; }
+    public VoicingDetectorSettings VoicingSettings { get; init; }
     public float MinFrequency { get; init; }
     public float MaxFrequency { get; init; }
     public WindowFunction WindowFunction { get; init; }
@@ -28,7 +27,7 @@ public readonly record struct AnalysisSignalProcessorSettings
     {
         AnalysisSize = 2048,
         PitchDetector = PitchDetectorType.Yin,
-        FormantProfile = FormantProfile.Tenor,
+        VoicingSettings = new VoicingDetectorSettings(),
         MinFrequency = 80f,
         MaxFrequency = 8000f,
         WindowFunction = WindowFunction.Hann,
@@ -47,11 +46,6 @@ public sealed class AnalysisSignalProcessor
     private const float SibilanceQ = 1.2f;
     private const float DcCutoffHz = 10f;
     private const float DefaultPreEmphasis = 0.97f;
-    private const float VowelEnergyMinHz = 200f;
-    private const float VowelEnergyMaxHz = 1000f;
-    private const float VowelEnergyRatioThreshold = 0.15f;
-    private const float LpcWindowSeconds = 0.025f;
-    private const float LpcGaussianSigma = 0.4f;
 
     private int _sampleRate;
     private int _hopSize;
@@ -68,6 +62,7 @@ public sealed class AnalysisSignalProcessor
     private float[] _fftMagnitudes = Array.Empty<float>();
     private float[] _highFluxPrevious = Array.Empty<float>();
     private float[] _binFrequencies = Array.Empty<float>();
+    private bool _highFluxInitialized;
 
     private FastFft? _fft;
     private readonly SpectralFeatureExtractor _featureExtractor = new();
@@ -89,26 +84,6 @@ public sealed class AnalysisSignalProcessor
     private CepstralPitchDetector? _cepstralPitchDetector;
     private SwipePitchDetector? _swipePitchDetector;
 
-    private LpcAnalyzer? _lpcAnalyzer;
-    private BeamSearchFormantTracker? _beamFormantTracker;
-    private DecimatingFilter _lpcDecimator1 = new();
-    private DecimatingFilter _lpcDecimator2 = new();
-    private PreEmphasisFilter _lpcPreEmphasisFilter;
-    private float[] _lpcCoefficients = Array.Empty<float>();
-    private float[] _lpcInputBuffer = Array.Empty<float>();
-    private float[] _lpcDecimateBuffer1 = Array.Empty<float>();
-    private float[] _lpcDecimatedBuffer = Array.Empty<float>();
-    private float[] _lpcWindowedBuffer = Array.Empty<float>();
-    private float[] _lpcWindow = Array.Empty<float>();
-    private int _lpcWindowLength;
-    private int _lpcWindowSamples;
-    private int _lpcSampleRate;
-    private int _lpcDecimationStages;
-    private FormantTrackingPreset _formantPreset;
-    private float _formantCeilingHz;
-
-    private readonly float[] _formantFreqScratch = new float[3];
-    private readonly float[] _formantBwScratch = new float[3];
 
     private float[] _speechBuffer = Array.Empty<float>();
     private float[] _voicingScoreBuffer = Array.Empty<float>();
@@ -118,10 +93,6 @@ public sealed class AnalysisSignalProcessor
     private float[] _onsetFluxBuffer = Array.Empty<float>();
     private float[] _pitchBuffer = Array.Empty<float>();
     private float[] _pitchConfidenceBuffer = Array.Empty<float>();
-    private float[] _formantF1Buffer = Array.Empty<float>();
-    private float[] _formantF2Buffer = Array.Empty<float>();
-    private float[] _formantF3Buffer = Array.Empty<float>();
-    private float[] _formantConfidenceBuffer = Array.Empty<float>();
     private float[] _spectralFluxBuffer = Array.Empty<float>();
     private float[] _hnrDbBuffer = Array.Empty<float>();
 
@@ -129,9 +100,6 @@ public sealed class AnalysisSignalProcessor
     private float _lastCpp;
     private float _lastCentroid;
     private float _lastSlope;
-    private float _lastFormantBandwidth1;
-    private float _lastFormantBandwidth2;
-    private float _lastFormantBandwidth3;
 
     public int SampleRate => _sampleRate;
     public int HopSize => _hopSize;
@@ -139,9 +107,6 @@ public sealed class AnalysisSignalProcessor
     public float LastCpp => Volatile.Read(ref _lastCpp);
     public float LastCentroid => Volatile.Read(ref _lastCentroid);
     public float LastSlope => Volatile.Read(ref _lastSlope);
-    public float LastFormantBandwidth1 => Volatile.Read(ref _lastFormantBandwidth1);
-    public float LastFormantBandwidth2 => Volatile.Read(ref _lastFormantBandwidth2);
-    public float LastFormantBandwidth3 => Volatile.Read(ref _lastFormantBandwidth3);
 
     public float GetLastValue(AnalysisSignalId signal)
     {
@@ -173,6 +138,7 @@ public sealed class AnalysisSignalProcessor
         EnsureBuffer(ref _fftMagnitudes, _analysisBins);
         EnsureBuffer(ref _highFluxPrevious, _analysisBins);
         EnsureBuffer(ref _binFrequencies, _analysisBins);
+        _highFluxInitialized = false;
 
         _fft ??= new FastFft(_analysisSize);
         if (_fft.Size != _analysisSize)
@@ -194,7 +160,7 @@ public sealed class AnalysisSignalProcessor
 
         ConfigureFilters(settings);
         ConfigurePitchDetectors(settings.MinFrequency, settings.MaxFrequency);
-        ConfigureFormantTracking(settings.FormantProfile);
+        _voicingDetector.Configure(_sampleRate, _hopSize, _binResolution, settings.VoicingSettings);
     }
 
     public void Reset()
@@ -209,8 +175,7 @@ public sealed class AnalysisSignalProcessor
         _sibilanceBand.Reset();
         _featureExtractor.Reset();
         Array.Clear(_highFluxPrevious, 0, _highFluxPrevious.Length);
-
-        _beamFormantTracker?.Reset();
+        _highFluxInitialized = false;
     }
 
     public void ProcessBlock(ReadOnlySpan<float> hop, long sampleTime, in AnalysisSignalWriter writer, AnalysisSignalMask requestedSignals)
@@ -239,9 +204,11 @@ public sealed class AnalysisSignalProcessor
             Array.Copy(_analysisBufferProcessed, count, _analysisBufferProcessed, 0, tail);
         }
 
-        bool needSpeech = (requestedSignals & AnalysisSignalMask.SpeechPresence) != 0;
-        bool needFricative = (requestedSignals & AnalysisSignalMask.FricativeActivity) != 0;
-        bool needSibilance = (requestedSignals & AnalysisSignalMask.SibilanceEnergy) != 0;
+        AnalysisSignalMask computeSignals = AnalysisSignalDependencies.Expand(requestedSignals);
+
+        bool needSpeech = (computeSignals & AnalysisSignalMask.SpeechPresence) != 0;
+        bool needFricative = (computeSignals & AnalysisSignalMask.FricativeActivity) != 0;
+        bool needSibilance = (computeSignals & AnalysisSignalMask.SibilanceEnergy) != 0;
         bool needStreaming = needSpeech || needFricative || needSibilance;
 
         float speechSum = 0f;
@@ -314,11 +281,11 @@ public sealed class AnalysisSignalProcessor
             WriteLastValue(AnalysisSignalId.SibilanceEnergy, sibilanceSum / Math.Max(1, count));
         }
 
-        bool needsFrame = NeedsFrameSignals(requestedSignals);
+        bool needsFrame = NeedsFrameSignals(computeSignals);
         if (needsFrame)
         {
             EnsureFftMagnitudes();
-            ProcessFrameCore(_analysisBufferRaw, _analysisBufferProcessed, _fftMagnitudes, requestedSignals);
+            ProcessFrameCore(_analysisBufferRaw, _analysisBufferProcessed, _fftMagnitudes, computeSignals);
             FillFrameBuffers(count, requestedSignals);
         }
 
@@ -333,9 +300,10 @@ public sealed class AnalysisSignalProcessor
             return;
         }
 
-        bool needSpeech = (requestedSignals & AnalysisSignalMask.SpeechPresence) != 0;
-        bool needFricative = (requestedSignals & AnalysisSignalMask.FricativeActivity) != 0;
-        bool needSibilance = (requestedSignals & AnalysisSignalMask.SibilanceEnergy) != 0;
+        AnalysisSignalMask computeSignals = AnalysisSignalDependencies.Expand(requestedSignals);
+        bool needSpeech = (computeSignals & AnalysisSignalMask.SpeechPresence) != 0;
+        bool needFricative = (computeSignals & AnalysisSignalMask.FricativeActivity) != 0;
+        bool needSibilance = (computeSignals & AnalysisSignalMask.SibilanceEnergy) != 0;
         bool needStreaming = needSpeech || needFricative || needSibilance;
         if (!needStreaming)
         {
@@ -397,28 +365,22 @@ public sealed class AnalysisSignalProcessor
             return;
         }
 
-        ProcessFrameCore(rawFrame, processedFrame, magnitudes, requestedSignals);
+        AnalysisSignalMask computeSignals = AnalysisSignalDependencies.Expand(requestedSignals);
+        ProcessFrameCore(rawFrame, processedFrame, magnitudes, computeSignals);
     }
 
     private void ProcessFrameCore(ReadOnlySpan<float> rawFrame, ReadOnlySpan<float> processedFrame,
-        ReadOnlySpan<float> magnitudes, AnalysisSignalMask requestedSignals)
+        ReadOnlySpan<float> magnitudes, AnalysisSignalMask computeSignals)
     {
-        bool needsPitch = (requestedSignals & (AnalysisSignalMask.PitchHz | AnalysisSignalMask.PitchConfidence)) != 0;
-        bool needsVoicing = (requestedSignals & (AnalysisSignalMask.VoicingScore | AnalysisSignalMask.VoicingState)) != 0;
-        bool needsFormants = (requestedSignals & (AnalysisSignalMask.FormantF1Hz | AnalysisSignalMask.FormantF2Hz | AnalysisSignalMask.FormantF3Hz | AnalysisSignalMask.FormantConfidence)) != 0;
-        bool needsSpectralFlux = (requestedSignals & AnalysisSignalMask.SpectralFlux) != 0;
-        bool needsOnsetFlux = (requestedSignals & AnalysisSignalMask.OnsetFluxHigh) != 0;
-        bool needsHnr = (requestedSignals & AnalysisSignalMask.HnrDb) != 0;
+        bool needsPitch = (computeSignals & (AnalysisSignalMask.PitchHz | AnalysisSignalMask.PitchConfidence)) != 0;
+        bool needsVoicing = (computeSignals & (AnalysisSignalMask.VoicingScore | AnalysisSignalMask.VoicingState)) != 0;
+        bool needsSpectralFlux = (computeSignals & AnalysisSignalMask.SpectralFlux) != 0;
+        bool needsOnsetFlux = (computeSignals & AnalysisSignalMask.OnsetFluxHigh) != 0;
+        bool needsHnr = (computeSignals & AnalysisSignalMask.HnrDb) != 0;
 
         if (needsVoicing)
         {
             needsPitch = true;
-        }
-
-        if (needsFormants)
-        {
-            needsPitch = true;
-            needsVoicing = true;
         }
 
         float pitch = 0f;
@@ -436,69 +398,12 @@ public sealed class AnalysisSignalProcessor
 
         if (needsVoicing)
         {
-            voicing = _voicingDetector.Detect(rawFrame, magnitudes, pitchConfidence);
-            voicingScore = voicing == VoicingState.Voiced ? pitchConfidence : 0f;
+            float cpp = Volatile.Read(ref _lastCpp);
+            var voicingResult = _voicingDetector.Process(rawFrame, magnitudes, pitchConfidence, cpp);
+            voicing = voicingResult.State;
+            voicingScore = voicing == VoicingState.Silence ? 0f : voicingResult.Score;
             WriteLastValue(AnalysisSignalId.VoicingState, (float)voicing);
             WriteLastValue(AnalysisSignalId.VoicingScore, voicingScore);
-        }
-
-        if (needsFormants)
-        {
-            float f1 = 0f;
-            float f2 = 0f;
-            float f3 = 0f;
-            float confidence = 0f;
-            float bw1 = 0f;
-            float bw2 = 0f;
-            float bw3 = 0f;
-
-            bool vowelLike = false;
-            if (voicing == VoicingState.Voiced)
-            {
-                float vowelMinHz = MathF.Max(VowelEnergyMinHz, _formantPreset.F1MinHz);
-                float vowelMaxHz = MathF.Min(VowelEnergyMaxHz, _formantPreset.F1MaxHz);
-                if (vowelMaxHz <= vowelMinHz)
-                {
-                    vowelMinHz = VowelEnergyMinHz;
-                    vowelMaxHz = VowelEnergyMaxHz;
-                }
-
-                float ratio = DspUtils.ComputeBandEnergyRatio(magnitudes, _binResolution, vowelMinHz, vowelMaxHz);
-                vowelLike = ratio >= VowelEnergyRatioThreshold;
-            }
-
-            if (voicing == VoicingState.Voiced && vowelLike && TryExtractFormants(rawFrame, out int count))
-            {
-                if (count > 0)
-                {
-                    f1 = _formantFreqScratch[0];
-                    if (count > 1)
-                    {
-                        f2 = _formantFreqScratch[1];
-                    }
-                    if (count > 2)
-                    {
-                        f3 = _formantFreqScratch[2];
-                    }
-                    bw1 = _formantBwScratch[0];
-                    bw2 = count > 1 ? _formantBwScratch[1] : 0f;
-                    bw3 = count > 2 ? _formantBwScratch[2] : 0f;
-                    // Confidence derives from LPC + beam tracking cost, not pitch.
-                    confidence = _beamFormantTracker?.LastConfidence ?? 0f;
-                }
-            }
-            else
-            {
-                _beamFormantTracker?.MarkNoUpdate();
-            }
-
-            WriteLastValue(AnalysisSignalId.FormantF1Hz, f1);
-            WriteLastValue(AnalysisSignalId.FormantF2Hz, f2);
-            WriteLastValue(AnalysisSignalId.FormantF3Hz, f3);
-            WriteLastValue(AnalysisSignalId.FormantConfidence, Math.Clamp(confidence, 0f, 1f));
-            Volatile.Write(ref _lastFormantBandwidth1, bw1);
-            Volatile.Write(ref _lastFormantBandwidth2, bw2);
-            Volatile.Write(ref _lastFormantBandwidth3, bw3);
         }
 
         if (needsSpectralFlux || needsOnsetFlux)
@@ -567,22 +472,6 @@ public sealed class AnalysisSignalProcessor
         {
             writer.WriteBlock(AnalysisSignalId.PitchConfidence, sampleTime, _pitchConfidenceBuffer.AsSpan(0, count));
         }
-        if ((requestedSignals & AnalysisSignalMask.FormantF1Hz) != 0)
-        {
-            writer.WriteBlock(AnalysisSignalId.FormantF1Hz, sampleTime, _formantF1Buffer.AsSpan(0, count));
-        }
-        if ((requestedSignals & AnalysisSignalMask.FormantF2Hz) != 0)
-        {
-            writer.WriteBlock(AnalysisSignalId.FormantF2Hz, sampleTime, _formantF2Buffer.AsSpan(0, count));
-        }
-        if ((requestedSignals & AnalysisSignalMask.FormantF3Hz) != 0)
-        {
-            writer.WriteBlock(AnalysisSignalId.FormantF3Hz, sampleTime, _formantF3Buffer.AsSpan(0, count));
-        }
-        if ((requestedSignals & AnalysisSignalMask.FormantConfidence) != 0)
-        {
-            writer.WriteBlock(AnalysisSignalId.FormantConfidence, sampleTime, _formantConfidenceBuffer.AsSpan(0, count));
-        }
         if ((requestedSignals & AnalysisSignalMask.SpectralFlux) != 0)
         {
             writer.WriteBlock(AnalysisSignalId.SpectralFlux, sampleTime, _spectralFluxBuffer.AsSpan(0, count));
@@ -614,22 +503,6 @@ public sealed class AnalysisSignalProcessor
         if ((requestedSignals & AnalysisSignalMask.PitchConfidence) != 0)
         {
             _pitchConfidenceBuffer.AsSpan(0, count).Fill(GetLastValue(AnalysisSignalId.PitchConfidence));
-        }
-        if ((requestedSignals & AnalysisSignalMask.FormantF1Hz) != 0)
-        {
-            _formantF1Buffer.AsSpan(0, count).Fill(GetLastValue(AnalysisSignalId.FormantF1Hz));
-        }
-        if ((requestedSignals & AnalysisSignalMask.FormantF2Hz) != 0)
-        {
-            _formantF2Buffer.AsSpan(0, count).Fill(GetLastValue(AnalysisSignalId.FormantF2Hz));
-        }
-        if ((requestedSignals & AnalysisSignalMask.FormantF3Hz) != 0)
-        {
-            _formantF3Buffer.AsSpan(0, count).Fill(GetLastValue(AnalysisSignalId.FormantF3Hz));
-        }
-        if ((requestedSignals & AnalysisSignalMask.FormantConfidence) != 0)
-        {
-            _formantConfidenceBuffer.AsSpan(0, count).Fill(GetLastValue(AnalysisSignalId.FormantConfidence));
         }
         if ((requestedSignals & AnalysisSignalMask.SpectralFlux) != 0)
         {
@@ -677,13 +550,27 @@ public sealed class AnalysisSignalProcessor
         int start = (int)MathF.Floor(2000f / MathF.Max(_binResolution, 1e-6f));
         start = Math.Clamp(start, 0, bins - 1);
 
+        if (!_highFluxInitialized)
+        {
+            for (int i = start; i < bins; i++)
+            {
+                _highFluxPrevious[i] = DspUtils.LinearToDb(magnitudes[i]);
+            }
+            _highFluxInitialized = true;
+            return 0f;
+        }
+
         double sum = 0.0;
         int count = 0;
         for (int i = start; i < bins; i++)
         {
-            float diff = magnitudes[i] - _highFluxPrevious[i];
-            sum += diff * diff;
-            _highFluxPrevious[i] = magnitudes[i];
+            float currentDb = DspUtils.LinearToDb(magnitudes[i]);
+            float diff = currentDb - _highFluxPrevious[i];
+            if (diff > 0f)
+            {
+                sum += diff;
+            }
+            _highFluxPrevious[i] = currentDb;
             count++;
         }
 
@@ -734,84 +621,6 @@ public sealed class AnalysisSignalProcessor
         }
     }
 
-    private bool TryExtractFormants(ReadOnlySpan<float> rawFrame, out int count)
-    {
-        count = 0;
-        if (_lpcAnalyzer is null || _beamFormantTracker is null)
-        {
-            return false;
-        }
-
-        int bufferLen = rawFrame.Length;
-        int lpcLen = Math.Min(_lpcWindowSamples, bufferLen);
-        int lpcStart = Math.Max(0, bufferLen - lpcLen);
-
-        EnsureBuffer(ref _lpcInputBuffer, lpcLen);
-        rawFrame.Slice(lpcStart, lpcLen).CopyTo(_lpcInputBuffer.AsSpan(0, lpcLen));
-
-        int decimatedLen = lpcLen;
-        if (_lpcDecimationStages >= 1)
-        {
-            _lpcDecimator1.Reset();
-            int decimated1Len = lpcLen / 2;
-            EnsureBuffer(ref _lpcDecimateBuffer1, decimated1Len);
-            _lpcDecimator1.ProcessDownsample(_lpcInputBuffer.AsSpan(0, lpcLen),
-                _lpcDecimateBuffer1.AsSpan(0, decimated1Len));
-
-            if (_lpcDecimationStages == 2)
-            {
-                _lpcDecimator2.Reset();
-                decimatedLen = decimated1Len / 2;
-                EnsureBuffer(ref _lpcDecimatedBuffer, decimatedLen);
-                _lpcDecimator2.ProcessDownsample(_lpcDecimateBuffer1.AsSpan(0, decimated1Len),
-                    _lpcDecimatedBuffer.AsSpan(0, decimatedLen));
-            }
-            else
-            {
-                decimatedLen = decimated1Len;
-                EnsureBuffer(ref _lpcDecimatedBuffer, decimatedLen);
-                _lpcDecimateBuffer1.AsSpan(0, decimatedLen).CopyTo(_lpcDecimatedBuffer.AsSpan(0, decimatedLen));
-            }
-        }
-        else
-        {
-            EnsureBuffer(ref _lpcDecimatedBuffer, lpcLen);
-            _lpcInputBuffer.AsSpan(0, lpcLen).CopyTo(_lpcDecimatedBuffer.AsSpan(0, lpcLen));
-        }
-
-        float preEmphasisAlpha = ComputePreEmphasisAlpha(FormantProfileInfo.DefaultPreEmphasisHz, _lpcSampleRate);
-        _lpcPreEmphasisFilter.Configure(preEmphasisAlpha);
-        _lpcPreEmphasisFilter.Reset();
-
-        EnsureBuffer(ref _lpcWindow, decimatedLen);
-        EnsureBuffer(ref _lpcWindowedBuffer, decimatedLen);
-        if (_lpcWindowLength != decimatedLen)
-        {
-            WindowFunctions.FillGaussian(_lpcWindow.AsSpan(0, decimatedLen), LpcGaussianSigma);
-            _lpcWindowLength = decimatedLen;
-        }
-
-        for (int i = 0; i < decimatedLen; i++)
-        {
-            float emphasized = _lpcPreEmphasisFilter.Process(_lpcDecimatedBuffer[i]);
-            _lpcWindowedBuffer[i] = emphasized * _lpcWindow[i];
-        }
-
-        int order = _formantPreset.LpcOrder;
-        EnsureBuffer(ref _lpcCoefficients, order + 1);
-
-        if (_lpcAnalyzer.Compute(_lpcWindowedBuffer.AsSpan(0, decimatedLen), _lpcCoefficients))
-        {
-            count = _beamFormantTracker.Track(_lpcCoefficients, _lpcSampleRate,
-                _formantFreqScratch, _formantBwScratch,
-                50f, _formantCeilingHz, 3);
-            return count > 0;
-        }
-
-        _beamFormantTracker.MarkNoUpdate();
-        return false;
-    }
-
     private void ConfigureFilters(AnalysisSignalProcessorSettings settings)
     {
         _dcHighPass.Configure(DcCutoffHz, _sampleRate);
@@ -852,29 +661,6 @@ public sealed class AnalysisSignalProcessor
         _swipePitchDetector.Configure(_sampleRate, _analysisSize, minFrequency, maxFrequency);
     }
 
-    private void ConfigureFormantTracking(FormantProfile profile)
-    {
-        _formantPreset = FormantProfileInfo.GetTrackingPreset(profile);
-        _formantCeilingHz = _formantPreset.FormantCeilingHz;
-
-        _lpcDecimationStages = GetLpcDecimationStages(_sampleRate, _formantCeilingHz);
-        float currentRate = _sampleRate;
-        for (int i = 0; i < _lpcDecimationStages; i++)
-        {
-            currentRate *= 0.5f;
-        }
-
-        _lpcSampleRate = Math.Max(1, (int)MathF.Round(currentRate));
-        _lpcWindowSamples = ComputeLpcWindowSamples(_lpcSampleRate, _formantPreset.LpcOrder, _analysisSize);
-
-        _lpcAnalyzer ??= new LpcAnalyzer(_formantPreset.LpcOrder);
-        _lpcAnalyzer.Configure(_formantPreset.LpcOrder);
-
-        float frameSeconds = _hopSize / (float)Math.Max(1, _sampleRate);
-        _beamFormantTracker ??= new BeamSearchFormantTracker(_formantPreset.LpcOrder, _formantPreset, frameSeconds, beamWidth: 5);
-        _beamFormantTracker.Configure(_formantPreset.LpcOrder, _formantPreset, frameSeconds, beamWidth: 5);
-    }
-
     private static void EnsureBuffer(ref float[] buffer, int length)
     {
         if (buffer.Length != length)
@@ -893,10 +679,6 @@ public sealed class AnalysisSignalProcessor
         EnsureBuffer(ref _onsetFluxBuffer, length);
         EnsureBuffer(ref _pitchBuffer, length);
         EnsureBuffer(ref _pitchConfidenceBuffer, length);
-        EnsureBuffer(ref _formantF1Buffer, length);
-        EnsureBuffer(ref _formantF2Buffer, length);
-        EnsureBuffer(ref _formantF3Buffer, length);
-        EnsureBuffer(ref _formantConfidenceBuffer, length);
         EnsureBuffer(ref _spectralFluxBuffer, length);
         EnsureBuffer(ref _hnrDbBuffer, length);
     }
@@ -921,10 +703,6 @@ public sealed class AnalysisSignalProcessor
             AnalysisSignalMask.OnsetFluxHigh |
             AnalysisSignalMask.PitchHz |
             AnalysisSignalMask.PitchConfidence |
-            AnalysisSignalMask.FormantF1Hz |
-            AnalysisSignalMask.FormantF2Hz |
-            AnalysisSignalMask.FormantF3Hz |
-            AnalysisSignalMask.FormantConfidence |
             AnalysisSignalMask.SpectralFlux |
             AnalysisSignalMask.HnrDb;
 
@@ -948,10 +726,6 @@ public sealed class AnalysisSignalProcessor
             AnalysisSignalId.OnsetFluxHigh => MathF.Max(0f, value),
             AnalysisSignalId.PitchHz => MathF.Max(0f, value),
             AnalysisSignalId.PitchConfidence => Clamp01(value),
-            AnalysisSignalId.FormantF1Hz => MathF.Max(0f, value),
-            AnalysisSignalId.FormantF2Hz => MathF.Max(0f, value),
-            AnalysisSignalId.FormantF3Hz => MathF.Max(0f, value),
-            AnalysisSignalId.FormantConfidence => Clamp01(value),
             AnalysisSignalId.SpectralFlux => MathF.Max(0f, value),
             AnalysisSignalId.HnrDb => Math.Clamp(value, -120f, 120f),
             _ => value
@@ -981,42 +755,6 @@ public sealed class AnalysisSignalProcessor
             power <<= 1;
         }
         return power;
-    }
-
-    private static int ComputeLpcWindowSamples(int sampleRate, int lpcOrder, int maxWindowSamples)
-    {
-        int desired = (int)MathF.Round(LpcWindowSeconds * sampleRate);
-        int maxWindow = Math.Max(1, maxWindowSamples);
-        int minWindow = Math.Min(maxWindow, Math.Max(lpcOrder + 1, 128));
-        return Math.Clamp(desired, minWindow, maxWindow);
-    }
-
-    private static int GetLpcDecimationStages(int sampleRate, float formantCeilingHz)
-    {
-        if (sampleRate <= 0 || formantCeilingHz <= 0f)
-        {
-            return 0;
-        }
-
-        float requiredRate = formantCeilingHz * 2f;
-        int stages = 0;
-        float currentRate = sampleRate;
-        while (stages < 2 && currentRate / 2f >= requiredRate)
-        {
-            currentRate /= 2f;
-            stages++;
-        }
-        return stages;
-    }
-
-    private static float ComputePreEmphasisAlpha(float cutoffHz, int sampleRate)
-    {
-        if (cutoffHz <= 0f || sampleRate <= 0)
-        {
-            return 0f;
-        }
-
-        return MathF.Exp(-2f * MathF.PI * cutoffHz / sampleRate);
     }
 
     private static float ComputeSpectralFlatness(ReadOnlySpan<float> magnitudes)

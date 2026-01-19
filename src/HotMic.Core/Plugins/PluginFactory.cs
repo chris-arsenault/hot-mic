@@ -32,7 +32,6 @@ public static class PluginFactory
             "builtin:air-exciter" => new AirExciterPlugin(),
             "builtin:bass-enhancer" => new BassEnhancerPlugin(),
             "builtin:consonant-transient" => new ConsonantTransientPlugin(),
-            "builtin:formant-enhance" => new FormantEnhancerPlugin(),
             "builtin:input" => new InputPlugin(),
             "builtin:copy" => new CopyToChannelPlugin(),
             "builtin:bus-input" => new BusInputPlugin(),

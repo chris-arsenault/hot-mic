@@ -59,8 +59,7 @@ internal sealed class PluginWindowRouter
             new() { Id = "builtin:spectral-contrast", Name = "Spectral Contrast", IsVst3 = false, Category = PluginCategory.Effects, Description = "Enhances spectral detail via lateral inhibition" },
             new() { Id = "builtin:air-exciter", Name = "Air Exciter", IsVst3 = false, Category = PluginCategory.Effects, Description = "Keyed high-frequency excitation" },
             new() { Id = "builtin:bass-enhancer", Name = "Bass Enhancer", IsVst3 = false, Category = PluginCategory.Effects, Description = "Psychoacoustic low-end harmonics" },
-            new() { Id = "builtin:room-tone", Name = "Room Tone", IsVst3 = false, Category = PluginCategory.Effects, Description = "Controlled ambience bed with ducking" },
-            new() { Id = "builtin:formant-enhance", Name = "Formant Enhancer", IsVst3 = false, Category = PluginCategory.Effects, Description = "Formant-aware enhancement for vowels" }
+            new() { Id = "builtin:room-tone", Name = "Room Tone", IsVst3 = false, Category = PluginCategory.Effects, Description = "Controlled ambience bed with ducking" }
         };
 
         if (config.EnableVstPlugins)
@@ -226,12 +225,6 @@ internal sealed class PluginWindowRouter
         if (plugin is DynamicEqPlugin dynamicEq)
         {
             ShowDynamicEqWindow(channelIndex, pluginInstanceId, dynamicEq, request);
-            return;
-        }
-
-        if (plugin is FormantEnhancerPlugin formantEnhancer)
-        {
-            ShowFormantEnhancerWindow(channelIndex, pluginInstanceId, formantEnhancer, request);
             return;
         }
 
@@ -648,21 +641,6 @@ internal sealed class PluginWindowRouter
     private void ShowDynamicEqWindow(int channelIndex, int pluginInstanceId, DynamicEqPlugin plugin, PluginWindowRequest request)
     {
         var window = new DynamicEqWindow(plugin,
-            (paramIndex, value) =>
-            {
-                string paramName = plugin.Parameters[paramIndex].Name;
-                request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
-            },
-            bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
-        {
-            Owner = System.Windows.Application.Current?.MainWindow
-        };
-        window.Show();
-    }
-
-    private void ShowFormantEnhancerWindow(int channelIndex, int pluginInstanceId, FormantEnhancerPlugin plugin, PluginWindowRequest request)
-    {
-        var window = new FormantEnhancerWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = plugin.Parameters[paramIndex].Name;

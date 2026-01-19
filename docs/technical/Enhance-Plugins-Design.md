@@ -65,9 +65,7 @@ Minimal set to support all 8 plugins:
 - VoicingState (0=Silence, 1=Unvoiced, 2=Voiced)
 - FricativeActivity (HF aperiodic activity, 0..1)
 - SibilanceEnergy (narrow HF band energy)
-- OnsetFluxHigh (HF spectral flux, 0..1)
-- FormantF1/F2/F3 (Hz)
-- FormantConfidence (0..1)
+- OnsetFluxHigh (HF spectral flux, mean positive dB change per frame)
 
 Note: the analysis bus may carry additional signals for visuals; this list only
 captures what the enhance plugins require.
@@ -121,12 +119,6 @@ consumers stay aligned. IDs are illustrative and should be finalized later.
 - Domain: time-domain HF transient shaper OR STFT flux
 - Analysis signal: OnsetFluxHigh
 - Notes: short window emphasis with hard ceiling.
-
-8) Formant-Aware Enhancement
-- Id: builtin:formant-enhance
-- Domain: time-domain EQ steered by formants
-- Analysis signal: SpeechPresence + FormantF1/F2/F3 + FormantConfidence
-- Notes: light tracking; boost near moving formants, avoid in-between.
 
 ## Alignment Rules
 

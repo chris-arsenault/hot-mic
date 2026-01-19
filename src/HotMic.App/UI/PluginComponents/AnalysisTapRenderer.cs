@@ -396,10 +396,6 @@ public sealed class AnalysisTapRenderer : IDisposable
             AnalysisSignalId.OnsetFluxHigh => _fluxPaint,
             AnalysisSignalId.PitchHz => _pitchPaint,
             AnalysisSignalId.PitchConfidence => _pitchPaint,
-            AnalysisSignalId.FormantF1Hz => _formantPaint,
-            AnalysisSignalId.FormantF2Hz => _formantPaint,
-            AnalysisSignalId.FormantF3Hz => _formantPaint,
-            AnalysisSignalId.FormantConfidence => _formantPaint,
             AnalysisSignalId.SpectralFlux => _fluxPaint,
             AnalysisSignalId.HnrDb => _hnrPaint,
             _ => _speechPaint
@@ -415,13 +411,9 @@ public sealed class AnalysisTapRenderer : IDisposable
             AnalysisSignalId.VoicingState => Clamp01(value / 2f),
             AnalysisSignalId.FricativeActivity => Clamp01(value),
             AnalysisSignalId.SibilanceEnergy => Clamp01(value),
-            AnalysisSignalId.OnsetFluxHigh => Clamp01(value),
+            AnalysisSignalId.OnsetFluxHigh => NormalizeRange(value, 0f, 12f),
             AnalysisSignalId.PitchHz => NormalizeRange(value, 50f, 1000f),
             AnalysisSignalId.PitchConfidence => Clamp01(value),
-            AnalysisSignalId.FormantF1Hz => NormalizeRange(value, 100f, 1000f),
-            AnalysisSignalId.FormantF2Hz => NormalizeRange(value, 500f, 3500f),
-            AnalysisSignalId.FormantF3Hz => NormalizeRange(value, 1500f, 4500f),
-            AnalysisSignalId.FormantConfidence => Clamp01(value),
             AnalysisSignalId.SpectralFlux => NormalizeRange(value, 0f, 2f),
             AnalysisSignalId.HnrDb => NormalizeRange(value, -10f, 30f),
             _ => 0f
@@ -437,13 +429,9 @@ public sealed class AnalysisTapRenderer : IDisposable
             AnalysisSignalId.VoicingScore => $"{value * 100f:0}%",
             AnalysisSignalId.FricativeActivity => $"{value * 100f:0}%",
             AnalysisSignalId.SibilanceEnergy => $"{value * 100f:0}%",
-            AnalysisSignalId.OnsetFluxHigh => $"{value * 100f:0}%",
+            AnalysisSignalId.OnsetFluxHigh => $"{value:0.0} dB",
             AnalysisSignalId.PitchHz => value > 0f ? $"{value:0} Hz" : "-",
             AnalysisSignalId.PitchConfidence => $"{value * 100f:0}%",
-            AnalysisSignalId.FormantF1Hz => value > 0f ? $"{value:0} Hz" : "-",
-            AnalysisSignalId.FormantF2Hz => value > 0f ? $"{value:0} Hz" : "-",
-            AnalysisSignalId.FormantF3Hz => value > 0f ? $"{value:0} Hz" : "-",
-            AnalysisSignalId.FormantConfidence => $"{value * 100f:0}%",
             AnalysisSignalId.SpectralFlux => $"{value:0.00}",
             AnalysisSignalId.HnrDb => $"{value:0.0} dB",
             _ => $"{value:0.00}"
@@ -521,13 +509,6 @@ public sealed class AnalysisTapRenderer : IDisposable
     private static readonly SKPaint _pitchPaint = new()
     {
         Color = new SKColor(0x40, 0xB0, 0xD0),
-        IsAntialias = true,
-        Style = SKPaintStyle.Fill
-    };
-
-    private static readonly SKPaint _formantPaint = new()
-    {
-        Color = new SKColor(0x60, 0xA0, 0x60),
         IsAntialias = true,
         Style = SKPaintStyle.Fill
     };

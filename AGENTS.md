@@ -304,6 +304,7 @@ public class MeterControl : SkiaControl
 
 - **Do not change DSP algorithms to match UI behavior.** If the UI does not reflect audible behavior, fix the UI scaling/meters/labels first.
 - **Do change DSP algorithms when there are real bugs,** but validate changes against reference implementations or standard formulas for that DSP class.
+- **CRITICAL: Do not tweak DSP algorithms or thresholds based solely on observed behavior.** Changes must be grounded in DSP references, measurement, or explicit requirements; otherwise expose tunable parameters instead of hardcoding guesses.
 - **Document the reference** with a concise inline comment near the relevant code so intent and expected behavior are clear.
 - **Keep spec docs in sync** whenever DSP algorithms change (update `docs/technical` references to match behavior).
 

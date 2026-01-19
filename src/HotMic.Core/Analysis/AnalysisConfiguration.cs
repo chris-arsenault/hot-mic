@@ -1,6 +1,6 @@
 using HotMic.Core.Dsp;
+using HotMic.Core.Dsp.Analysis;
 using HotMic.Core.Dsp.Spectrogram;
-using HotMic.Core.Dsp.Voice;
 
 namespace HotMic.Core.Analysis;
 
@@ -14,7 +14,6 @@ public sealed class AnalysisConfiguration
     public const float DefaultTimeWindow = 5f;
     public const float DefaultMinFrequency = 80f;
     public const float DefaultMaxFrequency = 8000f;
-    public const int MaxFormants = 5;
     public const int MaxHarmonics = 24;
     public const int FixedDisplayBins = 512;
 
@@ -32,7 +31,6 @@ public sealed class AnalysisConfiguration
     private SpectrogramTransformType _transformType = SpectrogramTransformType.Fft;
     private int _cqtBinsPerOctave = 48;
     private PitchDetectorType _pitchAlgorithm = PitchDetectorType.Yin;
-    private FormantProfile _formantProfile = FormantProfile.Tenor;
     private ClarityProcessingMode _clarityMode = ClarityProcessingMode.None;
     private float _clarityNoise = 1f;
     private float _clarityHarmonic = 1f;
@@ -45,6 +43,7 @@ public sealed class AnalysisConfiguration
     private float _reassignThreshold = -60f;
     private float _reassignSpread = 1f;
     private SpectrogramNormalizationMode _normalizationMode = SpectrogramNormalizationMode.None;
+    private VoicingDetectorSettings _voicingSettings = new();
 
     public int FftSize
     {
@@ -106,12 +105,6 @@ public sealed class AnalysisConfiguration
     {
         get => _pitchAlgorithm;
         set => _pitchAlgorithm = value;
-    }
-
-    public FormantProfile FormantProfile
-    {
-        get => _formantProfile;
-        set => _formantProfile = value;
     }
 
     public ClarityProcessingMode ClarityMode
@@ -186,6 +179,12 @@ public sealed class AnalysisConfiguration
         set => _normalizationMode = value;
     }
 
+    public VoicingDetectorSettings VoicingSettings
+    {
+        get => _voicingSettings;
+        set => _voicingSettings = value;
+    }
+
     public int ComputeHopSize() => Math.Max(1, (int)(_fftSize * (1f - Overlap)));
 
     public int ComputeFrameCapacity(int sampleRate)
@@ -208,7 +207,6 @@ public sealed class AnalysisConfiguration
             _transformType = _transformType,
             _cqtBinsPerOctave = _cqtBinsPerOctave,
             _pitchAlgorithm = _pitchAlgorithm,
-            _formantProfile = _formantProfile,
             _clarityMode = _clarityMode,
             _clarityNoise = _clarityNoise,
             _clarityHarmonic = _clarityHarmonic,
@@ -221,6 +219,7 @@ public sealed class AnalysisConfiguration
             _reassignThreshold = _reassignThreshold,
             _reassignSpread = _reassignSpread,
             _normalizationMode = _normalizationMode,
+            _voicingSettings = _voicingSettings,
         };
     }
 

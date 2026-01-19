@@ -38,7 +38,6 @@ def resonance_coeffs(freq_hz, bw_hz, sr):
     return np.array([1.0, -2 * r * np.cos(theta), r**2])
 
 
-def extract_formants(coeffs, sr, min_hz, max_hz):
     roots = np.roots(coeffs)
     nyquist = sr * 0.5
     min_hz = max(0.0, min_hz)
@@ -160,33 +159,23 @@ def main():
     )
     coeffs = burg_coeffs(x, order)
     print("LPC Burg 700+1200+2500 Hz, fs=12000, n=512, order=12:", fmt(coeffs))
-    formants = extract_formants(coeffs, fs, 100, 5500)
-    print("Formant extract (Burg, 700/1200/2500 sines):", formants)
 
     noise = lcg_gaussian(9012, n)
     noisy = x + 0.1 * noise
     coeffs = burg_coeffs(noisy, order)
-    formants = extract_formants(coeffs, fs, 100, 5500)
-    print("Formant extract (Burg, 700/1200/2500 sines + noise 0.1, seed=9012):", formants)
 
     noisy = x + 0.2 * noise
     coeffs = burg_coeffs(noisy, order)
-    formants = extract_formants(coeffs, fs, 100, 5500)
-    print("Formant extract (Burg, 700/1200/2500 sines + noise 0.2, seed=9012):", formants)
 
-    # Formant references
     sr = 16000
     coeffs = resonance_coeffs(500, 80, sr)
-    print("Formant single 500 Hz, bw 80 Hz, sr=16000:", fmt(coeffs))
 
     coeffs = np.convolve(
         resonance_coeffs(500, 100, sr),
         resonance_coeffs(2000, 300, sr),
     )
-    print("Formant 500/2000 Hz, bw 100/300 Hz, sr=16000:", fmt(coeffs))
 
     coeffs = resonance_coeffs(2500, 5, 12000)
-    print("Formant single 2500 Hz, bw 5 Hz, sr=12000:", fmt(coeffs))
 
     # YIN references (canonical YIN, CMND + threshold + parabolic interpolation)
     def sine(freq, sr, n):

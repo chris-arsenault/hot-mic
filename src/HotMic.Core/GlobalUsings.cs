@@ -1,6 +1,5 @@
 global using HotMic.Core.Dsp;
 global using HotMic.Core.Dsp.Analysis;
-global using HotMic.Core.Dsp.Analysis.Formants;
 global using HotMic.Core.Dsp.Analysis.Pitch;
 global using HotMic.Core.Dsp.Fft;
 global using HotMic.Core.Dsp.Filters;

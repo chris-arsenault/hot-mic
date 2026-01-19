@@ -42,7 +42,7 @@ public readonly struct SpectrographTimingSnapshot
     public int TransformUs { get; }
     /// <summary>Normalization stage (A-weight/peak/RMS normalization).</summary>
     public int NormalizationUs { get; }
-    /// <summary>Pitch/CPP/voicing/formants/harmonics stage.</summary>
+    /// <summary>Pitch/CPP/voicing/harmonics stage.</summary>
     public int PitchUs { get; }
     /// <summary>Clarity stage (noise, HPSS, smoothing, HNR).</summary>
     public int ClarityUs { get; }

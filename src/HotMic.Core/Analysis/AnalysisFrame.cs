@@ -25,67 +25,6 @@ public struct AnalysisFrame
 }
 
 /// <summary>
-/// Formant data for a single frame (up to 5 formants).
-/// </summary>
-public struct FormantFrame
-{
-    public float F1 { get; set; }
-    public float F2 { get; set; }
-    public float F3 { get; set; }
-    public float F4 { get; set; }
-    public float F5 { get; set; }
-    public float B1 { get; set; }
-    public float B2 { get; set; }
-    public float B3 { get; set; }
-    public float B4 { get; set; }
-    public float B5 { get; set; }
-
-    public float GetFrequency(int index) => index switch
-    {
-        0 => F1,
-        1 => F2,
-        2 => F3,
-        3 => F4,
-        4 => F5,
-        _ => 0f
-    };
-
-    public float GetBandwidth(int index) => index switch
-    {
-        0 => B1,
-        1 => B2,
-        2 => B3,
-        3 => B4,
-        4 => B5,
-        _ => 0f
-    };
-
-    public void SetFrequency(int index, float value)
-    {
-        switch (index)
-        {
-            case 0: F1 = value; break;
-            case 1: F2 = value; break;
-            case 2: F3 = value; break;
-            case 3: F4 = value; break;
-            case 4: F5 = value; break;
-        }
-    }
-
-    public void SetBandwidth(int index, float value)
-    {
-        switch (index)
-        {
-            case 0: B1 = value; break;
-            case 1: B2 = value; break;
-            case 2: B3 = value; break;
-            case 3: B4 = value; break;
-            case 4: B5 = value; break;
-        }
-    }
-}
-
-/// <summary>
 /// Harmonic data for a single frame (up to 24 harmonics).
 /// </summary>
 public struct HarmonicFrame

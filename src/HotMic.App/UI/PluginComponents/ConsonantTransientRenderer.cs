@@ -13,7 +13,6 @@ public sealed class ConsonantTransientRenderer : IDisposable
     private const float KnobSpacing = 72f;
     private const float CornerRadius = 10f;
     private const float EnvelopeHeight = 80f;
-    private static readonly float[] ThresholdDash = [4f, 3f];
 
     private readonly PluginComponentTheme _theme;
     private readonly PluginPresetBar _presetBar;
@@ -30,8 +29,8 @@ public sealed class ConsonantTransientRenderer : IDisposable
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
     private readonly SKPaint _envelopeBackgroundPaint;
-    private readonly SKPaint _fastEnvPaint;
-    private readonly SKPaint _slowEnvPaint;
+    private readonly SKPaint _fluxPaint;
+    private readonly SKPaint _baselinePaint;
     private readonly SKPaint _transientPaint;
     private readonly SKPaint _gateLedOnPaint;
     private readonly SKPaint _gateLedOffPaint;
@@ -44,10 +43,11 @@ public sealed class ConsonantTransientRenderer : IDisposable
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
 
-    // Envelope history for visualization
-    private readonly float[] _fastEnvHistory = new float[64];
-    private readonly float[] _slowEnvHistory = new float[64];
+    // Flux history for visualization
+    private readonly float[] _fluxHistory = new float[64];
+    private readonly float[] _baselineHistory = new float[64];
     private int _historyIndex;
+    private float _displayMaxDb = 6f;
 
     public ConsonantTransientRenderer(PluginComponentTheme? theme = null)
     {
@@ -58,9 +58,9 @@ public sealed class ConsonantTransientRenderer : IDisposable
         {
             ValueFormat = "0.00"
         };
-        ThresholdKnob = new KnobWidget(KnobRadius, 0f, 0.5f, "THRESH", "", KnobStyle.Standard, _theme)
+        ThresholdKnob = new KnobWidget(KnobRadius, 0f, 6f, "THRESH", "dB", KnobStyle.Standard, _theme)
         {
-            ValueFormat = "0.00"
+            ValueFormat = "0.0"
         };
         HighCutKnob = new KnobWidget(KnobRadius, 3000f, 9000f, "HIGH CUT", "Hz", KnobStyle.Standard, _theme)
         {
@@ -114,17 +114,17 @@ public sealed class ConsonantTransientRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _fastEnvPaint = new SKPaint
+        _fluxPaint = new SKPaint
         {
-            Color = new SKColor(0xFF, 0xA0, 0x40), // Bright orange for fast
+            Color = new SKColor(0xFF, 0xA0, 0x40), // Bright orange for flux
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 2f
         };
 
-        _slowEnvPaint = new SKPaint
+        _baselinePaint = new SKPaint
         {
-            Color = new SKColor(0x80, 0x60, 0x40), // Dim brown for slow
+            Color = new SKColor(0x80, 0x60, 0x40), // Dim brown for baseline
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 2f
@@ -171,10 +171,10 @@ public sealed class ConsonantTransientRenderer : IDisposable
         canvas.Scale(dpiScale);
         size = new SKSize(size.Width / dpiScale, size.Height / dpiScale);
 
-        // Update envelope history
-        _fastEnvHistory[_historyIndex] = state.FastEnvelope;
-        _slowEnvHistory[_historyIndex] = state.SlowEnvelope;
-        _historyIndex = (_historyIndex + 1) % _fastEnvHistory.Length;
+        // Update flux history
+        _fluxHistory[_historyIndex] = state.FluxDb;
+        _baselineHistory[_historyIndex] = state.FluxBaselineDb;
+        _historyIndex = (_historyIndex + 1) % _fluxHistory.Length;
 
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
         var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
@@ -195,10 +195,16 @@ public sealed class ConsonantTransientRenderer : IDisposable
         // Onset gate LED + transient indicator
         float gateX = Padding + 20f;
         float gateY = y + 20f;
-        bool gateOpen = state.OnsetGate > 0.3f;
+        float gate = Math.Clamp(state.OnsetGate, 0f, 1f);
+        bool gateOpen = gate > 0.05f;
 
         if (gateOpen)
         {
+            int alpha = (int)(80f + gate * 175f);
+            byte glowAlpha = (byte)Math.Clamp(alpha, 0, 120);
+            byte ledAlpha = (byte)Math.Clamp(alpha, 0, 255);
+            _gateLedGlowPaint.Color = new SKColor(0xFF, 0x80, 0x40, glowAlpha);
+            _gateLedOnPaint.Color = new SKColor(0xFF, 0x80, 0x40, ledAlpha);
             canvas.DrawCircle(gateX, gateY, 10f, _gateLedGlowPaint);
             canvas.DrawCircle(gateX, gateY, 6f, _gateLedOnPaint);
         }
@@ -226,11 +232,11 @@ public sealed class ConsonantTransientRenderer : IDisposable
         }
         canvas.DrawText("TRANS", transX, gateY + 18f, _labelPaint);
 
-        // Envelope display
+        // Flux display
         float envX = transX + 50f;
         float envWidth = size.Width - envX - Padding;
         var envRect = new SKRect(envX, y, envX + envWidth, y + EnvelopeHeight);
-        DrawEnvelopeDisplay(canvas, envRect, state.Threshold);
+        DrawFluxDisplay(canvas, envRect, state.Threshold);
 
         y += EnvelopeHeight + Padding + 10f;
 
@@ -299,7 +305,7 @@ public sealed class ConsonantTransientRenderer : IDisposable
         canvas.DrawText("\u00D7", _closeButtonRect.MidX, _closeButtonRect.MidY + 6, _closeButtonPaint);
     }
 
-    private void DrawEnvelopeDisplay(SKCanvas canvas, SKRect rect, float threshold)
+    private void DrawFluxDisplay(SKCanvas canvas, SKRect rect, float fluxThresholdDb)
     {
         var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _envelopeBackgroundPaint);
@@ -307,51 +313,60 @@ public sealed class ConsonantTransientRenderer : IDisposable
         float padding = 4f;
         float plotWidth = rect.Width - padding * 2;
         float plotHeight = rect.Height - padding * 2;
-        int count = _fastEnvHistory.Length;
+        int count = _fluxHistory.Length;
+        float lastBaseline = _baselineHistory[(_historyIndex - 1 + count) % count];
+        float targetMaxDb = Math.Clamp(lastBaseline + fluxThresholdDb + 1f, 6f, 12f);
+        targetMaxDb = targetMaxDb <= 6f ? 6f : targetMaxDb <= 9f ? 9f : 12f;
+        _displayMaxDb += (targetMaxDb - _displayMaxDb) * 0.05f;
+        float maxDb = Math.Clamp(_displayMaxDb, 4f, 12f);
 
-        // Draw slow envelope (background)
-        using var slowPath = new SKPath();
+        // Draw baseline (background)
+        using var baselinePath = new SKPath();
         for (int i = 0; i < count; i++)
         {
             int idx = (_historyIndex + i) % count;
             float x = rect.Left + padding + (i / (float)(count - 1)) * plotWidth;
-            float level = Math.Clamp(_slowEnvHistory[idx] * 10f, 0f, 1f);
+            float level = Math.Clamp(_baselineHistory[idx] / maxDb, 0f, 1f);
             float y = rect.Bottom - padding - level * plotHeight;
 
             if (i == 0)
-                slowPath.MoveTo(x, y);
+                baselinePath.MoveTo(x, y);
             else
-                slowPath.LineTo(x, y);
+                baselinePath.LineTo(x, y);
         }
-        canvas.DrawPath(slowPath, _slowEnvPaint);
+        canvas.DrawPath(baselinePath, _baselinePaint);
 
-        // Draw fast envelope (foreground)
-        using var fastPath = new SKPath();
+        // Draw flux (foreground)
+        using var fluxPath = new SKPath();
         for (int i = 0; i < count; i++)
         {
             int idx = (_historyIndex + i) % count;
             float x = rect.Left + padding + (i / (float)(count - 1)) * plotWidth;
-            float level = Math.Clamp(_fastEnvHistory[idx] * 10f, 0f, 1f);
+            float level = Math.Clamp(_fluxHistory[idx] / maxDb, 0f, 1f);
             float y = rect.Bottom - padding - level * plotHeight;
 
             if (i == 0)
-                fastPath.MoveTo(x, y);
+                fluxPath.MoveTo(x, y);
             else
-                fastPath.LineTo(x, y);
+                fluxPath.LineTo(x, y);
         }
-        canvas.DrawPath(fastPath, _fastEnvPaint);
+        canvas.DrawPath(fluxPath, _fluxPaint);
 
-        // Threshold line
-        float threshY = rect.Bottom - padding - threshold * 2f * plotHeight;
+        // Threshold line (baseline + threshold)
+        float thresholdLevel = Math.Clamp((lastBaseline + fluxThresholdDb) / maxDb, 0f, 1f);
+        float threshY = rect.Bottom - padding - thresholdLevel * plotHeight;
         using var threshPaint = new SKPaint
         {
             Color = _theme.ThresholdLine,
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f,
-            PathEffect = SKPathEffect.CreateDash(ThresholdDash, 0)
+            PathEffect = SKPathEffect.CreateDash([4f, 3f], 0)
         };
         canvas.DrawLine(rect.Left + padding, threshY, rect.Right - padding, threshY, threshPaint);
+
+        var scaleLabel = $"{maxDb:0} dB";
+        _labelPaint.DrawText(canvas, scaleLabel, rect.Left + padding + 2f, rect.Top + padding + 10f);
 
         canvas.DrawRoundRect(roundRect, _borderPaint);
     }
@@ -401,8 +416,8 @@ public sealed class ConsonantTransientRenderer : IDisposable
         _bypassPaint.Dispose();
         _bypassActivePaint.Dispose();
         _envelopeBackgroundPaint.Dispose();
-        _fastEnvPaint.Dispose();
-        _slowEnvPaint.Dispose();
+        _fluxPaint.Dispose();
+        _baselinePaint.Dispose();
         _transientPaint.Dispose();
         _gateLedOnPaint.Dispose();
         _gateLedOffPaint.Dispose();
@@ -418,8 +433,8 @@ public record struct ConsonantTransientState(
     float Threshold,
     float HighCutHz,
     float OnsetGate,
-    float FastEnvelope,
-    float SlowEnvelope,
+    float FluxDb,
+    float FluxBaselineDb,
     float TransientDetected,
     float LatencyMs,
     bool IsBypassed,

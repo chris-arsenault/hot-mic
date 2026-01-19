@@ -49,6 +49,9 @@ public sealed class AnalysisOrchestrator : IDisposable
     private float[] _hopBuffer = Array.Empty<float>();
     private readonly AnalysisSignalProcessor _analysisSignalProcessor = new();
     private readonly float[] _analysisSignalValues = new float[(int)AnalysisSignalId.Count];
+    private AnalysisSignalProcessorSettings _activeSignalSettings;
+    private int _activeSignalHopSize;
+    private bool _hasActiveSignalSettings;
     private float[] _fftReal = Array.Empty<float>();
     private float[] _fftImag = Array.Empty<float>();
     private float[] _fftWindow = Array.Empty<float>();
@@ -89,8 +92,6 @@ public sealed class AnalysisOrchestrator : IDisposable
     private OnePoleHighPass _dcHighPass;
     private BiquadFilter _rumbleHighPass = new();
     private PreEmphasisFilter _preEmphasisFilter;
-    private readonly float[] _formantFreqScratch = new float[AnalysisConfiguration.MaxFormants];
-    private readonly float[] _formantBwScratch = new float[AnalysisConfiguration.MaxFormants];
     private readonly float[] _harmonicScratch = new float[AnalysisConfiguration.MaxHarmonics];
     private readonly float[] _harmonicMagScratch = new float[AnalysisConfiguration.MaxHarmonics];
 
@@ -276,7 +277,6 @@ public sealed class AnalysisOrchestrator : IDisposable
 
         bool needsPitch = caps.HasFlag(AnalysisCapabilities.Pitch) ||
                           caps.HasFlag(AnalysisCapabilities.Harmonics) ||
-                          caps.HasFlag(AnalysisCapabilities.Formants) ||
                           caps.HasFlag(AnalysisCapabilities.SpeechMetrics);
         if (needsPitch)
         {
@@ -284,19 +284,10 @@ public sealed class AnalysisOrchestrator : IDisposable
         }
 
         bool needsVoicing = caps.HasFlag(AnalysisCapabilities.VoicingState) ||
-                            caps.HasFlag(AnalysisCapabilities.Formants) ||
                             caps.HasFlag(AnalysisCapabilities.SpeechMetrics);
         if (needsVoicing)
         {
             mask |= AnalysisSignalMask.VoicingState | AnalysisSignalMask.VoicingScore;
-        }
-
-        if (caps.HasFlag(AnalysisCapabilities.Formants) || caps.HasFlag(AnalysisCapabilities.SpeechMetrics))
-        {
-            mask |= AnalysisSignalMask.FormantF1Hz |
-                    AnalysisSignalMask.FormantF2Hz |
-                    AnalysisSignalMask.FormantF3Hz |
-                    AnalysisSignalMask.FormantConfidence;
         }
 
         if (caps.HasFlag(AnalysisCapabilities.SpectralFeatures) || caps.HasFlag(AnalysisCapabilities.SpeechMetrics))
@@ -304,7 +295,7 @@ public sealed class AnalysisOrchestrator : IDisposable
             mask |= AnalysisSignalMask.SpectralFlux | AnalysisSignalMask.HnrDb;
         }
 
-        return mask;
+        return AnalysisSignalDependencies.Expand(mask);
     }
 
     private void UpdateRequestedSignals(AnalysisSignalMask requestedSignals)
@@ -502,13 +493,6 @@ public sealed class AnalysisOrchestrator : IDisposable
                 ? _analysisSignalProcessor.LastCpp
                 : 0f;
 
-            int formantCount = 0;
-            if ((requestedSignals & (AnalysisSignalMask.FormantF1Hz | AnalysisSignalMask.FormantF2Hz | AnalysisSignalMask.FormantF3Hz)) != 0)
-            {
-                float formantConfidence = _analysisSignalValues[(int)AnalysisSignalId.FormantConfidence];
-                formantCount = UpdateFormantScratch(formantConfidence);
-            }
-
             int harmonicCount = ComputeHarmonics(capabilities, lastPitch);
 
             // Clarity processing
@@ -538,11 +522,6 @@ public sealed class AnalysisOrchestrator : IDisposable
             _resultStore.WriteSpectralFeatures(frameIndex, centroid, slope, flux, lastHnr, lastCpp);
             _resultStore.WriteAnalysisSignalFrame(frameIndex, _analysisSignalValues);
 
-            if (formantCount > 0)
-            {
-                _resultStore.WriteFormantFrame(frameIndex, _formantFreqScratch, _formantBwScratch);
-            }
-
             if (harmonicCount > 0)
             {
                 _resultStore.WriteHarmonicFrame(frameIndex, _harmonicScratch, _harmonicMagScratch, harmonicCount);
@@ -552,7 +531,7 @@ public sealed class AnalysisOrchestrator : IDisposable
             if (capabilities.HasFlag(AnalysisCapabilities.SpeechMetrics))
             {
                 var metrics = ProcessSpeechMetrics(waveformMin, waveformMax, lastPitch, lastConfidence,
-                    voicing, flux, slope, lastHnr, formantCount, frameId);
+                    voicing, flux, slope, lastHnr, frameId);
                 _resultStore.WriteSpeechMetrics(frameIndex, metrics);
             }
 
@@ -694,34 +673,6 @@ public sealed class AnalysisOrchestrator : IDisposable
             available |= AnalysisSignalMask.PitchConfidence;
         }
 
-        if ((requestedSignals & AnalysisSignalMask.FormantF1Hz) != 0 &&
-            TryReadSample(bus, producers, AnalysisSignalId.FormantF1Hz, lastTime, out float f1Hz))
-        {
-            values[(int)AnalysisSignalId.FormantF1Hz] = f1Hz;
-            available |= AnalysisSignalMask.FormantF1Hz;
-        }
-
-        if ((requestedSignals & AnalysisSignalMask.FormantF2Hz) != 0 &&
-            TryReadSample(bus, producers, AnalysisSignalId.FormantF2Hz, lastTime, out float f2Hz))
-        {
-            values[(int)AnalysisSignalId.FormantF2Hz] = f2Hz;
-            available |= AnalysisSignalMask.FormantF2Hz;
-        }
-
-        if ((requestedSignals & AnalysisSignalMask.FormantF3Hz) != 0 &&
-            TryReadSample(bus, producers, AnalysisSignalId.FormantF3Hz, lastTime, out float f3Hz))
-        {
-            values[(int)AnalysisSignalId.FormantF3Hz] = f3Hz;
-            available |= AnalysisSignalMask.FormantF3Hz;
-        }
-
-        if ((requestedSignals & AnalysisSignalMask.FormantConfidence) != 0 &&
-            TryReadSample(bus, producers, AnalysisSignalId.FormantConfidence, lastTime, out float formantConfidence))
-        {
-            values[(int)AnalysisSignalId.FormantConfidence] = formantConfidence;
-            available |= AnalysisSignalMask.FormantConfidence;
-        }
-
         if ((requestedSignals & AnalysisSignalMask.SpectralFlux) != 0 &&
             TryReadSample(bus, producers, AnalysisSignalId.SpectralFlux, lastTime, out float flux))
         {
@@ -805,22 +756,6 @@ public sealed class AnalysisOrchestrator : IDisposable
         {
             values[(int)AnalysisSignalId.PitchConfidence] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.PitchConfidence);
         }
-        if ((missingSignals & AnalysisSignalMask.FormantF1Hz) != 0)
-        {
-            values[(int)AnalysisSignalId.FormantF1Hz] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.FormantF1Hz);
-        }
-        if ((missingSignals & AnalysisSignalMask.FormantF2Hz) != 0)
-        {
-            values[(int)AnalysisSignalId.FormantF2Hz] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.FormantF2Hz);
-        }
-        if ((missingSignals & AnalysisSignalMask.FormantF3Hz) != 0)
-        {
-            values[(int)AnalysisSignalId.FormantF3Hz] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.FormantF3Hz);
-        }
-        if ((missingSignals & AnalysisSignalMask.FormantConfidence) != 0)
-        {
-            values[(int)AnalysisSignalId.FormantConfidence] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.FormantConfidence);
-        }
         if ((missingSignals & AnalysisSignalMask.SpectralFlux) != 0)
         {
             values[(int)AnalysisSignalId.SpectralFlux] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.SpectralFlux);
@@ -829,41 +764,6 @@ public sealed class AnalysisOrchestrator : IDisposable
         {
             values[(int)AnalysisSignalId.HnrDb] = _analysisSignalProcessor.GetLastValue(AnalysisSignalId.HnrDb);
         }
-    }
-
-    private int UpdateFormantScratch(float confidence)
-    {
-        if (confidence <= 0f)
-        {
-            return 0;
-        }
-
-        int count = 0;
-        float f1 = _analysisSignalValues[(int)AnalysisSignalId.FormantF1Hz];
-        if (f1 > 0f)
-        {
-            _formantFreqScratch[0] = f1;
-            _formantBwScratch[0] = _analysisSignalProcessor.LastFormantBandwidth1;
-            count = 1;
-        }
-
-        float f2 = _analysisSignalValues[(int)AnalysisSignalId.FormantF2Hz];
-        if (f2 > 0f)
-        {
-            _formantFreqScratch[1] = f2;
-            _formantBwScratch[1] = _analysisSignalProcessor.LastFormantBandwidth2;
-            count = 2;
-        }
-
-        float f3 = _analysisSignalValues[(int)AnalysisSignalId.FormantF3Hz];
-        if (f3 > 0f)
-        {
-            _formantFreqScratch[2] = f3;
-            _formantBwScratch[2] = _analysisSignalProcessor.LastFormantBandwidth3;
-            count = 3;
-        }
-
-        return count;
     }
 
     private int ComputeHarmonics(AnalysisCapabilities capabilities, float pitchHz)
@@ -1186,12 +1086,12 @@ public sealed class AnalysisOrchestrator : IDisposable
         float lastPitch, float lastConfidence,
         VoicingState voicing,
         float flux, float slope, float lastHnr,
-        int formantCount, long frameId)
+        long frameId)
     {
         float peakAmplitude = MathF.Max(MathF.Abs(waveformMin), MathF.Abs(waveformMax));
         float energyDb = peakAmplitude > 1e-8f ? 20f * MathF.Log10(peakAmplitude) : -80f;
-        float f1Hz = formantCount > 0 ? _formantFreqScratch[0] : 0f;
-        float f2Hz = formantCount > 1 ? _formantFreqScratch[1] : 0f;
+        float f1Hz = 0f;
+        float f2Hz = 0f;
         float spectralFlatness = ComputeSpectralFlatness(_fftMagnitudes);
 
         var metrics = _speechCoach.Process(energyDb, lastPitch, lastConfidence, voicing,
@@ -1223,7 +1123,6 @@ public sealed class AnalysisOrchestrator : IDisposable
         var scale = _config.FrequencyScale;
         var transformType = _config.TransformType;
         var reassignMode = _config.ReassignMode;
-        var formantProfile = _config.FormantProfile;
         float hpfCutoff = _config.HighPassCutoff;
         bool hpfEnabled = _config.HighPassEnabled;
         bool preEmphasis = _config.PreEmphasis;
@@ -1391,7 +1290,6 @@ public sealed class AnalysisOrchestrator : IDisposable
 
         _activeTransformType = transformType;
 
-        // Formant analysis
         // Filters
         if (sizeChanged || force || MathF.Abs(hpfCutoff - _activeHighPassCutoff) > 1e-3f ||
             hpfEnabled != _activeHighPassEnabled || preEmphasis != _activePreEmphasisEnabled)
@@ -1451,7 +1349,7 @@ public sealed class AnalysisOrchestrator : IDisposable
         {
             AnalysisSize = _activeFftSize,
             PitchDetector = pitchAlgorithm,
-            FormantProfile = formantProfile,
+            VoicingSettings = _config.VoicingSettings,
             MinFrequency = minHz,
             MaxFrequency = maxHz,
             WindowFunction = window,
@@ -1459,7 +1357,17 @@ public sealed class AnalysisOrchestrator : IDisposable
             HighPassEnabled = hpfEnabled,
             HighPassCutoff = hpfCutoff
         };
-        _analysisSignalProcessor.Configure(_sampleRate, _activeHopSize, signalSettings);
+        bool signalConfigChanged = force ||
+                                   !_hasActiveSignalSettings ||
+                                   _activeSignalHopSize != _activeHopSize ||
+                                   !_activeSignalSettings.Equals(signalSettings);
+        if (signalConfigChanged)
+        {
+            _analysisSignalProcessor.Configure(_sampleRate, _activeHopSize, signalSettings);
+            _activeSignalSettings = signalSettings;
+            _activeSignalHopSize = _activeHopSize;
+            _hasActiveSignalSettings = true;
+        }
     }
 
     private void UpdateAnalysisDescriptor(SpectrogramTransformType transformType)

@@ -9,7 +9,7 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
     public const int HighCutIndex = 2;
 
     private float _amount = 0.6f;
-    private float _threshold = 0.15f;
+    private float _fluxThresholdDb = 1f;
     private float _highCutHz = 6000f;
     private int _sampleRate;
     private string _statusMessage = string.Empty;
@@ -17,6 +17,11 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
     private const string MissingSidechainMessage = "Missing analysis data.";
     private const float BandLowCutHz = 2000f;
     private const float TransientCeiling = 0.35f;
+    private const float FluxBaselineMs = 120f;
+    private const float FluxGateKneeDb = 3f;
+
+    private float _fluxBaseline;
+    private float _fluxBaselineCoeff;
 
     private readonly BiquadFilter _highPass = new();
     private readonly BiquadFilter _lowPass = new();
@@ -25,16 +30,17 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
 
     // Metering
     private float _meterOnsetGate;
-    private float _meterFastEnvelope;
-    private float _meterSlowEnvelope;
     private float _meterTransientDetected;
+    private float _meterFluxDb;
+    private float _meterFluxBaselineDb;
+    private float _meterOnsetDb;
 
     public ConsonantTransientPlugin()
     {
         Parameters =
         [
             new PluginParameter { Index = AmountIndex, Name = "Amount", MinValue = 0f, MaxValue = 1f, DefaultValue = 0.6f, Unit = string.Empty },
-            new PluginParameter { Index = ThresholdIndex, Name = "Threshold", MinValue = 0f, MaxValue = 0.5f, DefaultValue = 0.15f, Unit = string.Empty },
+            new PluginParameter { Index = ThresholdIndex, Name = "Threshold", MinValue = 0f, MaxValue = 6f, DefaultValue = 1f, Unit = "dB" },
             new PluginParameter { Index = HighCutIndex, Name = "High Cut", MinValue = 3000f, MaxValue = 9000f, DefaultValue = 6000f, Unit = "Hz" }
         ];
     }
@@ -54,7 +60,7 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
     public string StatusMessage => Volatile.Read(ref _statusMessage);
 
     public float Amount => _amount;
-    public float Threshold => _threshold;
+    public float Threshold => _fluxThresholdDb;
     public float HighCutHz => _highCutHz;
     public int SampleRate => _sampleRate;
 
@@ -68,6 +74,8 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
         _sampleRate = sampleRate;
         _fastEnv.Configure(1.5f, 25f, sampleRate);
         _slowEnv.Configure(10f, 120f, sampleRate);
+        _fluxBaseline = 0f;
+        _fluxBaselineCoeff = DspUtils.TimeToCoefficient(FluxBaselineMs, sampleRate);
         UpdateFilter();
     }
 
@@ -96,29 +104,35 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
             float norm = slow > 1e-6f ? transient / slow : 0f;
 
             float flux = onsetFluxSource.ReadSample(baseTime + i);
-            float gate = FluxToGate(flux);
+            _fluxBaseline += _fluxBaselineCoeff * (flux - _fluxBaseline);
+            float onsetDb = flux - (_fluxBaseline + _fluxThresholdDb);
+            float gate = onsetDb > 0f ? onsetDb / (onsetDb + FluxGateKneeDb) : 0f;
 
-            float gain = norm > _threshold ? 1f + _amount * gate * MathF.Min(1.5f, norm * 2f) : 1f;
+            float gain = 1f + _amount * gate * MathF.Min(1.5f, norm * 2f);
             float boost = band * (gain - 1f);
             boost = SoftClip(boost, TransientCeiling);
             buffer[i] = input + boost;
 
             // Update metering
             _meterOnsetGate = gate;
-            _meterFastEnvelope = fast;
-            _meterSlowEnvelope = slow;
-            _meterTransientDetected = norm > _threshold && gate > 0.1f ? 1f : 0f;
+            _meterTransientDetected = gain > 1.01f ? 1f : 0f;
+            _meterFluxDb = flux;
+            _meterFluxBaselineDb = _fluxBaseline;
+            _meterOnsetDb = onsetDb;
         }
     }
 
     /// <summary>Gets the current onset gate level (0-1).</summary>
     public float GetOnsetGate() => Volatile.Read(ref _meterOnsetGate);
 
-    /// <summary>Gets the fast envelope level.</summary>
-    public float GetFastEnvelope() => Volatile.Read(ref _meterFastEnvelope);
+    /// <summary>Gets the current onset flux value (dB change per frame).</summary>
+    public float GetFluxDb() => Volatile.Read(ref _meterFluxDb);
 
-    /// <summary>Gets the slow envelope level.</summary>
-    public float GetSlowEnvelope() => Volatile.Read(ref _meterSlowEnvelope);
+    /// <summary>Gets the current flux baseline (dB change per frame).</summary>
+    public float GetFluxBaselineDb() => Volatile.Read(ref _meterFluxBaselineDb);
+
+    /// <summary>Gets the onset amount above baseline + threshold (dB).</summary>
+    public float GetOnsetDb() => Volatile.Read(ref _meterOnsetDb);
 
     /// <summary>Gets whether a transient is currently detected (0 or 1).</summary>
     public float GetTransientDetected() => Volatile.Read(ref _meterTransientDetected);
@@ -138,7 +152,7 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
             float slow = _slowEnv.Process(band);
             float transient = MathF.Max(0f, fast - slow);
             float norm = slow > 1e-6f ? transient / slow : 0f;
-            float gain = norm > _threshold ? 1f + _amount * MathF.Min(1.5f, norm * 2f) : 1f;
+            float gain = 1f + _amount * MathF.Min(1.5f, norm * 2f);
             float boost = band * (gain - 1f);
             boost = SoftClip(boost, TransientCeiling);
             buffer[i] = input + boost;
@@ -153,7 +167,7 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
                 _amount = Math.Clamp(value, 0f, 1f);
                 break;
             case ThresholdIndex:
-                _threshold = Math.Clamp(value, 0f, 0.5f);
+                _fluxThresholdDb = Math.Clamp(value, 0f, 6f);
                 break;
             case HighCutIndex:
                 _highCutHz = Math.Clamp(value, 3000f, 9000f);
@@ -166,7 +180,7 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
     {
         var bytes = new byte[sizeof(float) * 3];
         Buffer.BlockCopy(BitConverter.GetBytes(_amount), 0, bytes, 0, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_threshold), 0, bytes, 4, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_fluxThresholdDb), 0, bytes, 4, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_highCutHz), 0, bytes, 8, 4);
         return bytes;
     }
@@ -179,7 +193,7 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
         }
 
         _amount = BitConverter.ToSingle(state, 0);
-        _threshold = BitConverter.ToSingle(state, 4);
+        _fluxThresholdDb = BitConverter.ToSingle(state, 4);
         if (state.Length >= sizeof(float) * 3)
         {
             _highCutHz = BitConverter.ToSingle(state, 8);
@@ -203,16 +217,6 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
         _lowPass.SetLowPass(_sampleRate, _highCutHz, 0.707f);
     }
 
-    private static float FluxToGate(float flux)
-    {
-        if (flux <= 0f)
-        {
-            return 0f;
-        }
-
-        const float Knee = 0.02f;
-        return flux / (flux + Knee);
-    }
 
     private static float SoftClip(float value, float ceiling)
     {

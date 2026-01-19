@@ -15,10 +15,6 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
         new AnalysisTapSignalInfo(AnalysisSignalId.OnsetFluxHigh, "Onset Flux High"),
         new AnalysisTapSignalInfo(AnalysisSignalId.PitchHz, "Pitch (Hz)"),
         new AnalysisTapSignalInfo(AnalysisSignalId.PitchConfidence, "Pitch Confidence"),
-        new AnalysisTapSignalInfo(AnalysisSignalId.FormantF1Hz, "Formant F1 (Hz)"),
-        new AnalysisTapSignalInfo(AnalysisSignalId.FormantF2Hz, "Formant F2 (Hz)"),
-        new AnalysisTapSignalInfo(AnalysisSignalId.FormantF3Hz, "Formant F3 (Hz)"),
-        new AnalysisTapSignalInfo(AnalysisSignalId.FormantConfidence, "Formant Confidence"),
         new AnalysisTapSignalInfo(AnalysisSignalId.SpectralFlux, "Spectral Flux"),
         new AnalysisTapSignalInfo(AnalysisSignalId.HnrDb, "HNR (dB)")
     ];

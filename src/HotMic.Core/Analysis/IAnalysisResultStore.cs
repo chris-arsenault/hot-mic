@@ -75,17 +75,6 @@ public interface IAnalysisResultStore
         out bool fullCopy);
 
     /// <summary>
-    /// Copy formant data.
-    /// </summary>
-    bool TryGetFormantRange(
-        long sinceFrameId,
-        float[] frequencies,
-        float[] bandwidths,
-        out long latestFrameId,
-        out int availableFrames,
-        out bool fullCopy);
-
-    /// <summary>
     /// Copy harmonic data.
     /// </summary>
     bool TryGetHarmonicRange(

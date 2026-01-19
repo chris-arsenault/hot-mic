@@ -59,8 +59,6 @@ public partial class AnalyzerWindow : Window, IDisposable
     private float[] _analysisMagnitudes = Array.Empty<float>();
     private float[] _pitchTrack = Array.Empty<float>();
     private float[] _pitchConfidence = Array.Empty<float>();
-    private float[] _formantFrequencies = Array.Empty<float>();
-    private float[] _formantBandwidths = Array.Empty<float>();
     private byte[] _voicingStates = Array.Empty<byte>();
     private float[] _harmonicFrequencies = Array.Empty<float>();
     private float[] _harmonicMagnitudes = Array.Empty<float>();
@@ -87,7 +85,6 @@ public partial class AnalyzerWindow : Window, IDisposable
     private int _bufferFrameCount;
     private int _bufferBins;
     private int _bufferAnalysisBins;
-    private int _bufferMaxFormants;
     private int _bufferMaxHarmonics;
     private int _lastDisplayBins;
     private FrequencyScale _lastScale;
@@ -111,8 +108,6 @@ public partial class AnalyzerWindow : Window, IDisposable
     private VocalRangeType _voiceRange = VocalRangeType.Tenor;
     private HarmonicDisplayMode _harmonicDisplayMode = HarmonicDisplayMode.Detected;
     private bool _showPitch = true;
-    private bool _showFormants = true;
-    private bool _showFormantBandwidths;
     private bool _showHarmonics;
     private bool _showVoicing = true;
     private bool _showRange;
@@ -120,7 +115,6 @@ public partial class AnalyzerWindow : Window, IDisposable
     private bool _showWaveform = true;
     private bool _showSpectrum;
     private bool _showPitchMeter = true;
-    private bool _showVowelSpace;
     private bool _isBypassed;
     private bool _speechCoachEnabled;
     private bool _showSpeechMetrics;
@@ -175,7 +169,6 @@ public partial class AnalyzerWindow : Window, IDisposable
     private const int ParamTimeWindow = 8;
     private const int ParamColorMap = 9;
     private const int ParamShowPitch = 10;
-    private const int ParamShowFormants = 11;
     private const int ParamShowHarmonics = 12;
     private const int ParamShowVoicing = 13;
     private const int ParamPreEmphasis = 14;
@@ -196,18 +189,15 @@ public partial class AnalyzerWindow : Window, IDisposable
     private const int ParamShowWaveform = 30;
     private const int ParamShowSpectrum = 31;
     private const int ParamShowPitchMeter = 32;
-    private const int ParamShowVowelSpace = 33;
     private const int ParamSmoothingMode = 34;
     private const int ParamBrightness = 35;
     private const int ParamGamma = 36;
     private const int ParamContrast = 37;
     private const int ParamColorLevels = 38;
-    private const int ParamFormantProfile = 39;
     private const int ParamNormalizationMode = 40;
     private const int ParamDynamicRangeMode = 41;
     private const int ParamTransformType = 42;
     private const int ParamCqtBinsPerOctave = 43;
-    private const int ParamShowFormantBandwidths = 44;
     private const int ParamHarmonicDisplayMode = 45;
     private const int ParamSpeechCoachEnabled = 46;
     private const int ParamShowSpeechMetrics = 47;
@@ -310,7 +300,6 @@ public partial class AnalyzerWindow : Window, IDisposable
         else if (index == ParamClarityHarmonic) config.ClarityHarmonic = value;
         else if (index == ParamClaritySmoothing) config.ClaritySmoothing = value;
         else if (index == ParamPitchAlgorithm) config.PitchAlgorithm = (PitchDetectorType)(int)value;
-        else if (index == ParamFormantProfile) config.FormantProfile = (FormantProfile)(int)value;
         else if (index == ParamSmoothingMode) config.SmoothingMode = (SpectrogramSmoothingMode)(int)value;
         else if (index == ParamNormalizationMode) config.NormalizationMode = (SpectrogramNormalizationMode)(int)value;
         else if (index == ParamTransformType) config.TransformType = (SpectrogramTransformType)(int)value;
@@ -331,8 +320,6 @@ public partial class AnalyzerWindow : Window, IDisposable
 
         // Toggle overlays/views (local) - these affect required capabilities
         else if (index == ParamShowPitch) { _showPitch = value > 0.5f; UpdateSubscription(); }
-        else if (index == ParamShowFormants) { _showFormants = value > 0.5f; UpdateSubscription(); }
-        else if (index == ParamShowFormantBandwidths) _showFormantBandwidths = value > 0.5f;
         else if (index == ParamShowHarmonics) { _showHarmonics = value > 0.5f; UpdateSubscription(); }
         else if (index == ParamShowVoicing) { _showVoicing = value > 0.5f; UpdateSubscription(); }
         else if (index == ParamShowRange) _showRange = value > 0.5f;
@@ -340,7 +327,6 @@ public partial class AnalyzerWindow : Window, IDisposable
         else if (index == ParamShowWaveform) { _showWaveform = value > 0.5f; UpdateSubscription(); }
         else if (index == ParamShowSpectrum) { _showSpectrum = value > 0.5f; UpdateSubscription(); }
         else if (index == ParamShowPitchMeter) { _showPitchMeter = value > 0.5f; UpdateSubscription(); }
-        else if (index == ParamShowVowelSpace) { _showVowelSpace = value > 0.5f; UpdateSubscription(); }
         else if (index == ParamSpeechCoachEnabled) { _speechCoachEnabled = value > 0.5f; UpdateSubscription(); }
         else if (index == ParamShowSpeechMetrics) { _showSpeechMetrics = value > 0.5f; UpdateSubscription(); }
         else if (index == ParamShowSyllableMarkers) _showSyllableMarkers = value > 0.5f;
@@ -638,10 +624,6 @@ public partial class AnalyzerWindow : Window, IDisposable
                     _lastCopiedFrameId, _pitchTrack, _pitchConfidence, _voicingStates,
                     out _, out _, out _);
 
-                bool formantCopied = _store.TryGetFormantRange(
-                    _lastCopiedFrameId, _formantFrequencies, _formantBandwidths,
-                    out _, out _, out _);
-
                 bool harmonicCopied = _store.TryGetHarmonicRange(
                     _lastCopiedFrameId, _harmonicFrequencies, _harmonicMagnitudes,
                     out _, out _, out _);
@@ -675,7 +657,7 @@ public partial class AnalyzerWindow : Window, IDisposable
                     copyTicks = Stopwatch.GetTimestamp() - copyStartTicks;
                 }
 
-                bool overlayCopied = spectrogramCopied || pitchCopied || formantCopied;
+                bool overlayCopied = spectrogramCopied || pitchCopied;
                 if (overlayCopied)
                 {
                     _latestFrameId = latestFrameId;
@@ -948,13 +930,11 @@ public partial class AnalyzerWindow : Window, IDisposable
         int frames = Math.Max(1, _store.FrameCapacity);
         int bins = Math.Max(1, _store.DisplayBins);
         int analysisBins = Math.Max(1, _store.AnalysisBins);
-        int maxFormants = AnalysisConfiguration.MaxFormants;
         int maxHarmonics = AnalysisConfiguration.MaxHarmonics;
 
         _bufferFrameCount = frames;
         _bufferBins = bins;
         _bufferAnalysisBins = analysisBins;
-        _bufferMaxFormants = maxFormants;
         _bufferMaxHarmonics = maxHarmonics;
 
         int spectrogramLength = frames * bins;
@@ -985,15 +965,6 @@ public partial class AnalyzerWindow : Window, IDisposable
             _pitchTrack = new float[frames];
             _pitchConfidence = new float[frames];
             _voicingStates = new byte[frames];
-            _lastDataVersion = -1;
-            resized = true;
-        }
-
-        int formantLength = frames * maxFormants;
-        if (_formantFrequencies.Length != formantLength)
-        {
-            _formantFrequencies = new float[formantLength];
-            _formantBandwidths = new float[formantLength];
             _lastDataVersion = -1;
             resized = true;
         }
@@ -1166,13 +1137,11 @@ public partial class AnalyzerWindow : Window, IDisposable
             PitchAlgorithm: _orchestrator.Config.PitchAlgorithm,
             AxisMode: _axisMode,
             VoiceRange: _voiceRange,
-            FormantProfile: _orchestrator.Config.FormantProfile,
             ShowRange: _showRange,
             ShowGuides: _showGuides,
             ShowWaveform: _showWaveform,
             ShowSpectrum: _showSpectrum,
             ShowPitchMeter: _showPitchMeter,
-            ShowVowelSpace: _showVowelSpace,
             SmoothingMode: _orchestrator.Config.SmoothingMode,
             Brightness: _brightness,
             Gamma: _gamma,
@@ -1187,8 +1156,6 @@ public partial class AnalyzerWindow : Window, IDisposable
             AnalysisTiming: default, // Timing not available from shared orchestrator
             UiTiming: new SpectroUiTimingSnapshot(_uiTickUs, _uiCopyUs, _uiMapUs),
             ShowPitch: _showPitch,
-            ShowFormants: _showFormants,
-            ShowFormantBandwidths: _showFormantBandwidths,
             ShowHarmonics: _showHarmonics,
             HarmonicDisplayMode: _harmonicDisplayMode,
             ShowVoicing: _showVoicing,
@@ -1204,8 +1171,6 @@ public partial class AnalyzerWindow : Window, IDisposable
             Spectrogram: _spectrogram,
             PitchTrack: _pitchTrack,
             PitchConfidence: _pitchConfidence,
-            FormantFrequencies: _formantFrequencies,
-            FormantBandwidths: _formantBandwidths,
             VoicingStates: _voicingStates,
             HarmonicFrequencies: _harmonicFrequencies,
             HarmonicMagnitudes: _harmonicMagnitudes,
@@ -1217,7 +1182,6 @@ public partial class AnalyzerWindow : Window, IDisposable
             SpectralSlope: _spectralSlope,
             SpectralFlux: _spectralFlux,
             BinFrequencies: _binFrequencies,
-            MaxFormants: _bufferMaxFormants,
             MaxHarmonics: _bufferMaxHarmonics,
             Discontinuities: _discontinuities,
             // Speech Coach
@@ -1429,9 +1393,6 @@ public partial class AnalyzerWindow : Window, IDisposable
             case SpectroHitArea.PitchToggle:
                 ToggleParameter(ParamShowPitch, _showPitch);
                 return true;
-            case SpectroHitArea.FormantToggle:
-                ToggleParameter(ParamShowFormants, _showFormants);
-                return true;
             case SpectroHitArea.HarmonicToggle:
                 ToggleParameter(ParamShowHarmonics, _showHarmonics);
                 return true;
@@ -1456,9 +1417,6 @@ public partial class AnalyzerWindow : Window, IDisposable
             case SpectroHitArea.VoiceRangeButton:
                 CycleVoiceRange();
                 return true;
-            case SpectroHitArea.FormantProfileButton:
-                CycleFormantProfile();
-                return true;
             case SpectroHitArea.NormalizationButton:
                 CycleNormalizationMode();
                 return true;
@@ -1473,9 +1431,6 @@ public partial class AnalyzerWindow : Window, IDisposable
                 return true;
             case SpectroHitArea.PitchMeterToggle:
                 ToggleParameter(ParamShowPitchMeter, _showPitchMeter);
-                return true;
-            case SpectroHitArea.VowelToggle:
-                ToggleParameter(ParamShowVowelSpace, _showVowelSpace);
                 return true;
             case SpectroHitArea.SpeechToggle:
                 ToggleParameter(ParamSpeechCoachEnabled, _speechCoachEnabled);
@@ -1746,19 +1701,6 @@ public partial class AnalyzerWindow : Window, IDisposable
         // Preset tracking removed - using shared orchestrator config
     }
 
-    private void CycleFormantProfile()
-    {
-        FormantProfile next = _orchestrator.Config.FormantProfile switch
-        {
-            FormantProfile.BassBaritone => FormantProfile.Tenor,
-            FormantProfile.Tenor => FormantProfile.Alto,
-            FormantProfile.Alto => FormantProfile.Soprano,
-            _ => FormantProfile.BassBaritone
-        };
-        SetParameter(ParamFormantProfile, (float)next);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
     private void CycleSmoothingMode()
     {
         SpectrogramSmoothingMode next = _orchestrator.Config.SmoothingMode switch
@@ -1818,8 +1760,6 @@ public partial class AnalyzerWindow : Window, IDisposable
         Array.Clear(_analysisMagnitudes, 0, _analysisMagnitudes.Length);
         Array.Clear(_pitchTrack, 0, _pitchTrack.Length);
         Array.Clear(_pitchConfidence, 0, _pitchConfidence.Length);
-        Array.Clear(_formantFrequencies, 0, _formantFrequencies.Length);
-        Array.Clear(_formantBandwidths, 0, _formantBandwidths.Length);
         Array.Clear(_voicingStates, 0, _voicingStates.Length);
         Array.Clear(_harmonicFrequencies, 0, _harmonicFrequencies.Length);
         Array.Clear(_harmonicMagnitudes, 0, _harmonicMagnitudes.Length);
@@ -1977,6 +1917,7 @@ public partial class AnalyzerWindow : Window, IDisposable
         try
         {
             var config = _orchestrator.Config;
+            var voicing = config.VoicingSettings;
             foreach (var (name, value) in parameters)
             {
                 switch (name)
@@ -2000,11 +1941,33 @@ public partial class AnalyzerWindow : Window, IDisposable
                     case "Clarity Harmonic": config.ClarityHarmonic = value; break;
                     case "Clarity Smoothing": config.ClaritySmoothing = value; break;
                     case "Pitch Algorithm": config.PitchAlgorithm = (PitchDetectorType)(int)value; break;
-                    case "Formant Profile": config.FormantProfile = (FormantProfile)(int)value; break;
                     case "Smoothing Mode": config.SmoothingMode = (SpectrogramSmoothingMode)(int)value; break;
                     case "Normalization": config.NormalizationMode = (SpectrogramNormalizationMode)(int)value; break;
                     case "Transform": config.TransformType = (SpectrogramTransformType)(int)value; break;
                     case "CQT Bins/Oct": config.CqtBinsPerOctave = (int)value; break;
+                    case "Voicing Noise Floor Init": voicing = voicing with { InitialNoiseFloorDb = value }; break;
+                    case "Voicing Noise Attack": voicing = voicing with { NoiseFloorAttackMs = value }; break;
+                    case "Voicing Noise Release": voicing = voicing with { NoiseFloorReleaseMs = value }; break;
+                    case "Voicing Noise Margin": voicing = voicing with { NoiseFloorMarginDb = value }; break;
+                    case "Voicing Silence Margin": voicing = voicing with { SilenceMarginDb = value }; break;
+                    case "Voicing Energy Range": voicing = voicing with { EnergyRangeDb = value }; break;
+                    case "Voicing ZCR Low": voicing = voicing with { ZcrLow = value }; break;
+                    case "Voicing ZCR High": voicing = voicing with { ZcrHigh = value }; break;
+                    case "Voicing Flatness Low": voicing = voicing with { FlatnessLow = value }; break;
+                    case "Voicing Flatness High": voicing = voicing with { FlatnessHigh = value }; break;
+                    case "Voicing CPP Low": voicing = voicing with { CppLow = value }; break;
+                    case "Voicing CPP High": voicing = voicing with { CppHigh = value }; break;
+                    case "Voicing Voiced Threshold": voicing = voicing with { VoicedThreshold = value }; break;
+                    case "Voicing Unvoiced Threshold": voicing = voicing with { UnvoicedThreshold = value }; break;
+                    case "Voicing Attack": voicing = voicing with { AttackMs = value }; break;
+                    case "Voicing Release": voicing = voicing with { ReleaseMs = value }; break;
+                    case "Voicing Hangover": voicing = voicing with { HangoverMs = value }; break;
+                    case "Voicing Band Min": voicing = voicing with { BandMinHz = value }; break;
+                    case "Voicing Band Max": voicing = voicing with { BandMaxHz = value }; break;
+                    case "Voicing Weight Periodicity": voicing = voicing with { PeriodicityWeight = value }; break;
+                    case "Voicing Weight Flatness": voicing = voicing with { FlatnessWeight = value }; break;
+                    case "Voicing Weight ZCR": voicing = voicing with { ZcrWeight = value }; break;
+                    case "Voicing Weight Energy": voicing = voicing with { EnergyWeight = value }; break;
 
                     // Display parameters (local to this window)
                     case "Min dB": _minDb = value; break;
@@ -2020,7 +1983,6 @@ public partial class AnalyzerWindow : Window, IDisposable
 
                     // Toggle overlays/views (local)
                     case "Pitch Overlay": _showPitch = value > 0.5f; break;
-                    case "Formants": _showFormants = value > 0.5f; break;
                     case "Harmonics": _showHarmonics = value > 0.5f; break;
                     case "Voicing": _showVoicing = value > 0.5f; break;
                     case "Range Overlay": _showRange = value > 0.5f; break;
@@ -2028,9 +1990,10 @@ public partial class AnalyzerWindow : Window, IDisposable
                     case "Waveform View": _showWaveform = value > 0.5f; break;
                     case "Spectrum View": _showSpectrum = value > 0.5f; break;
                     case "Pitch Meter": _showPitchMeter = value > 0.5f; break;
-                    case "Vowel View": _showVowelSpace = value > 0.5f; break;
                 }
             }
+
+            config.VoicingSettings = voicing;
         }
         finally
         {
@@ -2041,6 +2004,7 @@ public partial class AnalyzerWindow : Window, IDisposable
 
     private Dictionary<string, float> GetCurrentParameters()
     {
+        var voicing = _orchestrator.Config.VoicingSettings;
         return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
         {
             ["FFT Size"] = _orchestrator.Config.FftSize,
@@ -2054,13 +2018,11 @@ public partial class AnalyzerWindow : Window, IDisposable
             ["Time Window"] = _orchestrator.Config.TimeWindow,
             ["Color Map"] = _colorMap,
             ["Pitch Overlay"] = _showPitch ? 1f : 0f,
-            ["Formants"] = _showFormants ? 1f : 0f,
             ["Harmonics"] = _showHarmonics ? 1f : 0f,
             ["Voicing"] = _showVoicing ? 1f : 0f,
             ["Pre-Emphasis"] = _orchestrator.Config.PreEmphasis ? 1f : 0f,
             ["HPF Enabled"] = _orchestrator.Config.HighPassEnabled ? 1f : 0f,
             ["HPF Cutoff"] = _orchestrator.Config.HighPassCutoff,
-            ["LPC Order"] = 14f, // Default LPC order for formant analysis
             ["Reassign"] = (float)_orchestrator.Config.ReassignMode,
             ["Reassign Threshold"] = _orchestrator.Config.ReassignThreshold,
             ["Reassign Spread"] = _orchestrator.Config.ReassignSpread,
@@ -2071,13 +2033,11 @@ public partial class AnalyzerWindow : Window, IDisposable
             ["Pitch Algorithm"] = (float)_orchestrator.Config.PitchAlgorithm,
             ["Axis Mode"] = (float)_axisMode,
             ["Voice Range"] = (float)_voiceRange,
-            ["Formant Profile"] = (float)_orchestrator.Config.FormantProfile,
             ["Range Overlay"] = _showRange ? 1f : 0f,
             ["Guides"] = _showGuides ? 1f : 0f,
             ["Waveform View"] = _showWaveform ? 1f : 0f,
             ["Spectrum View"] = _showSpectrum ? 1f : 0f,
             ["Pitch Meter"] = _showPitchMeter ? 1f : 0f,
-            ["Vowel View"] = _showVowelSpace ? 1f : 0f,
             ["Smoothing Mode"] = (float)_orchestrator.Config.SmoothingMode,
             ["Brightness"] = _brightness,
             ["Gamma"] = _gamma,
@@ -2086,7 +2046,30 @@ public partial class AnalyzerWindow : Window, IDisposable
             ["Normalization"] = (float)_orchestrator.Config.NormalizationMode,
             ["Dynamic Range"] = (float)_dynamicRangeMode,
             ["Transform"] = (float)_orchestrator.Config.TransformType,
-            ["CQT Bins/Oct"] = _orchestrator.Config.CqtBinsPerOctave
+            ["CQT Bins/Oct"] = _orchestrator.Config.CqtBinsPerOctave,
+            ["Voicing Noise Floor Init"] = voicing.InitialNoiseFloorDb,
+            ["Voicing Noise Attack"] = voicing.NoiseFloorAttackMs,
+            ["Voicing Noise Release"] = voicing.NoiseFloorReleaseMs,
+            ["Voicing Noise Margin"] = voicing.NoiseFloorMarginDb,
+            ["Voicing Silence Margin"] = voicing.SilenceMarginDb,
+            ["Voicing Energy Range"] = voicing.EnergyRangeDb,
+            ["Voicing ZCR Low"] = voicing.ZcrLow,
+            ["Voicing ZCR High"] = voicing.ZcrHigh,
+            ["Voicing Flatness Low"] = voicing.FlatnessLow,
+            ["Voicing Flatness High"] = voicing.FlatnessHigh,
+            ["Voicing CPP Low"] = voicing.CppLow,
+            ["Voicing CPP High"] = voicing.CppHigh,
+            ["Voicing Voiced Threshold"] = voicing.VoicedThreshold,
+            ["Voicing Unvoiced Threshold"] = voicing.UnvoicedThreshold,
+            ["Voicing Attack"] = voicing.AttackMs,
+            ["Voicing Release"] = voicing.ReleaseMs,
+            ["Voicing Hangover"] = voicing.HangoverMs,
+            ["Voicing Band Min"] = voicing.BandMinHz,
+            ["Voicing Band Max"] = voicing.BandMaxHz,
+            ["Voicing Weight Periodicity"] = voicing.PeriodicityWeight,
+            ["Voicing Weight Flatness"] = voicing.FlatnessWeight,
+            ["Voicing Weight ZCR"] = voicing.ZcrWeight,
+            ["Voicing Weight Energy"] = voicing.EnergyWeight
         };
     }
 
@@ -2102,9 +2085,6 @@ public partial class AnalyzerWindow : Window, IDisposable
 
         if (_showPitch || _showPitchMeter)
             caps |= AnalysisCapabilities.Pitch;
-
-        if (_showFormants || _showVowelSpace)
-            caps |= AnalysisCapabilities.Formants;
 
         if (_showHarmonics)
             caps |= AnalysisCapabilities.Harmonics;

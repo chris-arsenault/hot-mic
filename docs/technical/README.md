@@ -17,7 +17,6 @@ are intentionally omitted.
 - `docs/technical/Cleanup.md` - noise reduction, HPSS, harmonic comb, and smoothing.
 - `docs/technical/Reassignment.md` - time/frequency reassignment.
 - `docs/technical/Pitch.md` - pitch detectors and confidence metrics.
-- `docs/technical/Formants.md` - LPC formant tracking.
 - `docs/technical/Voicing-Harmonics.md` - voicing classification and harmonic peaks.
 - `docs/technical/Spectral-Features.md` - centroid, slope, and flux.
 - `docs/technical/Spectrogram-Rendering.md` - magnitude-to-color transfer mapping.

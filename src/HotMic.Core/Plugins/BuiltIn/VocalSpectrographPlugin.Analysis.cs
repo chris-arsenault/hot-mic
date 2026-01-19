@@ -4,7 +4,6 @@ using System.Threading;
 using HotMic.Core.Dsp.Analysis.Speech;
 using HotMic.Core.Dsp.Mapping;
 using HotMic.Core.Dsp.Spectrogram;
-using HotMic.Core.Dsp.Voice;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
@@ -13,9 +12,6 @@ public sealed partial class VocalSpectrographPlugin
     public void Initialize(int sampleRate, int blockSize)
     {
         _sampleRate = sampleRate;
-        _requestedLpcOrder = FormantProfileInfo.GetRecommendedLpcOrder(
-            (FormantProfile)Math.Clamp(_requestedFormantProfile, 0, 3),
-            MaxFormants);
         ConfigureAnalysis(force: true);
         EnsureAnalysisThread();
     }
@@ -160,7 +156,7 @@ public sealed partial class VocalSpectrographPlugin
 
             stageStartTicks = Stopwatch.GetTimestamp();
             AnalyzePitchAndOverlays(ref pitchFrameCounter, ref cppFrameCounter, ref lastPitch, ref lastConfidence,
-                ref lastCpp, _fftMagnitudes, out var voicing, out int formantCount, out int harmonicCount);
+                ref lastCpp, _fftMagnitudes, out var voicing, out int harmonicCount);
             long pitchTicks = Stopwatch.GetTimestamp() - stageStartTicks;
 
             var clarityMode = (ClarityProcessingMode)Math.Clamp(Volatile.Read(ref _requestedClarityMode), 0, 3);
@@ -196,7 +192,7 @@ public sealed partial class VocalSpectrographPlugin
 
             stageStartTicks = Stopwatch.GetTimestamp();
             WriteOverlayData(frameId, frameIndex, waveformMin, waveformMax, lastHnr, lastCpp, lastPitch,
-                lastConfidence, voicing, formantCount, harmonicCount, centroid, slope, flux);
+                lastConfidence, voicing, harmonicCount, centroid, slope, flux);
             long writebackTicks = writeLinearTicks + (Stopwatch.GetTimestamp() - stageStartTicks);
 
             long frameTicks = Stopwatch.GetTimestamp() - frameStartTicks;
@@ -408,7 +404,7 @@ public sealed partial class VocalSpectrographPlugin
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void AnalyzePitchAndOverlays(ref int pitchFrameCounter, ref int cppFrameCounter, ref float lastPitch,
         ref float lastConfidence, ref float lastCpp, ReadOnlySpan<float> fftMagnitudes, out VoicingState voicing,
-        out int formantCount, out int harmonicCount)
+        out int harmonicCount)
     {
         var pitchAlgorithm = (PitchDetectorType)Math.Clamp(Volatile.Read(ref _requestedPitchAlgorithm), 0, 4);
         if (_activeTransformType == SpectrogramTransformType.Cqt && pitchAlgorithm == PitchDetectorType.Swipe)
@@ -418,15 +414,12 @@ public sealed partial class VocalSpectrographPlugin
 
         bool showPitch = Volatile.Read(ref _requestedShowPitch) != 0;
         bool showPitchMeter = Volatile.Read(ref _requestedShowPitchMeter) != 0;
-        bool showFormants = Volatile.Read(ref _requestedShowFormants) != 0;
-        bool showVowelSpace = Volatile.Read(ref _requestedShowVowelSpace) != 0;
         bool showHarmonics = Volatile.Read(ref _requestedShowHarmonics) != 0;
         bool showVoicing = Volatile.Read(ref _requestedShowVoicing) != 0;
         var clarityMode = (ClarityProcessingMode)Math.Clamp(Volatile.Read(ref _requestedClarityMode), 0, 3);
         float clarityHarmonic = Volatile.Read(ref _requestedClarityHarmonic);
 
-        bool needsFormants = showFormants || showVowelSpace;
-        bool needsVoicing = showVoicing || needsFormants || showPitchMeter || clarityMode != ClarityProcessingMode.None;
+        bool needsVoicing = showVoicing || showPitchMeter || clarityMode != ClarityProcessingMode.None;
         bool needsPitch = showPitch || showPitchMeter || showHarmonics || needsVoicing
             || (clarityMode == ClarityProcessingMode.Full && clarityHarmonic > 0f);
         bool needsCpp = showPitchMeter || (pitchAlgorithm == PitchDetectorType.Cepstral && needsPitch);
@@ -494,123 +487,14 @@ public sealed partial class VocalSpectrographPlugin
             }
         }
 
-        voicing = needsVoicing
-            ? _voicingDetector.Detect(_analysisBufferRaw, fftMagnitudes, lastConfidence)
-            : VoicingState.Silence;
-
-        formantCount = 0;
-        var lpcAnalyzer = _lpcAnalyzer;
-        var beamTracker = _beamFormantTracker;
-        bool lpcOk = lpcAnalyzer is not null;
-        bool beamTrackerOk = beamTracker is not null;
-        bool voiced = voicing == VoicingState.Voiced;
-        float vowelRatio = 0f;
-        bool vowelLike = false;
-
-        if (needsFormants && voiced)
+        if (needsVoicing)
         {
-            float vowelMinHz = MathF.Max(VowelEnergyMinHz, _activeFormantPreset.F1MinHz);
-            float vowelMaxHz = MathF.Min(VowelEnergyMaxHz, _activeFormantPreset.F1MaxHz);
-            if (vowelMaxHz <= vowelMinHz)
-            {
-                vowelMinHz = VowelEnergyMinHz;
-                vowelMaxHz = VowelEnergyMaxHz;
-            }
-
-            vowelRatio = DspUtils.ComputeBandEnergyRatio(fftMagnitudes, _binResolution,
-                vowelMinHz, vowelMaxHz);
-            vowelLike = vowelRatio >= VowelEnergyRatioThreshold;
+            var voicingResult = _voicingDetector.Process(_analysisBufferRaw, fftMagnitudes, lastConfidence, lastCpp);
+            voicing = voicingResult.State;
         }
-
-        _formantDiagCounter++;
-
-        if (_formantDiagCounter % 100 == 0 && needsFormants)
+        else
         {
-            float rms = ComputeRms(_analysisBufferRaw);
-            float energyDb = DspUtils.LinearToDb(rms);
-            float zcr = ComputeZeroCrossingRate(_analysisBufferRaw);
-            float flatness = ComputeSpectralFlatness(fftMagnitudes);
-            int lpcOrder = _lpcAnalyzer?.Order ?? 0;
-            Console.WriteLine($"[FormantGate] voiced={voicing}, pitchConf={lastConfidence:F2}, energyDb={energyDb:F1}, zcr={zcr:F3}, flat={flatness:F3}, vowelRatio={vowelRatio:F2}, lpcOk={lpcOk}, beamOk={beamTrackerOk}, lpcOrder={lpcOrder}, lpcSr={_activeLpcSampleRate}, decim={_activeLpcDecimationStages}, ceiling={_activeFormantCeilingHz:F0}, profile={_activeFormantProfile}, preEmp={_activePreEmphasisEnabled}, hpf={_activeHighPassEnabled}, transform={_activeTransformType}");
-        }
-
-        if (needsFormants && lpcAnalyzer is not null && beamTracker is not null && voiced && vowelLike)
-        {
-            // LPC formant analysis (Praat/Burg reference):
-            // 1) Decimate to >= 2 * formant ceiling
-            // 2) Pre-emphasis from 50 Hz
-            // 3) Gaussian window (effective length 25ms)
-            // 4) Burg LPC + root extraction + beam search
-            int bufferLen = _analysisBufferRaw.Length;
-            int lpcLen = Math.Min(_lpcWindowSamples, bufferLen);
-            int lpcStart = bufferLen - lpcLen; // Use most recent samples
-            if (_formantDiagCounter % 100 == 0)
-            {
-                Console.WriteLine($"[FormantLpc] bufferLen={bufferLen}, lpcLen={lpcLen}, windowSamples={_lpcWindowSamples}");
-            }
-
-            // Step 1: Copy raw samples to input buffer
-            _analysisBufferRaw.AsSpan(lpcStart, lpcLen).CopyTo(_lpcInputBuffer.AsSpan(0, lpcLen));
-
-            int decimatedLen = lpcLen;
-            if (_activeLpcDecimationStages >= 1)
-            {
-                _lpcDecimator1.Reset();
-                int decimated1Len = lpcLen / 2;
-                _lpcDecimator1.ProcessDownsample(_lpcInputBuffer.AsSpan(0, lpcLen), _lpcDecimateBuffer1.AsSpan(0, decimated1Len));
-
-                if (_activeLpcDecimationStages == 2)
-                {
-                    _lpcDecimator2.Reset();
-                    decimatedLen = decimated1Len / 2;
-                    _lpcDecimator2.ProcessDownsample(_lpcDecimateBuffer1.AsSpan(0, decimated1Len), _lpcDecimatedBuffer.AsSpan(0, decimatedLen));
-                }
-                else
-                {
-                    decimatedLen = decimated1Len;
-                    _lpcDecimateBuffer1.AsSpan(0, decimatedLen).CopyTo(_lpcDecimatedBuffer.AsSpan(0, decimatedLen));
-                }
-            }
-            else
-            {
-                _lpcInputBuffer.AsSpan(0, lpcLen).CopyTo(_lpcDecimatedBuffer.AsSpan(0, lpcLen));
-            }
-            if (_formantDiagCounter % 100 == 0)
-            {
-                Console.WriteLine($"[FormantLpc] decimatedLen={decimatedLen}, lpcSr={_activeLpcSampleRate}, decim={_activeLpcDecimationStages}");
-            }
-
-            float preEmphasisAlpha = ComputePreEmphasisAlpha(FormantProfileInfo.DefaultPreEmphasisHz, _activeLpcSampleRate);
-            _lpcPreEmphasisFilter.Configure(preEmphasisAlpha);
-            _lpcPreEmphasisFilter.Reset();
-
-            if (_lpcWindowLength != decimatedLen)
-            {
-                WindowFunctions.FillGaussian(_lpcWindow.AsSpan(0, decimatedLen), LpcGaussianSigma);
-                _lpcWindowLength = decimatedLen;
-            }
-
-            for (int i = 0; i < decimatedLen; i++)
-            {
-                float emphasized = _lpcPreEmphasisFilter.Process(_lpcDecimatedBuffer[i]);
-                _lpcWindowedBuffer[i] = emphasized * _lpcWindow[i];
-            }
-
-            if (lpcAnalyzer.Compute(_lpcWindowedBuffer.AsSpan(0, decimatedLen), _lpcCoefficients))
-            {
-                // Use beam-search tracker (V2) for better continuity and lower dropout
-                formantCount = beamTracker.Track(_lpcCoefficients, _activeLpcSampleRate,
-                    _formantFreqScratch, _formantBwScratch,
-                    50f, _activeFormantCeilingHz, MaxFormants);
-            }
-            else
-            {
-                beamTracker.MarkNoUpdate();
-            }
-        }
-        else if (needsFormants && beamTracker is not null)
-        {
-            beamTracker.MarkNoUpdate();
+            voicing = VoicingState.Silence;
         }
 
         harmonicCount = 0;
@@ -1021,7 +905,7 @@ public sealed partial class VocalSpectrographPlugin
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void WriteOverlayData(long frameId, int frameIndex, float waveformMin, float waveformMax, float lastHnr,
-        float lastCpp, float lastPitch, float lastConfidence, VoicingState voicing, int formantCount, int harmonicCount,
+        float lastCpp, float lastPitch, float lastConfidence, VoicingState voicing, int harmonicCount,
         float centroid, float slope, float flux)
     {
         _waveformMin[frameIndex] = waveformMin == float.MaxValue ? 0f : waveformMin;
@@ -1043,9 +927,8 @@ public sealed partial class VocalSpectrographPlugin
             float peakAmplitude = MathF.Max(MathF.Abs(waveformMin), MathF.Abs(waveformMax));
             float energyDb = peakAmplitude > 1e-8f ? 20f * MathF.Log10(peakAmplitude) : -80f;
 
-            // Get F1 and F2 from formant data
-            float f1Hz = formantCount > 0 ? _formantFreqScratch[0] : 0f;
-            float f2Hz = formantCount > 1 ? _formantFreqScratch[1] : 0f;
+            float f1Hz = 0f;
+            float f2Hz = 0f;
 
             // Compute spectral flatness from magnitudes (reuse existing calculation approach)
             float spectralFlatness = ComputeSpectralFlatness(_fftMagnitudes);
@@ -1073,21 +956,6 @@ public sealed partial class VocalSpectrographPlugin
             _speakingStateTrack[frameIndex] = (byte)metrics.CurrentState;
             _syllableMarkers[frameIndex] = metrics.SyllableDetected ? (byte)1 : (byte)0;
         }
-
-        int formantOffset = frameIndex * MaxFormants;
-        for (int i = 0; i < MaxFormants; i++)
-        {
-            _formantFrequencies[formantOffset + i] = i < formantCount ? _formantFreqScratch[i] : 0f;
-            _formantBandwidths[formantOffset + i] = i < formantCount ? _formantBwScratch[i] : 0f;
-        }
-
-#if HOTMIC_SPECTROGRAPH_DIAGNOSTICS
-        // Diagnostic: print formant results once per second.
-        if (_formantDiagCounter % 100 == 50 && formantCount > 0)
-        {
-            Console.WriteLine($"[WriteOverlay] formantCount={formantCount}: F1={_formantFreqScratch[0]:F0}Hz, F2={(formantCount > 1 ? _formantFreqScratch[1] : 0):F0}Hz, F3={(formantCount > 2 ? _formantFreqScratch[2] : 0):F0}Hz");
-        }
-#endif
 
         int harmonicOffset = frameIndex * MaxHarmonics;
         for (int i = 0; i < MaxHarmonics; i++)

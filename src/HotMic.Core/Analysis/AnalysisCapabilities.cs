@@ -15,9 +15,6 @@ public enum AnalysisCapabilities
     /// <summary>Fundamental frequency (F0) tracking.</summary>
     Pitch = 1 << 1,
 
-    /// <summary>Formant frequencies (F1-F5) and bandwidths.</summary>
-    Formants = 1 << 2,
-
     /// <summary>Harmonic peak frequencies and magnitudes.</summary>
     Harmonics = 1 << 3,
 

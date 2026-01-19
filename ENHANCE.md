@@ -67,16 +67,6 @@ Goal: bring back the micro-attacks denoise + compression tend to smear.
 * Apply a transient shaper *only* to those moments (5–30 ms windows), with a hard ceiling to avoid spit/ess.
   This tends to read as “livelier” and more intelligible than static presence EQ because it’s event-based.
 
-## If you want to go more “speech-model aware” (still real-time)
-
-### 8) Formant-aware enhancement / stabilization (very subtle)
-
-Goal: preserve natural vowel identity and motion after processing.
-
-* Track F1/F2 (lightweight formant tracking).
-* Use that to steer dynamic EQ bands (boost near moving formants slightly; avoid boosting between them).
-  Formant tracking is a well-studied area; you don’t need perfect accuracy—just stable enough to guide small moves. ([ece.mcmaster.ca][7])
-
 ## Practical chain order (typical)
 
 1. NR (yours) → 2) De-ess (yours) → 3) **Spectral contrast OR multiband upward expansion** → 4) Dynamic EQ keyed by voiced/unvoiced → 5) keyed exciter/air → 6) psychoacoustic bass (optional) → 7) ambience bed (ducked)
@@ -89,4 +79,3 @@ If you tell me your sample rate / block size / latency budget and whether you’
 [4]: https://www.izotope.com/en/learn/basics-of-room-tone-audio-editing?srsltid=AfmBOoq3CtKfcihN2he3hVxagINjVQVpEwnkk1rzep6nfypswFGOs4gE&utm_source=chatgpt.com "The Basics of Room Tone in Audio Editing"
 [5]: https://support.apple.com/en-ge/guide/logicpro/lgcef2cbe1b9/mac?utm_source=chatgpt.com "Exciter in Logic Pro for Mac"
 [6]: https://www.waves.com/plugins/maxxbass?utm_source=chatgpt.com "MaxxBass - Bass Enhancer Plugin"
-[7]: https://www.ece.mcmaster.ca/~ibruce/papers/mustafa2006_preprint.pdf?utm_source=chatgpt.com "Robust Formant Tracking for Continuous Speech With ..."

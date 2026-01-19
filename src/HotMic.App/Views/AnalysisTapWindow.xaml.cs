@@ -4,6 +4,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using HotMic.App.UI.PluginComponents;
+using HotMic.Core.Analysis;
 using HotMic.Core.Plugins;
 using HotMic.Core.Plugins.BuiltIn;
 using SkiaSharp;
@@ -90,6 +91,7 @@ public partial class AnalysisTapWindow : Window, IDisposable
             }
         }
 
+        requested = AnalysisSignalDependencies.Expand(requested);
         if (requested != _requestedMask)
         {
             _requestedMask = requested;

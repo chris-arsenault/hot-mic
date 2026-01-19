@@ -116,24 +116,6 @@ public sealed partial class VocalSpectrographPlugin
             },
             new PluginParameter
             {
-                Index = ShowFormantsIndex,
-                Name = "Formants",
-                MinValue = 0f,
-                MaxValue = 1f,
-                DefaultValue = 1f,
-                Unit = ""
-            },
-            new PluginParameter
-            {
-                Index = ShowFormantBandwidthsIndex,
-                Name = "Formant Bandwidths",
-                MinValue = 0f,
-                MaxValue = 1f,
-                DefaultValue = 0f, // Default to dots-only like Praat
-                Unit = ""
-            },
-            new PluginParameter
-            {
                 Index = ShowHarmonicsIndex,
                 Name = "Harmonics",
                 MinValue = 0f,
@@ -186,15 +168,6 @@ public sealed partial class VocalSpectrographPlugin
                 MaxValue = 120f,
                 DefaultValue = DefaultHighPassHz,
                 Unit = "Hz"
-            },
-            new PluginParameter
-            {
-                Index = LpcOrderIndex,
-                Name = "LPC Order",
-                MinValue = 8f,
-                MaxValue = 24f,
-                DefaultValue = 10f,
-                Unit = ""
             },
             new PluginParameter
             {
@@ -297,17 +270,6 @@ public sealed partial class VocalSpectrographPlugin
             },
             new PluginParameter
             {
-                Index = FormantProfileIndex,
-                Name = "Formant Profile",
-                MinValue = 0f,
-                MaxValue = 3f,
-                DefaultValue = (float)FormantProfile.Tenor,
-                Unit = "",
-                FormatValue = value => FormantProfileInfo.GetLabel(
-                    (FormantProfile)Math.Clamp((int)MathF.Round(value), 0, 3))
-            },
-            new PluginParameter
-            {
                 Index = ShowRangeIndex,
                 Name = "Range Overlay",
                 MinValue = 0f,
@@ -346,15 +308,6 @@ public sealed partial class VocalSpectrographPlugin
             {
                 Index = ShowPitchMeterIndex,
                 Name = "Pitch Meter",
-                MinValue = 0f,
-                MaxValue = 1f,
-                DefaultValue = 1f,
-                Unit = ""
-            },
-            new PluginParameter
-            {
-                Index = ShowVowelSpaceIndex,
-                Name = "Vowel View",
                 MinValue = 0f,
                 MaxValue = 1f,
                 DefaultValue = 1f,
@@ -560,8 +513,6 @@ public sealed partial class VocalSpectrographPlugin
 
     public int FrameCount => Volatile.Read(ref _activeFrameCapacity);
 
-    public int MaxFormantCount => MaxFormants;
-
     public int MaxHarmonicCount => MaxHarmonics;
 
     public int DataVersion => Volatile.Read(ref _dataVersion);
@@ -606,9 +557,6 @@ public sealed partial class VocalSpectrographPlugin
     public VocalRangeType VoiceRange =>
         (VocalRangeType)Math.Clamp(Volatile.Read(ref _requestedVoiceRange), 0, 5);
 
-    public FormantProfile FormantProfile =>
-        (FormantProfile)Math.Clamp(Volatile.Read(ref _requestedFormantProfile), 0, 3);
-
     public bool ShowRange => Volatile.Read(ref _requestedShowRange) != 0;
 
     public bool ShowGuides => Volatile.Read(ref _requestedShowGuides) != 0;
@@ -618,8 +566,6 @@ public sealed partial class VocalSpectrographPlugin
     public bool ShowSpectrum => Volatile.Read(ref _requestedShowSpectrum) != 0;
 
     public bool ShowPitchMeter => Volatile.Read(ref _requestedShowPitchMeter) != 0;
-
-    public bool ShowVowelSpace => Volatile.Read(ref _requestedShowVowelSpace) != 0;
 
     public SpectrogramSmoothingMode SmoothingMode =>
         (SpectrogramSmoothingMode)Math.Clamp(Volatile.Read(ref _requestedSmoothingMode), 0, 2);
@@ -657,10 +603,6 @@ public sealed partial class VocalSpectrographPlugin
 
     public bool ShowPitch => Volatile.Read(ref _requestedShowPitch) != 0;
 
-    public bool ShowFormants => Volatile.Read(ref _requestedShowFormants) != 0;
-
-    public bool ShowFormantBandwidths => Volatile.Read(ref _requestedShowFormantBandwidths) != 0;
-
     public bool ShowHarmonics => Volatile.Read(ref _requestedShowHarmonics) != 0;
 
     public HarmonicDisplayMode HarmonicDisplayMode =>
@@ -673,8 +615,6 @@ public sealed partial class VocalSpectrographPlugin
     public bool HighPassEnabled => Volatile.Read(ref _requestedHighPassEnabled) != 0;
 
     public float HighPassCutoff => Volatile.Read(ref _requestedHighPassCutoff);
-
-    public int LpcOrder => Volatile.Read(ref _requestedLpcOrder);
 
     // Speech Coach properties
     public bool SpeechCoachEnabled => Volatile.Read(ref _requestedSpeechCoachEnabled) != 0;
@@ -744,12 +684,6 @@ public sealed partial class VocalSpectrographPlugin
             case ShowPitchIndex:
                 Interlocked.Exchange(ref _requestedShowPitch, value >= 0.5f ? 1 : 0);
                 break;
-            case ShowFormantsIndex:
-                Interlocked.Exchange(ref _requestedShowFormants, value >= 0.5f ? 1 : 0);
-                break;
-            case ShowFormantBandwidthsIndex:
-                Interlocked.Exchange(ref _requestedShowFormantBandwidths, value >= 0.5f ? 1 : 0);
-                break;
             case ShowHarmonicsIndex:
                 Interlocked.Exchange(ref _requestedShowHarmonics, value >= 0.5f ? 1 : 0);
                 break;
@@ -767,9 +701,6 @@ public sealed partial class VocalSpectrographPlugin
                 break;
             case HighPassCutoffIndex:
                 Interlocked.Exchange(ref _requestedHighPassCutoff, Math.Clamp(value, 20f, 120f));
-                break;
-            case LpcOrderIndex:
-                Interlocked.Exchange(ref _requestedLpcOrder, Math.Clamp((int)MathF.Round(value), 8, 24));
                 break;
             case ReassignModeIndex:
                 Interlocked.Exchange(ref _requestedReassignMode, Math.Clamp((int)MathF.Round(value), 0, 3));
@@ -807,9 +738,6 @@ public sealed partial class VocalSpectrographPlugin
             case VoiceRangeIndex:
                 Interlocked.Exchange(ref _requestedVoiceRange, Math.Clamp((int)MathF.Round(value), 0, 5));
                 break;
-            case FormantProfileIndex:
-                Interlocked.Exchange(ref _requestedFormantProfile, Math.Clamp((int)MathF.Round(value), 0, 3));
-                break;
             case ShowRangeIndex:
                 Interlocked.Exchange(ref _requestedShowRange, value >= 0.5f ? 1 : 0);
                 break;
@@ -824,9 +752,6 @@ public sealed partial class VocalSpectrographPlugin
                 break;
             case ShowPitchMeterIndex:
                 Interlocked.Exchange(ref _requestedShowPitchMeter, value >= 0.5f ? 1 : 0);
-                break;
-            case ShowVowelSpaceIndex:
-                Interlocked.Exchange(ref _requestedShowVowelSpace, value >= 0.5f ? 1 : 0);
                 break;
             case SmoothingModeIndex:
                 Interlocked.Exchange(ref _requestedSmoothingMode, Math.Clamp((int)MathF.Round(value), 0, 2));
@@ -885,7 +810,7 @@ public sealed partial class VocalSpectrographPlugin
 
     public byte[] GetState()
     {
-        var bytes = new byte[sizeof(float) * 45];
+        var bytes = new byte[sizeof(float) * 41];
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedFftSize), 0, bytes, 0, 4);
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedWindow), 0, bytes, 4, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(OverlapOptions[_requestedOverlapIndex]), 0, bytes, 8, 4);
@@ -897,46 +822,42 @@ public sealed partial class VocalSpectrographPlugin
         Buffer.BlockCopy(BitConverter.GetBytes(_requestedTimeWindow), 0, bytes, 32, 4);
         Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedColorMap), 0, bytes, 36, 4);
         Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowPitch), 0, bytes, 40, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowFormants), 0, bytes, 44, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowHarmonics), 0, bytes, 48, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowVoicing), 0, bytes, 52, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedPreEmphasis), 0, bytes, 56, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedHighPassEnabled), 0, bytes, 60, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedHighPassCutoff), 0, bytes, 64, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedLpcOrder), 0, bytes, 68, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedReassignMode), 0, bytes, 72, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedReassignThreshold), 0, bytes, 76, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedReassignSpread), 0, bytes, 80, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedClarityMode), 0, bytes, 84, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedClarityNoise), 0, bytes, 88, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedClarityHarmonic), 0, bytes, 92, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedClaritySmoothing), 0, bytes, 96, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedPitchAlgorithm), 0, bytes, 100, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedAxisMode), 0, bytes, 104, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedVoiceRange), 0, bytes, 108, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowRange), 0, bytes, 112, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowGuides), 0, bytes, 116, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowWaveform), 0, bytes, 120, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowSpectrum), 0, bytes, 124, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowPitchMeter), 0, bytes, 128, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowVowelSpace), 0, bytes, 132, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedSmoothingMode), 0, bytes, 136, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedBrightness), 0, bytes, 140, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedGamma), 0, bytes, 144, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes(_requestedContrast), 0, bytes, 148, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedColorLevels), 0, bytes, 152, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedNormalizationMode), 0, bytes, 156, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedDynamicRangeMode), 0, bytes, 160, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedTransformType), 0, bytes, 164, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedCqtBinsPerOctave), 0, bytes, 168, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedHarmonicDisplayMode), 0, bytes, 172, 4);
-        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedFormantProfile), 0, bytes, 176, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowHarmonics), 0, bytes, 44, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowVoicing), 0, bytes, 48, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedPreEmphasis), 0, bytes, 52, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedHighPassEnabled), 0, bytes, 56, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedHighPassCutoff), 0, bytes, 60, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedReassignMode), 0, bytes, 64, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedReassignThreshold), 0, bytes, 68, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedReassignSpread), 0, bytes, 72, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedClarityMode), 0, bytes, 76, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedClarityNoise), 0, bytes, 80, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedClarityHarmonic), 0, bytes, 84, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedClaritySmoothing), 0, bytes, 88, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedPitchAlgorithm), 0, bytes, 92, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedAxisMode), 0, bytes, 96, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedVoiceRange), 0, bytes, 100, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowRange), 0, bytes, 104, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowGuides), 0, bytes, 108, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowWaveform), 0, bytes, 112, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowSpectrum), 0, bytes, 116, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedShowPitchMeter), 0, bytes, 120, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedSmoothingMode), 0, bytes, 124, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedBrightness), 0, bytes, 128, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedGamma), 0, bytes, 132, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_requestedContrast), 0, bytes, 136, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedColorLevels), 0, bytes, 140, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedNormalizationMode), 0, bytes, 144, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedDynamicRangeMode), 0, bytes, 148, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedTransformType), 0, bytes, 152, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedCqtBinsPerOctave), 0, bytes, 156, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_requestedHarmonicDisplayMode), 0, bytes, 160, 4);
         return bytes;
     }
 
     public void SetState(byte[] state)
     {
-        if (state.Length < sizeof(float) * 19)
+        if (state.Length != sizeof(float) * 41)
         {
             return;
         }
@@ -952,63 +873,35 @@ public sealed partial class VocalSpectrographPlugin
         SetParameter(TimeWindowIndex, BitConverter.ToSingle(state, 32));
         SetParameter(ColorMapIndex, BitConverter.ToSingle(state, 36));
         SetParameter(ShowPitchIndex, BitConverter.ToSingle(state, 40));
-        SetParameter(ShowFormantsIndex, BitConverter.ToSingle(state, 44));
-        SetParameter(ShowHarmonicsIndex, BitConverter.ToSingle(state, 48));
-        SetParameter(ShowVoicingIndex, BitConverter.ToSingle(state, 52));
-        SetParameter(PreEmphasisIndex, BitConverter.ToSingle(state, 56));
-        SetParameter(HighPassEnabledIndex, BitConverter.ToSingle(state, 60));
-        SetParameter(HighPassCutoffIndex, BitConverter.ToSingle(state, 64));
-        SetParameter(LpcOrderIndex, BitConverter.ToSingle(state, 68));
-        SetParameter(ReassignModeIndex, BitConverter.ToSingle(state, 72));
-
-        if (state.Length >= sizeof(float) * 25)
-        {
-            SetParameter(ReassignThresholdIndex, BitConverter.ToSingle(state, 76));
-            SetParameter(ReassignSpreadIndex, BitConverter.ToSingle(state, 80));
-            SetParameter(ClarityModeIndex, BitConverter.ToSingle(state, 84));
-            SetParameter(ClarityNoiseIndex, BitConverter.ToSingle(state, 88));
-            SetParameter(ClarityHarmonicIndex, BitConverter.ToSingle(state, 92));
-            SetParameter(ClaritySmoothingIndex, BitConverter.ToSingle(state, 96));
-        }
-
-        if (state.Length >= sizeof(float) * 39)
-        {
-            SetParameter(PitchAlgorithmIndex, BitConverter.ToSingle(state, 100));
-            SetParameter(AxisModeIndex, BitConverter.ToSingle(state, 104));
-            SetParameter(VoiceRangeIndex, BitConverter.ToSingle(state, 108));
-            SetParameter(ShowRangeIndex, BitConverter.ToSingle(state, 112));
-            SetParameter(ShowGuidesIndex, BitConverter.ToSingle(state, 116));
-            SetParameter(ShowWaveformIndex, BitConverter.ToSingle(state, 120));
-            SetParameter(ShowSpectrumIndex, BitConverter.ToSingle(state, 124));
-            SetParameter(ShowPitchMeterIndex, BitConverter.ToSingle(state, 128));
-            SetParameter(ShowVowelSpaceIndex, BitConverter.ToSingle(state, 132));
-            SetParameter(SmoothingModeIndex, BitConverter.ToSingle(state, 136));
-            SetParameter(BrightnessIndex, BitConverter.ToSingle(state, 140));
-            SetParameter(GammaIndex, BitConverter.ToSingle(state, 144));
-            SetParameter(ContrastIndex, BitConverter.ToSingle(state, 148));
-            SetParameter(ColorLevelsIndex, BitConverter.ToSingle(state, 152));
-        }
-
-        if (state.Length >= sizeof(float) * 41)
-        {
-            SetParameter(NormalizationModeIndex, BitConverter.ToSingle(state, 156));
-            SetParameter(DynamicRangeModeIndex, BitConverter.ToSingle(state, 160));
-        }
-
-        if (state.Length >= sizeof(float) * 43)
-        {
-            SetParameter(TransformTypeIndex, BitConverter.ToSingle(state, 164));
-            SetParameter(CqtBinsPerOctaveIndex, BitConverter.ToSingle(state, 168));
-        }
-
-        if (state.Length >= sizeof(float) * 44)
-        {
-            SetParameter(HarmonicDisplayModeIndex, BitConverter.ToSingle(state, 172));
-        }
-
-        if (state.Length >= sizeof(float) * 45)
-        {
-            SetParameter(FormantProfileIndex, BitConverter.ToSingle(state, 176));
-        }
+        SetParameter(ShowHarmonicsIndex, BitConverter.ToSingle(state, 44));
+        SetParameter(ShowVoicingIndex, BitConverter.ToSingle(state, 48));
+        SetParameter(PreEmphasisIndex, BitConverter.ToSingle(state, 52));
+        SetParameter(HighPassEnabledIndex, BitConverter.ToSingle(state, 56));
+        SetParameter(HighPassCutoffIndex, BitConverter.ToSingle(state, 60));
+        SetParameter(ReassignModeIndex, BitConverter.ToSingle(state, 64));
+        SetParameter(ReassignThresholdIndex, BitConverter.ToSingle(state, 68));
+        SetParameter(ReassignSpreadIndex, BitConverter.ToSingle(state, 72));
+        SetParameter(ClarityModeIndex, BitConverter.ToSingle(state, 76));
+        SetParameter(ClarityNoiseIndex, BitConverter.ToSingle(state, 80));
+        SetParameter(ClarityHarmonicIndex, BitConverter.ToSingle(state, 84));
+        SetParameter(ClaritySmoothingIndex, BitConverter.ToSingle(state, 88));
+        SetParameter(PitchAlgorithmIndex, BitConverter.ToSingle(state, 92));
+        SetParameter(AxisModeIndex, BitConverter.ToSingle(state, 96));
+        SetParameter(VoiceRangeIndex, BitConverter.ToSingle(state, 100));
+        SetParameter(ShowRangeIndex, BitConverter.ToSingle(state, 104));
+        SetParameter(ShowGuidesIndex, BitConverter.ToSingle(state, 108));
+        SetParameter(ShowWaveformIndex, BitConverter.ToSingle(state, 112));
+        SetParameter(ShowSpectrumIndex, BitConverter.ToSingle(state, 116));
+        SetParameter(ShowPitchMeterIndex, BitConverter.ToSingle(state, 120));
+        SetParameter(SmoothingModeIndex, BitConverter.ToSingle(state, 124));
+        SetParameter(BrightnessIndex, BitConverter.ToSingle(state, 128));
+        SetParameter(GammaIndex, BitConverter.ToSingle(state, 132));
+        SetParameter(ContrastIndex, BitConverter.ToSingle(state, 136));
+        SetParameter(ColorLevelsIndex, BitConverter.ToSingle(state, 140));
+        SetParameter(NormalizationModeIndex, BitConverter.ToSingle(state, 144));
+        SetParameter(DynamicRangeModeIndex, BitConverter.ToSingle(state, 148));
+        SetParameter(TransformTypeIndex, BitConverter.ToSingle(state, 152));
+        SetParameter(CqtBinsPerOctaveIndex, BitConverter.ToSingle(state, 156));
+        SetParameter(HarmonicDisplayModeIndex, BitConverter.ToSingle(state, 160));
     }
 }

@@ -1,11 +1,10 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Threading;
-using HotMic.Core.Dsp.Analysis.Formants;
+using HotMic.Core.Dsp.Analysis;
 using HotMic.Core.Dsp.Analysis.Speech;
 using HotMic.Core.Dsp.Fft;
 using HotMic.Core.Dsp.Spectrogram;
-using HotMic.Core.Dsp.Voice;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
@@ -39,8 +38,6 @@ public sealed partial class VocalSpectrographPlugin
         float[] magnitudes,
         float[] pitchTrack,
         float[] pitchConfidence,
-        float[] formantFrequencies,
-        float[] formantBandwidths,
         byte[] voicingStates,
         float[] harmonicFrequencies,
         float[] harmonicMagnitudes,
@@ -55,8 +52,6 @@ public sealed partial class VocalSpectrographPlugin
         var spectrogramBuffer = _spectrogramBuffer;
         var pitchTrackBuffer = _pitchTrack;
         var pitchConfidenceBuffer = _pitchConfidence;
-        var formantFrequencyBuffer = _formantFrequencies;
-        var formantBandwidthBuffer = _formantBandwidths;
         var voicingBuffer = _voicingStates;
         var harmonicBuffer = _harmonicFrequencies;
         var harmonicMagBuffer = _harmonicMagnitudes;
@@ -76,14 +71,11 @@ public sealed partial class VocalSpectrographPlugin
         }
 
         int specLength = frames * bins;
-        int formantLength = frames * MaxFormants;
         int harmonicLength = frames * MaxHarmonics;
 
         if (spectrogramBuffer.Length != specLength
             || pitchTrackBuffer.Length != frames
             || pitchConfidenceBuffer.Length != frames
-            || formantFrequencyBuffer.Length != formantLength
-            || formantBandwidthBuffer.Length != formantLength
             || voicingBuffer.Length != frames
             || harmonicBuffer.Length != harmonicLength
             || harmonicMagBuffer.Length != harmonicLength
@@ -101,8 +93,6 @@ public sealed partial class VocalSpectrographPlugin
         if (magnitudes.Length < specLength
             || pitchTrack.Length < frames
             || pitchConfidence.Length < frames
-            || formantFrequencies.Length < formantLength
-            || formantBandwidths.Length < formantLength
             || voicingStates.Length < frames
             || harmonicFrequencies.Length < harmonicLength
             || harmonicMagnitudes.Length < harmonicLength
@@ -133,8 +123,6 @@ public sealed partial class VocalSpectrographPlugin
                 Array.Clear(magnitudes, 0, specLength);
                 Array.Clear(pitchTrack, 0, frames);
                 Array.Clear(pitchConfidence, 0, frames);
-                Array.Clear(formantFrequencies, 0, formantLength);
-                Array.Clear(formantBandwidths, 0, formantLength);
                 Array.Clear(voicingStates, 0, frames);
                 Array.Clear(harmonicFrequencies, 0, harmonicLength);
                 Array.Clear(harmonicMagnitudes, 0, harmonicLength);
@@ -157,8 +145,6 @@ public sealed partial class VocalSpectrographPlugin
                     Array.Clear(magnitudes, 0, padFrames * bins);
                     Array.Clear(pitchTrack, 0, padFrames);
                     Array.Clear(pitchConfidence, 0, padFrames);
-                    Array.Clear(formantFrequencies, 0, padFrames * MaxFormants);
-                    Array.Clear(formantBandwidths, 0, padFrames * MaxFormants);
                     Array.Clear(voicingStates, 0, padFrames);
                     Array.Clear(harmonicFrequencies, 0, padFrames * MaxHarmonics);
                     Array.Clear(harmonicMagnitudes, 0, padFrames * MaxHarmonics);
@@ -174,8 +160,6 @@ public sealed partial class VocalSpectrographPlugin
                 CopyRing(spectrogramBuffer, magnitudes, availableFrames, bins, startIndex, padFrames);
                 CopyRing(pitchTrackBuffer, pitchTrack, availableFrames, 1, startIndex, padFrames);
                 CopyRing(pitchConfidenceBuffer, pitchConfidence, availableFrames, 1, startIndex, padFrames);
-                CopyRing(formantFrequencyBuffer, formantFrequencies, availableFrames, MaxFormants, startIndex, padFrames);
-                CopyRing(formantBandwidthBuffer, formantBandwidths, availableFrames, MaxFormants, startIndex, padFrames);
                 CopyRing(voicingBuffer, voicingStates, availableFrames, startIndex, padFrames);
                 CopyRing(harmonicBuffer, harmonicFrequencies, availableFrames, MaxHarmonics, startIndex, padFrames);
                 CopyRing(harmonicMagBuffer, harmonicMagnitudes, availableFrames, MaxHarmonics, startIndex, padFrames);
@@ -484,8 +468,6 @@ public sealed partial class VocalSpectrographPlugin
         float[] magnitudes,
         float[] pitchTrack,
         float[] pitchConfidence,
-        float[] formantFrequencies,
-        float[] formantBandwidths,
         byte[] voicingStates,
         float[] harmonicFrequencies,
         float[] harmonicMagnitudes,
@@ -507,8 +489,6 @@ public sealed partial class VocalSpectrographPlugin
         var spectrogramBuffer = _spectrogramBuffer;
         var pitchTrackBuffer = _pitchTrack;
         var pitchConfidenceBuffer = _pitchConfidence;
-        var formantFrequencyBuffer = _formantFrequencies;
-        var formantBandwidthBuffer = _formantBandwidths;
         var voicingBuffer = _voicingStates;
         var harmonicBuffer = _harmonicFrequencies;
         var harmonicMagBuffer = _harmonicMagnitudes;
@@ -528,14 +508,11 @@ public sealed partial class VocalSpectrographPlugin
         }
 
         int specLength = frames * bins;
-        int formantLength = frames * MaxFormants;
         int harmonicLength = frames * MaxHarmonics;
 
         if (spectrogramBuffer.Length != specLength
             || pitchTrackBuffer.Length != frames
             || pitchConfidenceBuffer.Length != frames
-            || formantFrequencyBuffer.Length != formantLength
-            || formantBandwidthBuffer.Length != formantLength
             || voicingBuffer.Length != frames
             || harmonicBuffer.Length != harmonicLength
             || harmonicMagBuffer.Length != harmonicLength
@@ -553,8 +530,6 @@ public sealed partial class VocalSpectrographPlugin
         if (magnitudes.Length < specLength
             || pitchTrack.Length < frames
             || pitchConfidence.Length < frames
-            || formantFrequencies.Length < formantLength
-            || formantBandwidths.Length < formantLength
             || voicingStates.Length < frames
             || harmonicFrequencies.Length < harmonicLength
             || harmonicMagnitudes.Length < harmonicLength
@@ -587,8 +562,6 @@ public sealed partial class VocalSpectrographPlugin
                 Array.Clear(magnitudes, 0, specLength);
                 Array.Clear(pitchTrack, 0, frames);
                 Array.Clear(pitchConfidence, 0, frames);
-                Array.Clear(formantFrequencies, 0, formantLength);
-                Array.Clear(formantBandwidths, 0, formantLength);
                 Array.Clear(voicingStates, 0, frames);
                 Array.Clear(harmonicFrequencies, 0, harmonicLength);
                 Array.Clear(harmonicMagnitudes, 0, harmonicLength);
@@ -613,8 +586,6 @@ public sealed partial class VocalSpectrographPlugin
                     Array.Copy(spectrogramBuffer, magnitudes, specLength);
                     Array.Copy(pitchTrackBuffer, pitchTrack, frames);
                     Array.Copy(pitchConfidenceBuffer, pitchConfidence, frames);
-                    Array.Copy(formantFrequencyBuffer, formantFrequencies, formantLength);
-                    Array.Copy(formantBandwidthBuffer, formantBandwidths, formantLength);
                     Array.Copy(voicingBuffer, voicingStates, frames);
                     Array.Copy(harmonicBuffer, harmonicFrequencies, harmonicLength);
                     Array.Copy(harmonicMagBuffer, harmonicMagnitudes, harmonicLength);
@@ -639,8 +610,6 @@ public sealed partial class VocalSpectrographPlugin
                     CopyRingFrames(spectrogramBuffer, magnitudes, framesToCopy, bins, startIndex);
                     CopyRingFrames(pitchTrackBuffer, pitchTrack, framesToCopy, 1, startIndex);
                     CopyRingFrames(pitchConfidenceBuffer, pitchConfidence, framesToCopy, 1, startIndex);
-                    CopyRingFrames(formantFrequencyBuffer, formantFrequencies, framesToCopy, MaxFormants, startIndex);
-                    CopyRingFrames(formantBandwidthBuffer, formantBandwidths, framesToCopy, MaxFormants, startIndex);
                     CopyRingFrames(voicingBuffer, voicingStates, framesToCopy, startIndex);
                     CopyRingFrames(harmonicBuffer, harmonicFrequencies, framesToCopy, MaxHarmonics, startIndex);
                     CopyRingFrames(harmonicMagBuffer, harmonicMagnitudes, framesToCopy, MaxHarmonics, startIndex);
@@ -776,23 +745,11 @@ public sealed partial class VocalSpectrographPlugin
         float minHz = Volatile.Read(ref _requestedMinFrequency);
         float maxHz = Volatile.Read(ref _requestedMaxFrequency);
         float timeWindow = Volatile.Read(ref _requestedTimeWindow);
-        FormantProfile formantProfile = (FormantProfile)Math.Clamp(Volatile.Read(ref _requestedFormantProfile), 0, 3);
-        int minLpcOrder = 8;
-        int lpcOrder = Math.Clamp(Volatile.Read(ref _requestedLpcOrder), minLpcOrder, 24);
         float hpfCutoff = Volatile.Read(ref _requestedHighPassCutoff);
         bool hpfEnabled = Volatile.Read(ref _requestedHighPassEnabled) != 0;
         bool preEmphasisEnabled = Volatile.Read(ref _requestedPreEmphasis) != 0;
         var transformType = (SpectrogramTransformType)Math.Clamp(Volatile.Read(ref _requestedTransformType), 0, 2);
         int cqtBinsPerOctave = SelectDiscrete(Volatile.Read(ref _requestedCqtBinsPerOctave), CqtBinsPerOctaveOptions);
-        FormantTrackingPreset formantPreset = FormantProfileInfo.GetTrackingPreset(formantProfile);
-        float formantCeilingHz = formantPreset.FormantCeilingHz;
-        int lpcDecimationStages = GetLpcDecimationStages(_sampleRate, formantCeilingHz);
-        int lpcSampleRate = _sampleRate;
-        for (int i = 0; i < lpcDecimationStages; i++)
-        {
-            lpcSampleRate /= 2;
-        }
-        int recommendedLpcOrder = formantPreset.LpcOrder;
 
         // Detect what changed (excluding force - that's handled separately)
         bool fftSizeChanged = !force && fftSize != _activeFftSize;
@@ -809,19 +766,9 @@ public sealed partial class VocalSpectrographPlugin
         bool filterChanged = !force && (MathF.Abs(hpfCutoff - _activeHighPassCutoff) > 1e-3f
             || hpfEnabled != _activeHighPassEnabled
             || preEmphasisEnabled != _activePreEmphasisEnabled);
-        bool formantProfileChanged = force || formantProfile != _activeFormantProfile;
-        if (formantProfileChanged)
-        {
-            Interlocked.Exchange(ref _requestedLpcOrder, recommendedLpcOrder);
-            lpcOrder = recommendedLpcOrder;
-        }
-        int desiredLpcWindowSamples = ComputeLpcWindowSamples(_sampleRate, lpcOrder, fftSize);
-        bool lpcChanged = force || _lpcAnalyzer is null || lpcOrder != _lpcAnalyzer.Order
-            || lpcSampleRate != _activeLpcSampleRate || formantProfileChanged;
         bool reassignChanged = !force && reassignMode != _activeReassignMode;
         bool transformChanged = !force && transformType != _activeTransformType;
         bool cqtChanged = !force && cqtBinsPerOctave != _activeCqtBinsPerOctave;
-        bool lpcWindowChanged = desiredLpcWindowSamples != _lpcWindowSamples;
 
         // Track discontinuity type and whether buffers need reallocation
         var discontinuity = DiscontinuityType.None;
@@ -843,13 +790,6 @@ public sealed partial class VocalSpectrographPlugin
             _fft = new FastFft(_activeFftSize);
             _analysisBufferRaw = new float[_activeFftSize];
             _analysisBufferProcessed = new float[_activeFftSize];
-            _lpcWindowSamples = desiredLpcWindowSamples;
-            _lpcInputBuffer = new float[_lpcWindowSamples];
-            _lpcDecimateBuffer1 = new float[Math.Max(1, _lpcWindowSamples / 2)];
-            _lpcDecimatedBuffer = new float[_lpcWindowSamples];
-            _lpcWindowedBuffer = new float[_lpcWindowSamples];
-            _lpcWindow = new float[_lpcWindowSamples];
-            _lpcWindowLength = 0;
             _hopBuffer = new float[_activeHopSize];
             _fftReal = new float[_activeFftSize];
             _fftImag = new float[_activeFftSize];
@@ -866,6 +806,7 @@ public sealed partial class VocalSpectrographPlugin
             _fftNormalization = 2f / MathF.Max(1f, _activeFftSize);
             _binResolution = _sampleRate / (float)_activeFftSize;
             UpdateAWeighting();
+            _voicingDetector.Configure(_sampleRate, _activeHopSize, _binResolution, new VoicingDetectorSettings());
 
             // Overlay buffers - preserve existing data when resizing
             int framesToCopy = Math.Min(oldFrameCapacity, _activeFrameCapacity);
@@ -883,8 +824,6 @@ public sealed partial class VocalSpectrographPlugin
             _voicingStates = ResizePreserve(_voicingStates, _activeFrameCapacity, framesToCopy);
 
             // Multi-value per-frame buffers
-            _formantFrequencies = ResizePreserveStrided(_formantFrequencies, _activeFrameCapacity, MaxFormants, framesToCopy);
-            _formantBandwidths = ResizePreserveStrided(_formantBandwidths, _activeFrameCapacity, MaxFormants, framesToCopy);
             _harmonicFrequencies = ResizePreserveStrided(_harmonicFrequencies, _activeFrameCapacity, MaxHarmonics, framesToCopy);
             _harmonicMagnitudes = ResizePreserveStrided(_harmonicMagnitudes, _activeFrameCapacity, MaxHarmonics, framesToCopy);
 
@@ -902,30 +841,6 @@ public sealed partial class VocalSpectrographPlugin
             if (fftSizeChanged) discontinuity |= DiscontinuityType.ResolutionChange;
             if (overlapChanged) discontinuity |= DiscontinuityType.OverlapChange;
             if (timeWindowChanged) discontinuity |= DiscontinuityType.TimeWindowChange;
-        }
-
-        if (!sizeChanged && lpcWindowChanged)
-        {
-            _lpcWindowSamples = desiredLpcWindowSamples;
-            _lpcInputBuffer = new float[_lpcWindowSamples];
-            _lpcDecimateBuffer1 = new float[Math.Max(1, _lpcWindowSamples / 2)];
-            _lpcDecimatedBuffer = new float[_lpcWindowSamples];
-            _lpcWindowedBuffer = new float[_lpcWindowSamples];
-            _lpcWindow = new float[_lpcWindowSamples];
-            _lpcWindowLength = 0;
-        }
-
-        if (formantProfileChanged
-            || lpcSampleRate != _activeLpcSampleRate
-            || lpcDecimationStages != _activeLpcDecimationStages
-            || MathF.Abs(formantCeilingHz - _activeFormantCeilingHz) > 1e-3f)
-        {
-            _activeFormantProfile = formantProfile;
-            _activeFormantPreset = formantPreset;
-            _activeFormantCeilingHz = formantCeilingHz;
-            _activeLpcSampleRate = lpcSampleRate;
-            _activeLpcDecimationStages = lpcDecimationStages;
-            _lpcWindowLength = 0;
         }
 
         // Refill the window buffer when size changes to avoid zeroed FFT input.
@@ -970,7 +885,6 @@ public sealed partial class VocalSpectrographPlugin
             {
                 _analysisBufferRaw = new float[requiredSize];
                 _analysisBufferProcessed = new float[requiredSize];
-                _lpcInputBuffer = new float[requiredSize];
                 _analysisFilled = 0;
             }
             _activeAnalysisSize = requiredSize;
@@ -1000,7 +914,6 @@ public sealed partial class VocalSpectrographPlugin
             {
                 _analysisBufferRaw = new float[requiredSize];
                 _analysisBufferProcessed = new float[requiredSize];
-                _lpcInputBuffer = new float[requiredSize];
                 _analysisFilled = 0;
             }
             _activeAnalysisSize = requiredSize;
@@ -1130,7 +1043,7 @@ public sealed partial class VocalSpectrographPlugin
             if (filterChanged) discontinuity |= DiscontinuityType.FilterChange;
         }
 
-        if (sizeChanged || lpcChanged || frequencyRangeChanged)
+        if (sizeChanged || frequencyRangeChanged)
         {
             // Pitch range should cover display range; Nyquist/2 is practical limit for time-domain methods
             float maxPitch = MathF.Min(_sampleRate * 0.25f, maxHz);
@@ -1145,38 +1058,6 @@ public sealed partial class VocalSpectrographPlugin
 
             _cepstralPitchDetector ??= new CepstralPitchDetector(_sampleRate, _activeFftSize, 50f, maxPitch, 2f);
             _cepstralPitchDetector.Configure(_sampleRate, _activeFftSize, 50f, maxPitch, 2f);
-
-            if (_lpcAnalyzer is null)
-            {
-                _lpcAnalyzer = new LpcAnalyzer(lpcOrder);
-            }
-            else
-            {
-                _lpcAnalyzer.Configure(lpcOrder);
-            }
-
-            if (_formantTracker is null)
-            {
-                _formantTracker = new FormantTracker(lpcOrder);
-            }
-            else
-            {
-                _formantTracker.Configure(lpcOrder);
-            }
-
-            // Initialize beam-search tracker (V2)
-            if (_beamFormantTracker is null)
-            {
-                float frameSeconds = _activeHopSize / (float)Math.Max(1, _sampleRate);
-                _beamFormantTracker = new BeamSearchFormantTracker(lpcOrder, formantPreset, frameSeconds, beamWidth: 5);
-            }
-            else
-            {
-                float frameSeconds = _activeHopSize / (float)Math.Max(1, _sampleRate);
-                _beamFormantTracker.Configure(lpcOrder, formantPreset, frameSeconds, beamWidth: 5);
-            }
-
-            _lpcCoefficients = new float[lpcOrder + 1];
         }
 
         // Configure speech coach when hop size changes
@@ -1254,6 +1135,7 @@ public sealed partial class VocalSpectrographPlugin
         _smoother.Reset();
         _harmonicComb.Reset();
         _featureExtractor.Reset();
+        _voicingDetector.Reset();
         _cqt?.Reset();
         _zoomFft?.Reset();
 
@@ -1274,8 +1156,6 @@ public sealed partial class VocalSpectrographPlugin
         Array.Clear(_linearMagnitudeBuffer, 0, _linearMagnitudeBuffer.Length);
         Array.Clear(_pitchTrack, 0, _pitchTrack.Length);
         Array.Clear(_pitchConfidence, 0, _pitchConfidence.Length);
-        Array.Clear(_formantFrequencies, 0, _formantFrequencies.Length);
-        Array.Clear(_formantBandwidths, 0, _formantBandwidths.Length);
         Array.Clear(_voicingStates, 0, _voicingStates.Length);
         Array.Clear(_harmonicFrequencies, 0, _harmonicFrequencies.Length);
         Array.Clear(_harmonicMagnitudes, 0, _harmonicMagnitudes.Length);
@@ -1599,33 +1479,6 @@ public sealed partial class VocalSpectrographPlugin
         {
             Array.Copy(source, 0, destination, 0, remainingFrames);
         }
-    }
-
-    private static int ComputeLpcWindowSamples(int sampleRate, int lpcOrder, int maxWindowSamples)
-    {
-        int desired = (int)MathF.Round(LpcWindowSeconds * sampleRate);
-        int maxWindow = Math.Max(1, maxWindowSamples);
-        int minWindow = Math.Min(maxWindow, Math.Max(lpcOrder + 1, 128));
-        return Math.Clamp(desired, minWindow, maxWindow);
-    }
-
-    private static int GetLpcDecimationStages(int sampleRate, float formantCeilingHz)
-    {
-        if (sampleRate <= 0 || formantCeilingHz <= 0f)
-        {
-            return 0;
-        }
-
-        float requiredRate = formantCeilingHz * 2f;
-        int stages = 0;
-        float currentRate = sampleRate;
-        while (stages < 2 && currentRate / 2f >= requiredRate)
-        {
-            currentRate /= 2f;
-            stages++;
-        }
-
-        return stages;
     }
 
     /// <summary>

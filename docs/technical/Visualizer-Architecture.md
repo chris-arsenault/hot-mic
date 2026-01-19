@@ -2,6 +2,7 @@
 
 This document describes the refactored visualization system that replaces the monolithic VocalSpectrographPlugin with a modular, composable architecture.
 
+
 ## Goals
 
 1. **Smaller surface area**: Each visualizer has only its relevant parameters
@@ -31,7 +32,6 @@ This document describes the refactored visualization system that replaces the mo
 │  ┌──────────────────────────────────────────────────────────────────┐  │
 │  │                      Analysis Providers                          │  │
 │  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌────────────┐  │  │
-│  │  │ Spectrogram │ │    Pitch    │ │   Formant   │ │  Harmonic  │  │  │
 │  │  │  Provider   │ │  Provider   │ │  Provider   │ │  Provider  │  │  │
 │  │  └─────────────┘ └─────────────┘ └─────────────┘ └────────────┘  │  │
 │  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐                 │  │
@@ -45,7 +45,6 @@ This document describes the refactored visualization system that replaces the mo
 │  │                    AnalysisResultStore                           │  │
 │  │  • Spectrogram frames (versioned ring buffer)                    │  │
 │  │  • Pitch/voicing track                                           │  │
-│  │  • Formant history (F1-F5 + bandwidths)                          │  │
 │  │  • Harmonic peaks                                                │  │
 │  │  • Waveform envelope                                             │  │
 │  │  • Speech metrics                                                │  │
@@ -119,7 +118,6 @@ public sealed class AnalysisOrchestrator : IDisposable
     // Providers (lazy-initialized, demand-activated)
     private readonly SpectrogramProvider _spectrogram;
     private readonly PitchProvider _pitch;
-    private readonly FormantProvider _formants;
     private readonly HarmonicProvider _harmonics;
     private readonly WaveformProvider _waveform;
     private readonly SpeechMetricsProvider _speechMetrics;
@@ -157,8 +155,6 @@ private void AnalysisLoop()
         if (caps.HasFlag(AnalysisCapabilities.Pitch))
             _pitch.Process(...);
 
-        if (caps.HasFlag(AnalysisCapabilities.Formants))
-            _formants.Process(...);
 
         // etc.
     }
@@ -191,8 +187,6 @@ public interface IAnalysisResultStore
                           Span<byte> voicing,
                           out int framesCopied);
 
-    bool TryGetFormantRange(long startFrame, int count,
-                            Span<float> frequencies,  // [count * MaxFormants]
                             Span<float> bandwidths,
                             out int framesCopied);
 
@@ -293,7 +287,6 @@ public enum AnalysisCapabilities
     None = 0,
     Spectrogram = 1 << 0,
     Pitch = 1 << 1,
-    Formants = 1 << 2,
     Harmonics = 1 << 3,
     Waveform = 1 << 4,
     SpeechMetrics = 1 << 5,
@@ -327,16 +320,13 @@ public interface IOverlay : IVisualizer
 | `SpectrogramVisualizer` | Spectrogram | TimeWindow, FreqMin, FreqMax, FreqScale, DbMin, DbMax, ColorMap, Brightness, Gamma, Contrast |
 | `WaveformVisualizer` | Waveform | TimeWindow, AmplitudeScale, ShowEnvelope |
 | `PitchMeterVisualizer` | Pitch, VoicingState | VoiceRange, ShowCents, ReferenceA4 |
-| `VowelSpaceVisualizer` | Formants, Pitch, VoicingState | ShowTarget, VowelSet, Smoothing |
 | `SpeechCoachVisualizer` | SpeechMetrics, Pitch, VoicingState | RateWindow, ShowMarkers, ShowRate, ShowPauses, ShowClarity |
-| `SingingCoachVisualizer` | Pitch, Formants, Harmonics | TargetScale, Tolerance, ShowVibrato, ShowBreath |
 
 ### Overlays
 
 | Overlay | Required Capabilities | Parameters |
 |---------|----------------------|------------|
 | `PitchOverlay` | Pitch, VoicingState | Color, LineWidth, ShowConfidence |
-| `FormantOverlay` | Formants | Color, ShowBandwidths, MaxFormants |
 | `HarmonicOverlay` | Harmonics, Pitch | DisplayMode (Detected/Theoretical/Both), Color |
 | `VoicingOverlay` | VoicingState | Color, Opacity |
 | `RangeGuidesOverlay` | None | VoiceRange, ShowNotes |
@@ -452,10 +442,8 @@ Location: `HotMic.App/UI/VisualizerComponents/OverlayBar.xaml`
                               Style="{StaticResource OverlayToggleStyle}"
                               Content="Pitch"
                               IsChecked="{Binding PitchOverlayEnabled}"/>
-                <ToggleButton x:Name="FormantToggle"
                               Style="{StaticResource OverlayToggleStyle}"
                               Content="F1-5"
-                              IsChecked="{Binding FormantOverlayEnabled}"/>
                 <ToggleButton x:Name="HarmonicToggle"
                               Style="{StaticResource OverlayToggleStyle}"
                               Content="Harmonic"
@@ -513,7 +501,6 @@ Location: `HotMic.App/UI/VisualizerComponents/OverlayBar.xaml`
 │ ▶ Open Window          │
 │   ├ Waveform           │
 │   ├ Pitch Meter        │
-│   ├ Vowel Space        │
 │   ├ Speech Coach       │
 │   └ Singing Coach      │
 ├────────────────────────┤
@@ -544,7 +531,6 @@ Location: `HotMic.App/UI/VisualizerComponents/OverlayBar.xaml`
 
 2. **Analysis Presets**: Shared analysis configuration
    - Stored in: `%AppData%\HotMic\analysis-presets\*.json`
-   - Contains: FFT size, overlap, transform type, pitch algorithm, formant profile, clarity settings
 
 3. **Chain Presets** (existing): Plugin chain configuration
    - Does NOT contain visualizer or analysis settings
@@ -572,7 +558,6 @@ Location: `HotMic.App/UI/VisualizerComponents/OverlayBar.xaml`
   },
   "overlays": {
     "pitch": true,
-    "formants": true,
     "harmonics": false,
     "voicing": false,
     "range": true,
@@ -591,7 +576,6 @@ Location: `HotMic.App/UI/VisualizerComponents/OverlayBar.xaml`
     "overlap": 0.875,
     "transformType": "fft",
     "pitchAlgorithm": "yin",
-    "formantProfile": "male",
     "clarityMode": "none",
     "preEmphasis": true,
     "highPassEnabled": true,
@@ -628,17 +612,12 @@ Source extraction:
 - `AnalyzePitch()` → `PitchProvider.Detect()`
 - `_voicingDetector` moves to this provider
 
-### FormantProvider (~400 lines)
 
 Responsibilities:
 - LPC analysis with decimation
-- Formant extraction (F1-F5)
 - Beam search tracking for continuity
-- Writes to: formant frequencies, bandwidths
 
 Source extraction:
-- `AnalyzeFormants()` → `FormantProvider.Extract()`
-- `_lpcAnalyzer`, `_beamFormantTracker` move here
 - Decimation logic moves here
 
 ### HarmonicProvider (~150 lines)
@@ -697,7 +676,6 @@ src/HotMic.Core/
 │   └── Providers/
 │       ├── SpectrogramProvider.cs
 │       ├── PitchProvider.cs
-│       ├── FormantProvider.cs
 │       ├── HarmonicProvider.cs
 │       ├── WaveformProvider.cs
 │       ├── SpeechMetricsProvider.cs
@@ -717,7 +695,6 @@ src/HotMic.App/
 │   ├── SpectrogramWindow.cs        (replaces VocalSpectrographWindow)
 │   ├── WaveformWindow.cs
 │   ├── PitchMeterWindow.cs
-│   ├── VowelSpaceWindow.cs
 │   ├── SpeechCoachWindow.cs
 │   └── SingingCoachWindow.cs
 ├── UI/
@@ -729,12 +706,10 @@ src/HotMic.App/
     ├── SpectrogramVisualizer.cs
     ├── WaveformVisualizer.cs
     ├── PitchMeterVisualizer.cs
-    ├── VowelSpaceVisualizer.cs
     ├── SpeechCoachVisualizer.cs
     ├── SingingCoachVisualizer.cs
     └── Overlays/
         ├── PitchOverlay.cs
-        ├── FormantOverlay.cs
         ├── HarmonicOverlay.cs
         ├── VoicingOverlay.cs
         └── RangeGuidesOverlay.cs
@@ -753,7 +728,6 @@ src/HotMic.App/
 ### Phase 2: Providers (extract from VocalSpectrographPlugin)
 - [ ] Extract `SpectrogramProvider`
 - [ ] Extract `PitchProvider`
-- [ ] Extract `FormantProvider`
 - [ ] Extract `HarmonicProvider`
 - [ ] Extract `WaveformProvider`
 - [ ] Extract `SpeechMetricsProvider`
@@ -771,13 +745,11 @@ src/HotMic.App/
 ### Phase 4: Visualizers (extract rendering from VocalSpectrographRenderer)
 - [ ] Create `SpectrogramVisualizer`
 - [ ] Create `PitchOverlay`
-- [ ] Create `FormantOverlay`
 - [ ] Create `HarmonicOverlay`
 - [ ] Create `VoicingOverlay`
 - [ ] Create `RangeGuidesOverlay`
 - [ ] Create `WaveformVisualizer`
 - [ ] Create `PitchMeterVisualizer`
-- [ ] Create `VowelSpaceVisualizer`
 - [ ] Create `SpeechCoachVisualizer`
 - [ ] Create `SingingCoachVisualizer`
 
@@ -785,7 +757,6 @@ src/HotMic.App/
 - [ ] Create `SpectrogramWindow`
 - [ ] Create `WaveformWindow`
 - [ ] Create `PitchMeterWindow`
-- [ ] Create `VowelSpaceWindow`
 - [ ] Create `SpeechCoachWindow`
 - [ ] Create `SingingCoachWindow`
 
@@ -819,7 +790,6 @@ src/HotMic.App/
 │  AnalysisOrchestrator.AnalysisLoop()                            │
 │    → SpectrogramProvider.Process()                              │
 │    → PitchProvider.Detect()                                     │
-│    → FormantProvider.Extract()                                  │
 │    → etc.                                                       │
 │    → AnalysisResultStore.Publish()  (version increment)         │
 └─────────────────────────────────────────────────────────────────┘

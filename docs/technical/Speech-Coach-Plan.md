@@ -4,6 +4,7 @@
 
 This document tracks the implementation of real-time speech analysis features within the existing VocalSpectrograph plugin.
 
+
 ## Goal
 
 Add "voice as speech" analysis alongside existing "voice as singing" features. Provide real-time feedback on:
@@ -206,14 +207,12 @@ Characteristics of fillers:
 - Voiced, sustained (100ms - 1000ms)
 - Low F0 variation (< 1 semitone over duration)
 - Low spectral flux (steady spectrum)
-- Specific formant patterns:
   - "uh/ah": F1 ≈ 600-800 Hz, F2 ≈ 1000-1400 Hz (schwa-like)
   - "um": nasal closure following schwa (drop in high-freq energy)
 
 Detection:
 1. Identify "sustained voiced" segments (> 100ms voiced with low F0 variation)
 2. Check spectral stability (flux < threshold)
-3. Optional: Check formant proximity to schwa region
 4. Classify: filled_pause vs filler_word based on duration/context
 ```
 
@@ -222,7 +221,6 @@ Detection:
 **Reuses**:
 - Voicing state
 - F0 tracking
-- Formant tracking (already computed)
 - Spectral flux (from SpectralFeatureExtractor)
 
 ---
@@ -236,7 +234,6 @@ Detection:
 **Components**:
 - **Spectral contrast**: ratio of high-freq to low-freq energy (clear consonants have more HF)
 - **Voicing transitions**: clear speech has crisp V/UV transitions
-- **HNR during voiced**: higher HNR = clearer vowels
 
 **Implementation**:
 ```
@@ -245,7 +242,6 @@ Output: Clarity score (0-100)
 
 Metrics:
 - consonant_clarity: spectral_slope during unvoiced (steeper = crisper)
-- vowel_clarity: HNR during voiced (higher = cleaner)
 - transition_sharpness: rate of voicing state changes
 - overall_clarity: weighted combination
 ```
@@ -326,7 +322,6 @@ public bool ShowStressMarkers { get; set; }
 | 1d | Plugin integration | Medium | All Phase 1 |
 | 2a | PitchContourAnalyzer | Low | Pitch detector results |
 | 2b | StressDetector | Medium | SyllableDetector, PitchContour |
-| 3 | FillerDetector | Medium | Voicing, F0, formants, flux |
 | 4a | ClarityAnalyzer | Low | HNR, spectral features |
 | 4b | IntelligibilityScore | Medium | Energy envelope FFT |
 | 5 | UI overlays | Medium | All analysis complete |
@@ -410,7 +405,6 @@ Per project policy (AGENTS.md):
 **Reused Infrastructure:**
 - VoicingState enum from VoicingDetector
 - Pitch detection (F0, confidence)
-- Formant tracking (F1, F2 for filler detection)
 - Spectral features (flux, slope)
 - HNR from HarmonicCombEnhancer
 - Existing ring buffer copy patterns

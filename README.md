@@ -108,7 +108,6 @@ DSP, analysis, and real-time constraints live in `docs/technical/`. Start with t
 - `docs/technical/Cleanup.md`
 - `docs/technical/Reassignment.md`
 - `docs/technical/Pitch.md`
-- `docs/technical/Formants.md`
 - `docs/technical/Voicing-Harmonics.md`
 - `docs/technical/Spectral-Features.md`
 - `docs/technical/Spectrogram-Rendering.md`

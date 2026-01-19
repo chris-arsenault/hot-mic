@@ -23,8 +23,8 @@ public partial class ConsonantTransientWindow : Window, IDisposable
     private bool _disposed;
 
     private float _smoothedOnsetGate;
-    private float _smoothedFastEnvelope;
-    private float _smoothedSlowEnvelope;
+    private float _smoothedFlux;
+    private float _smoothedFluxBaseline;
 
     public ConsonantTransientWindow(ConsonantTransientPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
@@ -68,12 +68,12 @@ public partial class ConsonantTransientWindow : Window, IDisposable
     private void OnRenderTick(object? sender, EventArgs e)
     {
         float rawGate = _plugin.GetOnsetGate();
-        float rawFast = _plugin.GetFastEnvelope();
-        float rawSlow = _plugin.GetSlowEnvelope();
+        float rawFlux = _plugin.GetFluxDb();
+        float rawBaseline = _plugin.GetFluxBaselineDb();
 
         _smoothedOnsetGate = _smoothedOnsetGate * 0.7f + rawGate * 0.3f;
-        _smoothedFastEnvelope = _smoothedFastEnvelope * 0.6f + rawFast * 0.4f;
-        _smoothedSlowEnvelope = _smoothedSlowEnvelope * 0.6f + rawSlow * 0.4f;
+        _smoothedFlux = _smoothedFlux * 0.9f + rawFlux * 0.1f;
+        _smoothedFluxBaseline = _smoothedFluxBaseline * 0.9f + rawBaseline * 0.1f;
 
         SkiaCanvas.InvalidateVisual();
     }
@@ -89,8 +89,8 @@ public partial class ConsonantTransientWindow : Window, IDisposable
             Threshold: _plugin.Threshold,
             HighCutHz: _plugin.HighCutHz,
             OnsetGate: _smoothedOnsetGate,
-            FastEnvelope: _smoothedFastEnvelope,
-            SlowEnvelope: _smoothedSlowEnvelope,
+            FluxDb: _smoothedFlux,
+            FluxBaselineDb: _smoothedFluxBaseline,
             TransientDetected: _plugin.GetTransientDetected(),
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,

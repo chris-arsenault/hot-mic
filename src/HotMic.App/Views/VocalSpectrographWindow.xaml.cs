@@ -59,8 +59,6 @@ public partial class VocalSpectrographWindow : Window, IDisposable
     private float[] _analysisMagnitudes = Array.Empty<float>();
     private float[] _pitchTrack = Array.Empty<float>();
     private float[] _pitchConfidence = Array.Empty<float>();
-    private float[] _formantFrequencies = Array.Empty<float>();
-    private float[] _formantBandwidths = Array.Empty<float>();
     private byte[] _voicingStates = Array.Empty<byte>();
     private float[] _harmonicFrequencies = Array.Empty<float>();
     private float[] _harmonicMagnitudes = Array.Empty<float>();
@@ -87,7 +85,6 @@ public partial class VocalSpectrographWindow : Window, IDisposable
     private int _bufferFrameCount;
     private int _bufferBins;
     private int _bufferAnalysisBins;
-    private int _bufferMaxFormants;
     private int _bufferMaxHarmonics;
     private int _lastDisplayBins;
     private FrequencyScale _lastScale;
@@ -478,7 +475,7 @@ public partial class VocalSpectrographWindow : Window, IDisposable
                 long copyStartTicks = profiling ? Stopwatch.GetTimestamp() : 0;
                 bool overlayCopied = _plugin.CopySpectrogramUpdates(
                     _lastCopiedFrameId,
-                    _displayMagnitudes, _pitchTrack, _pitchConfidence, _formantFrequencies, _formantBandwidths,
+                    _displayMagnitudes, _pitchTrack, _pitchConfidence,
                     _voicingStates, _harmonicFrequencies, _harmonicMagnitudes, _waveformMin, _waveformMax,
                     _hnrTrack, _cppTrack, _spectralCentroid, _spectralSlope, _spectralFlux,
                     out long latestFrameId, out int availableFrames, out bool overlayFullCopy);
@@ -748,13 +745,11 @@ public partial class VocalSpectrographWindow : Window, IDisposable
         int frames = Math.Max(1, _plugin.FrameCount);
         int bins = Math.Max(1, _plugin.DisplayBins);
         int analysisBins = Math.Max(1, _plugin.AnalysisBins);
-        int maxFormants = _plugin.MaxFormantCount;
         int maxHarmonics = _plugin.MaxHarmonicCount;
 
         _bufferFrameCount = frames;
         _bufferBins = bins;
         _bufferAnalysisBins = analysisBins;
-        _bufferMaxFormants = maxFormants;
         _bufferMaxHarmonics = maxHarmonics;
 
         int spectrogramLength = frames * bins;
@@ -785,15 +780,6 @@ public partial class VocalSpectrographWindow : Window, IDisposable
             _pitchTrack = new float[frames];
             _pitchConfidence = new float[frames];
             _voicingStates = new byte[frames];
-            _lastDataVersion = -1;
-            resized = true;
-        }
-
-        int formantLength = frames * maxFormants;
-        if (_formantFrequencies.Length != formantLength)
-        {
-            _formantFrequencies = new float[formantLength];
-            _formantBandwidths = new float[formantLength];
             _lastDataVersion = -1;
             resized = true;
         }
@@ -966,13 +952,11 @@ public partial class VocalSpectrographWindow : Window, IDisposable
             PitchAlgorithm: _plugin.PitchAlgorithm,
             AxisMode: _plugin.AxisMode,
             VoiceRange: _plugin.VoiceRange,
-            FormantProfile: _plugin.FormantProfile,
             ShowRange: _plugin.ShowRange,
             ShowGuides: _plugin.ShowGuides,
             ShowWaveform: _plugin.ShowWaveform,
             ShowSpectrum: _plugin.ShowSpectrum,
             ShowPitchMeter: _plugin.ShowPitchMeter,
-            ShowVowelSpace: _plugin.ShowVowelSpace,
             SmoothingMode: _plugin.SmoothingMode,
             Brightness: _plugin.Brightness,
             Gamma: _plugin.Gamma,
@@ -987,8 +971,6 @@ public partial class VocalSpectrographWindow : Window, IDisposable
             AnalysisTiming: _plugin.TimingSnapshot,
             UiTiming: new SpectrographUiTimingSnapshot(_uiTickUs, _uiCopyUs, _uiMapUs),
             ShowPitch: _plugin.ShowPitch,
-            ShowFormants: _plugin.ShowFormants,
-            ShowFormantBandwidths: _plugin.ShowFormantBandwidths,
             ShowHarmonics: _plugin.ShowHarmonics,
             HarmonicDisplayMode: _plugin.HarmonicDisplayMode,
             ShowVoicing: _plugin.ShowVoicing,
@@ -1004,8 +986,6 @@ public partial class VocalSpectrographWindow : Window, IDisposable
             Spectrogram: _spectrogram,
             PitchTrack: _pitchTrack,
             PitchConfidence: _pitchConfidence,
-            FormantFrequencies: _formantFrequencies,
-            FormantBandwidths: _formantBandwidths,
             VoicingStates: _voicingStates,
             HarmonicFrequencies: _harmonicFrequencies,
             HarmonicMagnitudes: _harmonicMagnitudes,
@@ -1017,7 +997,6 @@ public partial class VocalSpectrographWindow : Window, IDisposable
             SpectralSlope: _spectralSlope,
             SpectralFlux: _spectralFlux,
             BinFrequencies: _binFrequencies,
-            MaxFormants: _bufferMaxFormants,
             MaxHarmonics: _bufferMaxHarmonics,
             Discontinuities: _discontinuities,
             // Speech Coach
@@ -1229,9 +1208,6 @@ public partial class VocalSpectrographWindow : Window, IDisposable
             case SpectrographHitArea.PitchToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowPitchIndex, _plugin.ShowPitch);
                 return true;
-            case SpectrographHitArea.FormantToggle:
-                ToggleParameter(VocalSpectrographPlugin.ShowFormantsIndex, _plugin.ShowFormants);
-                return true;
             case SpectrographHitArea.HarmonicToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowHarmonicsIndex, _plugin.ShowHarmonics);
                 return true;
@@ -1256,9 +1232,6 @@ public partial class VocalSpectrographWindow : Window, IDisposable
             case SpectrographHitArea.VoiceRangeButton:
                 CycleVoiceRange();
                 return true;
-            case SpectrographHitArea.FormantProfileButton:
-                CycleFormantProfile();
-                return true;
             case SpectrographHitArea.NormalizationButton:
                 CycleNormalizationMode();
                 return true;
@@ -1273,9 +1246,6 @@ public partial class VocalSpectrographWindow : Window, IDisposable
                 return true;
             case SpectrographHitArea.PitchMeterToggle:
                 ToggleParameter(VocalSpectrographPlugin.ShowPitchMeterIndex, _plugin.ShowPitchMeter);
-                return true;
-            case SpectrographHitArea.VowelToggle:
-                ToggleParameter(VocalSpectrographPlugin.ShowVowelSpaceIndex, _plugin.ShowVowelSpace);
                 return true;
             case SpectrographHitArea.SpeechToggle:
                 ToggleParameter(VocalSpectrographPlugin.SpeechCoachEnabledIndex, _plugin.SpeechCoachEnabled);
@@ -1546,19 +1516,6 @@ public partial class VocalSpectrographWindow : Window, IDisposable
         _presetHelper.MarkAsCustom();
     }
 
-    private void CycleFormantProfile()
-    {
-        FormantProfile next = _plugin.FormantProfile switch
-        {
-            FormantProfile.BassBaritone => FormantProfile.Tenor,
-            FormantProfile.Tenor => FormantProfile.Alto,
-            FormantProfile.Alto => FormantProfile.Soprano,
-            _ => FormantProfile.BassBaritone
-        };
-        _parameterCallback(VocalSpectrographPlugin.FormantProfileIndex, (float)next);
-        _presetHelper.MarkAsCustom();
-    }
-
     private void CycleSmoothingMode()
     {
         SpectrogramSmoothingMode next = _plugin.SmoothingMode switch
@@ -1620,8 +1577,6 @@ public partial class VocalSpectrographWindow : Window, IDisposable
         Array.Clear(_analysisMagnitudes, 0, _analysisMagnitudes.Length);
         Array.Clear(_pitchTrack, 0, _pitchTrack.Length);
         Array.Clear(_pitchConfidence, 0, _pitchConfidence.Length);
-        Array.Clear(_formantFrequencies, 0, _formantFrequencies.Length);
-        Array.Clear(_formantBandwidths, 0, _formantBandwidths.Length);
         Array.Clear(_voicingStates, 0, _voicingStates.Length);
         Array.Clear(_harmonicFrequencies, 0, _harmonicFrequencies.Length);
         Array.Clear(_harmonicMagnitudes, 0, _harmonicMagnitudes.Length);
@@ -1790,13 +1745,11 @@ public partial class VocalSpectrographWindow : Window, IDisposable
                 "Time Window" => VocalSpectrographPlugin.TimeWindowIndex,
                 "Color Map" => VocalSpectrographPlugin.ColorMapIndex,
                 "Pitch Overlay" => VocalSpectrographPlugin.ShowPitchIndex,
-                "Formants" => VocalSpectrographPlugin.ShowFormantsIndex,
                 "Harmonics" => VocalSpectrographPlugin.ShowHarmonicsIndex,
                 "Voicing" => VocalSpectrographPlugin.ShowVoicingIndex,
                 "Pre-Emphasis" => VocalSpectrographPlugin.PreEmphasisIndex,
                 "HPF Enabled" => VocalSpectrographPlugin.HighPassEnabledIndex,
                 "HPF Cutoff" => VocalSpectrographPlugin.HighPassCutoffIndex,
-                "LPC Order" => VocalSpectrographPlugin.LpcOrderIndex,
                 "Reassign" => VocalSpectrographPlugin.ReassignModeIndex,
                 "Reassign Threshold" => VocalSpectrographPlugin.ReassignThresholdIndex,
                 "Reassign Spread" => VocalSpectrographPlugin.ReassignSpreadIndex,
@@ -1807,13 +1760,11 @@ public partial class VocalSpectrographWindow : Window, IDisposable
                 "Pitch Algorithm" => VocalSpectrographPlugin.PitchAlgorithmIndex,
                 "Axis Mode" => VocalSpectrographPlugin.AxisModeIndex,
                 "Voice Range" => VocalSpectrographPlugin.VoiceRangeIndex,
-                "Formant Profile" => VocalSpectrographPlugin.FormantProfileIndex,
                 "Range Overlay" => VocalSpectrographPlugin.ShowRangeIndex,
                 "Guides" => VocalSpectrographPlugin.ShowGuidesIndex,
                 "Waveform View" => VocalSpectrographPlugin.ShowWaveformIndex,
                 "Spectrum View" => VocalSpectrographPlugin.ShowSpectrumIndex,
                 "Pitch Meter" => VocalSpectrographPlugin.ShowPitchMeterIndex,
-                "Vowel View" => VocalSpectrographPlugin.ShowVowelSpaceIndex,
                 "Smoothing Mode" => VocalSpectrographPlugin.SmoothingModeIndex,
                 "Brightness" => VocalSpectrographPlugin.BrightnessIndex,
                 "Gamma" => VocalSpectrographPlugin.GammaIndex,
@@ -1848,13 +1799,11 @@ public partial class VocalSpectrographWindow : Window, IDisposable
             ["Time Window"] = _plugin.TimeWindowSeconds,
             ["Color Map"] = _plugin.ColorMap,
             ["Pitch Overlay"] = _plugin.ShowPitch ? 1f : 0f,
-            ["Formants"] = _plugin.ShowFormants ? 1f : 0f,
             ["Harmonics"] = _plugin.ShowHarmonics ? 1f : 0f,
             ["Voicing"] = _plugin.ShowVoicing ? 1f : 0f,
             ["Pre-Emphasis"] = _plugin.PreEmphasisEnabled ? 1f : 0f,
             ["HPF Enabled"] = _plugin.HighPassEnabled ? 1f : 0f,
             ["HPF Cutoff"] = _plugin.HighPassCutoff,
-            ["LPC Order"] = _plugin.LpcOrder,
             ["Reassign"] = (float)_plugin.ReassignMode,
             ["Reassign Threshold"] = _plugin.ReassignThresholdDb,
             ["Reassign Spread"] = _plugin.ReassignSpread,
@@ -1865,13 +1814,11 @@ public partial class VocalSpectrographWindow : Window, IDisposable
             ["Pitch Algorithm"] = (float)_plugin.PitchAlgorithm,
             ["Axis Mode"] = (float)_plugin.AxisMode,
             ["Voice Range"] = (float)_plugin.VoiceRange,
-            ["Formant Profile"] = (float)_plugin.FormantProfile,
             ["Range Overlay"] = _plugin.ShowRange ? 1f : 0f,
             ["Guides"] = _plugin.ShowGuides ? 1f : 0f,
             ["Waveform View"] = _plugin.ShowWaveform ? 1f : 0f,
             ["Spectrum View"] = _plugin.ShowSpectrum ? 1f : 0f,
             ["Pitch Meter"] = _plugin.ShowPitchMeter ? 1f : 0f,
-            ["Vowel View"] = _plugin.ShowVowelSpace ? 1f : 0f,
             ["Smoothing Mode"] = (float)_plugin.SmoothingMode,
             ["Brightness"] = _plugin.Brightness,
             ["Gamma"] = _plugin.Gamma,

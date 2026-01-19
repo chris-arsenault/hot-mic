@@ -41,10 +41,6 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
     private float[] _pitchConfidence = Array.Empty<float>();
     private byte[] _voicingStates = Array.Empty<byte>();
 
-    // Formants
-    private float[] _formantFrequencies = Array.Empty<float>();
-    private float[] _formantBandwidths = Array.Empty<float>();
-
     // Harmonics
     private float[] _harmonicFrequencies = Array.Empty<float>();
     private float[] _harmonicMagnitudes = Array.Empty<float>();
@@ -125,7 +121,6 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
             // Reallocate buffers - display dimensions changed
             int specLength = frameCapacity * displayBins;
             int linearLength = frameCapacity * analysisBins;
-            int formantLength = frameCapacity * AnalysisConfiguration.MaxFormants;
             int harmonicLength = frameCapacity * AnalysisConfiguration.MaxHarmonics;
 
             _spectrogramBuffer = new float[specLength];
@@ -133,8 +128,6 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
             _pitchTrack = new float[frameCapacity];
             _pitchConfidence = new float[frameCapacity];
             _voicingStates = new byte[frameCapacity];
-            _formantFrequencies = new float[formantLength];
-            _formantBandwidths = new float[formantLength];
             _harmonicFrequencies = new float[harmonicLength];
             _harmonicMagnitudes = new float[harmonicLength];
             _waveformMin = new float[frameCapacity];
@@ -279,19 +272,6 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
     }
 
     /// <summary>
-    /// Write formant data for a frame.
-    /// </summary>
-    public void WriteFormantFrame(int frameIndex, ReadOnlySpan<float> frequencies, ReadOnlySpan<float> bandwidths)
-    {
-        int offset = frameIndex * AnalysisConfiguration.MaxFormants;
-        for (int i = 0; i < AnalysisConfiguration.MaxFormants; i++)
-        {
-            _formantFrequencies[offset + i] = i < frequencies.Length ? frequencies[i] : 0f;
-            _formantBandwidths[offset + i] = i < bandwidths.Length ? bandwidths[i] : 0f;
-        }
-    }
-
-    /// <summary>
     /// Write harmonic data for a frame.
     /// </summary>
     public void WriteHarmonicFrame(int frameIndex, ReadOnlySpan<float> frequencies, ReadOnlySpan<float> magnitudes, int count)
@@ -394,8 +374,6 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         Array.Clear(_pitchTrack);
         Array.Clear(_pitchConfidence);
         Array.Clear(_voicingStates);
-        Array.Clear(_formantFrequencies);
-        Array.Clear(_formantBandwidths);
         Array.Clear(_harmonicFrequencies);
         Array.Clear(_harmonicMagnitudes);
         Array.Clear(_waveformMin);
@@ -530,38 +508,6 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         }
 
         return false;
-    }
-
-    public bool TryGetFormantRange(
-        long sinceFrameId,
-        float[] frequencies,
-        float[] bandwidths,
-        out long latestFrameId,
-        out int availableFrames,
-        out bool fullCopy)
-    {
-        latestFrameId = -1;
-        availableFrames = 0;
-        fullCopy = false;
-
-        int frames = _frameCapacity;
-        int stride = AnalysisConfiguration.MaxFormants;
-        int length = frames * stride;
-
-        if (frames <= 0 || frequencies.Length < length || bandwidths.Length < length)
-            return false;
-
-        return TryGetStridedRange(
-            sinceFrameId,
-            _formantFrequencies,
-            _formantBandwidths,
-            frequencies,
-            bandwidths,
-            frames,
-            stride,
-            out latestFrameId,
-            out availableFrames,
-            out fullCopy);
     }
 
     public bool TryGetHarmonicRange(

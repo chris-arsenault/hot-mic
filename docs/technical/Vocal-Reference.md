@@ -1,5 +1,6 @@
 # Vocal Reference
 
+
 ## Purpose
 Provide vocal frequency ranges and reference bands used for analysis overlays and
 interpretation.
@@ -14,8 +15,6 @@ interpretation.
 | Mezzo-Soprano | 180-800 |
 | Soprano | 250-1100 |
 
-## Formant Ranges (Typical Adult)
-| Formant | Range (Hz) | Description |
 | --- | --- | --- |
 | F1 | 250-1000 | Jaw openness |
 | F2 | 700-2500 | Tongue position |
@@ -28,7 +27,6 @@ interpretation.
 | --- | --- | --- |
 | Sub-bass | <80 | Plosives, rumble |
 | Fundamental | 80-500 | Pitch body |
-| Lower harmonics | 500-2000 | Warmth, vowel definition |
 | Presence | 2000-4000 | Intelligibility, clarity |
 | Brilliance | 4000-8000 | Air, consonant detail |
 | Extended air | 8000-12000 | Breathiness |
