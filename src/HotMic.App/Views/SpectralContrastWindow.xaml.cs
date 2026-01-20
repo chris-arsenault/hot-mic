@@ -69,10 +69,15 @@ public partial class SpectralContrastWindow : Window, IDisposable
 
     private void OnRenderTick(object? sender, EventArgs e)
     {
-        float rawGate = _plugin.GetSpeechGate();
+        float rawSpeech = _plugin.GetSpeechGate();
+        float rawGateApplied = _plugin.GetAppliedGate();
         float rawStrength = _plugin.GetContrastStrength();
+        float rawContrastMean = _plugin.GetContrastMeanAbs();
+        float rawContrastPeak = _plugin.GetContrastPeakAbs();
+        float rawGainMean = _plugin.GetGainMean();
+        float rawGainPeak = _plugin.GetGainPeak();
 
-        _smoothedSpeechGate = _smoothedSpeechGate * 0.7f + rawGate * 0.3f;
+        _smoothedSpeechGate = _smoothedSpeechGate * 0.7f + rawSpeech * 0.3f;
         _smoothedContrastStrength = _smoothedContrastStrength * 0.8f + rawStrength * 0.2f;
 
         // Get and smooth magnitudes
@@ -89,8 +94,10 @@ public partial class SpectralContrastWindow : Window, IDisposable
         {
             float scale = EnhanceDebug.ScaleFactor(_plugin.StrengthScaleIndex);
             EnhanceDebug.Log("SpectralContrast",
-                $"scale=x{scale:0} idx={_plugin.StrengthScaleIndex} strength={_plugin.StrengthPct:0} mix={_plugin.MixPct:0} gate={_plugin.GateStrength:0.00} " +
-                $"speechGate={rawGate:0.000} contrast={rawStrength:0.000} bins={_plugin.MagnitudeBinCount} status=\"{_plugin.StatusMessage}\"");
+                $"scale=x{scale:0} idx={_plugin.StrengthScaleIndex} strength={_plugin.StrengthPct:0} mix={_plugin.MixPct:0} " +
+                $"gateStrength={_plugin.GateStrength:0.00} speech={rawSpeech:0.000} gateApplied={rawGateApplied:0.000} " +
+                $"strengthApplied={rawStrength:0.000} contrastAbs={rawContrastMean:0.000} contrastPeak={rawContrastPeak:0.000} " +
+                $"gainMean={rawGainMean:0.000} gainPeak={rawGainPeak:0.000} bins={_plugin.MagnitudeBinCount} status=\"{_plugin.StatusMessage}\"");
         }
 
         SkiaCanvas.InvalidateVisual();
