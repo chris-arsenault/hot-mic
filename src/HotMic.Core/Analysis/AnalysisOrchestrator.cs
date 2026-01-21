@@ -23,6 +23,7 @@ public sealed class AnalysisOrchestrator : IDisposable
     private const float DcCutoffHz = 10f;
     private const float DefaultPreEmphasis = 0.97f;
     private const int ZoomFftZoomFactor = 8;
+    private const float MaxReassignBinShift = 0.5f;
     private const float MaxReassignFrameShift = 0.5f;
 
     private readonly AnalysisResultStore _resultStore = new();
@@ -83,6 +84,13 @@ public sealed class AnalysisOrchestrator : IDisposable
     private float[] _displayProcessed = Array.Empty<float>();
     private float[] _displaySmoothed = Array.Empty<float>();
     private float[] _displayGain = Array.Empty<float>();
+    private readonly SpectrogramDisplayMapper _displayMapper = new();
+    private float[] _displayMapScratch = Array.Empty<float>();
+    private SpectrogramAnalysisDescriptor? _displayMapperDescriptor;
+    private FrequencyScale _displayMapperScale;
+    private float _displayMapperMinHz;
+    private float _displayMapperMaxHz;
+    private int _displayMapperBins;
     private readonly SpectrogramNoiseReducer _noiseReducer = new();
     private readonly SpectrogramHpssProcessor _hpssProcessor = new();
     private readonly SpectrogramSmoother _smoother = new();
@@ -146,6 +154,14 @@ public sealed class AnalysisOrchestrator : IDisposable
     private int _debugTransformPath; // 0=FFT, 1=CQT, 2=ZoomFFT
     private float _debugLastProcessedMax;
     private int _debugAnalysisFilled;
+    private int _debugReassignMinOffset;
+    private int _debugReassignMaxOffset;
+    private int _debugReassignWritesMinus2;
+    private int _debugReassignWritesMinus1;
+    private int _debugReassignWritesZero;
+    private int _debugReassignBinsConsidered;
+    private int _debugReassignBinsPassed;
+    private long _debugReassignFrameId;
 
     public long DebugEnqueueCalls => Interlocked.Read(ref _debugEnqueueCalls);
     public long DebugEnqueueSkippedChannel => Interlocked.Read(ref _debugEnqueueSkippedChannel);
@@ -173,11 +189,22 @@ public sealed class AnalysisOrchestrator : IDisposable
     public int DebugTransformPath => Volatile.Read(ref _debugTransformPath);
     public float DebugLastProcessedMax => Volatile.Read(ref _debugLastProcessedMax);
     public int DebugAnalysisFilled => Volatile.Read(ref _debugAnalysisFilled);
+    public int DebugReassignMinOffset => Volatile.Read(ref _debugReassignMinOffset);
+    public int DebugReassignMaxOffset => Volatile.Read(ref _debugReassignMaxOffset);
+    public int DebugReassignWritesMinus2 => Volatile.Read(ref _debugReassignWritesMinus2);
+    public int DebugReassignWritesMinus1 => Volatile.Read(ref _debugReassignWritesMinus1);
+    public int DebugReassignWritesZero => Volatile.Read(ref _debugReassignWritesZero);
+    public int DebugReassignBinsConsidered => Volatile.Read(ref _debugReassignBinsConsidered);
+    public int DebugReassignBinsPassed => Volatile.Read(ref _debugReassignBinsPassed);
+    public long DebugReassignFrameId => Volatile.Read(ref _debugReassignFrameId);
 
     public IAnalysisResultStore Results => _resultStore;
     public VisualizerSyncHub SyncHub => _syncHub;
     public AnalysisConfiguration Config => _config;
     public int SampleRate => Volatile.Read(ref _sampleRate);
+    public int ReassignFrameLookback => _activeReassignMode.HasFlag(SpectrogramReassignMode.Time)
+        ? _reassignLatencyFrames + (int)MathF.Ceiling(MaxReassignFrameShift) + 1
+        : 0;
     public bool HasActiveConsumers => Volatile.Read(ref _consumerCount) > 0;
 
     public AnalysisCaptureLink? CaptureLink
@@ -535,12 +562,19 @@ public sealed class AnalysisOrchestrator : IDisposable
                 _resultStore.WriteSpeechMetrics(frameIndex, metrics);
             }
 
-            _resultStore.EndWriteFrame(frameId);
+            int displayLatencyFrames = _activeReassignMode.HasFlag(SpectrogramReassignMode.Time)
+                ? _reassignLatencyFrames
+                : 0;
+            _resultStore.EndWriteFrame(frameId, displayLatencyFrames);
             _frameCounter++;
             Interlocked.Increment(ref _debugLoopFramesWritten);
 
             // Update sync hub
-            _syncHub.UpdateViewRange(frameId, _activeFrameCapacity, _sampleRate, _activeHopSize);
+            long displayLatestFrameId = frameId - displayLatencyFrames;
+            if (displayLatestFrameId >= 0)
+            {
+                _syncHub.UpdateViewRange(displayLatestFrameId, _activeFrameCapacity, _sampleRate, _activeHopSize);
+            }
         }
     }
 
@@ -1060,25 +1094,311 @@ public sealed class AnalysisOrchestrator : IDisposable
 
     private void MapToDisplayBins(int clarityBins, int frameIndex)
     {
-        // Simple linear mapping for now - can be enhanced with frequency scale mapping
-        var displayBuffer = new float[_activeDisplayBins];
-        float ratio = (float)clarityBins / _activeDisplayBins;
+        if (_activeDisplayBins <= 0 || clarityBins <= 0)
+        {
+            return;
+        }
 
+        if (_displayMapScratch.Length != _activeDisplayBins)
+        {
+            _displayMapScratch = new float[_activeDisplayBins];
+        }
+
+        if (_displayMapper.IsConfigured)
+        {
+            _displayMapper.MapMax(_displaySmoothed.AsSpan(0, clarityBins), _displayMapScratch);
+            _resultStore.WriteSpectrogramFrame(frameIndex, _displayMapScratch);
+            return;
+        }
+
+        float ratio = (float)clarityBins / _activeDisplayBins;
         for (int i = 0; i < _activeDisplayBins; i++)
         {
             int srcIdx = Math.Min((int)(i * ratio), clarityBins - 1);
-            displayBuffer[i] = _displaySmoothed[srcIdx];
+            _displayMapScratch[i] = _displaySmoothed[srcIdx];
         }
 
-        _resultStore.WriteSpectrogramFrame(frameIndex, displayBuffer);
+        _resultStore.WriteSpectrogramFrame(frameIndex, _displayMapScratch);
     }
 
     private void ApplyReassignment(long frameId, ReadOnlySpan<float> displayMagnitudes, SpectrogramTransformType transformType)
     {
-        // Simplified reassignment - just map to display for now
-        // Full reassignment can be ported from VocalSpectrographPlugin if needed
         int frameIndex = (int)(frameId % _activeFrameCapacity);
-        MapToDisplayBins(_activeAnalysisBins, frameIndex);
+        _resultStore.ClearSpectrogramFrame(frameIndex);
+        BuildDisplayGain();
+
+        float reassignThresholdDb = _config.ReassignThreshold;
+        float reassignThresholdLinear = DspUtils.DbToLinear(reassignThresholdDb);
+        float reassignSpread = Math.Clamp(_config.ReassignSpread, 0f, 1f);
+        float maxTimeShift = MaxReassignFrameShift * reassignSpread;
+        float maxBinShift = MaxReassignBinShift * reassignSpread;
+        float invHop = 1f / MathF.Max(1f, _activeHopSize);
+        long oldestFrameId = Math.Max(0, frameId - _activeFrameCapacity + 1);
+
+        int numBins;
+        float freqBinScale;
+        float binResHz;
+        float minFreqHz = _displayMapper.IsConfigured ? _displayMapper.MinFrequencyHz : _activeMinFrequency;
+        float maxFreqHz = _displayMapper.IsConfigured ? _displayMapper.MaxFrequencyHz : _activeMaxFrequency;
+        ReadOnlySpan<float> centerFreqs = ReadOnlySpan<float>.Empty;
+
+        if (transformType == SpectrogramTransformType.Cqt && _cqt is not null)
+        {
+            numBins = _cqt.BinCount;
+            freqBinScale = 0f;
+            binResHz = 0f;
+            centerFreqs = _cqt.CenterFrequencies;
+        }
+        else if (transformType == SpectrogramTransformType.ZoomFft && _zoomFft is not null)
+        {
+            numBins = _zoomFft.OutputBins;
+            binResHz = _zoomFft.BinResolutionHz;
+            freqBinScale = numBins * 2 / (MathF.PI * 2f);
+        }
+        else
+        {
+            numBins = _activeFftSize / 2;
+            binResHz = _binResolution;
+            freqBinScale = _activeFftSize / (MathF.PI * 2f);
+        }
+
+        float scaledMin = FrequencyScaleUtils.ToScale(_activeScale, minFreqHz);
+        float scaledMax = FrequencyScaleUtils.ToScale(_activeScale, maxFreqHz);
+        float scaledRange = MathF.Max(1e-6f, scaledMax - scaledMin);
+        float invScaledRange = 1f / scaledRange;
+        float maxPos = Math.Max(1f, _activeDisplayBins - 1);
+
+        for (int bin = 0; bin < numBins; bin++)
+        {
+            float mag;
+            double re, im, reTime, imTime, reDeriv, imDeriv;
+            float binFreqHz;
+            float phaseDiff = 0f;
+
+            if (transformType == SpectrogramTransformType.Cqt)
+            {
+                mag = _cqtMagnitudes[bin];
+                re = _cqtReal[bin];
+                im = _cqtImag[bin];
+                reTime = _cqtTimeReal[bin];
+                imTime = _cqtTimeImag[bin];
+                reDeriv = 0;
+                imDeriv = 0;
+                binFreqHz = centerFreqs[bin];
+                phaseDiff = _cqtPhaseDiff[bin];
+            }
+            else if (transformType == SpectrogramTransformType.ZoomFft)
+            {
+                mag = _fftDisplayMagnitudes[bin];
+                re = _zoomReal[bin];
+                im = _zoomImag[bin];
+                reTime = _zoomTimeReal[bin];
+                imTime = _zoomTimeImag[bin];
+                reDeriv = _zoomDerivReal[bin];
+                imDeriv = _zoomDerivImag[bin];
+                binFreqHz = _zoomFft!.GetBinFrequency(bin);
+            }
+            else
+            {
+                mag = displayMagnitudes[bin];
+                re = _fftReal[bin];
+                im = _fftImag[bin];
+                reTime = _fftTimeReal[bin];
+                imTime = _fftTimeImag[bin];
+                reDeriv = _fftDerivReal[bin];
+                imDeriv = _fftDerivImag[bin];
+                binFreqHz = bin * _binResolution;
+            }
+
+            if (mag <= 0f)
+            {
+                continue;
+            }
+
+            float adjustedMag = mag;
+            if (transformType == SpectrogramTransformType.Fft)
+            {
+                float gain = _displayGain[bin];
+                if (gain <= 0f)
+                {
+                    continue;
+                }
+                adjustedMag = mag * gain;
+            }
+
+            if (adjustedMag < reassignThresholdLinear)
+            {
+                continue;
+            }
+
+            double denom = re * re + im * im + 1e-12;
+
+            float timeShiftFrames = 0f;
+            if (_activeReassignMode.HasFlag(SpectrogramReassignMode.Time))
+            {
+                double timeShiftSamples = (reTime * re + imTime * im) / denom;
+                double timeShiftScaled = timeShiftSamples * invHop;
+                timeShiftFrames = (float)Math.Clamp(timeShiftScaled, -maxTimeShift, maxTimeShift);
+            }
+
+            float reassignedFreqHz = binFreqHz;
+            if (_activeReassignMode.HasFlag(SpectrogramReassignMode.Frequency))
+            {
+                if (transformType == SpectrogramTransformType.Cqt)
+                {
+                    float hopTime = _activeHopSize / (float)_sampleRate;
+                    float twoPi = MathF.PI * 2f;
+                    float expectedPhaseAdvance = twoPi * binFreqHz * hopTime;
+                    float expectedMod = expectedPhaseAdvance;
+                    while (expectedMod > MathF.PI) expectedMod -= twoPi;
+                    while (expectedMod < -MathF.PI) expectedMod += twoPi;
+
+                    float deviation = phaseDiff - expectedMod;
+                    while (deviation > MathF.PI) deviation -= twoPi;
+                    while (deviation < -MathF.PI) deviation += twoPi;
+
+                    float logDeviation = deviation / (twoPi * hopTime * binFreqHz);
+                    reassignedFreqHz = binFreqHz * MathF.Exp(logDeviation);
+                }
+                else
+                {
+                    double imagPart = (imDeriv * re - reDeriv * im) / denom;
+                    double freqShift = imagPart * freqBinScale;
+                    float freqShiftBins = (float)Math.Clamp(freqShift, -maxBinShift, maxBinShift);
+                    reassignedFreqHz = binFreqHz + freqShiftBins * binResHz;
+                }
+            }
+
+            if (reassignedFreqHz < minFreqHz || reassignedFreqHz > maxFreqHz)
+            {
+                continue;
+            }
+
+            float targetFrame = frameId + timeShiftFrames - _reassignLatencyFrames;
+            long frameBase = (long)MathF.Floor(targetFrame);
+            float frameFrac = targetFrame - frameBase;
+            if (frameBase < oldestFrameId || frameBase > frameId)
+            {
+                continue;
+            }
+
+            float clamped = Math.Clamp(reassignedFreqHz, minFreqHz, maxFreqHz);
+            float scaled = FrequencyScaleUtils.ToScale(_activeScale, clamped);
+            float norm = (scaled - scaledMin) * invScaledRange;
+            float displayPos = Math.Clamp(norm * maxPos, 0f, maxPos);
+
+            float binHalfHz;
+            if (transformType == SpectrogramTransformType.Cqt)
+            {
+                float prev = bin > 0 ? centerFreqs[bin - 1] : centerFreqs[bin];
+                float next = bin + 1 < numBins ? centerFreqs[bin + 1] : centerFreqs[bin];
+                binHalfHz = 0.5f * MathF.Max(1e-3f, next - prev);
+            }
+            else
+            {
+                binHalfHz = MathF.Max(1e-3f, binResHz * 0.5f);
+            }
+
+            float startHz = reassignedFreqHz - binHalfHz;
+            float endHz = reassignedFreqHz + binHalfHz;
+
+            float scaledStart = FrequencyScaleUtils.ToScale(_activeScale, Math.Clamp(startHz, minFreqHz, maxFreqHz));
+            float scaledEnd = FrequencyScaleUtils.ToScale(_activeScale, Math.Clamp(endHz, minFreqHz, maxFreqHz));
+            float normStart = (scaledStart - scaledMin) * invScaledRange;
+            float normEnd = (scaledEnd - scaledMin) * invScaledRange;
+            float displayStart = Math.Clamp(normStart * maxPos, 0f, maxPos);
+            float displayEnd = Math.Clamp(normEnd * maxPos, 0f, maxPos);
+
+            float low = MathF.Min(displayStart, displayEnd);
+            float high = MathF.Max(displayStart, displayEnd);
+            int binStart = (int)MathF.Floor(low);
+            int binEnd = Math.Max(binStart, (int)MathF.Ceiling(high));
+            binStart = Math.Clamp(binStart, 0, _activeDisplayBins - 1);
+            binEnd = Math.Clamp(binEnd, binStart, _activeDisplayBins - 1);
+
+            float valueBase = adjustedMag;
+            if (valueBase <= 0f)
+            {
+                continue;
+            }
+
+            float wFrame0 = 1f - frameFrac;
+            float wFrame1 = frameFrac;
+
+            if (frameBase >= oldestFrameId)
+            {
+                WriteReassignFrame(frameBase, wFrame0, binStart, binEnd, displayPos, valueBase);
+            }
+
+            long frame1 = frameBase + 1;
+            if (wFrame1 > 0f && frame1 <= frameId && frame1 >= oldestFrameId)
+            {
+                WriteReassignFrame(frame1, wFrame1, binStart, binEnd, displayPos, valueBase);
+            }
+        }
+    }
+
+    private void WriteReassignFrame(long frameId, float frameWeight, int binStart, int binEnd, float displayPos, float valueBase)
+    {
+        if (frameWeight <= 0f)
+        {
+            return;
+        }
+
+        int targetIndex = (int)(frameId % _activeFrameCapacity);
+        if (targetIndex < 0)
+        {
+            targetIndex += _activeFrameCapacity;
+        }
+
+        Span<float> target = _resultStore.GetSpectrogramFrameSpan(targetIndex);
+        if (target.IsEmpty)
+        {
+            return;
+        }
+
+        if (binStart == binEnd)
+        {
+            float value = valueBase * frameWeight;
+            if (value > target[binStart])
+            {
+                target[binStart] = value;
+            }
+            return;
+        }
+
+        float invSpan = 1f / (binEnd - binStart);
+        for (int targetBin = binStart; targetBin <= binEnd; targetBin++)
+        {
+            float weight = 1f - MathF.Abs(targetBin - displayPos) * invSpan;
+            if (weight <= 0f)
+            {
+                continue;
+            }
+
+            float value = valueBase * frameWeight * weight;
+            if (value > target[targetBin])
+            {
+                target[targetBin] = value;
+            }
+        }
+    }
+
+    private void BuildDisplayGain()
+    {
+        int bins = Math.Min(_activeAnalysisBins, _displayGain.Length);
+        for (int i = 0; i < bins; i++)
+        {
+            float raw = _spectrumScratch[i];
+            float processed = _displaySmoothed[i];
+            float gain = raw > 1e-8f ? processed / raw : 0f;
+            _displayGain[i] = Math.Clamp(gain, 0f, 4f);
+        }
+
+        if (bins < _displayGain.Length)
+        {
+            Array.Clear(_displayGain, bins, _displayGain.Length - bins);
+        }
     }
 
     private SpeechMetricsFrame ProcessSpeechMetrics(
@@ -1314,6 +1634,7 @@ public sealed class AnalysisOrchestrator : IDisposable
         // Update result store - only reconfigure when display dimensions change
         // Record discontinuity when analysis parameters change (preserves display buffer)
         UpdateAnalysisDescriptor(transformType);
+        UpdateDisplayMapper();
 
         if (sizeChanged || force)
         {
@@ -1395,6 +1716,38 @@ public sealed class AnalysisOrchestrator : IDisposable
         {
             _analysisDescriptor = descriptor;
             _resultStore.SetAnalysisDescriptor(descriptor);
+        }
+    }
+
+    private void UpdateDisplayMapper()
+    {
+        if (_analysisDescriptor is null || _activeDisplayBins <= 0)
+        {
+            return;
+        }
+
+        float minHz = _activeMinFrequency;
+        float maxHz = _activeMaxFrequency;
+        bool mappingChanged = !_displayMapper.IsConfigured
+                              || _displayMapperBins != _activeDisplayBins
+                              || _displayMapperScale != _activeScale
+                              || MathF.Abs(minHz - _displayMapperMinHz) > 1e-3f
+                              || MathF.Abs(maxHz - _displayMapperMaxHz) > 1e-3f
+                              || !ReferenceEquals(_displayMapperDescriptor, _analysisDescriptor);
+
+        if (mappingChanged)
+        {
+            _displayMapper.Configure(_analysisDescriptor, _activeDisplayBins, minHz, maxHz, _activeScale);
+            _displayMapperBins = _activeDisplayBins;
+            _displayMapperScale = _activeScale;
+            _displayMapperMinHz = minHz;
+            _displayMapperMaxHz = maxHz;
+            _displayMapperDescriptor = _analysisDescriptor;
+        }
+
+        if (_displayMapScratch.Length != _activeDisplayBins)
+        {
+            _displayMapScratch = new float[_activeDisplayBins];
         }
     }
 

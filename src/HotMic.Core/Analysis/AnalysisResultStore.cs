@@ -251,6 +251,34 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         displayMagnitudes.Slice(0, count).CopyTo(_spectrogramBuffer.AsSpan(offset, count));
     }
 
+    internal Span<float> GetSpectrogramFrameSpan(int frameIndex)
+    {
+        int frames = _frameCapacity;
+        if (frames <= 0 || _displayBins <= 0)
+        {
+            return Span<float>.Empty;
+        }
+
+        int index = frameIndex;
+        if (index < 0)
+        {
+            index = (index % frames + frames) % frames;
+        }
+        else if (index >= frames)
+        {
+            index %= frames;
+        }
+
+        int offset = index * _displayBins;
+        return _spectrogramBuffer.AsSpan(offset, _displayBins);
+    }
+
+    internal void ClearSpectrogramFrame(int frameIndex)
+    {
+        var span = GetSpectrogramFrameSpan(frameIndex);
+        span.Clear();
+    }
+
     /// <summary>
     /// Write linear magnitude data for a frame.
     /// </summary>
@@ -337,13 +365,31 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
     /// </summary>
     public void EndWriteFrame(long frameId)
     {
-        int frameCapacity = _frameCapacity;
-        long latestFrameId = frameId;
-        long oldestFrameId = Math.Max(0, frameId - frameCapacity + 1);
-        int availableFrames = (int)Math.Min(frameCapacity, frameId - oldestFrameId + 1);
+        EndWriteFrame(frameId, 0);
+    }
 
-        Volatile.Write(ref _latestFrameId, latestFrameId);
-        Volatile.Write(ref _availableFrames, availableFrames);
+    /// <summary>
+    /// End writing a frame with an optional display latency offset (e.g., time reassignment).
+    /// </summary>
+    public void EndWriteFrame(long frameId, int displayLatencyFrames)
+    {
+        int frameCapacity = _frameCapacity;
+        long latestFrameId = frameId - Math.Max(0, displayLatencyFrames);
+        long oldestFrameId = Math.Max(0, frameId - frameCapacity + 1);
+        int availableFrames = 0;
+
+        if (latestFrameId >= 0 && latestFrameId >= oldestFrameId)
+        {
+            availableFrames = (int)Math.Min(frameCapacity, latestFrameId - oldestFrameId + 1);
+            Volatile.Write(ref _latestFrameId, latestFrameId);
+            Volatile.Write(ref _availableFrames, availableFrames);
+        }
+        else
+        {
+            Volatile.Write(ref _latestFrameId, -1);
+            Volatile.Write(ref _availableFrames, 0);
+        }
+
         Volatile.Write(ref _frameCounter, frameId + 1);
 
         Interlocked.Increment(ref _dataVersion);

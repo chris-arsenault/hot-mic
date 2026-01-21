@@ -616,8 +616,15 @@ public partial class AnalyzerWindow : Window, IDisposable
                 long copyStartTicks = profiling ? Stopwatch.GetTimestamp() : 0;
 
                 // Copy data from the shared analysis result store
+                long copySinceFrameId = _lastCopiedFrameId;
+                int reassignLookback = _orchestrator.ReassignFrameLookback;
+                if (reassignLookback > 0 && copySinceFrameId >= 0)
+                {
+                    copySinceFrameId = Math.Max(-1, copySinceFrameId - reassignLookback);
+                }
+
                 bool spectrogramCopied = _store.TryGetSpectrogramRange(
-                    _lastCopiedFrameId, _displayMagnitudes,
+                    copySinceFrameId, _displayMagnitudes,
                     out long latestFrameId, out int availableFrames, out bool spectrogramFullCopy);
 
                 bool pitchCopied = _store.TryGetPitchRange(
@@ -674,6 +681,11 @@ public partial class AnalyzerWindow : Window, IDisposable
                         dataUpdated = _latestFrameId > _lastCopiedFrameId || spectrogramFullCopy || linearFullCopy;
                         _lastCopiedFrameId = _latestFrameId;
                         forceFullMap |= spectrogramFullCopy || linearFullCopy || buffersResized;
+
+                        if (reassignLookback > 0 && copySinceFrameId < _lastMappedFrameId)
+                        {
+                            _lastMappedFrameId = copySinceFrameId;
+                        }
                     }
                 }
             }
