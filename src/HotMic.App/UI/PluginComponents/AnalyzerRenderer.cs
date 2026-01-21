@@ -4,7 +4,6 @@ using System.Runtime.InteropServices;
 using HotMic.Core.Dsp;
 using HotMic.Core.Dsp.Mapping;
 using HotMic.Core.Dsp.Spectrogram;
-using HotMic.Core.Plugins.BuiltIn;
 using SkiaSharp;
 
 namespace HotMic.App.UI.PluginComponents;

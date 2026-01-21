@@ -41,4 +41,4 @@ Implementation refs: (src/HotMic.Core/Dsp/Mapping/FrequencyScaleUtils.cs,
  src/HotMic.Core/Dsp/Mapping/SpectrogramDisplayMapper.cs,
  src/HotMic.Core/Dsp/Spectrogram/SpectrogramAnalysisDescriptor.cs,
  src/HotMic.App/UI/PluginComponents/DisplayPipeline.cs,
- src/HotMic.Core/Plugins/BuiltIn/VocalSpectrographPlugin.Buffers.cs)
+ src/HotMic.Core/Analysis/AnalysisOrchestrator.cs)

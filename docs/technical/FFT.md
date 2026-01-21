@@ -32,4 +32,4 @@ Derived values:
 
 Implementation refs: (src/HotMic.Core/Dsp/Fft/WindowFunctions.cs,
  src/HotMic.Core/Dsp/Fft/FastFft.cs,
- src/HotMic.Core/Plugins/BuiltIn/VocalSpectrographPlugin.Buffers.cs)
+ src/HotMic.Core/Analysis/AnalysisSignalProcessor.cs)

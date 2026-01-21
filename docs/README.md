@@ -12,4 +12,4 @@
 - `docs/architecture/Enhance-Plugins-Design.md` - enhance plugin timing/alignment design.
 
 ## Feature References
-- `docs/reference/Spectrograph-Presets.md` - vocal spectrograph preset intent.
+- `docs/reference/Analyzer-Presets.md` - analysis visualizer preset intent.

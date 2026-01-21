@@ -41,5 +41,5 @@ Applied to each normalized value `v`:
 - LUTs are recomputed only when parameters change.
 - Spectrogram bitmap updates incrementally per new frame.
 
-Implementation refs: (src/HotMic.App/UI/PluginComponents/VocalSpectrographRenderer.cs,
+Implementation refs: (src/HotMic.App/UI/PluginComponents/AnalyzerRenderer.cs,
  src/HotMic.App/UI/PluginComponents/SpectrogramColorMaps.cs)

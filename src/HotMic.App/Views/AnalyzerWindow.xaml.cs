@@ -212,7 +212,7 @@ public partial class AnalyzerWindow : Window, IDisposable
         _orchestrator = orchestrator;
         _store = orchestrator.Results;
         _presetHelper = new PluginPresetHelper(
-            "builtin:vocal-spectrograph",
+            "analysis:visualizer",
             PluginPresetManager.Default,
             ApplyPreset,
             GetCurrentParameters);

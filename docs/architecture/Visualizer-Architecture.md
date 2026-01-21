@@ -1,6 +1,6 @@
 # Visualizer Architecture
 
-This document describes the refactored visualization system that replaces the monolithic VocalSpectrographPlugin with a modular, composable architecture.
+This document describes the refactored visualization system that replaces the legacy monolithic spectrograph implementation with a modular, composable architecture.
 
 
 ## Goals
@@ -586,7 +586,7 @@ Location: `HotMic.App/UI/VisualizerComponents/OverlayBar.xaml`
 
 ## Provider Extraction
 
-Each provider is extracted from the current VocalSpectrographPlugin.Analysis.cs:
+Each provider aligns to analysis stages now centered in `AnalysisSignalProcessor` and `AnalysisOrchestrator`:
 
 ### SpectrogramProvider (~600 lines)
 
@@ -692,7 +692,7 @@ src/HotMic.App/
 ├── Views/
 │   ├── VisualizerWindow.cs
 │   ├── CompositeVisualizerWindow.cs
-│   ├── SpectrogramWindow.cs        (replaces VocalSpectrographWindow)
+│   ├── AnalyzerWindow.xaml.cs      (current spectrogram/analyzer view)
 │   ├── WaveformWindow.cs
 │   ├── PitchMeterWindow.cs
 │   ├── SpeechCoachWindow.cs

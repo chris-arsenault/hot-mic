@@ -43,5 +43,5 @@ Noise Floor mode:
 
 Implementation refs: (src/HotMic.Core/Dsp/Analysis/AWeighting.cs,
  src/HotMic.Core/Dsp/Spectrogram/SpectrogramDynamicRangeTracker.cs,
- src/HotMic.Core/Plugins/BuiltIn/VocalSpectrographPlugin.Analysis.cs,
+ src/HotMic.Core/Analysis/AnalysisOrchestrator.cs,
  src/HotMic.App/UI/PluginComponents/DisplayPipeline.cs)

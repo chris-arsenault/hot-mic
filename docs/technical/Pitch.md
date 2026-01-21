@@ -40,4 +40,4 @@ Algorithm-specific defaults:
 - Detectors preallocate buffers and are reconfigured on FFT size changes.
 
 Implementation refs: (src/HotMic.Core/Dsp/Analysis/Pitch/*.cs,
- src/HotMic.Core/Plugins/BuiltIn/VocalSpectrographPlugin.Analysis.cs)
+ src/HotMic.Core/Analysis/AnalysisSignalProcessor.cs)

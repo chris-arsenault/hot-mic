@@ -1,7 +1,9 @@
-# Spectrograph Presets
+# Analyzer Presets
 
 ## Purpose
-Describe built-in vocal spectrograph presets and their parameter intent.
+Describe built-in analysis visualizer presets and their parameter intent.
+
+Preset bank id: `analysis:visualizer`.
 
 ## Base Parameters (applied to all presets)
 | Parameter | Default |

@@ -20,7 +20,7 @@ internal static partial class BuiltInPresetCatalog
             ["builtin:eq3"] = BuildEqBank(),
             ["builtin:saturation"] = BuildSaturationBank(),
             ["builtin:limiter"] = BuildLimiterBank(),
-            ["builtin:vocal-spectrograph"] = BuildVocalSpectrographBank(),
+            ["analysis:visualizer"] = BuildAnalyzerBank(),
             ["builtin:signal-generator"] = BuildSignalGeneratorBank()
         };
     }
