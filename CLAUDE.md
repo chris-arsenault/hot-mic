@@ -5,7 +5,9 @@ You are working on **HotMic**, a Windows audio routing application. Keep respons
 ## Primary References
 
 - `AGENTS.md` for architecture rules, threading constraints, workflow, testing policy, and WSL limitations.
+- `docs/README.md` for the documentation index.
 - `docs/technical/README.md` for DSP/analysis/visualization specs and code-reference format.
+- `docs/architecture/` for system design and data-flow docs.
 - `README.md` for product scope and user-facing requirements.
 
 ## UI/Core Consistency
@@ -15,7 +17,7 @@ You are working on **HotMic**, a Windows audio routing application. Keep respons
 
 ## Spec Hygiene
 
-Do not duplicate spec content here. When behavior changes, update the relevant doc under `docs/technical/` and keep its code references accurate.
+Do not duplicate spec content here. When behavior changes, update the relevant doc under `docs/technical/` (DSP), `docs/architecture/` (system design), or `docs/reference/` (feature references) and keep its code references accurate.
 
 ## Testing
 

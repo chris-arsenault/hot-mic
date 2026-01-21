@@ -136,10 +136,3 @@ consumers stay aligned. IDs are illustrative and should be finalized later.
 - Extend plugin processing with a `ProcessContext` containing sampleClock,
   sampleTime, and analysis signal accessors.
 - Use the contextual path for all plugins; no parallel legacy processing.
-
-## Integration Checklist
-
-- Add new plugin classes in `src/HotMic.Core/Plugins/BuiltIn/`.
-- Update `PluginFactory` to expose new IDs.
-- Add to plugin browser list (UI).
-- Add presets only after DSP defaults are confirmed.

@@ -715,64 +715,6 @@ src/HotMic.App/
         └── RangeGuidesOverlay.cs
 ```
 
-## Migration Checklist
-
-### Phase 1: Core Infrastructure
-- [ ] Create `AnalysisCapabilities` enum
-- [ ] Create `IAnalysisResultStore` interface
-- [ ] Create `AnalysisResultStore` implementation
-- [ ] Create `VisualizerSyncHub`
-- [ ] Create `AnalysisOrchestrator` skeleton
-- [ ] Create `AnalysisTap`
-
-### Phase 2: Providers (extract from VocalSpectrographPlugin)
-- [ ] Extract `SpectrogramProvider`
-- [ ] Extract `PitchProvider`
-- [ ] Extract `HarmonicProvider`
-- [ ] Extract `WaveformProvider`
-- [ ] Extract `SpeechMetricsProvider`
-- [ ] Extract `SpectralFeaturesProvider`
-- [ ] Wire providers into `AnalysisOrchestrator`
-
-### Phase 3: Visualization Infrastructure
-- [ ] Create `IVisualizer` interface
-- [ ] Create `IOverlay` interface
-- [ ] Create `VisualizerParameter` class
-- [ ] Create `VisualizerWindow` base class
-- [ ] Create `CompositeVisualizerWindow`
-- [ ] Create `OverlayBar` component
-
-### Phase 4: Visualizers (extract rendering from VocalSpectrographRenderer)
-- [ ] Create `SpectrogramVisualizer`
-- [ ] Create `PitchOverlay`
-- [ ] Create `HarmonicOverlay`
-- [ ] Create `VoicingOverlay`
-- [ ] Create `RangeGuidesOverlay`
-- [ ] Create `WaveformVisualizer`
-- [ ] Create `PitchMeterVisualizer`
-- [ ] Create `SpeechCoachVisualizer`
-- [ ] Create `SingingCoachVisualizer`
-
-### Phase 5: Windows
-- [ ] Create `SpectrogramWindow`
-- [ ] Create `WaveformWindow`
-- [ ] Create `PitchMeterWindow`
-- [ ] Create `SpeechCoachWindow`
-- [ ] Create `SingingCoachWindow`
-
-### Phase 6: Integration
-- [ ] Add `AnalysisTap` to `AudioEngine`
-- [ ] Update `MainViewModel` to launch new windows
-- [ ] Implement preset loading/saving
-- [ ] Add visualizer menu to main window
-
-### Phase 7: Cleanup
-- [ ] Remove `VocalSpectrographPlugin` (all 4 partial files)
-- [ ] Remove `VocalSpectrographWindow`
-- [ ] Remove `VocalSpectrographRenderer`
-- [ ] Remove plugin from `PluginFactory`
-- [ ] Update documentation
-
 ## Threading Model
 
 ```

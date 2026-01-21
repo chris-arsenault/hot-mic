@@ -1,4 +1,4 @@
-# Presets
+# Spectrograph Presets
 
 ## Purpose
 Describe built-in vocal spectrograph presets and their parameter intent.
@@ -61,5 +61,3 @@ Describe built-in vocal spectrograph presets and their parameter intent.
 - Balanced: no overrides (base parameters only).
 - Low Latency: FFT 1024; Overlap 0.5; Min dB -60; Clarity Mode Noise; Clarity Noise 0.5; Clarity Harmonic 0; Clarity Smoothing 0.2; Smoothing Mode EMA; Gamma 0.85.
 - Analysis Mode: Min dB -80; Clarity Mode None; Clarity Noise 0; Clarity Harmonic 0; Clarity Smoothing 0; Smoothing Mode Off; Gamma 1; Contrast 1; Brightness 1.
-
-Implementation refs: (src/HotMic.Core/Presets/PluginPresetManager.cs)

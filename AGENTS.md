@@ -16,7 +16,7 @@ This document provides structured guidance for AI coding agents working on the H
 
 ## Technical Specifications
 
-All DSP/analysis/visualization specs live in `docs/technical/`. Do not duplicate spec details in this file; reference the relevant technical doc and update it when behavior changes.
+All DSP/analysis/visualization algorithm specs live in `docs/technical/`. Architecture and system design docs live in `docs/architecture/`, and feature references live in `docs/reference/`. Do not duplicate spec details in this file; reference the relevant technical doc and update it when behavior changes.
 
 Index: `docs/technical/README.md`
 
