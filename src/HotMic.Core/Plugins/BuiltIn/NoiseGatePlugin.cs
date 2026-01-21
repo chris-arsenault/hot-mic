@@ -35,7 +35,7 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
 
     private float _detector;
     // Mutable struct: keep non-readonly so filter state persists across samples.
-    private OnePoleHighPass _sidechainFilter = new();
+    private OnePoleHighPass _sidechainFilter;
     private float _sidechainHpfHz = 80f;
     private float _gateRatio = 3f;
     private float _maxRangeDb = 24f;
@@ -76,6 +76,11 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
         Interlocked.Exchange(ref _gateOpenBits, 0);
         Interlocked.Exchange(ref _inputLevelBits, 0);
         UpdateCoefficients();
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)

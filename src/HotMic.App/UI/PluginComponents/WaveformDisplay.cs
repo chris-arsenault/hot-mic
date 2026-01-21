@@ -8,6 +8,8 @@ namespace HotMic.App.UI.PluginComponents;
 /// </summary>
 public sealed class WaveformDisplay : IDisposable
 {
+    private static readonly float[] ThresholdDash = [6f, 4f];
+
     private readonly PluginComponentTheme _theme;
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _gridPaint;
@@ -17,8 +19,8 @@ public sealed class WaveformDisplay : IDisposable
     private readonly SKPaint _thresholdGlowPaint;
     private readonly SKPaint _gateOpenPaint;
     private readonly SKPaint _gateClosedPaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _dbLabelPaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _dbLabelPaint;
 
     // Pre-allocated arrays for rendering (no allocation during draw)
     private float[] _levelBuffer;
@@ -67,7 +69,7 @@ public sealed class WaveformDisplay : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 2f,
-            PathEffect = SKPathEffect.CreateDash(new[] { 6f, 4f }, 0)
+            PathEffect = SKPathEffect.CreateDash(ThresholdDash, 0)
         };
 
         _thresholdGlowPaint = new SKPaint
@@ -93,22 +95,8 @@ public sealed class WaveformDisplay : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _dbLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal);
+        _dbLabelPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
 
         _levelBuffer = new float[256];
         _gateBuffer = new bool[256];

@@ -110,6 +110,11 @@ public sealed class Vst3PluginWrapper : IPlugin
         _parameters = BuildParameters();
     }
 
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
+    }
+
     public void Process(Span<float> buffer)
     {
         if (IsBypassed || _processReplacing is null || IsFaulted)
@@ -366,7 +371,7 @@ public sealed class Vst3PluginWrapper : IPlugin
 
         try
         {
-            return (T)method.CreateDelegate(typeof(T), target);
+            return method.CreateDelegate<T>(target);
         }
         catch (Exception ex)
         {

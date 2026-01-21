@@ -13,8 +13,8 @@ public sealed class VadMeter : IDisposable
     private readonly SKPaint _borderPaint;
     private readonly SKPaint _meterPaint;
     private readonly SKPaint _thresholdPaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _valuePaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _valuePaint;
     private readonly SKPaint _glowPaint;
 
     private float _smoothedValue;
@@ -54,23 +54,8 @@ public sealed class VadMeter : IDisposable
             PathEffect = SKPathEffect.CreateDash([4f, 2f], 0)
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _valuePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 12f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Center);
+        _valuePaint = new SkiaTextPaint(_theme.TextPrimary, 12f, SKFontStyle.Bold, SKTextAlign.Center);
 
         _glowPaint = new SKPaint
         {

@@ -1,0 +1,164 @@
+namespace HotMic.Core.Dsp.Filters;
+
+/// <summary>
+/// In-place biquad filter (transposed DF-II) with coefficient updates and no allocations.
+/// </summary>
+public sealed class BiquadFilter
+{
+    private float _b0;
+    private float _b1;
+    private float _b2;
+    private float _a1;
+    private float _a2;
+    private float _z1;
+    private float _z2;
+
+    public void SetLowShelf(float sampleRate, float freq, float gainDb, float q)
+    {
+        SetCoefficients(FilterType.LowShelf, sampleRate, freq, gainDb, q);
+    }
+
+    public void SetHighShelf(float sampleRate, float freq, float gainDb, float q)
+    {
+        SetCoefficients(FilterType.HighShelf, sampleRate, freq, gainDb, q);
+    }
+
+    public void SetPeaking(float sampleRate, float freq, float gainDb, float q)
+    {
+        SetCoefficients(FilterType.Peaking, sampleRate, freq, gainDb, q);
+    }
+
+    public void SetHighPass(float sampleRate, float freq, float q)
+    {
+        SetCoefficients(FilterType.HighPass, sampleRate, freq, 0f, q);
+    }
+
+    public void SetLowPass(float sampleRate, float freq, float q)
+    {
+        SetCoefficients(FilterType.LowPass, sampleRate, freq, 0f, q);
+    }
+
+    public void SetBandPass(float sampleRate, float freq, float q)
+    {
+        SetCoefficients(FilterType.BandPass, sampleRate, freq, 0f, q);
+    }
+
+    public float Process(float input)
+    {
+        float output = _b0 * input + _z1;
+        _z1 = _b1 * input - _a1 * output + _z2;
+        _z2 = _b2 * input - _a2 * output;
+        _z1 = DspUtils.FlushDenormal(_z1);
+        _z2 = DspUtils.FlushDenormal(_z2);
+        return DspUtils.FlushDenormal(output);
+    }
+
+    public void Reset()
+    {
+        _z1 = 0f;
+        _z2 = 0f;
+    }
+
+    private void SetCoefficients(FilterType type, float sampleRate, float freq, float gainDb, float q)
+    {
+        double clampedFreq = Math.Clamp((double)freq, 10.0, sampleRate * 0.45);
+        double clampedQ = Math.Max(0.1, q);
+        double a = Math.Pow(10.0, gainDb / 40.0);
+        double omega = 2.0 * Math.PI * clampedFreq / sampleRate;
+        double sin = Math.Sin(omega);
+        double cos = Math.Cos(omega);
+        double alpha = sin / (2.0 * clampedQ);
+
+        double b0;
+        double b1;
+        double b2;
+        double a0;
+        double a1;
+        double a2;
+
+        switch (type)
+        {
+            case FilterType.LowPass:
+            {
+                b0 = (1f - cos) * 0.5f;
+                b1 = 1f - cos;
+                b2 = (1f - cos) * 0.5f;
+                a0 = 1f + alpha;
+                a1 = -2f * cos;
+                a2 = 1f - alpha;
+                break;
+            }
+            case FilterType.HighPass:
+            {
+                b0 = (1f + cos) * 0.5f;
+                b1 = -(1f + cos);
+                b2 = (1f + cos) * 0.5f;
+                a0 = 1f + alpha;
+                a1 = -2f * cos;
+                a2 = 1f - alpha;
+                break;
+            }
+            case FilterType.BandPass:
+            {
+                b0 = alpha;
+                b1 = 0f;
+                b2 = -alpha;
+                a0 = 1f + alpha;
+                a1 = -2f * cos;
+                a2 = 1f - alpha;
+                break;
+            }
+            case FilterType.LowShelf:
+            {
+                double sqrtA = Math.Sqrt(a);
+                double twoSqrtAAlpha = 2.0 * sqrtA * alpha;
+                b0 = a * ((a + 1f) - (a - 1f) * cos + twoSqrtAAlpha);
+                b1 = 2f * a * ((a - 1f) - (a + 1f) * cos);
+                b2 = a * ((a + 1f) - (a - 1f) * cos - twoSqrtAAlpha);
+                a0 = (a + 1f) + (a - 1f) * cos + twoSqrtAAlpha;
+                a1 = -2f * ((a - 1f) + (a + 1f) * cos);
+                a2 = (a + 1f) + (a - 1f) * cos - twoSqrtAAlpha;
+                break;
+            }
+            case FilterType.HighShelf:
+            {
+                double sqrtA = Math.Sqrt(a);
+                double twoSqrtAAlpha = 2.0 * sqrtA * alpha;
+                b0 = a * ((a + 1f) + (a - 1f) * cos + twoSqrtAAlpha);
+                b1 = -2f * a * ((a - 1f) + (a + 1f) * cos);
+                b2 = a * ((a + 1f) + (a - 1f) * cos - twoSqrtAAlpha);
+                a0 = (a + 1f) - (a - 1f) * cos + twoSqrtAAlpha;
+                a1 = 2f * ((a - 1f) - (a + 1f) * cos);
+                a2 = (a + 1f) - (a - 1f) * cos - twoSqrtAAlpha;
+                break;
+            }
+            default:
+            {
+                b0 = 1f + alpha * a;
+                b1 = -2f * cos;
+                b2 = 1f - alpha * a;
+                a0 = 1f + alpha / a;
+                a1 = -2f * cos;
+                a2 = 1f - alpha / a;
+                break;
+            }
+        }
+
+        double invA0 = 1.0 / a0;
+        _b0 = (float)(b0 * invA0);
+        _b1 = (float)(b1 * invA0);
+        _b2 = (float)(b2 * invA0);
+        _a1 = (float)(a1 * invA0);
+        _a2 = (float)(a2 * invA0);
+    }
+
+    private enum FilterType
+    {
+        LowShelf,
+        HighShelf,
+        Peaking,
+        LowPass,
+        HighPass,
+        BandPass
+    }
+}

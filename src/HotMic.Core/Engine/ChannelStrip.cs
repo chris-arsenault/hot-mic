@@ -11,18 +11,21 @@ public sealed class ChannelStrip
     private readonly PluginChain _pluginChain;
     private readonly MeterProcessor _inputMeter;
     private readonly MeterProcessor _outputMeter;
-    private LinearSmoother _inputGainSmoother = new();
-    private LinearSmoother _outputGainSmoother = new();
-    private LinearSmoother _muteSmoother = new();
+    private readonly Action<Span<float>> _inputSplitAction;
+    private LinearSmoother _inputGainSmoother;
+    private LinearSmoother _outputGainSmoother;
+    private LinearSmoother _muteSmoother;
     private int _isMuted;
     private int _isSoloed;
     private float _muteTarget = 1f;
 
-    public ChannelStrip(int sampleRate, int blockSize)
+    public ChannelStrip(int channelId, int sampleRate, int blockSize)
     {
-        _pluginChain = new PluginChain(sampleRate);
+        ChannelId = channelId;
+        _pluginChain = new PluginChain(sampleRate, blockSize);
         _inputMeter = new MeterProcessor(sampleRate);
         _outputMeter = new MeterProcessor(sampleRate);
+        _inputSplitAction = ProcessInputSplit;
         _inputGainSmoother.Configure(sampleRate, 5f, 1f);
         _outputGainSmoother.Configure(sampleRate, 5f, 1f);
         _muteSmoother.Configure(sampleRate, 5f, 1f);
@@ -33,6 +36,8 @@ public sealed class ChannelStrip
     public MeterProcessor OutputMeter => _outputMeter;
 
     public PluginChain PluginChain => _pluginChain;
+
+    public int ChannelId { get; }
 
     public void SetInputGainDb(float gainDb)
     {
@@ -56,7 +61,7 @@ public sealed class ChannelStrip
 
     public bool IsSoloed => Volatile.Read(ref _isSoloed) == 1;
 
-    public void Process(Span<float> buffer, bool globalMute)
+    public int Process(Span<float> buffer, bool globalMute, long sampleClock, RoutingContext routingContext)
     {
         bool localMute = Volatile.Read(ref _isMuted) == 1;
         float targetMute = (globalMute || localMute) ? 0f : 1f;
@@ -72,15 +77,66 @@ public sealed class ChannelStrip
             _inputMeter.Process(buffer);
             _pluginChain.ProcessMeters(buffer);
             _outputMeter.Process(buffer);
-            return;
+            return 0;
         }
 
-        ApplyGain(buffer, ref _inputGainSmoother);
-        _inputMeter.Process(buffer);
-        _pluginChain.Process(buffer);
+        int inputSplitIndex = _pluginChain.InputStageIndex;
+        int latencySamples;
+        if (inputSplitIndex >= 0)
+        {
+            latencySamples = _pluginChain.ProcessWithSplit(
+                buffer,
+                sampleClock,
+                ChannelId,
+                routingContext,
+                inputSplitIndex,
+                _inputSplitAction);
+        }
+        else
+        {
+            ApplyGain(buffer, ref _inputGainSmoother);
+            _inputMeter.Process(buffer);
+            latencySamples = _pluginChain.Process(buffer, sampleClock, ChannelId, routingContext);
+        }
+
         ApplyGain(buffer, ref _outputGainSmoother);
         ApplyGain(buffer, ref _muteSmoother);
+
+        if (TryGetOutputSendMode(out var sendMode))
+        {
+            routingContext.OutputBus.TryWrite(buffer, sendMode, latencySamples, sampleClock);
+        }
+
         _outputMeter.Process(buffer);
+        return latencySamples;
+    }
+
+    private void ProcessInputSplit(Span<float> buffer)
+    {
+        ApplyGain(buffer, ref _inputGainSmoother);
+        _inputMeter.Process(buffer);
+    }
+
+    private bool TryGetOutputSendMode(out OutputSendMode mode)
+    {
+        var slots = _pluginChain.GetSnapshot();
+        for (int i = 0; i < slots.Length; i++)
+        {
+            var slot = slots[i];
+            if (slot is null)
+            {
+                continue;
+            }
+
+            if (slot.Plugin is IChannelOutputPlugin send && !slot.Plugin.IsBypassed)
+            {
+                mode = send.OutputMode;
+                return true;
+            }
+        }
+
+        mode = OutputSendMode.Both;
+        return false;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -20,11 +20,14 @@ public sealed class FFTNoiseRenderer : IDisposable
     private readonly PluginComponentTheme _theme;
     private readonly PluginPresetBar _presetBar;
 
+    /// <summary>The noise reduction knob widget. Handles its own rendering and interaction.</summary>
+    public KnobWidget ReductionKnob { get; }
+
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _closeButtonPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
     private readonly SKPaint _spectrumBackgroundPaint;
@@ -33,17 +36,13 @@ public sealed class FFTNoiseRenderer : IDisposable
     private readonly SKPaint _noiseProfilePaint;
     private readonly SKPaint _noiseProfileFillPaint;
     private readonly SKPaint _gridPaint;
-    private readonly SKPaint _knobBackgroundPaint;
-    private readonly SKPaint _knobTrackPaint;
-    private readonly SKPaint _knobArcPaint;
-    private readonly SKPaint _knobPointerPaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _valuePaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _valuePaint;
     private readonly SKPaint _learnButtonPaint;
     private readonly SKPaint _learningPaint;
     private readonly SKPaint _progressBarPaint;
     private readonly SKPaint _progressFillPaint;
-    private readonly SKPaint _latencyPaint;
+    private readonly SkiaTextPaint _latencyPaint;
 
     private readonly SKColor _inputColor = new(0x3D, 0xA5, 0xF4, 0x80);    // Blue, semi-transparent
     private readonly SKColor _outputColor = new(0x00, 0xD4, 0xAA, 0xA0);   // Teal, semi-transparent
@@ -55,7 +54,6 @@ public sealed class FFTNoiseRenderer : IDisposable
     private SKRect _titleBarRect;
     private SKRect _spectrumRect;
     private SKRect _learnButtonRect;
-    private SKPoint _reductionKnob;
 
     public FFTNoiseRenderer(PluginComponentTheme? theme = null)
     {
@@ -84,22 +82,8 @@ public sealed class FFTNoiseRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _closeButtonPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 18f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _bypassPaint = new SKPaint
         {
@@ -161,66 +145,17 @@ public sealed class FFTNoiseRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _knobBackgroundPaint = new SKPaint
+        ReductionKnob = new KnobWidget(
+            KnobRadius, 0f, 100f, "REDUCTION", "%",
+            KnobStyle.Standard with { ArcColor = _theme.WaveformLine },
+            _theme)
         {
-            Color = _theme.KnobBackground,
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
+            ValueFormat = "0"
         };
 
-        _knobTrackPaint = new SKPaint
-        {
-            Color = _theme.KnobTrack,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 4f,
-            StrokeCap = SKStrokeCap.Round
-        };
-
-        _knobArcPaint = new SKPaint
-        {
-            Color = _theme.WaveformLine,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 4f,
-            StrokeCap = SKStrokeCap.Round
-        };
-
-        _knobPointerPaint = new SKPaint
-        {
-            Color = _theme.KnobPointer,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 2.5f,
-            StrokeCap = SKStrokeCap.Round
-        };
-
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _valuePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 12f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _latencyPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _valuePaint = new SkiaTextPaint(_theme.TextPrimary, 12f, SKFontStyle.Bold, SKTextAlign.Center);
+        _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
 
         _learnButtonPaint = new SKPaint
         {
@@ -295,14 +230,7 @@ public sealed class FFTNoiseRenderer : IDisposable
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SKPaint
-        {
-            Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
 
         if (state.LatencyMs >= 0f)
@@ -359,13 +287,7 @@ public sealed class FFTNoiseRenderer : IDisposable
         float maxFreq = state.SampleRate > 0 ? state.SampleRate / 2f : 24000f;
 
         // Axis label paint
-        using var axisLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 8f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        using var axisLabelPaint = new SkiaTextPaint(_theme.TextMuted, 8f, SKFontStyle.Normal);
 
         // Draw dB grid lines and labels
         int[] dbMarkers = { 0, -12, -24, -36, -48, -60, -72, -84 };
@@ -516,14 +438,7 @@ public sealed class FFTNoiseRenderer : IDisposable
             canvas.DrawRoundRect(new SKRoundRect(progressFill, 4f), _progressFillPaint);
 
             // Learning text
-            using var learningText = new SKPaint
-            {
-                Color = _theme.TextPrimary,
-                IsAntialias = true,
-                TextSize = 14f,
-                TextAlign = SKTextAlign.Center,
-                Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-            };
+            using var learningText = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold, SKTextAlign.Center);
             canvas.DrawText($"Learning noise profile... {state.LearningProgress}/{state.LearningTotal}",
                 graphRect.MidX, progressY - 12, learningText);
         }
@@ -535,13 +450,7 @@ public sealed class FFTNoiseRenderer : IDisposable
 
         // Legend (below everything)
         float legendY = outerRect.Bottom + 14;
-        using var legendPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        using var legendPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal);
 
         // Input legend
         using var inputSwatch = new SKPaint { Color = _inputColor, Style = SKPaintStyle.Fill };
@@ -574,14 +483,7 @@ public sealed class FFTNoiseRenderer : IDisposable
         canvas.DrawRoundRect(new SKRoundRect(_learnButtonRect, 6f), learnPaint);
         canvas.DrawRoundRect(new SKRoundRect(_learnButtonRect, 6f), _borderPaint);
 
-        using var learnTextPaint = new SKPaint
-        {
-            Color = SKColors.White,
-            IsAntialias = true,
-            TextSize = 12f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var learnTextPaint = new SkiaTextPaint(SKColors.White, 12f, SKFontStyle.Bold, SKTextAlign.Center);
         string learnLabel = state.IsLearning ? "STOP" : (state.HasNoiseProfile ? "RE-LEARN" : "LEARN");
         canvas.DrawText(learnLabel, _learnButtonRect.MidX, _learnButtonRect.MidY + 4, learnTextPaint);
 
@@ -592,97 +494,9 @@ public sealed class FFTNoiseRenderer : IDisposable
         // Reduction knob
         float reductionX = x + sectionWidth + sectionWidth / 2;
         float reductionY = y + height / 2;
-        _reductionKnob = new SKPoint(reductionX, reductionY);
-        DrawKnob(canvas, _reductionKnob, state.Reduction, 0f, 1f, "REDUCTION", $"{state.Reduction * 100:0}%",
-            state.HoveredKnob == 0);
-    }
-
-    private void DrawKnob(SKCanvas canvas, SKPoint center, float value, float minValue, float maxValue,
-        string label, string valueText, bool isHovered)
-    {
-        const float startAngle = 135f;
-        const float sweepAngle = 270f;
-        float arcRadius = KnobRadius * 0.8f;
-
-        float normalized = (value - minValue) / (maxValue - minValue);
-        normalized = Math.Clamp(normalized, 0f, 1f);
-
-        // Shadow
-        using var shadowPaint = new SKPaint
-        {
-            Color = new SKColor(0, 0, 0, 40),
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill,
-            MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 3f)
-        };
-        canvas.DrawCircle(center.X + 2, center.Y + 2, KnobRadius, shadowPaint);
-
-        // Background
-        canvas.DrawCircle(center, KnobRadius, _knobBackgroundPaint);
-
-        // Track
-        using var trackPath = new SKPath();
-        trackPath.AddArc(
-            new SKRect(center.X - arcRadius, center.Y - arcRadius, center.X + arcRadius, center.Y + arcRadius),
-            startAngle, sweepAngle);
-        canvas.DrawPath(trackPath, _knobTrackPaint);
-
-        // Value arc
-        if (normalized > 0.001f)
-        {
-            float valueAngle = sweepAngle * normalized;
-            using var arcPath = new SKPath();
-            arcPath.AddArc(
-                new SKRect(center.X - arcRadius, center.Y - arcRadius, center.X + arcRadius, center.Y + arcRadius),
-                startAngle, valueAngle);
-            canvas.DrawPath(arcPath, _knobArcPaint);
-        }
-
-        // Inner circle
-        float innerRadius = KnobRadius * 0.6f;
-        using var innerPaint = new SKPaint
-        {
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill,
-            Shader = SKShader.CreateRadialGradient(
-                new SKPoint(center.X - innerRadius * 0.2f, center.Y - innerRadius * 0.2f),
-                innerRadius * 2,
-                new[] { _theme.KnobHighlight, _theme.KnobBackground },
-                null,
-                SKShaderTileMode.Clamp)
-        };
-        canvas.DrawCircle(center, innerRadius, innerPaint);
-
-        // Pointer
-        float pointerAngle = startAngle + sweepAngle * normalized;
-        float pointerRad = pointerAngle * MathF.PI / 180f;
-        float pointerStartRadius = innerRadius * 0.3f;
-        float pointerEndRadius = innerRadius * 0.8f;
-        canvas.DrawLine(
-            center.X + pointerStartRadius * MathF.Cos(pointerRad),
-            center.Y + pointerStartRadius * MathF.Sin(pointerRad),
-            center.X + pointerEndRadius * MathF.Cos(pointerRad),
-            center.Y + pointerEndRadius * MathF.Sin(pointerRad),
-            _knobPointerPaint);
-
-        // Hover ring
-        if (isHovered)
-        {
-            using var hoverPaint = new SKPaint
-            {
-                Color = _theme.WaveformLine.WithAlpha(50),
-                IsAntialias = true,
-                Style = SKPaintStyle.Stroke,
-                StrokeWidth = 2f
-            };
-            canvas.DrawCircle(center, KnobRadius + 3, hoverPaint);
-        }
-
-        // Label above
-        canvas.DrawText(label, center.X, center.Y - KnobRadius - 8, _labelPaint);
-
-        // Value below
-        canvas.DrawText(valueText, center.X, center.Y + KnobRadius + 16, _valuePaint);
+        ReductionKnob.Center = new SKPoint(reductionX, reductionY);
+        ReductionKnob.Value = state.Reduction * 100f; // Convert 0-1 to 0-100 for display
+        ReductionKnob.Render(canvas);
     }
 
     public FFTNoiseHitTest HitTest(float x, float y)
@@ -702,20 +516,13 @@ public sealed class FFTNoiseRenderer : IDisposable
         if (_learnButtonRect.Contains(x, y))
             return new FFTNoiseHitTest(FFTNoiseHitArea.LearnButton, -1);
 
-        if (IsInKnob(x, y, _reductionKnob))
+        if (ReductionKnob.HitTest(x, y))
             return new FFTNoiseHitTest(FFTNoiseHitArea.Knob, 0);
 
         if (_titleBarRect.Contains(x, y))
             return new FFTNoiseHitTest(FFTNoiseHitArea.TitleBar, -1);
 
         return new FFTNoiseHitTest(FFTNoiseHitArea.None, -1);
-    }
-
-    private bool IsInKnob(float x, float y, SKPoint center)
-    {
-        float dx = x - center.X;
-        float dy = y - center.Y;
-        return dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.3f;
     }
 
     public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
@@ -738,10 +545,7 @@ public sealed class FFTNoiseRenderer : IDisposable
         _noiseProfilePaint.Dispose();
         _noiseProfileFillPaint.Dispose();
         _gridPaint.Dispose();
-        _knobBackgroundPaint.Dispose();
-        _knobTrackPaint.Dispose();
-        _knobArcPaint.Dispose();
-        _knobPointerPaint.Dispose();
+        ReductionKnob.Dispose();
         _labelPaint.Dispose();
         _valuePaint.Dispose();
         _latencyPaint.Dispose();
@@ -766,7 +570,6 @@ public record struct FFTNoiseState(
     float[]? OutputSpectrum = null,
     float[]? OutputPeaks = null,
     float[]? NoiseProfile = null,
-    int HoveredKnob = -1,
     string PresetName = "Custom");
 
 public enum FFTNoiseHitArea

@@ -8,13 +8,11 @@ public sealed class LockFreeRingBuffer
     private readonly int _mask;
     private long _writeIndex;
     private long _readIndex;
+    private long _droppedSamples;
 
     public LockFreeRingBuffer(int capacity)
     {
-        if (capacity <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(capacity));
-        }
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
 
         int size = NextPowerOfTwo(capacity);
         _buffer = new float[size];
@@ -22,6 +20,11 @@ public sealed class LockFreeRingBuffer
     }
 
     public int Capacity => _buffer.Length;
+
+    /// <summary>
+    /// Total samples dropped because the buffer was full.
+    /// </summary>
+    public long DroppedSamples => Volatile.Read(ref _droppedSamples);
 
     public int AvailableRead
     {
@@ -46,6 +49,7 @@ public sealed class LockFreeRingBuffer
         long available = Math.Max(0, write - read);
         int free = _buffer.Length - (int)Math.Min(_buffer.Length, available);
         int toWrite = Math.Min(data.Length, free);
+        int dropped = data.Length - toWrite;
 
         for (int i = 0; i < toWrite; i++)
         {
@@ -53,6 +57,10 @@ public sealed class LockFreeRingBuffer
         }
 
         Volatile.Write(ref _writeIndex, write + toWrite);
+        if (dropped > 0)
+        {
+            Interlocked.Add(ref _droppedSamples, dropped);
+        }
         return toWrite;
     }
 
@@ -72,10 +80,31 @@ public sealed class LockFreeRingBuffer
         return toRead;
     }
 
+    public int Skip(int count)
+    {
+        if (count <= 0)
+        {
+            return 0;
+        }
+
+        long write = Volatile.Read(ref _writeIndex);
+        long read = Volatile.Read(ref _readIndex);
+        long available = Math.Max(0, write - read);
+        int toSkip = Math.Min(count, (int)Math.Min(_buffer.Length, available));
+        if (toSkip <= 0)
+        {
+            return 0;
+        }
+
+        Volatile.Write(ref _readIndex, read + toSkip);
+        return toSkip;
+    }
+
     public void Clear()
     {
         Volatile.Write(ref _writeIndex, 0);
         Volatile.Write(ref _readIndex, 0);
+        Volatile.Write(ref _droppedSamples, 0);
     }
 
     private static int NextPowerOfTwo(int value)

@@ -1,1 +1,9 @@
+global using HotMic.Core.Dsp;
+global using HotMic.Core.Dsp.Analysis;
+global using HotMic.Core.Dsp.Analysis.Pitch;
+global using HotMic.Core.Dsp.Fft;
+global using HotMic.Core.Dsp.Mapping;
+global using HotMic.Core.Dsp.Spectrogram;
+global using HotMic.Core.Dsp.Voice;
+global using HotMic.App.UI;
 global using SkiaSharp.Views.Desktop;

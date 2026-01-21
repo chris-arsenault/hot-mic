@@ -2,30 +2,42 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using HotMic.App.Models;
+using HotMic.Common.Configuration;
 
 namespace HotMic.App.ViewModels;
 
 public partial class ChannelStripViewModel : ObservableObject
 {
     private readonly Action<HotMic.Core.Engine.ParameterChange>? _parameterSink;
-    private readonly Action<int>? _pluginActionSink;
+    private readonly Action<int, int, int, float>? _pluginParameterSink;
+    private readonly Action<int, int>? _pluginActionSink;
     private readonly Action<int>? _pluginRemoveSink;
     private readonly Action<int, int>? _pluginReorderSink;
     private readonly Action<int, bool>? _pluginBypassConfigSink;
+    private readonly Action<int>? _containerActionSink;
+    private readonly Action<int>? _containerRemoveSink;
+    private readonly Action<int, bool>? _containerBypassSink;
+    private readonly Action<int, int>? _containerReorderSink;
 
-    public ChannelStripViewModel(int channelId, string name, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int>? pluginActionSink = null, Action<int>? pluginRemoveSink = null, Action<int, int>? pluginReorderSink = null, Action<int, bool>? pluginBypassConfigSink = null)
+    public ChannelStripViewModel(int channelId, string name, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int, int, int, float>? pluginParameterSink = null, Action<int, int>? pluginActionSink = null, Action<int>? pluginRemoveSink = null, Action<int, int>? pluginReorderSink = null, Action<int, bool>? pluginBypassConfigSink = null, Action<int>? containerActionSink = null, Action<int>? containerRemoveSink = null, Action<int, bool>? containerBypassSink = null, Action<int, int>? containerReorderSink = null)
     {
         ChannelId = channelId;
         Name = name;
         _parameterSink = parameterSink;
+        _pluginParameterSink = pluginParameterSink;
         _pluginActionSink = pluginActionSink;
         _pluginRemoveSink = pluginRemoveSink;
         _pluginReorderSink = pluginReorderSink;
         _pluginBypassConfigSink = pluginBypassConfigSink;
+        _containerActionSink = containerActionSink;
+        _containerRemoveSink = containerRemoveSink;
+        _containerBypassSink = containerBypassSink;
+        _containerReorderSink = containerReorderSink;
         PluginSlots = new ObservableCollection<PluginViewModel>();
+        Containers = new ObservableCollection<PluginContainerViewModel>();
 
         // Start with just one add placeholder
-        PluginSlots.Add(PluginViewModel.CreateEmpty(ChannelId, 1, () => _pluginActionSink?.Invoke(0), () => _pluginRemoveSink?.Invoke(0), _parameterSink, (index, value) => _pluginBypassConfigSink?.Invoke(index, value)));
+        PluginSlots.Add(PluginViewModel.CreateEmpty(ChannelId, 1, 0, () => _pluginActionSink?.Invoke(0, 0), () => _pluginRemoveSink?.Invoke(0), _parameterSink, _pluginParameterSink, (instanceId, value) => _pluginBypassConfigSink?.Invoke(instanceId, value)));
 
         ToggleMuteCommand = new RelayCommand(() => IsMuted = !IsMuted);
         ToggleSoloCommand = new RelayCommand(() => IsSoloed = !IsSoloed);
@@ -36,6 +48,8 @@ public partial class ChannelStripViewModel : ObservableObject
     public string Name { get; private set; }
 
     public ObservableCollection<PluginViewModel> PluginSlots { get; }
+
+    public ObservableCollection<PluginContainerViewModel> Containers { get; }
 
     [ObservableProperty]
     private float inputGainDb;
@@ -54,6 +68,15 @@ public partial class ChannelStripViewModel : ObservableObject
 
     [ObservableProperty]
     private float outputRmsLevel;
+
+    [ObservableProperty]
+    private string inputDeviceId = string.Empty;
+
+    [ObservableProperty]
+    private string inputDeviceLabel = "No Input";
+
+    [ObservableProperty]
+    private InputChannelMode inputChannelMode = InputChannelMode.Sum;
 
     [ObservableProperty]
     private bool isMuted;
@@ -130,37 +153,90 @@ public partial class ChannelStripViewModel : ObservableObject
 
     public void UpdatePlugins(IReadOnlyList<PluginSlotInfo> slots)
     {
-        PluginSlots.Clear();
-
-        // Add actual plugins
-        for (int i = 0; i < slots.Count; i++)
+        var existing = new Dictionary<int, PluginViewModel>();
+        for (int i = 0; i < PluginSlots.Count; i++)
         {
-            if (!string.IsNullOrWhiteSpace(slots[i].Name))
+            var slot = PluginSlots[i];
+            if (!slot.IsEmpty && slot.InstanceId > 0)
             {
-                int slotIndex = i + 1;
-                int slot = i;
-                var viewModel = PluginViewModel.CreateFilled(
-                    ChannelId,
-                    slotIndex,
-                    slots[i].PluginId,
-                    slots[i].Name,
-                    slots[i].LatencyMs,
-                    slots[i].ElevatedParamValues,
-                    () => _pluginActionSink?.Invoke(slot),
-                    () => _pluginRemoveSink?.Invoke(slot),
-                    _parameterSink,
-                    (index, value) => _pluginBypassConfigSink?.Invoke(index, value));
-                viewModel.IsBypassed = slots[i].IsBypassed;
-                PluginSlots.Add(viewModel);
+                existing[slot.InstanceId] = slot;
             }
         }
 
-        // Add the "+1" add placeholder at the end
-        int addSlotIndex = slots.Count;
-        PluginSlots.Add(PluginViewModel.CreateEmpty(ChannelId, addSlotIndex + 1, () => _pluginActionSink?.Invoke(addSlotIndex), () => { }, _parameterSink, (index, value) => { }));
+        PluginSlots.Clear();
+
+        for (int i = 0; i < slots.Count; i++)
+        {
+            var slotInfo = slots[i];
+            if (string.IsNullOrWhiteSpace(slotInfo.Name))
+            {
+                continue;
+            }
+
+            int displayIndex = i + 1;
+            int instanceId = slotInfo.InstanceId;
+
+            if (!existing.TryGetValue(instanceId, out var viewModel))
+            {
+                viewModel = PluginViewModel.CreateFilled(
+                    ChannelId,
+                    displayIndex,
+                    instanceId,
+                    slotInfo.PluginId,
+                    slotInfo.Name,
+                    slotInfo.LatencyMs,
+                    slotInfo.ElevatedParamValues,
+                    () => _pluginActionSink?.Invoke(instanceId, 0),
+                    () => _pluginRemoveSink?.Invoke(instanceId),
+                    _parameterSink,
+                    _pluginParameterSink,
+                    (id, value) => _pluginBypassConfigSink?.Invoke(id, value));
+            }
+            else
+            {
+                viewModel.UpdateSlotIndex(displayIndex);
+                viewModel.UpdateActions(
+                    () => _pluginActionSink?.Invoke(instanceId, 0),
+                    () => _pluginRemoveSink?.Invoke(instanceId));
+            }
+
+            viewModel.UpdateFromSlotInfo(slotInfo);
+            PluginSlots.Add(viewModel);
+        }
+
+        int addSlotIndex = PluginSlots.Count;
+        PluginSlots.Add(PluginViewModel.CreateEmpty(
+            ChannelId,
+            addSlotIndex + 1,
+            0,
+            () => _pluginActionSink?.Invoke(0, PluginSlots.Count - 1),
+            () => { },
+            _parameterSink,
+            _pluginParameterSink,
+            (id, value) => { }));
     }
 
-    public void MovePlugin(int fromIndex, int toIndex)
+    public void UpdateContainers(IReadOnlyList<PluginContainerInfo> containers)
+    {
+        Containers.Clear();
+
+        for (int i = 0; i < containers.Count; i++)
+        {
+            var container = containers[i];
+            var viewModel = new PluginContainerViewModel(
+                ChannelId,
+                container.ContainerId,
+                container.Name,
+                () => _containerActionSink?.Invoke(container.ContainerId),
+                () => _containerRemoveSink?.Invoke(container.ContainerId),
+                (id, bypass) => _containerBypassSink?.Invoke(id, bypass));
+            viewModel.UpdatePluginIds(container.PluginInstanceIds);
+            viewModel.SetBypassSilent(container.IsBypassed);
+            Containers.Add(viewModel);
+        }
+    }
+
+    public void MovePlugin(int instanceId, int toIndex)
     {
         // Keep the "+1" placeholder pinned to the end; only reorder real plugins.
         int lastPluginIndex = PluginSlots.Count - 2;
@@ -169,7 +245,17 @@ public partial class ChannelStripViewModel : ObservableObject
             return;
         }
 
-        if ((uint)fromIndex > (uint)lastPluginIndex)
+        int fromIndex = -1;
+        for (int i = 0; i <= lastPluginIndex; i++)
+        {
+            if (PluginSlots[i].InstanceId == instanceId)
+            {
+                fromIndex = i;
+                break;
+            }
+        }
+
+        if (fromIndex < 0)
         {
             return;
         }
@@ -191,6 +277,16 @@ public partial class ChannelStripViewModel : ObservableObject
         var item = PluginSlots[fromIndex];
         PluginSlots.RemoveAt(fromIndex);
         PluginSlots.Insert(toIndex, item);
-        _pluginReorderSink?.Invoke(fromIndex, toIndex);
+        _pluginReorderSink?.Invoke(instanceId, toIndex);
+    }
+
+    public void MoveContainer(int containerId, int targetIndex)
+    {
+        if (containerId <= 0)
+        {
+            return;
+        }
+
+        _containerReorderSink?.Invoke(containerId, targetIndex);
     }
 }

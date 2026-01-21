@@ -22,8 +22,8 @@ public sealed class NullDifferenceScope : IDisposable
     private readonly SKPaint _waveformPaint;
     private readonly SKPaint _positivePaint;
     private readonly SKPaint _negativePaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _scalePaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _scalePaint;
 
     private readonly float[] _samples = new float[MaxSamples];
     private float _scale = DefaultScale;
@@ -96,23 +96,8 @@ public sealed class NullDifferenceScope : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _scalePaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 8f,
-            TextAlign = SKTextAlign.Left,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _scalePaint = new SkiaTextPaint(_theme.TextMuted, 8f, SKFontStyle.Normal, SKTextAlign.Left);
     }
 
     /// <summary>
@@ -202,14 +187,7 @@ public sealed class NullDifferenceScope : IDisposable
         canvas.DrawRoundRect(roundRect, _borderPaint);
 
         // Asymmetry indicator (ratio != 1.0 indicates even harmonics from saturation)
-        using var asymPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 8f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        using var asymPaint = new SkiaTextPaint(_theme.TextMuted, 8f, SKFontStyle.Normal, SKTextAlign.Right);
         string asymText = $"+/-:{_asymmetryRatio:0.00}";
         canvas.DrawText(asymText, rect.Right - padding - 2, rect.Top + padding + 10, asymPaint);
 

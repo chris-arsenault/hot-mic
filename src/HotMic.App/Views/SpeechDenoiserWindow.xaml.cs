@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class SpeechDenoiserWindow : Window
+public partial class SpeechDenoiserWindow : Window, IDisposable
 {
     private readonly SpeechDenoiserRenderer _renderer = new();
     private readonly SpeechDenoiserPlugin _plugin;
@@ -20,11 +20,7 @@ public partial class SpeechDenoiserWindow : Window
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
-
-    private int _activeKnob = -1;
-    private float _dragStartY;
-    private float _dragStartValue;
-    private int _hoveredKnob = -1;
+    private bool _disposed;
 
     public SpeechDenoiserWindow(SpeechDenoiserPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
@@ -43,14 +39,22 @@ public partial class SpeechDenoiserWindow : Window
         Width = preferredSize.Width;
         Height = preferredSize.Height;
 
+        // Wire up knob ValueChanged events
+        _renderer.MixKnob.ValueChanged += value =>
+        {
+            _parameterCallback(SpeechDenoiserPlugin.DryWetIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.AttenLimitKnob.ValueChanged += value =>
+        {
+            _parameterCallback(SpeechDenoiserPlugin.AttenLimitIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += OnRenderTick;
         Loaded += (_, _) => _renderTimer.Start();
-        Closed += (_, _) =>
-        {
-            _renderTimer.Stop();
-            _renderer.Dispose();
-        };
+        Closed += (_, _) => Dispose();
     }
 
     private void OnRenderTick(object? sender, EventArgs e)
@@ -72,10 +76,12 @@ public partial class SpeechDenoiserWindow : Window
             AttenLimitDb: GetParameterValue(SpeechDenoiserPlugin.AttenLimitIndex),
             AttenEnabled: GetParameterValue(SpeechDenoiserPlugin.AttenEnableIndex) >= 0.5f,
             LatencyMs: latencyMs,
+            LatencySamples: _plugin.LatencySamples,
             IsBypassed: _plugin.IsBypassed,
             StatusMessage: _plugin.StatusMessage,
-            HoveredKnob: _hoveredKnob,
-            PresetName: _presetHelper.CurrentPresetName
+            PresetName: _presetHelper.CurrentPresetName,
+            LatencyReport: _plugin.LatencyReport,
+            IsLatencyLearning: _plugin.IsLatencyLearning
         );
 
         _renderer.Render(canvas, size, dpiScale, state);
@@ -83,14 +89,34 @@ public partial class SpeechDenoiserWindow : Window
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
+        var pos = e.GetPosition(SkiaCanvas);
+        float x = (float)pos.X;
+        float y = (float)pos.Y;
+
+        // Check if any knob handles the mouse first
+        if (_renderer.MixKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+        {
+            if (_renderer.MixKnob.IsDragging)
+            {
+                SkiaCanvas.CaptureMouse();
+            }
+            e.Handled = true;
+            return;
+        }
+        if (_renderer.AttenLimitKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+        {
+            if (_renderer.AttenLimitKnob.IsDragging)
+            {
+                SkiaCanvas.CaptureMouse();
+            }
+            e.Handled = true;
+            return;
+        }
+
         if (e.ChangedButton != MouseButton.Left)
         {
             return;
         }
-
-        var pos = e.GetPosition(SkiaCanvas);
-        float x = (float)pos.X;
-        float y = (float)pos.Y;
 
         var hit = _renderer.HitTest(x, y);
 
@@ -118,14 +144,6 @@ public partial class SpeechDenoiserWindow : Window
                 e.Handled = true;
                 break;
 
-            case SpeechDenoiserHitArea.Knob:
-                _activeKnob = hit.KnobIndex;
-                _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
-                SkiaCanvas.CaptureMouse();
-                e.Handled = true;
-                break;
-
             case SpeechDenoiserHitArea.PresetDropdown:
                 _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
                 e.Handled = true;
@@ -133,6 +151,11 @@ public partial class SpeechDenoiserWindow : Window
 
             case SpeechDenoiserHitArea.PresetSave:
                 _presetHelper.ShowSaveMenu(SkiaCanvas, this);
+                e.Handled = true;
+                break;
+
+            case SpeechDenoiserHitArea.LearnLatency:
+                _plugin.LearnLatency();
                 e.Handled = true;
                 break;
         }
@@ -143,30 +166,23 @@ public partial class SpeechDenoiserWindow : Window
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+        bool leftDown = e.LeftButton == MouseButtonState.Pressed;
 
-        if (_activeKnob >= 0 && e.LeftButton == MouseButtonState.Pressed)
-        {
-            float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.003f);
-            ApplyKnobValue(_activeKnob, newNormalized);
-            e.Handled = true;
-        }
-        else
-        {
-            var hit = _renderer.HitTest(x, y);
-            _hoveredKnob = hit.Area == SpeechDenoiserHitArea.Knob ? hit.KnobIndex : -1;
-        }
+        // Forward to all knobs
+        _renderer.MixKnob.HandleMouseMove(x, y, leftDown);
+        _renderer.AttenLimitKnob.HandleMouseMove(x, y, leftDown);
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-        {
-            return;
-        }
+        // Forward to all knobs
+        _renderer.MixKnob.HandleMouseUp(e.ChangedButton);
+        _renderer.AttenLimitKnob.HandleMouseUp(e.ChangedButton);
 
-        _activeKnob = -1;
-        SkiaCanvas.ReleaseMouseCapture();
+        if (e.ChangedButton == MouseButton.Left)
+        {
+            SkiaCanvas.ReleaseMouseCapture();
+        }
     }
 
     private float GetParameterValue(int index)
@@ -177,39 +193,6 @@ public partial class SpeechDenoiserWindow : Window
             return BitConverter.ToSingle(state, index * sizeof(float));
         }
         return _plugin.Parameters[index].DefaultValue;
-    }
-
-    private float GetKnobNormalizedValue(int knobIndex)
-    {
-        return knobIndex switch
-        {
-            0 => GetParameterValue(SpeechDenoiserPlugin.DryWetIndex) / 100f,
-            1 => GetParameterValue(SpeechDenoiserPlugin.AttenLimitIndex) / 100f,
-            _ => 0f
-        };
-    }
-
-    private void ApplyKnobValue(int knobIndex, float normalizedValue)
-    {
-        float value = knobIndex switch
-        {
-            0 => normalizedValue * 100f,
-            1 => normalizedValue * 100f,
-            _ => 0f
-        };
-
-        if (knobIndex == 0)
-        {
-            _parameterCallback(SpeechDenoiserPlugin.DryWetIndex, value);
-            _presetHelper.MarkAsCustom();
-            return;
-        }
-
-        if (knobIndex == 1)
-        {
-            _parameterCallback(SpeechDenoiserPlugin.AttenLimitIndex, value);
-            _presetHelper.MarkAsCustom();
-        }
     }
 
     private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)
@@ -245,5 +228,18 @@ public partial class SpeechDenoiserWindow : Window
     {
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _renderer.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

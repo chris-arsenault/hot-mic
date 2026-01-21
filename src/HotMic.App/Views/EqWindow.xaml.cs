@@ -11,7 +11,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class EqWindow : Window
+public partial class EqWindow : Window, IDisposable
 {
     private readonly EqRenderer _renderer = new();
     private readonly FiveBandEqPlugin _plugin;
@@ -20,30 +20,13 @@ public partial class EqWindow : Window
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
 
-    private int _activeKnob = -1;
-    private float _dragStartY;
-    private float _dragStartValue;
-    private int _hoveredKnob = -1;
     private float _smoothedInputLevel;
+    private bool _disposed;
     private float _smoothedOutputLevel;
 
     // Pre-allocated spectrum buffers to avoid allocations during rendering
     private readonly float[] _spectrumLevels = new float[FiveBandEqPlugin.SpectrumBins];
     private readonly float[] _spectrumPeaks = new float[FiveBandEqPlugin.SpectrumBins];
-
-    // Knob parameter mapping: index -> (paramIndex, minValue, maxValue, isLogScale)
-    private static readonly (int paramIndex, float min, float max, bool log)[] KnobParams =
-    {
-        (FiveBandEqPlugin.HpfFreqIndex, 40f, 200f, true),           // 0: HPF Freq
-        (FiveBandEqPlugin.LowShelfGainIndex, -24f, 24f, false),     // 1: Low Shelf Gain
-        (FiveBandEqPlugin.LowShelfFreqIndex, 60f, 300f, true),      // 2: Low Shelf Freq
-        (FiveBandEqPlugin.Mid1GainIndex, -24f, 24f, false),         // 3: Low-Mid Gain
-        (FiveBandEqPlugin.Mid1FreqIndex, 150f, 800f, true),         // 4: Low-Mid Freq
-        (FiveBandEqPlugin.Mid2GainIndex, -24f, 24f, false),         // 5: High-Mid Gain
-        (FiveBandEqPlugin.Mid2FreqIndex, 1000f, 6000f, true),       // 6: High-Mid Freq
-        (FiveBandEqPlugin.HighShelfGainIndex, -24f, 24f, false),    // 7: High Shelf Gain
-        (FiveBandEqPlugin.HighShelfFreqIndex, 6000f, 16000f, true)  // 8: High Shelf Freq
-    };
 
     public EqWindow(FiveBandEqPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
@@ -58,6 +41,53 @@ public partial class EqWindow : Window
             ApplyPreset,
             GetCurrentParameters);
 
+        // Wire up knob value changes
+        _renderer.HpfFreqKnob.ValueChanged += value =>
+        {
+            _parameterCallback(FiveBandEqPlugin.HpfFreqIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.LowGainKnob.ValueChanged += value =>
+        {
+            _parameterCallback(FiveBandEqPlugin.LowShelfGainIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.LowFreqKnob.ValueChanged += value =>
+        {
+            _parameterCallback(FiveBandEqPlugin.LowShelfFreqIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.Mid1GainKnob.ValueChanged += value =>
+        {
+            _parameterCallback(FiveBandEqPlugin.Mid1GainIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.Mid1FreqKnob.ValueChanged += value =>
+        {
+            _parameterCallback(FiveBandEqPlugin.Mid1FreqIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.Mid2GainKnob.ValueChanged += value =>
+        {
+            _parameterCallback(FiveBandEqPlugin.Mid2GainIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.Mid2FreqKnob.ValueChanged += value =>
+        {
+            _parameterCallback(FiveBandEqPlugin.Mid2FreqIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.HighGainKnob.ValueChanged += value =>
+        {
+            _parameterCallback(FiveBandEqPlugin.HighShelfGainIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.HighFreqKnob.ValueChanged += value =>
+        {
+            _parameterCallback(FiveBandEqPlugin.HighShelfFreqIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+
         var preferredSize = EqRenderer.GetPreferredSize();
         Width = preferredSize.Width;
         Height = preferredSize.Height;
@@ -65,11 +95,7 @@ public partial class EqWindow : Window
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += OnRenderTick;
         Loaded += (_, _) => _renderTimer.Start();
-        Closed += (_, _) =>
-        {
-            _renderTimer.Stop();
-            _renderer.Dispose();
-        };
+        Closed += (_, _) => Dispose();
     }
 
     private void OnRenderTick(object? sender, EventArgs e)
@@ -110,7 +136,6 @@ public partial class EqWindow : Window
             IsBypassed: _plugin.IsBypassed,
             SpectrumLevels: _spectrumLevels,
             SpectrumPeaks: _spectrumPeaks,
-            HoveredKnob: _hoveredKnob,
             PresetName: _presetHelper.CurrentPresetName
         );
 
@@ -119,12 +144,26 @@ public partial class EqWindow : Window
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Let knobs handle their own input (drag, right-click edit)
+        foreach (var knob in new[] { _renderer.HpfFreqKnob, _renderer.LowGainKnob, _renderer.LowFreqKnob,
+                                      _renderer.Mid1GainKnob, _renderer.Mid1FreqKnob, _renderer.Mid2GainKnob,
+                                      _renderer.Mid2FreqKnob, _renderer.HighGainKnob, _renderer.HighFreqKnob })
+        {
+            if (knob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+            {
+                if (knob.IsDragging)
+                    SkiaCanvas.CaptureMouse();
+                e.Handled = true;
+                return;
+            }
+        }
+
+        if (e.ChangedButton != MouseButton.Left)
+            return;
 
         var hit = _renderer.HitTest(x, y);
 
@@ -142,14 +181,6 @@ public partial class EqWindow : Window
 
             case EqHitArea.BypassButton:
                 _bypassCallback(!_plugin.IsBypassed);
-                e.Handled = true;
-                break;
-
-            case EqHitArea.Knob:
-                _activeKnob = hit.KnobIndex;
-                _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
-                SkiaCanvas.CaptureMouse();
                 e.Handled = true;
                 break;
 
@@ -171,83 +202,27 @@ public partial class EqWindow : Window
         float x = (float)pos.X;
         float y = (float)pos.Y;
 
-        if (_activeKnob >= 0 && e.LeftButton == MouseButtonState.Pressed)
+        // Let knobs handle drag and hover
+        foreach (var knob in new[] { _renderer.HpfFreqKnob, _renderer.LowGainKnob, _renderer.LowFreqKnob,
+                                      _renderer.Mid1GainKnob, _renderer.Mid1FreqKnob, _renderer.Mid2GainKnob,
+                                      _renderer.Mid2FreqKnob, _renderer.HighGainKnob, _renderer.HighFreqKnob })
         {
-            float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.004f);
-            ApplyKnobValue(_activeKnob, newNormalized);
-            e.Handled = true;
-        }
-        else
-        {
-            var hit = _renderer.HitTest(x, y);
-            _hoveredKnob = hit.Area == EqHitArea.Knob ? hit.KnobIndex : -1;
+            knob.HandleMouseMove(x, y, e.LeftButton == MouseButtonState.Pressed);
         }
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
-        _activeKnob = -1;
-        SkiaCanvas.ReleaseMouseCapture();
-    }
-
-    private float GetKnobNormalizedValue(int knobIndex)
-    {
-        if (knobIndex < 0 || knobIndex >= KnobParams.Length)
-            return 0f;
-
-        var (paramIndex, min, max, log) = KnobParams[knobIndex];
-        float value = GetPluginParamValue(paramIndex);
-
-        if (log)
+        // Let knobs handle mouse up
+        foreach (var knob in new[] { _renderer.HpfFreqKnob, _renderer.LowGainKnob, _renderer.LowFreqKnob,
+                                      _renderer.Mid1GainKnob, _renderer.Mid1FreqKnob, _renderer.Mid2GainKnob,
+                                      _renderer.Mid2FreqKnob, _renderer.HighGainKnob, _renderer.HighFreqKnob })
         {
-            return MathF.Log(value / min) / MathF.Log(max / min);
-        }
-        return (value - min) / (max - min);
-    }
-
-    private void ApplyKnobValue(int knobIndex, float normalizedValue)
-    {
-        if (knobIndex < 0 || knobIndex >= KnobParams.Length)
-            return;
-
-        normalizedValue = Math.Clamp(normalizedValue, 0f, 1f);
-        var (paramIndex, min, max, log) = KnobParams[knobIndex];
-
-        float value;
-        if (log)
-        {
-            value = min * MathF.Pow(max / min, normalizedValue);
-        }
-        else
-        {
-            value = min + normalizedValue * (max - min);
+            knob.HandleMouseUp(e.ChangedButton);
         }
 
-        _parameterCallback(paramIndex, value);
-        _presetHelper.MarkAsCustom();
-    }
-
-    private float GetPluginParamValue(int paramIndex)
-    {
-        return paramIndex switch
-        {
-            FiveBandEqPlugin.HpfFreqIndex => _plugin.HpfFreq,
-            FiveBandEqPlugin.LowShelfGainIndex => _plugin.LowShelfGainDb,
-            FiveBandEqPlugin.LowShelfFreqIndex => _plugin.LowShelfFreq,
-            FiveBandEqPlugin.Mid1GainIndex => _plugin.Mid1GainDb,
-            FiveBandEqPlugin.Mid1FreqIndex => _plugin.Mid1Freq,
-            FiveBandEqPlugin.Mid1QIndex => _plugin.Mid1Q,
-            FiveBandEqPlugin.Mid2GainIndex => _plugin.Mid2GainDb,
-            FiveBandEqPlugin.Mid2FreqIndex => _plugin.Mid2Freq,
-            FiveBandEqPlugin.Mid2QIndex => _plugin.Mid2Q,
-            FiveBandEqPlugin.HighShelfGainIndex => _plugin.HighShelfGainDb,
-            FiveBandEqPlugin.HighShelfFreqIndex => _plugin.HighShelfFreq,
-            _ => 0f
-        };
+        if (e.ChangedButton == MouseButton.Left)
+            SkiaCanvas.ReleaseMouseCapture();
     }
 
     private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)
@@ -299,5 +274,18 @@ public partial class EqWindow : Window
     {
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _renderer.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

@@ -20,26 +20,28 @@ public sealed class NoiseGateRenderer : IDisposable
     private readonly PluginComponentTheme _theme;
     private readonly WaveformDisplay _waveformDisplay;
     private readonly EnvelopeCurveDisplay _envelopeCurve;
-    private readonly RotaryKnob _knob;
     private readonly GateIndicator _gateIndicator;
     private readonly PluginPresetBar _presetBar;
+
+    public KnobWidget ThresholdKnob { get; }
+    public KnobWidget HysteresisKnob { get; }
+    public KnobWidget AttackKnob { get; }
+    public KnobWidget HoldKnob { get; }
+    public KnobWidget ReleaseKnob { get; }
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _closeButtonPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
-    private readonly SKPaint _sectionLabelPaint;
-    private readonly SKPaint _latencyPaint;
+    private readonly SkiaTextPaint _sectionLabelPaint;
+    private readonly SkiaTextPaint _latencyPaint;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
-    private readonly SKRect[] _knobRects = new SKRect[KnobCount];
-    private readonly SKPoint[] _knobCenters = new SKPoint[KnobCount];
-    private int _knobCount = KnobCount;
 
     public WaveformBuffer WaveformBuffer { get; } = new(256);
 
@@ -48,9 +50,15 @@ public sealed class NoiseGateRenderer : IDisposable
         _theme = theme ?? PluginComponentTheme.Default;
         _waveformDisplay = new WaveformDisplay(_theme);
         _envelopeCurve = new EnvelopeCurveDisplay(_theme);
-        _knob = new RotaryKnob(_theme);
         _gateIndicator = new GateIndicator(_theme);
         _presetBar = new PluginPresetBar(_theme);
+
+        var knobStyle = KnobStyle.Standard;
+        ThresholdKnob = new KnobWidget(KnobRadius, -80f, 0f, "THRESH", "dB", knobStyle, _theme) { ValueFormat = "0.0" };
+        HysteresisKnob = new KnobWidget(KnobRadius, 0f, 12f, "HYSTER", "dB", knobStyle, _theme) { ValueFormat = "0.0" };
+        AttackKnob = new KnobWidget(KnobRadius, 0.1f, 50f, "ATTACK", "ms", knobStyle, _theme) { ValueFormat = "0.0" };
+        HoldKnob = new KnobWidget(KnobRadius, 0f, 500f, "HOLD", "ms", knobStyle, _theme) { ValueFormat = "0" };
+        ReleaseKnob = new KnobWidget(KnobRadius, 10f, 500f, "RELEASE", "ms", knobStyle, _theme) { ValueFormat = "0" };
 
         _backgroundPaint = new SKPaint
         {
@@ -74,22 +82,8 @@ public sealed class NoiseGateRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _closeButtonPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 18f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _bypassPaint = new SKPaint
         {
@@ -105,22 +99,8 @@ public sealed class NoiseGateRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _sectionLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _latencyPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _sectionLabelPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal);
+        _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
     }
 
     /// <summary>
@@ -174,14 +154,7 @@ public sealed class NoiseGateRenderer : IDisposable
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SKPaint
-        {
-            Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
 
         if (state.LatencyMs >= 0f)
@@ -223,39 +196,29 @@ public sealed class NoiseGateRenderer : IDisposable
         float knobsStartX = (size.Width - knobsTotalWidth) / 2 + KnobSpacing / 2;
 
         // Threshold knob
-        _knobCenters[0] = new SKPoint(knobsStartX, knobsY);
-        float thresholdNorm = (state.ThresholdDb - (-80f)) / (0f - (-80f));
-        _knob.Render(canvas, _knobCenters[0], KnobRadius, thresholdNorm,
-            "THRESH", $"{state.ThresholdDb:0.0}", "dB", state.HoveredKnob == 0);
-        _knobRects[0] = _knob.GetHitRect(_knobCenters[0], KnobRadius);
+        ThresholdKnob.Center = new SKPoint(knobsStartX, knobsY);
+        ThresholdKnob.Value = state.ThresholdDb;
+        ThresholdKnob.Render(canvas);
 
         // Hysteresis knob
-        _knobCenters[1] = new SKPoint(knobsStartX + KnobSpacing, knobsY);
-        float hysteresisNorm = state.HysteresisDb / 12f;
-        _knob.Render(canvas, _knobCenters[1], KnobRadius, hysteresisNorm,
-            "HYSTER", $"{state.HysteresisDb:0.0}", "dB", state.HoveredKnob == 1);
-        _knobRects[1] = _knob.GetHitRect(_knobCenters[1], KnobRadius);
+        HysteresisKnob.Center = new SKPoint(knobsStartX + KnobSpacing, knobsY);
+        HysteresisKnob.Value = state.HysteresisDb;
+        HysteresisKnob.Render(canvas);
 
         // Attack knob
-        _knobCenters[2] = new SKPoint(knobsStartX + KnobSpacing * 2, knobsY);
-        float attackNorm = (state.AttackMs - 0.1f) / (50f - 0.1f);
-        _knob.Render(canvas, _knobCenters[2], KnobRadius, attackNorm,
-            "ATTACK", $"{state.AttackMs:0.0}", "ms", state.HoveredKnob == 2);
-        _knobRects[2] = _knob.GetHitRect(_knobCenters[2], KnobRadius);
+        AttackKnob.Center = new SKPoint(knobsStartX + KnobSpacing * 2, knobsY);
+        AttackKnob.Value = state.AttackMs;
+        AttackKnob.Render(canvas);
 
         // Hold knob
-        _knobCenters[3] = new SKPoint(knobsStartX + KnobSpacing * 3, knobsY);
-        float holdNorm = state.HoldMs / 500f;
-        _knob.Render(canvas, _knobCenters[3], KnobRadius, holdNorm,
-            "HOLD", $"{state.HoldMs:0}", "ms", state.HoveredKnob == 3);
-        _knobRects[3] = _knob.GetHitRect(_knobCenters[3], KnobRadius);
+        HoldKnob.Center = new SKPoint(knobsStartX + KnobSpacing * 3, knobsY);
+        HoldKnob.Value = state.HoldMs;
+        HoldKnob.Render(canvas);
 
         // Release knob
-        _knobCenters[4] = new SKPoint(knobsStartX + KnobSpacing * 4, knobsY);
-        float releaseNorm = (state.ReleaseMs - 10f) / (500f - 10f);
-        _knob.Render(canvas, _knobCenters[4], KnobRadius, releaseNorm,
-            "RELEASE", $"{state.ReleaseMs:0}", "ms", state.HoveredKnob == 4);
-        _knobRects[4] = _knob.GetHitRect(_knobCenters[4], KnobRadius);
+        ReleaseKnob.Center = new SKPoint(knobsStartX + KnobSpacing * 4, knobsY);
+        ReleaseKnob.Value = state.ReleaseMs;
+        ReleaseKnob.Render(canvas);
 
         // Gate status bar at bottom
         float barHeight = 20f;
@@ -287,15 +250,16 @@ public sealed class NoiseGateRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new NoiseGateHitTest(NoiseGateHitArea.PresetSave, -1);
 
-        for (int i = 0; i < _knobCount; i++)
-        {
-            float dx = x - _knobCenters[i].X;
-            float dy = y - _knobCenters[i].Y;
-            if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
-            {
-                return new NoiseGateHitTest(NoiseGateHitArea.Knob, i);
-            }
-        }
+        if (ThresholdKnob.HitTest(x, y))
+            return new NoiseGateHitTest(NoiseGateHitArea.Knob, 0);
+        if (HysteresisKnob.HitTest(x, y))
+            return new NoiseGateHitTest(NoiseGateHitArea.Knob, 1);
+        if (AttackKnob.HitTest(x, y))
+            return new NoiseGateHitTest(NoiseGateHitArea.Knob, 2);
+        if (HoldKnob.HitTest(x, y))
+            return new NoiseGateHitTest(NoiseGateHitArea.Knob, 3);
+        if (ReleaseKnob.HitTest(x, y))
+            return new NoiseGateHitTest(NoiseGateHitArea.Knob, 4);
 
         if (_titleBarRect.Contains(x, y))
             return new NoiseGateHitTest(NoiseGateHitArea.TitleBar, -1);
@@ -311,9 +275,13 @@ public sealed class NoiseGateRenderer : IDisposable
     {
         _waveformDisplay.Dispose();
         _envelopeCurve.Dispose();
-        _knob.Dispose();
         _gateIndicator.Dispose();
         _presetBar.Dispose();
+        ThresholdKnob.Dispose();
+        HysteresisKnob.Dispose();
+        AttackKnob.Dispose();
+        HoldKnob.Dispose();
+        ReleaseKnob.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -338,7 +306,6 @@ public record struct NoiseGateState(
     float LatencyMs,
     bool IsGateOpen,
     bool IsBypassed,
-    int HoveredKnob = -1,
     string PresetName = "Custom");
 
 public enum NoiseGateHitArea

@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class DeEsserWindow : Window
+public partial class DeEsserWindow : Window, IDisposable
 {
     private readonly DeEsserRenderer _renderer = new();
     private readonly DeEsserPlugin _plugin;
@@ -21,14 +21,11 @@ public partial class DeEsserWindow : Window
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
 
-    private DeEsserKnob _activeKnob = DeEsserKnob.None;
-    private float _dragStartY;
-    private float _dragStartValue;
-    private DeEsserKnob _hoveredKnob = DeEsserKnob.None;
     private float _smoothedInputLevel;
     private float _smoothedSibilanceLevel;
     private float _smoothedGainReduction;
     private readonly float[] _spectrum = new float[DeEsserPlugin.SpectrumBins];
+    private bool _disposed;
 
     public DeEsserWindow(DeEsserPlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
@@ -43,6 +40,33 @@ public partial class DeEsserWindow : Window
             ApplyPreset,
             GetCurrentParameters);
 
+        // Wire up knob value changes
+        _renderer.CenterFreqKnob.ValueChanged += value =>
+        {
+            _parameterCallback(DeEsserPlugin.CenterFreqIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.BandwidthKnob.ValueChanged += value =>
+        {
+            _parameterCallback(DeEsserPlugin.BandwidthIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.ThresholdKnob.ValueChanged += value =>
+        {
+            _parameterCallback(DeEsserPlugin.ThresholdIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.ReductionKnob.ValueChanged += value =>
+        {
+            _parameterCallback(DeEsserPlugin.ReductionIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.MaxRangeKnob.ValueChanged += value =>
+        {
+            _parameterCallback(DeEsserPlugin.MaxRangeIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+
         var preferredSize = DeEsserRenderer.GetPreferredSize();
         Width = preferredSize.Width;
         Height = preferredSize.Height;
@@ -50,11 +74,7 @@ public partial class DeEsserWindow : Window
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += OnRenderTick;
         Loaded += (_, _) => _renderTimer.Start();
-        Closed += (_, _) =>
-        {
-            _renderTimer.Stop();
-            _renderer.Dispose();
-        };
+        Closed += (_, _) => Dispose();
     }
 
     private void OnRenderTick(object? sender, EventArgs e)
@@ -89,7 +109,6 @@ public partial class DeEsserWindow : Window
             GainReductionDb: _smoothedGainReduction,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
-            HoveredKnob: _hoveredKnob,
             Spectrum: _spectrum,
             PresetName: _presetHelper.CurrentPresetName
         );
@@ -99,12 +118,27 @@ public partial class DeEsserWindow : Window
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Let knobs handle their own input (drag, right-click edit)
+        if (_renderer.CenterFreqKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas) ||
+            _renderer.BandwidthKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas) ||
+            _renderer.ThresholdKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas) ||
+            _renderer.ReductionKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas) ||
+            _renderer.MaxRangeKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+        {
+            if (_renderer.CenterFreqKnob.IsDragging || _renderer.BandwidthKnob.IsDragging ||
+                _renderer.ThresholdKnob.IsDragging || _renderer.ReductionKnob.IsDragging ||
+                _renderer.MaxRangeKnob.IsDragging)
+                SkiaCanvas.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.ChangedButton != MouseButton.Left)
+            return;
 
         var hit = _renderer.HitTest(x, y);
 
@@ -125,14 +159,6 @@ public partial class DeEsserWindow : Window
                 e.Handled = true;
                 break;
 
-            case DeEsserHitArea.Knob:
-                _activeKnob = hit.Knob;
-                _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue(hit.Knob);
-                SkiaCanvas.CaptureMouse();
-                e.Handled = true;
-                break;
-
             case DeEsserHitArea.PresetDropdown:
                 _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
                 e.Handled = true;
@@ -150,73 +176,26 @@ public partial class DeEsserWindow : Window
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+        bool leftDown = e.LeftButton == MouseButtonState.Pressed;
 
-        if (_activeKnob != DeEsserKnob.None && e.LeftButton == MouseButtonState.Pressed)
-        {
-            float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.004f);
-            ApplyKnobValue(_activeKnob, newNormalized);
-            e.Handled = true;
-        }
-        else
-        {
-            var hit = _renderer.HitTest(x, y);
-            _hoveredKnob = hit.Area == DeEsserHitArea.Knob ? hit.Knob : DeEsserKnob.None;
-        }
+        // Let knobs handle drag and hover
+        _renderer.CenterFreqKnob.HandleMouseMove(x, y, leftDown);
+        _renderer.BandwidthKnob.HandleMouseMove(x, y, leftDown);
+        _renderer.ThresholdKnob.HandleMouseMove(x, y, leftDown);
+        _renderer.ReductionKnob.HandleMouseMove(x, y, leftDown);
+        _renderer.MaxRangeKnob.HandleMouseMove(x, y, leftDown);
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
+        _renderer.CenterFreqKnob.HandleMouseUp(e.ChangedButton);
+        _renderer.BandwidthKnob.HandleMouseUp(e.ChangedButton);
+        _renderer.ThresholdKnob.HandleMouseUp(e.ChangedButton);
+        _renderer.ReductionKnob.HandleMouseUp(e.ChangedButton);
+        _renderer.MaxRangeKnob.HandleMouseUp(e.ChangedButton);
 
-        _activeKnob = DeEsserKnob.None;
-        SkiaCanvas.ReleaseMouseCapture();
-    }
-
-    private float GetKnobNormalizedValue(DeEsserKnob knob) => knob switch
-    {
-        DeEsserKnob.CenterFreq => (MathF.Log10(_plugin.CenterHz) - MathF.Log10(4000f)) / (MathF.Log10(9000f) - MathF.Log10(4000f)),
-        DeEsserKnob.Bandwidth => (_plugin.BandwidthHz - 1000f) / 3000f,
-        DeEsserKnob.Threshold => (_plugin.ThresholdDb + 40f) / 40f,
-        DeEsserKnob.Reduction => _plugin.ReductionDb / 12f,
-        DeEsserKnob.MaxRange => _plugin.MaxRangeDb / 20f,
-        _ => 0f
-    };
-
-    private void ApplyKnobValue(DeEsserKnob knob, float normalizedValue)
-    {
-        switch (knob)
-        {
-            case DeEsserKnob.CenterFreq:
-                // Log scale: 4kHz to 9kHz
-                float logMin = MathF.Log10(4000f);
-                float logMax = MathF.Log10(9000f);
-                float centerHz = MathF.Pow(10, logMin + normalizedValue * (logMax - logMin));
-                _parameterCallback(DeEsserPlugin.CenterFreqIndex, centerHz);
-                break;
-
-            case DeEsserKnob.Bandwidth:
-                float bandwidthHz = 1000f + normalizedValue * 3000f;
-                _parameterCallback(DeEsserPlugin.BandwidthIndex, bandwidthHz);
-                break;
-
-            case DeEsserKnob.Threshold:
-                float thresholdDb = -40f + normalizedValue * 40f;
-                _parameterCallback(DeEsserPlugin.ThresholdIndex, thresholdDb);
-                break;
-
-            case DeEsserKnob.Reduction:
-                float reductionDb = normalizedValue * 12f;
-                _parameterCallback(DeEsserPlugin.ReductionIndex, reductionDb);
-                break;
-
-            case DeEsserKnob.MaxRange:
-                float maxRangeDb = normalizedValue * 20f;
-                _parameterCallback(DeEsserPlugin.MaxRangeIndex, maxRangeDb);
-                break;
-        }
-        _presetHelper.MarkAsCustom();
+        if (e.ChangedButton == MouseButton.Left)
+            SkiaCanvas.ReleaseMouseCapture();
     }
 
     private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)
@@ -256,5 +235,18 @@ public partial class DeEsserWindow : Window
     {
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _renderer.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

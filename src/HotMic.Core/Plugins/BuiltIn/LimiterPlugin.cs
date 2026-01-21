@@ -50,6 +50,11 @@ public sealed class LimiterPlugin : IPlugin
         UpdateCoefficients();
     }
 
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
+    }
+
     public void Process(Span<float> buffer)
     {
         if (IsBypassed || buffer.IsEmpty)

@@ -18,9 +18,9 @@ public sealed class SaturationRenderer : IDisposable
     private const float CornerRadius = 10f;
     private const float WarmthPivotPct = 50f;
     private const float WarmthOverdriveMax = 2f;
+    private static readonly float[] LinearDash = [4f, 4f];
 
     private readonly PluginComponentTheme _theme;
-    private readonly RotaryKnob _knob;
     private readonly PluginPresetBar _presetBar;
     private readonly LevelMeter _inputMeter;
     private readonly LevelMeter _outputMeter;
@@ -28,11 +28,14 @@ public sealed class SaturationRenderer : IDisposable
     private readonly NullDifferenceScope _nullScope;
     private readonly HarmonicAnalyzer _harmonicAnalyzer;
 
+    public KnobWidget WarmthKnob { get; }
+    public KnobWidget BlendKnob { get; }
+
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _closeButtonPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
     private readonly SKPaint _meterBackgroundPaint;
@@ -41,26 +44,27 @@ public sealed class SaturationRenderer : IDisposable
     private readonly SKPaint _curvePaint;
     private readonly SKPaint _curveLinearPaint;
     private readonly SKPaint _gridPaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _latencyPaint;
-    private readonly SKPaint _sectionLabelPaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _latencyPaint;
+    private readonly SkiaTextPaint _sectionLabelPaint;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
-    private SKPoint _warmthKnobCenter;
-    private SKPoint _blendKnobCenter;
 
     public SaturationRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
-        _knob = new RotaryKnob(_theme);
         _presetBar = new PluginPresetBar(_theme);
         _inputMeter = new LevelMeter();
         _outputMeter = new LevelMeter();
         _transferCurve = new DynamicTransferCurveDisplay(_theme);
         _nullScope = new NullDifferenceScope(_theme);
         _harmonicAnalyzer = new HarmonicAnalyzer(_theme);
+
+        var knobStyle = KnobStyle.Standard;
+        WarmthKnob = new KnobWidget(KnobRadius, 0f, 100f, "WARMTH", "%", knobStyle, _theme) { ValueFormat = "0" };
+        BlendKnob = new KnobWidget(KnobRadius, 0f, 100f, "BLEND", "%", knobStyle, _theme) { ValueFormat = "0" };
 
         _backgroundPaint = new SKPaint
         {
@@ -84,22 +88,8 @@ public sealed class SaturationRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _closeButtonPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 18f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _bypassPaint = new SKPaint
         {
@@ -150,7 +140,7 @@ public sealed class SaturationRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f,
-            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0)
+            PathEffect = SKPathEffect.CreateDash(LinearDash, 0)
         };
 
         _gridPaint = new SKPaint
@@ -161,32 +151,9 @@ public sealed class SaturationRenderer : IDisposable
             StrokeWidth = 0.5f
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _latencyPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _sectionLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Left,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
+        _sectionLabelPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Bold, SKTextAlign.Left);
     }
 
     public void Render(SKCanvas canvas, SKSize size, float dpiScale, SaturationState state)
@@ -233,14 +200,7 @@ public sealed class SaturationRenderer : IDisposable
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SKPaint
-        {
-            Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
 
         if (state.LatencyMs >= 0f)
@@ -277,14 +237,14 @@ public sealed class SaturationRenderer : IDisposable
         float knobY = meterY + 20;
 
         // Warmth knob
-        _warmthKnobCenter = new SKPoint(knobAreaX + KnobRadius, knobY);
-        float warmthNorm = state.WarmthPct / 100f;
-        _knob.Render(canvas, _warmthKnobCenter, KnobRadius, warmthNorm, "WARMTH", $"{state.WarmthPct:0}", "%", state.HoveredKnob == SaturationKnob.Warmth);
+        WarmthKnob.Center = new SKPoint(knobAreaX + KnobRadius, knobY);
+        WarmthKnob.Value = state.WarmthPct;
+        WarmthKnob.Render(canvas);
 
         // Blend knob
-        _blendKnobCenter = new SKPoint(knobAreaX + KnobRadius, knobY + 70);
-        float blendNorm = state.BlendPct / 100f;
-        _knob.Render(canvas, _blendKnobCenter, KnobRadius, blendNorm, "BLEND", $"{state.BlendPct:0}", "%", state.HoveredKnob == SaturationKnob.Blend);
+        BlendKnob.Center = new SKPoint(knobAreaX + KnobRadius, knobY + 70);
+        BlendKnob.Value = state.BlendPct;
+        BlendKnob.Render(canvas);
 
         // Dynamic Transfer curve (larger, shows real samples)
         float curveX = knobAreaX + KnobRadius * 2 + 24;
@@ -430,14 +390,10 @@ public sealed class SaturationRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new SaturationHitTest(SaturationHitArea.PresetSave, SaturationKnob.None);
 
-        float dx = x - _warmthKnobCenter.X;
-        float dy = y - _warmthKnobCenter.Y;
-        if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
+        if (WarmthKnob.HitTest(x, y))
             return new SaturationHitTest(SaturationHitArea.Knob, SaturationKnob.Warmth);
 
-        dx = x - _blendKnobCenter.X;
-        dy = y - _blendKnobCenter.Y;
-        if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
+        if (BlendKnob.HitTest(x, y))
             return new SaturationHitTest(SaturationHitArea.Knob, SaturationKnob.Blend);
 
         if (_titleBarRect.Contains(x, y))
@@ -454,8 +410,9 @@ public sealed class SaturationRenderer : IDisposable
     {
         _inputMeter.Dispose();
         _outputMeter.Dispose();
-        _knob.Dispose();
         _presetBar.Dispose();
+        WarmthKnob.Dispose();
+        BlendKnob.Dispose();
         _transferCurve.Dispose();
         _nullScope.Dispose();
         _harmonicAnalyzer.Dispose();
@@ -485,7 +442,6 @@ public record struct SaturationState(
     float OutputLevel,
     float LatencyMs,
     bool IsBypassed,
-    SaturationKnob HoveredKnob = SaturationKnob.None,
     string PresetName = "Custom",
     int SampleRate = 0,
     Func<float[], float[], float[], int>? GetTransferCurveSamples = null,

@@ -44,7 +44,7 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
     private bool _sidechainHpfEnabled = true;
 
     // Mutable struct: keep non-readonly so filter state persists across samples.
-    private OnePoleHighPass _sidechainFilter = new();
+    private OnePoleHighPass _sidechainFilter;
 
     public CompressorPlugin()
     {
@@ -80,6 +80,11 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
         _envelopeDb = -120f;
         _gainReductionDb = 0f;
         UpdateCoefficients();
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)

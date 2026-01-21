@@ -14,6 +14,14 @@ This document provides structured guidance for AI coding agents working on the H
 
 ---
 
+## Technical Specifications
+
+All DSP/analysis/visualization algorithm specs live in `docs/technical/`. Architecture and system design docs live in `docs/architecture/`, and feature references live in `docs/reference/`. Do not duplicate spec details in this file; reference the relevant technical doc and update it when behavior changes.
+
+Index: `docs/technical/README.md`
+
+---
+
 ## Architecture Rules
 
 ### Strict Separation of Concerns
@@ -35,6 +43,11 @@ This document provides structured guidance for AI coding agents working on the H
 │         • No WPF references                                  │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### UI/Core Consistency
+
+- UI must never present a state the core layer will not execute.
+- If core clamps or auto-adjusts parameters, the UI must mirror the enforced value immediately (auto-switch), so backend and UI stay in lockstep.
 
 ### Audio Thread Safety Rules
 
@@ -291,89 +304,9 @@ public class MeterControl : SkiaControl
 
 - **Do not change DSP algorithms to match UI behavior.** If the UI does not reflect audible behavior, fix the UI scaling/meters/labels first.
 - **Do change DSP algorithms when there are real bugs,** but validate changes against reference implementations or standard formulas for that DSP class.
+- **CRITICAL: Do not tweak DSP algorithms or thresholds based solely on observed behavior.** Changes must be grounded in DSP references, measurement, or explicit requirements; otherwise expose tunable parameters instead of hardcoding guesses.
 - **Document the reference** with a concise inline comment near the relevant code so intent and expected behavior are clear.
-
-### Compressor Implementation Outline
-
-```csharp
-public class CompressorPlugin : IPlugin
-{
-    // Parameters
-    private float _thresholdDb = -20f;
-    private float _ratio = 4f;
-    private float _attackMs = 10f;
-    private float _releaseMs = 100f;
-    private float _makeupDb = 0f;
-    
-    // Computed coefficients (update when params change)
-    private float _thresholdLinear;
-    private float _attackCoeff;
-    private float _releaseCoeff;
-    private float _makeupLinear;
-    
-    // State
-    private float _envelope = 0f;
-    
-    public void Process(Span<float> buffer)
-    {
-        for (int i = 0; i < buffer.Length; i++)
-        {
-            float input = buffer[i];
-            float inputAbs = MathF.Abs(input);
-            
-            // Envelope follower
-            float coeff = inputAbs > _envelope ? _attackCoeff : _releaseCoeff;
-            _envelope = _envelope + coeff * (inputAbs - _envelope);
-            
-            // Gain computation (log domain)
-            float gainDb = 0f;
-            if (_envelope > _thresholdLinear)
-            {
-                float overDb = 20f * MathF.Log10(_envelope / _thresholdLinear);
-                gainDb = overDb * (1f - 1f / _ratio);
-            }
-            
-            // Apply gain
-            float gainLinear = MathF.Pow(10f, -gainDb / 20f) * _makeupLinear;
-            buffer[i] = input * gainLinear;
-        }
-    }
-}
-```
-
-### FFT Noise Removal Outline
-
-```csharp
-public class FFTNoiseRemovalPlugin : IPlugin
-{
-    private const int FFTSize = 2048;
-    private const int HopSize = FFTSize / 2;  // 50% overlap
-    
-    private float[] _inputBuffer;      // Circular buffer
-    private float[] _outputBuffer;     // Overlap-add buffer
-    private float[] _fftReal;
-    private float[] _fftImag;
-    private float[] _window;           // Hann window
-    private float[] _noiseProfile;     // Learned noise magnitude spectrum
-    private bool _learning = false;
-    
-    public void LearnNoiseProfile()
-    {
-        _learning = true;
-        // Accumulate frames, average magnitude spectrum
-    }
-    
-    public void Process(Span<float> buffer)
-    {
-        // Overlap-add STFT processing
-        // 1. Window input
-        // 2. FFT
-        // 3. Spectral subtraction: mag = max(mag - noiseProfile * reduction, floor)
-        // 4. IFFT
-        // 5. Overlap-add to output
-    }
-}
-```
+- **Keep spec docs in sync** whenever DSP algorithms change (update `docs/technical` references to match behavior).
 
 ---
 
@@ -450,7 +383,8 @@ HotMic/
 │   └── HotMic.Dsp.Tests/
 │
 └── docs/
-    ├── REQUIREMENTS.md
+    ├── technical/
+    │   └── README.md
     ├── AGENTS.md
     └── CLAUDE.md
 ```
@@ -463,6 +397,61 @@ This project should not rely on long-term unit or integration tests to control b
 Temporary, isolated verification tests are allowed (for example, DSP math or FFT correctness), but should be clearly scoped and may be removed once validated.
 
 Still document complex DSP or UI behavior with concise inline comments near the relevant code so intent and assumptions are captured in context.
+
+### Mathematical Accuracy Tests
+
+Testing for mathematical accuracy via **independent verification** is acceptable and encouraged for DSP algorithms. These tests validate that implementations match known-correct reference values.
+
+**Requirements for math verification tests:**
+
+1. **Pre-computed reference values** - Expected values must be computed externally (Python/NumPy, Wolfram Alpha, textbook examples) and hardcoded in tests. Document the source.
+   ```csharp
+   // Pre-computed with Python: mag = exp(-bw * π / sr)
+   // At sr=12000: bw=1000Hz -> mag=0.769665
+   [InlineData(0.769665, 1000)]
+   ```
+
+2. **Deterministic inputs** - Use fixed seeds for RNG, specific input signals, or pre-computed coefficient arrays. Same test input must always produce same output.
+   ```csharp
+   // Pre-computed LPC coefficients for resonance at 300Hz, mag 0.95
+   float[] lpcCoeffs = { 1.0f, -3.1494001f, 4.1010318f, -2.6687473f, 0.731025f };
+   ```
+
+3. **Specific expected values** - Assert against concrete numbers, not just presence or non-null. Use tight tolerances appropriate for the math.
+   ```csharp
+   // Expected frequency: 125 Hz (pre-computed: θ×fs/2π)
+   Assert.InRange(freqs[0], 120f, 130f);
+   ```
+
+4. **Direct production outputs only** - Tests must call the production method under test and compare its output to pre-computed constants. Do not compare one production method to another (no roundtrips, no internal consistency checks).
+
+5. **Never re-implement the algorithm** - Tests must not compute expected values using the same formula being tested. This is invalid:
+   ```csharp
+   // BAD: Re-implements the formula being tested
+   double expected = -sampleRate / Math.PI * Math.Log(magnitude);
+   Assert.Equal(expected, actual);
+
+   // GOOD: Uses pre-computed reference value
+   Assert.InRange(actual, 195.0, 197.0);  // Pre-computed: 195.93 Hz
+   ```
+
+6. **No presence-only tests** - Avoid "does not throw", `NotNull`, or "range-only" checks without a concrete expected value. Every test should assert specific expected outputs (with tolerance).
+
+7. **Document reference source** - Include comments noting how values were computed (tool, formula, textbook reference).
+
+**Example test structure:**
+```csharp
+[Theory]
+[InlineData(0.974160, 100)]   // Python: exp(-100*π/12000)
+[InlineData(0.877306, 500)]   // Python: exp(-500*π/12000)
+[InlineData(0.769665, 1000)]  // Python: exp(-1000*π/12000)
+public void MagnitudeToBandwidth_MatchesReference(double mag, double expectedBw)
+{
+    // Formula: bw = -sr/π × ln(mag), verified against Python/NumPy
+    double actual = ComputeBandwidth(mag, sampleRate: 12000);
+    Assert.InRange(actual, expectedBw - 0.5, expectedBw + 0.5);
+}
+```
 
 ---
 
@@ -543,7 +532,7 @@ This repo uses a WSL source tree with build outputs redirected to a Windows NTFS
 
 A feature is complete when:
 
-- [ ] Implementation matches requirements in REQUIREMENTS.md
+- [ ] Implementation matches documented requirements in `README.md` and `docs/technical/README.md`
 - [ ] No memory allocations in audio callback path (verify with profiler)
 - [ ] UI remains responsive during audio processing
 - [ ] No audio glitches under normal operation

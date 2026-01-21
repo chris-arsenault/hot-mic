@@ -20,18 +20,22 @@ public sealed class ReverbRenderer : IDisposable
 
     private readonly PluginComponentTheme _theme;
     private readonly WaveformDisplay _waveformDisplay;
-    private readonly RotaryKnob _knob;
     private readonly PluginPresetBar _presetBar;
+
+    // Knob widgets
+    public KnobWidget DryWetKnob { get; }
+    public KnobWidget DecayKnob { get; }
+    public KnobWidget PreDelayKnob { get; }
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _closeButtonPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
-    private readonly SKPaint _sectionLabelPaint;
-    private readonly SKPaint _statusPaint;
+    private readonly SkiaTextPaint _sectionLabelPaint;
+    private readonly SkiaTextPaint _statusPaint;
     private readonly SKPaint _presetPaint;
     private readonly SKPaint _presetSelectedPaint;
     private readonly SKPaint _loadButtonPaint;
@@ -41,8 +45,6 @@ public sealed class ReverbRenderer : IDisposable
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
     private SKRect _loadButtonRect;
-    private readonly SKRect[] _knobRects = new SKRect[KnobCount];
-    private readonly SKPoint[] _knobCenters = new SKPoint[KnobCount];
     private readonly SKRect[] _presetRects = new SKRect[PresetCount];
 
     public WaveformBuffer IrWaveformBuffer { get; } = new(256);
@@ -51,8 +53,24 @@ public sealed class ReverbRenderer : IDisposable
     {
         _theme = theme ?? PluginComponentTheme.Default;
         _waveformDisplay = new WaveformDisplay(_theme);
-        _knob = new RotaryKnob(_theme);
         _presetBar = new PluginPresetBar(_theme);
+
+        // Initialize knob widgets
+        DryWetKnob = new KnobWidget(KnobRadius, 0f, 100f, "DRY/WET", "%", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0",
+            DragSensitivity = 0.004f
+        };
+        DecayKnob = new KnobWidget(KnobRadius, 0.1f, 2f, "DECAY", "x", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0.0",
+            DragSensitivity = 0.004f
+        };
+        PreDelayKnob = new KnobWidget(KnobRadius, 0f, 100f, "PRE-DLY", "ms", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0",
+            DragSensitivity = 0.004f
+        };
 
         _backgroundPaint = new SKPaint
         {
@@ -76,22 +94,8 @@ public sealed class ReverbRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _closeButtonPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 18f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _bypassPaint = new SKPaint
         {
@@ -107,22 +111,8 @@ public sealed class ReverbRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _sectionLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _statusPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _sectionLabelPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal);
+        _statusPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _presetPaint = new SKPaint
         {
@@ -199,14 +189,7 @@ public sealed class ReverbRenderer : IDisposable
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SKPaint
-        {
-            Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
 
         // Close button
@@ -231,14 +214,11 @@ public sealed class ReverbRenderer : IDisposable
             canvas.DrawRoundRect(presetRound, isSelected ? _presetSelectedPaint : _presetPaint);
             canvas.DrawRoundRect(presetRound, _borderPaint);
 
-            using var presetTextPaint = new SKPaint
-            {
-                Color = isSelected ? _theme.TextPrimary : _theme.TextSecondary,
-                IsAntialias = true,
-                TextSize = 9f,
-                TextAlign = SKTextAlign.Center,
-                Typeface = SKTypeface.FromFamilyName("Segoe UI", isSelected ? SKFontStyle.Bold : SKFontStyle.Normal)
-            };
+            using var presetTextPaint = new SkiaTextPaint(
+                isSelected ? _theme.TextPrimary : _theme.TextSecondary,
+                9f,
+                isSelected ? SKFontStyle.Bold : SKFontStyle.Normal,
+                SKTextAlign.Center);
             canvas.DrawText(PresetNames[i], _presetRects[i].MidX, _presetRects[i].MidY + 3, presetTextPaint);
         }
 
@@ -252,14 +232,7 @@ public sealed class ReverbRenderer : IDisposable
             canvas.DrawRoundRect(loadRound, _loadButtonPaint);
             canvas.DrawRoundRect(loadRound, _borderPaint);
 
-            using var loadTextPaint = new SKPaint
-            {
-                Color = _theme.TextPrimary,
-                IsAntialias = true,
-                TextSize = 10f,
-                TextAlign = SKTextAlign.Center,
-                Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-            };
+            using var loadTextPaint = new SkiaTextPaint(_theme.TextPrimary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
             canvas.DrawText("Load IR File...", _loadButtonRect.MidX, _loadButtonRect.MidY + 4, loadTextPaint);
 
             // Show loaded file name
@@ -267,13 +240,7 @@ public sealed class ReverbRenderer : IDisposable
             {
                 string fileName = Path.GetFileName(state.LoadedIrPath);
                 if (fileName.Length > 30) fileName = fileName[..27] + "...";
-                using var fileNamePaint = new SKPaint
-                {
-                    Color = _theme.TextSecondary,
-                    IsAntialias = true,
-                    TextSize = 9f,
-                    Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-                };
+                using var fileNamePaint = new SkiaTextPaint(_theme.TextSecondary, 9f, SKFontStyle.Normal);
                 canvas.DrawText(fileName, _loadButtonRect.Right + 10, _loadButtonRect.MidY + 3, fileNamePaint);
             }
             y += 36;
@@ -303,14 +270,7 @@ public sealed class ReverbRenderer : IDisposable
         else
         {
             // No IR loaded message
-            using var noIrPaint = new SKPaint
-            {
-                Color = _theme.TextMuted,
-                IsAntialias = true,
-                TextSize = 12f,
-                TextAlign = SKTextAlign.Center,
-                Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Italic)
-            };
+            using var noIrPaint = new SkiaTextPaint(_theme.TextMuted, 12f, SKFontStyle.Italic, SKTextAlign.Center);
             canvas.DrawText("No impulse response loaded", irDisplayRect.MidX, irDisplayRect.MidY + 4, noIrPaint);
         }
 
@@ -322,24 +282,19 @@ public sealed class ReverbRenderer : IDisposable
         float knobsStartX = Padding + (size.Width - Padding * 2 - knobsTotalWidth) / 2 + KnobSpacing / 2;
 
         // Dry/Wet knob
-        _knobCenters[0] = new SKPoint(knobsStartX, knobsY);
-        _knob.Render(canvas, _knobCenters[0], KnobRadius, state.DryWet,
-            "DRY/WET", $"{state.DryWet * 100:0}", "%", state.HoveredKnob == 0);
-        _knobRects[0] = _knob.GetHitRect(_knobCenters[0], KnobRadius);
+        DryWetKnob.Center = new SKPoint(knobsStartX, knobsY);
+        DryWetKnob.Value = state.DryWet * 100f; // Convert to percentage
+        DryWetKnob.Render(canvas);
 
         // Decay knob
-        _knobCenters[1] = new SKPoint(knobsStartX + KnobSpacing, knobsY);
-        float decayNorm = (state.Decay - 0.1f) / (2f - 0.1f);
-        _knob.Render(canvas, _knobCenters[1], KnobRadius, decayNorm,
-            "DECAY", $"{state.Decay:0.0}", "x", state.HoveredKnob == 1);
-        _knobRects[1] = _knob.GetHitRect(_knobCenters[1], KnobRadius);
+        DecayKnob.Center = new SKPoint(knobsStartX + KnobSpacing, knobsY);
+        DecayKnob.Value = state.Decay;
+        DecayKnob.Render(canvas);
 
         // Pre-delay knob
-        _knobCenters[2] = new SKPoint(knobsStartX + KnobSpacing * 2, knobsY);
-        float preDelayNorm = state.PreDelayMs / 100f;
-        _knob.Render(canvas, _knobCenters[2], KnobRadius, preDelayNorm,
-            "PRE-DLY", $"{state.PreDelayMs:0}", "ms", state.HoveredKnob == 2);
-        _knobRects[2] = _knob.GetHitRect(_knobCenters[2], KnobRadius);
+        PreDelayKnob.Center = new SKPoint(knobsStartX + KnobSpacing * 2, knobsY);
+        PreDelayKnob.Value = state.PreDelayMs;
+        PreDelayKnob.Render(canvas);
 
         // Dry/Wet meter bar at bottom
         float barHeight = 20f;
@@ -472,13 +427,7 @@ public sealed class ReverbRenderer : IDisposable
         }
 
         // Labels
-        using var labelPaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 9f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var labelPaint = new SkiaTextPaint(_theme.TextPrimary, 9f, SKFontStyle.Bold);
         canvas.DrawText("DRY", rect.Left + 8, rect.MidY + 3, labelPaint);
         labelPaint.TextAlign = SKTextAlign.Right;
         canvas.DrawText("WET", rect.Right - 8, rect.MidY + 3, labelPaint);
@@ -509,15 +458,12 @@ public sealed class ReverbRenderer : IDisposable
         if (!_loadButtonRect.IsEmpty && _loadButtonRect.Contains(x, y))
             return new ReverbHitTest(ReverbHitArea.LoadButton, -1);
 
-        for (int i = 0; i < KnobCount; i++)
-        {
-            float dx = x - _knobCenters[i].X;
-            float dy = y - _knobCenters[i].Y;
-            if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
-            {
-                return new ReverbHitTest(ReverbHitArea.Knob, i);
-            }
-        }
+        if (DryWetKnob.HitTest(x, y))
+            return new ReverbHitTest(ReverbHitArea.Knob, 0);
+        if (DecayKnob.HitTest(x, y))
+            return new ReverbHitTest(ReverbHitArea.Knob, 1);
+        if (PreDelayKnob.HitTest(x, y))
+            return new ReverbHitTest(ReverbHitArea.Knob, 2);
 
         for (int i = 0; i < PresetCount; i++)
         {
@@ -540,7 +486,9 @@ public sealed class ReverbRenderer : IDisposable
     public void Dispose()
     {
         _waveformDisplay.Dispose();
-        _knob.Dispose();
+        DryWetKnob.Dispose();
+        DecayKnob.Dispose();
+        PreDelayKnob.Dispose();
         _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
@@ -567,7 +515,6 @@ public record struct ReverbState(
     string StatusMessage,
     string? LoadedIrPath,
     bool IsBypassed,
-    int HoveredKnob = -1,
     string PresetName = "Custom");
 
 public enum ReverbHitArea

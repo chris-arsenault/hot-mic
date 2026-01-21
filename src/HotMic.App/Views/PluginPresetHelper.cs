@@ -3,6 +3,8 @@ using System.Windows.Controls;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Presets;
 using SkiaSharp;
+using ContextMenu = System.Windows.Controls.ContextMenu;
+using MenuItem = System.Windows.Controls.MenuItem;
 
 namespace HotMic.App.Views;
 
@@ -134,7 +136,7 @@ public sealed class PluginPresetHelper
 
     private void ShowSaveDialog(Window owner, string? suggestedName)
     {
-        var dialog = new InputDialog("Save Preset", "Enter preset name:", suggestedName ?? "My Preset")
+        var dialog = new SkiaInputDialog("Save Preset", "Enter preset name:", suggestedName ?? "My Preset")
         {
             Owner = owner
         };
@@ -147,11 +149,7 @@ public sealed class PluginPresetHelper
             var builtInPresets = _presetManager.GetPluginPresetNames(_pluginId, includeCustom: false);
             if (builtInPresets.Contains(presetName))
             {
-                System.Windows.MessageBox.Show(
-                    $"Cannot overwrite built-in preset \"{presetName}\".",
-                    "Save Preset",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
+                SkiaMessageDialog.ShowWarning(owner, $"Cannot overwrite built-in preset \"{presetName}\".", "Save Preset");
                 return;
             }
 

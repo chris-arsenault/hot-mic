@@ -1,30 +1,36 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using HotMic.App.Models;
+using HotMic.Core.Dsp;
 
 namespace HotMic.App.ViewModels;
 
 public partial class PluginViewModel : ObservableObject
 {
-    private readonly Action? _action;
-    private readonly Action? _remove;
+    private Action? _action;
+    private Action? _remove;
     private readonly Action<HotMic.Core.Engine.ParameterChange>? _parameterSink;
+    private readonly Action<int, int, int, float>? _pluginParameterSink;
     private readonly Action<int, bool>? _bypassConfigSink;
     private readonly int _channelId;
 
-    private PluginViewModel(int channelId, int slotIndex, Action? action, Action? remove, Action<HotMic.Core.Engine.ParameterChange>? parameterSink, Action<int, bool>? bypassConfigSink)
+    private PluginViewModel(int channelId, int slotIndex, int instanceId, Action? action, Action? remove, Action<HotMic.Core.Engine.ParameterChange>? parameterSink, Action<int, int, int, float>? pluginParameterSink, Action<int, bool>? bypassConfigSink)
     {
         _channelId = channelId;
         SlotIndex = slotIndex;
+        InstanceId = instanceId;
         _action = action;
         _remove = remove;
         _parameterSink = parameterSink;
+        _pluginParameterSink = pluginParameterSink;
         _bypassConfigSink = bypassConfigSink;
         ActionCommand = new RelayCommand(() => _action?.Invoke());
         RemoveCommand = new RelayCommand(() => _remove?.Invoke());
     }
 
-    public int SlotIndex { get; }
+    public int SlotIndex { get; private set; }
+
+    public int InstanceId { get; }
 
     public int ChannelId => _channelId;
 
@@ -49,6 +55,20 @@ public partial class PluginViewModel : ObservableObject
     [ObservableProperty]
     private float outputRmsLevel;
 
+    [ObservableProperty]
+    private bool isClipping;
+
+    [ObservableProperty]
+    private int copyTargetChannelId;
+
+    // Spectral delta data for the delta strip visualization (32 bands)
+    [ObservableProperty]
+    private float[]? spectralDelta;
+
+    // Display mode for the delta strip (Full Spectrum vs Vocal Range)
+    [ObservableProperty]
+    private DeltaDisplayMode deltaDisplayMode = DeltaDisplayMode.VocalRange;
+
     // Elevated parameter definitions (from ElevatedParameterDefinitions)
     public ElevatedParameterDefinitions.ParamDef[]? ElevatedParams { get; private set; }
 
@@ -65,9 +85,19 @@ public partial class PluginViewModel : ObservableObject
 
     public IRelayCommand RemoveCommand { get; }
 
-    public static PluginViewModel CreateEmpty(int channelId, int slotIndex, Action? action = null, Action? remove = null, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int, bool>? bypassConfigSink = null)
+    /// <summary>
+    /// Toggle between Full Spectrum and Vocal Range display modes for the delta strip.
+    /// </summary>
+    public void ToggleDeltaDisplayMode()
     {
-        var viewModel = new PluginViewModel(channelId, slotIndex, action, remove, parameterSink, bypassConfigSink)
+        DeltaDisplayMode = DeltaDisplayMode == DeltaDisplayMode.VocalRange
+            ? DeltaDisplayMode.FullSpectrum
+            : DeltaDisplayMode.VocalRange;
+    }
+
+    public static PluginViewModel CreateEmpty(int channelId, int slotIndex, int instanceId, Action? action = null, Action? remove = null, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int, int, int, float>? pluginParameterSink = null, Action<int, bool>? bypassConfigSink = null)
+    {
+        var viewModel = new PluginViewModel(channelId, slotIndex, instanceId, action, remove, parameterSink, pluginParameterSink, bypassConfigSink)
         {
             IsEmpty = true,
             DisplayName = $"Slot {slotIndex}",
@@ -77,9 +107,9 @@ public partial class PluginViewModel : ObservableObject
         return viewModel;
     }
 
-    public static PluginViewModel CreateFilled(int channelId, int slotIndex, string pluginId, string name, float latencyMs, float[] elevatedValues, Action? action = null, Action? remove = null, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int, bool>? bypassConfigSink = null)
+    public static PluginViewModel CreateFilled(int channelId, int slotIndex, int instanceId, string pluginId, string name, float latencyMs, float[] elevatedValues, Action? action = null, Action? remove = null, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int, int, int, float>? pluginParameterSink = null, Action<int, bool>? bypassConfigSink = null)
     {
-        var viewModel = new PluginViewModel(channelId, slotIndex, action, remove, parameterSink, bypassConfigSink)
+        var viewModel = new PluginViewModel(channelId, slotIndex, instanceId, action, remove, parameterSink, pluginParameterSink, bypassConfigSink)
         {
             IsEmpty = false,
             PluginId = pluginId,
@@ -106,6 +136,47 @@ public partial class PluginViewModel : ObservableObject
         return viewModel;
     }
 
+    /// <summary>
+    /// Updates the slot index used for interactions.
+    /// </summary>
+    public void UpdateSlotIndex(int slotIndex)
+    {
+        SlotIndex = slotIndex;
+    }
+
+    /// <summary>
+    /// Updates action delegates for the slot.
+    /// </summary>
+    public void UpdateActions(Action? action, Action? remove)
+    {
+        _action = action;
+        _remove = remove;
+    }
+
+    /// <summary>
+    /// Updates this view model with the latest slot info without triggering parameter changes.
+    /// </summary>
+    public void UpdateFromSlotInfo(PluginSlotInfo slotInfo)
+    {
+        PluginId = slotInfo.PluginId;
+        DisplayName = slotInfo.Name;
+        LatencyMs = slotInfo.LatencyMs;
+        IsEmpty = false;
+        SetBypassSilent(slotInfo.IsBypassed);
+        CopyTargetChannelId = slotInfo.CopyTargetChannelId;
+
+        ElevatedParams = ElevatedParameterDefinitions.GetElevations(slotInfo.PluginId);
+
+        if (slotInfo.ElevatedParamValues.Length > 0)
+        {
+            SetParamValueSilent(0, slotInfo.ElevatedParamValues[0]);
+        }
+        if (slotInfo.ElevatedParamValues.Length > 1)
+        {
+            SetParamValueSilent(1, slotInfo.ElevatedParamValues[1]);
+        }
+    }
+
     partial void OnIsEmptyChanged(bool value)
     {
         OnPropertyChanged(nameof(ActionLabel));
@@ -113,14 +184,19 @@ public partial class PluginViewModel : ObservableObject
 
     partial void OnIsBypassedChanged(bool value)
     {
+        if (InstanceId <= 0)
+        {
+            return;
+        }
+
         _parameterSink?.Invoke(new HotMic.Core.Engine.ParameterChange
         {
             ChannelId = _channelId,
             Type = HotMic.Core.Engine.ParameterType.PluginBypass,
-            PluginIndex = SlotIndex - 1,
+            PluginInstanceId = InstanceId,
             Value = value ? 1f : 0f
         });
-        _bypassConfigSink?.Invoke(SlotIndex - 1, value);
+        _bypassConfigSink?.Invoke(InstanceId, value);
     }
 
     partial void OnParam0ValueChanged(float value)
@@ -130,11 +206,22 @@ public partial class PluginViewModel : ObservableObject
             return;
         }
 
+        if (InstanceId <= 0)
+        {
+            return;
+        }
+
+        if (_pluginParameterSink is not null)
+        {
+            _pluginParameterSink(_channelId, InstanceId, ElevatedParams[0].Index, value);
+            return;
+        }
+
         _parameterSink?.Invoke(new HotMic.Core.Engine.ParameterChange
         {
             ChannelId = _channelId,
             Type = HotMic.Core.Engine.ParameterType.PluginParameter,
-            PluginIndex = SlotIndex - 1,
+            PluginInstanceId = InstanceId,
             ParameterIndex = ElevatedParams[0].Index,
             Value = value
         });
@@ -147,11 +234,22 @@ public partial class PluginViewModel : ObservableObject
             return;
         }
 
+        if (InstanceId <= 0)
+        {
+            return;
+        }
+
+        if (_pluginParameterSink is not null)
+        {
+            _pluginParameterSink(_channelId, InstanceId, ElevatedParams[1].Index, value);
+            return;
+        }
+
         _parameterSink?.Invoke(new HotMic.Core.Engine.ParameterChange
         {
             ChannelId = _channelId,
             Type = HotMic.Core.Engine.ParameterType.PluginParameter,
-            PluginIndex = SlotIndex - 1,
+            PluginInstanceId = InstanceId,
             ParameterIndex = ElevatedParams[1].Index,
             Value = value
         });
@@ -176,5 +274,20 @@ public partial class PluginViewModel : ObservableObject
             OnPropertyChanged(nameof(Param1Value));
         }
 #pragma warning restore MVVMTK0034
+    }
+
+    /// <summary>
+    /// Updates bypass state without firing parameter change events.
+    /// </summary>
+    public void SetBypassSilent(bool value)
+    {
+#pragma warning disable MVVMTK0034
+        if (isBypassed == value)
+        {
+            return;
+        }
+        isBypassed = value;
+#pragma warning restore MVVMTK0034
+        OnPropertyChanged(nameof(IsBypassed));
     }
 }

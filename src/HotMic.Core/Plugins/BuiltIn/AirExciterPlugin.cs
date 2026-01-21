@@ -1,0 +1,258 @@
+using System.Threading;
+
+namespace HotMic.Core.Plugins.BuiltIn;
+
+public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPluginStatusProvider
+{
+    public const int DriveIndex = 0;
+    public const int MixIndex = 1;
+    public const int CutoffIndex = 2;
+    public const int ScaleIndex = 3;
+
+    private float _drive = 0.6f;
+    private float _mix = 0.4f;
+    private float _cutoffHz = 4500f;
+    private int _amountScaleIndex;
+    private int _sampleRate;
+    private string _statusMessage = string.Empty;
+
+    private const string MissingSidechainMessage = "Missing analysis data.";
+    private const float LfoRateHz = 0.35f;
+    private const float LfoDepth = 0.08f;
+    private const float LfoSlewMs = 500f;
+
+    private readonly BiquadFilter _highPass = new();
+
+    // Metering - atomic fields for thread-safe UI access
+    private float _meterGateLevel;
+    private float _meterHfEnergy;
+    private float _meterSaturationAmount;
+
+    private uint _lfoSeed = 0x5A17C0DEu;
+    private float _lfoValue;
+    private float _lfoTarget;
+    private int _lfoCountdown;
+    private int _lfoPeriodSamples;
+    private float _lfoCoeff;
+
+    public AirExciterPlugin()
+    {
+        Parameters =
+        [
+            new PluginParameter { Index = DriveIndex, Name = "Drive", MinValue = 0f, MaxValue = 1f, DefaultValue = 0.6f, Unit = string.Empty },
+            new PluginParameter
+            {
+                Index = ScaleIndex,
+                Name = "Scale",
+                MinValue = 0f,
+                MaxValue = 3f,
+                DefaultValue = 0f,
+                Unit = string.Empty,
+                FormatValue = EnhanceAmountScale.FormatLabel
+            },
+            new PluginParameter { Index = MixIndex, Name = "Mix", MinValue = 0f, MaxValue = 1f, DefaultValue = 0.4f, Unit = string.Empty },
+            new PluginParameter { Index = CutoffIndex, Name = "Cutoff", MinValue = 3000f, MaxValue = 10000f, DefaultValue = 4500f, Unit = "Hz" }
+        ];
+    }
+
+    public string Id => "builtin:air-exciter";
+
+    public string Name => "Air Exciter";
+
+    public bool IsBypassed { get; set; }
+
+    public int LatencySamples => 0;
+
+    public IReadOnlyList<PluginParameter> Parameters { get; }
+
+    public AnalysisSignalMask RequiredSignals =>
+        AnalysisSignalMask.VoicingScore |
+        AnalysisSignalMask.SibilanceEnergy;
+
+    public string StatusMessage => Volatile.Read(ref _statusMessage);
+
+    public float Drive => _drive;
+    public float Mix => _mix;
+    public float CutoffHz => _cutoffHz;
+    public int AmountScaleIndex => _amountScaleIndex;
+    public int SampleRate => _sampleRate;
+
+    public void SetAnalysisSignalsAvailable(bool available)
+    {
+        Volatile.Write(ref _statusMessage, available ? string.Empty : MissingSidechainMessage);
+    }
+
+    public void Initialize(int sampleRate, int blockSize)
+    {
+        _sampleRate = sampleRate;
+        UpdateFilter();
+        UpdateLfo();
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        if (IsBypassed || buffer.IsEmpty)
+        {
+            return;
+        }
+
+        if (!context.TryGetAnalysisSignalSource(AnalysisSignalId.VoicingScore, out var voicedSource)
+            || !context.TryGetAnalysisSignalSource(AnalysisSignalId.SibilanceEnergy, out var sibilanceSource))
+        {
+            return;
+        }
+
+        long baseTime = context.SampleTime;
+
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            float input = buffer[i];
+            float high = _highPass.Process(input);
+            float lfo = UpdateLfoValue();
+
+            float voiced = voicedSource.ReadSample(baseTime + i);
+            float sib = sibilanceSource.ReadSample(baseTime + i);
+            float gate = Math.Clamp(voiced * (1f - sib), 0f, 1f);
+            float mod = lfo * LfoDepth * (1f - sib);
+            float scale = EnhanceAmountScale.FromIndex(_amountScaleIndex);
+            float drive = Math.Clamp(_drive * scale * (1f + mod), 0f, 10f);
+            float shaped = MathF.Tanh(high * (1.5f + drive * 4f));
+
+            buffer[i] = input + shaped * (_mix * gate);
+
+            // Update metering
+            _meterGateLevel = gate;
+            _meterHfEnergy = MathF.Abs(high);
+            _meterSaturationAmount = MathF.Abs(shaped);
+        }
+    }
+
+    /// <summary>Gets the current gate level (voiced without sibilance, 0-1).</summary>
+    public float GetGateLevel() => Volatile.Read(ref _meterGateLevel);
+
+    /// <summary>Gets the current high-frequency energy level.</summary>
+    public float GetHfEnergy() => Volatile.Read(ref _meterHfEnergy);
+
+    /// <summary>Gets the current saturation output level.</summary>
+    public float GetSaturationAmount() => Volatile.Read(ref _meterSaturationAmount);
+
+    public void Process(Span<float> buffer)
+    {
+        if (IsBypassed || buffer.IsEmpty)
+        {
+            return;
+        }
+
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            float input = buffer[i];
+            float high = _highPass.Process(input);
+            float lfo = UpdateLfoValue();
+            float mod = lfo * LfoDepth;
+            float scale = EnhanceAmountScale.FromIndex(_amountScaleIndex);
+            float drive = Math.Clamp(_drive * scale * (1f + mod), 0f, 10f);
+            float shaped = MathF.Tanh(high * (1.5f + drive * 4f));
+            buffer[i] = input + shaped * _mix;
+        }
+    }
+
+    public void SetParameter(int index, float value)
+    {
+        switch (index)
+        {
+            case DriveIndex:
+                _drive = Math.Clamp(value, 0f, 1f);
+                break;
+            case MixIndex:
+                _mix = Math.Clamp(value, 0f, 1f);
+                break;
+            case CutoffIndex:
+                _cutoffHz = Math.Clamp(value, 3000f, 10000f);
+                UpdateFilter();
+                break;
+            case ScaleIndex:
+                _amountScaleIndex = EnhanceAmountScale.ClampIndex(value);
+                break;
+        }
+    }
+
+    public byte[] GetState()
+    {
+        var bytes = new byte[sizeof(float) * 4];
+        Buffer.BlockCopy(BitConverter.GetBytes(_drive), 0, bytes, 0, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_mix), 0, bytes, 4, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes(_cutoffHz), 0, bytes, 8, 4);
+        Buffer.BlockCopy(BitConverter.GetBytes((float)_amountScaleIndex), 0, bytes, 12, 4);
+        return bytes;
+    }
+
+    public void SetState(byte[] state)
+    {
+        if (state.Length < sizeof(float) * 2)
+        {
+            return;
+        }
+
+        _drive = BitConverter.ToSingle(state, 0);
+        _mix = BitConverter.ToSingle(state, 4);
+        if (state.Length >= sizeof(float) * 3)
+        {
+            _cutoffHz = BitConverter.ToSingle(state, 8);
+        }
+        if (state.Length >= sizeof(float) * 4)
+        {
+            _amountScaleIndex = EnhanceAmountScale.ClampIndex(BitConverter.ToSingle(state, 12));
+        }
+
+        UpdateFilter();
+    }
+
+    public void Dispose()
+    {
+    }
+
+    private void UpdateFilter()
+    {
+        if (_sampleRate <= 0)
+        {
+            return;
+        }
+
+        _highPass.SetHighPass(_sampleRate, _cutoffHz, 0.707f);
+    }
+
+    private void UpdateLfo()
+    {
+        if (_sampleRate <= 0)
+        {
+            return;
+        }
+
+        _lfoPeriodSamples = Math.Max(1, (int)MathF.Round(_sampleRate / LfoRateHz));
+        _lfoCountdown = _lfoPeriodSamples;
+        _lfoCoeff = DspUtils.TimeToCoefficient(LfoSlewMs, _sampleRate);
+        _lfoTarget = NextLfoTarget();
+        _lfoValue = 0f;
+    }
+
+    private float UpdateLfoValue()
+    {
+        if (_lfoCountdown <= 0)
+        {
+            _lfoTarget = NextLfoTarget();
+            _lfoCountdown = _lfoPeriodSamples;
+        }
+
+        _lfoCountdown--;
+        _lfoValue += _lfoCoeff * (_lfoTarget - _lfoValue);
+        return _lfoValue;
+    }
+
+    private float NextLfoTarget()
+    {
+        _lfoSeed = _lfoSeed * 1664525u + 1013904223u;
+        uint bits = _lfoSeed >> 9;
+        return (bits / 8388608f) * 2f - 1f;
+    }
+
+}

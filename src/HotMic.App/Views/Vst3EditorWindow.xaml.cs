@@ -5,11 +5,12 @@ using HotMic.Vst3;
 
 namespace HotMic.App.Views;
 
-public partial class Vst3EditorWindow : Window
+public partial class Vst3EditorWindow : Window, IDisposable
 {
     private readonly Vst3PluginWrapper _plugin;
     private readonly DispatcherTimer _idleTimer;
     private readonly System.Windows.Forms.Panel _panel;
+    private bool _disposed;
 
     public Vst3EditorWindow(Vst3PluginWrapper plugin)
     {
@@ -35,7 +36,7 @@ public partial class Vst3EditorWindow : Window
 
         if (!_plugin.OpenEditor(_panel.Handle))
         {
-            System.Windows.MessageBox.Show(this, "Failed to open VST3 editor.", "HotMic", MessageBoxButton.OK, MessageBoxImage.Error);
+            SkiaMessageDialog.ShowError(this, "Failed to open VST3 editor.", "HotMic");
             Close();
             return;
         }
@@ -45,7 +46,20 @@ public partial class Vst3EditorWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        Dispose();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
         _idleTimer.Stop();
         _plugin.CloseEditor();
+        _panel.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

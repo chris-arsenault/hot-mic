@@ -24,9 +24,9 @@ public sealed class HarmonicAnalyzer : IDisposable
     private readonly SKPaint _evenBarPaint;
     private readonly SKPaint _oddBarPaint;
     private readonly SKPaint _fundamentalPaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _ratioLabelPaint;
-    private readonly SKPaint _ratioValuePaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _ratioLabelPaint;
+    private readonly SkiaTextPaint _ratioValuePaint;
     private readonly SKPaint _ratioGoodPaint;
     private readonly SKPaint _ratioBadPaint;
 
@@ -107,31 +107,9 @@ public sealed class HarmonicAnalyzer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 8f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _ratioLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 8f,
-            TextAlign = SKTextAlign.Left,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _ratioValuePaint = new SKPaint
-        {
-            IsAntialias = true,
-            TextSize = 12f,
-            TextAlign = SKTextAlign.Left,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 8f, SKFontStyle.Normal, SKTextAlign.Center);
+        _ratioLabelPaint = new SkiaTextPaint(_theme.TextMuted, 8f, SKFontStyle.Normal, SKTextAlign.Left);
+        _ratioValuePaint = new SkiaTextPaint(_theme.TextPrimary, 12f, SKFontStyle.Bold, SKTextAlign.Left);
 
         _ratioGoodPaint = new SKPaint
         {
@@ -339,14 +317,7 @@ public sealed class HarmonicAnalyzer : IDisposable
         // Low signal warning (delta signal below -30dB means harmonics may not be visible)
         if (_signalPeakDb < -30f)
         {
-            using var warnPaint = new SKPaint
-            {
-                Color = _theme.TextMuted.WithAlpha(180),
-                IsAntialias = true,
-                TextSize = 8f,
-                TextAlign = SKTextAlign.Right,
-                Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Italic)
-            };
+            using var warnPaint = new SkiaTextPaint(_theme.TextMuted.WithAlpha(180), 8f, SKFontStyle.Italic, SKTextAlign.Right);
             canvas.DrawText($"Δ:{_signalPeakDb:0}dB (low)", rect.Right - padding - 2, rect.Top + padding + 10, warnPaint);
         }
     }

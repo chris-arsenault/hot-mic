@@ -14,7 +14,7 @@ public sealed class AiProcessingIndicator : IDisposable
     private readonly SKPaint _activePaint;
     private readonly SKPaint _inactivePaint;
     private readonly SKPaint _pulsePaint;
-    private readonly SKPaint _labelPaint;
+    private readonly SkiaTextPaint _labelPaint;
 
     private float _pulsePhase;
     private const float PulseSpeed = 0.08f;
@@ -59,14 +59,7 @@ public sealed class AiProcessingIndicator : IDisposable
             StrokeWidth = 2f
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
     }
 
     /// <summary>

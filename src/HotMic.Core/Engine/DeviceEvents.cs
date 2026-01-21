@@ -15,17 +15,14 @@ public sealed class DeviceDisconnectedEventArgs : EventArgs
 
 public sealed class DeviceRecoveredEventArgs : EventArgs
 {
-    public DeviceRecoveredEventArgs(string inputDevice1Id, string inputDevice2Id, string outputDeviceId, string monitorDeviceId)
+    public DeviceRecoveredEventArgs(IReadOnlyList<string> inputDeviceIds, string outputDeviceId, string monitorDeviceId)
     {
-        InputDevice1Id = inputDevice1Id;
-        InputDevice2Id = inputDevice2Id;
+        InputDeviceIds = inputDeviceIds;
         OutputDeviceId = outputDeviceId;
         MonitorDeviceId = monitorDeviceId;
     }
 
-    public string InputDevice1Id { get; }
-
-    public string InputDevice2Id { get; }
+    public IReadOnlyList<string> InputDeviceIds { get; }
 
     public string OutputDeviceId { get; }
 

@@ -17,27 +17,35 @@ public sealed class CompressorRenderer : IDisposable
     private const float KnobSpacing = 64f;
     private const float CornerRadius = 10f;
     private const int KnobCount = 6;
+    private static readonly float[] ThresholdDash = [4f, 3f];
 
     private readonly PluginComponentTheme _theme;
-    private readonly RotaryKnob _knob;
     private readonly PluginPresetBar _presetBar;
+
+    // Knob widgets
+    public KnobWidget ThresholdKnob { get; }
+    public KnobWidget RatioKnob { get; }
+    public KnobWidget AttackKnob { get; }
+    public KnobWidget ReleaseKnob { get; }
+    public KnobWidget KneeKnob { get; }
+    public KnobWidget MakeupKnob { get; }
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _closeButtonPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
-    private readonly SKPaint _sectionLabelPaint;
+    private readonly SkiaTextPaint _sectionLabelPaint;
     private readonly SKPaint _gridPaint;
     private readonly SKPaint _curvePaint;
     private readonly SKPaint _thresholdPaint;
     private readonly SKPaint _inputMarkerPaint;
     private readonly SKPaint _grBarPaint;
     private readonly SKPaint _grBackgroundPaint;
-    private readonly SKPaint _grTextPaint;
-    private readonly SKPaint _latencyPaint;
+    private readonly SkiaTextPaint _grTextPaint;
+    private readonly SkiaTextPaint _latencyPaint;
     private readonly SKPaint _togglePaint;
     private readonly SKPaint _toggleActivePaint;
 
@@ -49,14 +57,43 @@ public sealed class CompressorRenderer : IDisposable
     private SKRect _titleBarRect;
     private SKRect _detectorToggleRect;
     private SKRect _sidechainToggleRect;
-    private readonly SKRect[] _knobRects = new SKRect[KnobCount];
-    private readonly SKPoint[] _knobCenters = new SKPoint[KnobCount];
 
     public CompressorRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
-        _knob = new RotaryKnob(_theme);
         _presetBar = new PluginPresetBar(_theme);
+
+        // Initialize knob widgets
+        ThresholdKnob = new KnobWidget(KnobRadius, -60f, 0f, "THRESH", "dB", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0.0",
+            DragSensitivity = 0.004f
+        };
+        RatioKnob = new KnobWidget(KnobRadius, 1f, 20f, "RATIO", ":1", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0.0",
+            DragSensitivity = 0.004f
+        };
+        AttackKnob = new KnobWidget(KnobRadius, 0.1f, 100f, "ATTACK", "ms", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0.0",
+            DragSensitivity = 0.004f
+        };
+        ReleaseKnob = new KnobWidget(KnobRadius, 10f, 1000f, "RELEASE", "ms", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0",
+            DragSensitivity = 0.004f
+        };
+        KneeKnob = new KnobWidget(KnobRadius, 0f, 12f, "KNEE", "dB", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0.0",
+            DragSensitivity = 0.004f
+        };
+        MakeupKnob = new KnobWidget(KnobRadius, 0f, 24f, "MAKEUP", "dB", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0.0",
+            DragSensitivity = 0.004f
+        };
 
         _backgroundPaint = new SKPaint
         {
@@ -80,22 +117,8 @@ public sealed class CompressorRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _closeButtonPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 18f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _bypassPaint = new SKPaint
         {
@@ -111,13 +134,7 @@ public sealed class CompressorRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _sectionLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _sectionLabelPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal);
 
         _gridPaint = new SKPaint
         {
@@ -142,7 +159,7 @@ public sealed class CompressorRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1.5f,
-            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 3f }, 0)
+            PathEffect = SKPathEffect.CreateDash(ThresholdDash, 0)
         };
 
         _inputMarkerPaint = new SKPaint
@@ -166,23 +183,9 @@ public sealed class CompressorRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _grTextPaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 20f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        _grTextPaint = new SkiaTextPaint(_theme.TextPrimary, 20f, SKFontStyle.Bold, SKTextAlign.Center);
 
-        _latencyPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
 
         _togglePaint = new SKPaint
         {
@@ -250,14 +253,7 @@ public sealed class CompressorRenderer : IDisposable
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SKPaint
-        {
-            Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
 
         if (state.LatencyMs >= 0f)
@@ -296,46 +292,34 @@ public sealed class CompressorRenderer : IDisposable
         float knobsStartX = (size.Width - knobsTotalWidth) / 2 + KnobSpacing / 2;
 
         // Threshold knob
-        _knobCenters[0] = new SKPoint(knobsStartX, knobsY);
-        float thresholdNorm = (state.ThresholdDb - (-60f)) / (0f - (-60f));
-        _knob.Render(canvas, _knobCenters[0], KnobRadius, thresholdNorm,
-            "THRESH", $"{state.ThresholdDb:0.0}", "dB", state.HoveredKnob == 0);
-        _knobRects[0] = _knob.GetHitRect(_knobCenters[0], KnobRadius);
+        ThresholdKnob.Center = new SKPoint(knobsStartX, knobsY);
+        ThresholdKnob.Value = state.ThresholdDb;
+        ThresholdKnob.Render(canvas);
 
         // Ratio knob
-        _knobCenters[1] = new SKPoint(knobsStartX + KnobSpacing, knobsY);
-        float ratioNorm = (state.Ratio - 1f) / (20f - 1f);
-        _knob.Render(canvas, _knobCenters[1], KnobRadius, ratioNorm,
-            "RATIO", $"{state.Ratio:0.0}", ":1", state.HoveredKnob == 1);
-        _knobRects[1] = _knob.GetHitRect(_knobCenters[1], KnobRadius);
+        RatioKnob.Center = new SKPoint(knobsStartX + KnobSpacing, knobsY);
+        RatioKnob.Value = state.Ratio;
+        RatioKnob.Render(canvas);
 
         // Attack knob
-        _knobCenters[2] = new SKPoint(knobsStartX + KnobSpacing * 2, knobsY);
-        float attackNorm = (state.AttackMs - 0.1f) / (100f - 0.1f);
-        _knob.Render(canvas, _knobCenters[2], KnobRadius, attackNorm,
-            "ATTACK", $"{state.AttackMs:0.0}", "ms", state.HoveredKnob == 2);
-        _knobRects[2] = _knob.GetHitRect(_knobCenters[2], KnobRadius);
+        AttackKnob.Center = new SKPoint(knobsStartX + KnobSpacing * 2, knobsY);
+        AttackKnob.Value = state.AttackMs;
+        AttackKnob.Render(canvas);
 
         // Release knob
-        _knobCenters[3] = new SKPoint(knobsStartX + KnobSpacing * 3, knobsY);
-        float releaseNorm = (state.ReleaseMs - 10f) / (1000f - 10f);
-        _knob.Render(canvas, _knobCenters[3], KnobRadius, releaseNorm,
-            "RELEASE", $"{state.ReleaseMs:0}", "ms", state.HoveredKnob == 3);
-        _knobRects[3] = _knob.GetHitRect(_knobCenters[3], KnobRadius);
+        ReleaseKnob.Center = new SKPoint(knobsStartX + KnobSpacing * 3, knobsY);
+        ReleaseKnob.Value = state.ReleaseMs;
+        ReleaseKnob.Render(canvas);
 
         // Knee knob
-        _knobCenters[4] = new SKPoint(knobsStartX + KnobSpacing * 4, knobsY);
-        float kneeNorm = state.KneeDb / 12f;
-        _knob.Render(canvas, _knobCenters[4], KnobRadius, kneeNorm,
-            "KNEE", $"{state.KneeDb:0.0}", "dB", state.HoveredKnob == 4);
-        _knobRects[4] = _knob.GetHitRect(_knobCenters[4], KnobRadius);
+        KneeKnob.Center = new SKPoint(knobsStartX + KnobSpacing * 4, knobsY);
+        KneeKnob.Value = state.KneeDb;
+        KneeKnob.Render(canvas);
 
         // Makeup knob
-        _knobCenters[5] = new SKPoint(knobsStartX + KnobSpacing * 5, knobsY);
-        float makeupNorm = state.MakeupDb / 24f;
-        _knob.Render(canvas, _knobCenters[5], KnobRadius, makeupNorm,
-            "MAKEUP", $"{state.MakeupDb:0.0}", "dB", state.HoveredKnob == 5);
-        _knobRects[5] = _knob.GetHitRect(_knobCenters[5], KnobRadius);
+        MakeupKnob.Center = new SKPoint(knobsStartX + KnobSpacing * 5, knobsY);
+        MakeupKnob.Value = state.MakeupDb;
+        MakeupKnob.Render(canvas);
 
         float toggleY = knobsY + KnobRadius + 34f;
         float toggleHeight = 22f;
@@ -448,13 +432,7 @@ public sealed class CompressorRenderer : IDisposable
         canvas.DrawRoundRect(roundRect, _borderPaint);
 
         // Labels
-        using var labelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 8f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        using var labelPaint = new SkiaTextPaint(_theme.TextMuted, 8f, SKFontStyle.Normal);
         labelPaint.TextAlign = SKTextAlign.Center;
         canvas.DrawText("IN", rect.MidX, rect.Bottom - 2, labelPaint);
         labelPaint.TextAlign = SKTextAlign.Left;
@@ -490,14 +468,7 @@ public sealed class CompressorRenderer : IDisposable
         canvas.DrawRoundRect(round, active ? _toggleActivePaint : _togglePaint);
         canvas.DrawRoundRect(round, _borderPaint);
 
-        using var textPaint = new SKPaint
-        {
-            Color = active ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var textPaint = new SkiaTextPaint(active ? _theme.TextPrimary : _theme.TextSecondary, 9f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText(label, rect.MidX, rect.MidY + 3f, textPaint);
     }
 
@@ -542,14 +513,7 @@ public sealed class CompressorRenderer : IDisposable
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f
         };
-        using var tickLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 7f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        using var tickLabelPaint = new SkiaTextPaint(_theme.TextMuted, 7f, SKFontStyle.Normal, SKTextAlign.Right);
 
         foreach (float db in new[] { 6f, 12f, 18f })
         {
@@ -564,14 +528,7 @@ public sealed class CompressorRenderer : IDisposable
         canvas.DrawText(grText, rect.MidX, rect.Top + 18, _grTextPaint);
 
         // dB label
-        using var dbLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 8f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        using var dbLabelPaint = new SkiaTextPaint(_theme.TextMuted, 8f, SKFontStyle.Normal, SKTextAlign.Center);
         canvas.DrawText("dB", rect.MidX, rect.Top + 28, dbLabelPaint);
 
         // Border
@@ -599,15 +556,18 @@ public sealed class CompressorRenderer : IDisposable
         if (_sidechainToggleRect.Contains(x, y))
             return new CompressorHitTest(CompressorHitArea.SidechainToggle, -1);
 
-        for (int i = 0; i < KnobCount; i++)
-        {
-            float dx = x - _knobCenters[i].X;
-            float dy = y - _knobCenters[i].Y;
-            if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
-            {
-                return new CompressorHitTest(CompressorHitArea.Knob, i);
-            }
-        }
+        if (ThresholdKnob.HitTest(x, y))
+            return new CompressorHitTest(CompressorHitArea.Knob, 0);
+        if (RatioKnob.HitTest(x, y))
+            return new CompressorHitTest(CompressorHitArea.Knob, 1);
+        if (AttackKnob.HitTest(x, y))
+            return new CompressorHitTest(CompressorHitArea.Knob, 2);
+        if (ReleaseKnob.HitTest(x, y))
+            return new CompressorHitTest(CompressorHitArea.Knob, 3);
+        if (KneeKnob.HitTest(x, y))
+            return new CompressorHitTest(CompressorHitArea.Knob, 4);
+        if (MakeupKnob.HitTest(x, y))
+            return new CompressorHitTest(CompressorHitArea.Knob, 5);
 
         if (_titleBarRect.Contains(x, y))
             return new CompressorHitTest(CompressorHitArea.TitleBar, -1);
@@ -622,7 +582,12 @@ public sealed class CompressorRenderer : IDisposable
     public void Dispose()
     {
         _grMeter.Dispose();
-        _knob.Dispose();
+        ThresholdKnob.Dispose();
+        RatioKnob.Dispose();
+        AttackKnob.Dispose();
+        ReleaseKnob.Dispose();
+        KneeKnob.Dispose();
+        MakeupKnob.Dispose();
         _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
@@ -661,8 +626,7 @@ public record struct CompressorState(
     bool SidechainHpfEnabled,
     float LatencyMs,
     bool IsBypassed,
-    string PresetName = "Custom",
-    int HoveredKnob = -1);
+    string PresetName = "Custom");
 
 public enum CompressorHitArea
 {

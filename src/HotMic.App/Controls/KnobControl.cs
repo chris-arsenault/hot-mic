@@ -4,7 +4,7 @@ using SkiaSharp;
 
 namespace HotMic.App.Controls;
 
-public class KnobControl : SkiaControl
+public class KnobControl : SkiaControl, IDisposable
 {
     public static readonly DependencyProperty ValueProperty =
         DependencyProperty.Register(nameof(Value), typeof(float), typeof(KnobControl),
@@ -49,11 +49,17 @@ public class KnobControl : SkiaControl
     private bool _isDragging;
     private float _startValue;
     private System.Windows.Point _startPoint;
+    private bool _disposed;
 
     private readonly SKPaint _basePaint = new() { Color = new SKColor(0x33, 0x33, 0x33), IsAntialias = true };
     private readonly SKPaint _ringPaint = new() { Color = new SKColor(0xFF, 0x6B, 0x00), StrokeWidth = 4f, IsAntialias = true, Style = SKPaintStyle.Stroke };
     private readonly SKPaint _tickPaint = new() { Color = SKColors.White, StrokeWidth = 2f, IsAntialias = true };
-    private readonly SKPaint _labelPaint = new() { Color = new SKColor(0xFF, 0xFF, 0xFF), TextAlign = SKTextAlign.Center, TextSize = 12f, IsAntialias = true };
+    private readonly SkiaTextPaint _labelPaint = new(new SKColor(0xFF, 0xFF, 0xFF), 12f, align: SKTextAlign.Center);
+
+    public KnobControl()
+    {
+        Unloaded += (_, _) => Dispose();
+    }
 
     protected override void Render(SKCanvas canvas, int width, int height)
     {
@@ -123,5 +129,20 @@ public class KnobControl : SkiaControl
 
         _isDragging = false;
         ReleaseMouseCapture();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _basePaint.Dispose();
+        _ringPaint.Dispose();
+        _tickPaint.Dispose();
+        _labelPaint.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

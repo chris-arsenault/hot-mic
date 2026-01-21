@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class NoiseGateWindow : Window
+public partial class NoiseGateWindow : Window, IDisposable
 {
     private readonly NoiseGateRenderer _renderer = new();
     private readonly NoiseGatePlugin _plugin;
@@ -20,11 +20,7 @@ public partial class NoiseGateWindow : Window
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
-
-    private int _activeKnob = -1;
-    private float _dragStartY;
-    private float _dragStartValue;
-    private int _hoveredKnob = -1;
+    private bool _disposed;
 
     public NoiseGateWindow(NoiseGatePlugin plugin, Action<int, float> parameterCallback, Action<bool> bypassCallback)
     {
@@ -39,6 +35,33 @@ public partial class NoiseGateWindow : Window
             ApplyPreset,
             GetCurrentParameters);
 
+        // Wire up knob value changes
+        _renderer.ThresholdKnob.ValueChanged += value =>
+        {
+            _parameterCallback(NoiseGatePlugin.ThresholdIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.HysteresisKnob.ValueChanged += value =>
+        {
+            _parameterCallback(NoiseGatePlugin.HysteresisIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.AttackKnob.ValueChanged += value =>
+        {
+            _parameterCallback(NoiseGatePlugin.AttackIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.HoldKnob.ValueChanged += value =>
+        {
+            _parameterCallback(NoiseGatePlugin.HoldIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+        _renderer.ReleaseKnob.ValueChanged += value =>
+        {
+            _parameterCallback(NoiseGatePlugin.ReleaseIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+
         var preferredSize = NoiseGateRenderer.GetPreferredSize();
         Width = preferredSize.Width;
         Height = preferredSize.Height;
@@ -46,11 +69,7 @@ public partial class NoiseGateWindow : Window
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += OnRenderTick;
         Loaded += (_, _) => _renderTimer.Start();
-        Closed += (_, _) =>
-        {
-            _renderTimer.Stop();
-            _renderer.Dispose();
-        };
+        Closed += (_, _) => Dispose();
     }
 
     private void OnRenderTick(object? sender, EventArgs e)
@@ -78,7 +97,6 @@ public partial class NoiseGateWindow : Window
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsGateOpen: _plugin.IsGateOpen(),
             IsBypassed: _plugin.IsBypassed,
-            HoveredKnob: _hoveredKnob,
             PresetName: _presetHelper.CurrentPresetName
         );
 
@@ -87,12 +105,25 @@ public partial class NoiseGateWindow : Window
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Let knobs handle their own input (drag, right-click edit)
+        foreach (var knob in new[] { _renderer.ThresholdKnob, _renderer.HysteresisKnob, _renderer.AttackKnob,
+                                      _renderer.HoldKnob, _renderer.ReleaseKnob })
+        {
+            if (knob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+            {
+                if (knob.IsDragging)
+                    SkiaCanvas.CaptureMouse();
+                e.Handled = true;
+                return;
+            }
+        }
+
+        if (e.ChangedButton != MouseButton.Left)
+            return;
 
         var hit = _renderer.HitTest(x, y);
 
@@ -110,14 +141,6 @@ public partial class NoiseGateWindow : Window
 
             case NoiseGateHitArea.BypassButton:
                 _bypassCallback(!_plugin.IsBypassed);
-                e.Handled = true;
-                break;
-
-            case NoiseGateHitArea.Knob:
-                _activeKnob = hit.KnobIndex;
-                _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue(hit.KnobIndex);
-                SkiaCanvas.CaptureMouse();
                 e.Handled = true;
                 break;
 
@@ -139,69 +162,25 @@ public partial class NoiseGateWindow : Window
         float x = (float)pos.X;
         float y = (float)pos.Y;
 
-        if (_activeKnob >= 0 && e.LeftButton == MouseButtonState.Pressed)
+        // Let knobs handle drag and hover
+        foreach (var knob in new[] { _renderer.ThresholdKnob, _renderer.HysteresisKnob, _renderer.AttackKnob,
+                                      _renderer.HoldKnob, _renderer.ReleaseKnob })
         {
-            float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.003f);
-            ApplyKnobValue(_activeKnob, newNormalized);
-            e.Handled = true;
-        }
-        else
-        {
-            var hit = _renderer.HitTest(x, y);
-            _hoveredKnob = hit.Area == NoiseGateHitArea.Knob ? hit.KnobIndex : -1;
+            knob.HandleMouseMove(x, y, e.LeftButton == MouseButtonState.Pressed);
         }
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
-        _activeKnob = -1;
-        SkiaCanvas.ReleaseMouseCapture();
-    }
-
-    private float GetKnobNormalizedValue(int knobIndex)
-    {
-        return knobIndex switch
+        // Let knobs handle mouse up
+        foreach (var knob in new[] { _renderer.ThresholdKnob, _renderer.HysteresisKnob, _renderer.AttackKnob,
+                                      _renderer.HoldKnob, _renderer.ReleaseKnob })
         {
-            0 => (_plugin.ThresholdDb - (-80f)) / (0f - (-80f)),
-            1 => _plugin.HysteresisDb / 12f,
-            2 => (_plugin.AttackMs - 0.1f) / (50f - 0.1f),
-            3 => _plugin.HoldMs / 500f,
-            4 => (_plugin.ReleaseMs - 10f) / (500f - 10f),
-            _ => 0f
-        };
-    }
-
-    private void ApplyKnobValue(int knobIndex, float normalizedValue)
-    {
-        float value = knobIndex switch
-        {
-            0 => -80f + normalizedValue * 80f,            // Threshold: -80 to 0 dB
-            1 => normalizedValue * 12f,                    // Hysteresis: 0 to 12 dB
-            2 => 0.1f + normalizedValue * 49.9f,          // Attack: 0.1 to 50 ms
-            3 => normalizedValue * 500f,                   // Hold: 0 to 500 ms
-            4 => 10f + normalizedValue * 490f,            // Release: 10 to 500 ms
-            _ => 0f
-        };
-
-        int paramIndex = knobIndex switch
-        {
-            0 => NoiseGatePlugin.ThresholdIndex,
-            1 => NoiseGatePlugin.HysteresisIndex,
-            2 => NoiseGatePlugin.AttackIndex,
-            3 => NoiseGatePlugin.HoldIndex,
-            4 => NoiseGatePlugin.ReleaseIndex,
-            _ => -1
-        };
-
-        if (paramIndex >= 0)
-        {
-            _parameterCallback(paramIndex, value);
-            _presetHelper.MarkAsCustom();
+            knob.HandleMouseUp(e.ChangedButton);
         }
+
+        if (e.ChangedButton == MouseButton.Left)
+            SkiaCanvas.ReleaseMouseCapture();
     }
 
     private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)
@@ -241,5 +220,18 @@ public partial class NoiseGateWindow : Window
     {
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _renderer.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

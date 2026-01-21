@@ -4,9 +4,12 @@ namespace HotMic.App.Models;
 
 public enum PluginCategory
 {
+    Utility,
+    Routing,
     Dynamics,
     Eq,
     NoiseReduction,
+    Analysis,
     AiMl,
     Effects,
     Vst

@@ -5,8 +5,9 @@ namespace HotMic.App.ViewModels;
 public partial class PluginParameterViewModel : ObservableObject
 {
     private readonly Action<float>? _onChange;
+    private readonly Func<float, string>? _formatValue;
 
-    public PluginParameterViewModel(int index, string name, float min, float max, float value, string unit, Action<float>? onChange)
+    public PluginParameterViewModel(int index, string name, float min, float max, float value, string unit, Action<float>? onChange, Func<float, string>? formatValue = null)
     {
         Index = index;
         Name = name;
@@ -14,6 +15,7 @@ public partial class PluginParameterViewModel : ObservableObject
         Max = max;
         Unit = unit;
         _onChange = onChange;
+        _formatValue = formatValue;
         Value = value;
     }
 
@@ -30,7 +32,9 @@ public partial class PluginParameterViewModel : ObservableObject
     [ObservableProperty]
     private float value;
 
-    public string DisplayValue => $"{Value:0.##} {Unit}".Trim();
+    public string DisplayValue => _formatValue is not null
+        ? _formatValue(Value)
+        : $"{Value:0.##} {Unit}".Trim();
 
     partial void OnValueChanged(float value)
     {

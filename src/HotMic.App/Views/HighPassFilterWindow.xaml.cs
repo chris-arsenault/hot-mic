@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class HighPassFilterWindow : Window
+public partial class HighPassFilterWindow : Window, IDisposable
 {
     private readonly HighPassFilterRenderer _renderer = new();
     private readonly HighPassFilterPlugin _plugin;
@@ -20,11 +20,8 @@ public partial class HighPassFilterWindow : Window
     private readonly Action<bool> _bypassCallback;
     private readonly DispatcherTimer _renderTimer;
     private readonly PluginPresetHelper _presetHelper;
+    private bool _disposed;
 
-    private bool _isKnobActive;
-    private float _dragStartY;
-    private float _dragStartValue;
-    private HpfElement _hoveredElement = HpfElement.None;
     private float _smoothedInputLevel;
     private float _smoothedOutputLevel;
     private readonly float[] _spectrum = new float[32];
@@ -42,6 +39,13 @@ public partial class HighPassFilterWindow : Window
             ApplyPreset,
             GetCurrentParameters);
 
+        // Wire up knob value changes
+        _renderer.CutoffKnob.ValueChanged += value =>
+        {
+            _parameterCallback(HighPassFilterPlugin.CutoffIndex, value);
+            _presetHelper.MarkAsCustom();
+        };
+
         var preferredSize = HighPassFilterRenderer.GetPreferredSize();
         Width = preferredSize.Width;
         Height = preferredSize.Height;
@@ -49,11 +53,7 @@ public partial class HighPassFilterWindow : Window
         _renderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _renderTimer.Tick += OnRenderTick;
         Loaded += (_, _) => _renderTimer.Start();
-        Closed += (_, _) =>
-        {
-            _renderTimer.Stop();
-            _renderer.Dispose();
-        };
+        Closed += (_, _) => Dispose();
     }
 
     private void OnRenderTick(object? sender, EventArgs e)
@@ -82,7 +82,6 @@ public partial class HighPassFilterWindow : Window
             OutputLevel: _smoothedOutputLevel,
             LatencyMs: _plugin.SampleRate > 0 ? _plugin.LatencySamples * 1000f / _plugin.SampleRate : 0f,
             IsBypassed: _plugin.IsBypassed,
-            HoveredElement: _hoveredElement,
             Spectrum: _spectrum,
             PresetName: _presetHelper.CurrentPresetName
         );
@@ -92,12 +91,21 @@ public partial class HighPassFilterWindow : Window
 
     private void SkiaCanvas_MouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
-
         var pos = e.GetPosition(SkiaCanvas);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Let the knob handle its own input (drag, right-click edit)
+        if (_renderer.CutoffKnob.HandleMouseDown(x, y, e.ChangedButton, SkiaCanvas))
+        {
+            if (_renderer.CutoffKnob.IsDragging)
+                SkiaCanvas.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.ChangedButton != MouseButton.Left)
+            return;
 
         var hit = _renderer.HitTest(x, y);
 
@@ -125,14 +133,6 @@ public partial class HighPassFilterWindow : Window
                 e.Handled = true;
                 break;
 
-            case HpfHitArea.Knob:
-                _isKnobActive = true;
-                _dragStartY = y;
-                _dragStartValue = GetKnobNormalizedValue();
-                SkiaCanvas.CaptureMouse();
-                e.Handled = true;
-                break;
-
             case HpfHitArea.PresetDropdown:
                 _presetHelper.ShowPresetMenu(SkiaCanvas, _renderer.GetPresetDropdownRect());
                 e.Handled = true;
@@ -151,43 +151,16 @@ public partial class HighPassFilterWindow : Window
         float x = (float)pos.X;
         float y = (float)pos.Y;
 
-        if (_isKnobActive && e.LeftButton == MouseButtonState.Pressed)
-        {
-            float deltaY = _dragStartY - y;
-            float newNormalized = RotaryKnob.CalculateValueFromDrag(_dragStartValue, -deltaY, 0.004f);
-            ApplyKnobValue(newNormalized);
-            e.Handled = true;
-        }
-        else
-        {
-            var hit = _renderer.HitTest(x, y);
-            _hoveredElement = hit.Area == HpfHitArea.Knob ? HpfElement.CutoffKnob : HpfElement.None;
-        }
+        // Let the knob handle drag and hover
+        _renderer.CutoffKnob.HandleMouseMove(x, y, e.LeftButton == MouseButtonState.Pressed);
     }
 
     private void SkiaCanvas_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left)
-            return;
+        _renderer.CutoffKnob.HandleMouseUp(e.ChangedButton);
 
-        _isKnobActive = false;
-        SkiaCanvas.ReleaseMouseCapture();
-    }
-
-    private float GetKnobNormalizedValue()
-    {
-        // Log scale: 40Hz to 200Hz
-        return (MathF.Log10(_plugin.CutoffHz) - MathF.Log10(40f)) / (MathF.Log10(200f) - MathF.Log10(40f));
-    }
-
-    private void ApplyKnobValue(float normalizedValue)
-    {
-        // Log scale: 40Hz to 200Hz
-        float logMin = MathF.Log10(40f);
-        float logMax = MathF.Log10(200f);
-        float cutoffHz = MathF.Pow(10, logMin + normalizedValue * (logMax - logMin));
-        _parameterCallback(HighPassFilterPlugin.CutoffIndex, cutoffHz);
-        _presetHelper.MarkAsCustom();
+        if (e.ChangedButton == MouseButton.Left)
+            SkiaCanvas.ReleaseMouseCapture();
     }
 
     private void ApplyPreset(string presetName, IReadOnlyDictionary<string, float> parameters)
@@ -221,5 +194,18 @@ public partial class HighPassFilterWindow : Window
     {
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _renderTimer.Stop();
+        _renderer.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

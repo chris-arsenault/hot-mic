@@ -1,0 +1,478 @@
+using SkiaSharp;
+
+namespace HotMic.App.UI.PluginComponents;
+
+/// <summary>
+/// Consonant Transient plugin UI with dual envelope display and transient detector visualization.
+/// </summary>
+public sealed class ConsonantTransientRenderer : IDisposable
+{
+    private const float TitleBarHeight = 40f;
+    private const float Padding = 12f;
+    private const float KnobRadius = 24f;
+    private const float KnobSpacing = 72f;
+    private const float CornerRadius = 10f;
+    private const float EnvelopeHeight = 80f;
+
+    private readonly PluginComponentTheme _theme;
+    private readonly PluginPresetBar _presetBar;
+
+    public KnobWidget AmountKnob { get; }
+    public KnobWidget ThresholdKnob { get; }
+    public KnobWidget HighCutKnob { get; }
+
+    private readonly SKPaint _backgroundPaint;
+    private readonly SKPaint _titleBarPaint;
+    private readonly SKPaint _borderPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
+    private readonly SKPaint _bypassPaint;
+    private readonly SKPaint _bypassActivePaint;
+    private readonly SKPaint _envelopeBackgroundPaint;
+    private readonly SKPaint _fluxPaint;
+    private readonly SKPaint _baselinePaint;
+    private readonly SKPaint _transientPaint;
+    private readonly SKPaint _gateLedOnPaint;
+    private readonly SKPaint _gateLedOffPaint;
+    private readonly SKPaint _gateLedGlowPaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _latencyPaint;
+    private readonly SkiaTextPaint _statusPaint;
+    private readonly ScaleToggleGroup _scaleToggle;
+
+    private SKRect _closeButtonRect;
+    private SKRect _bypassButtonRect;
+    private SKRect _titleBarRect;
+
+    // Flux history for visualization
+    private readonly float[] _onsetHistory = new float[64];
+    private readonly float[] _boostHistory = new float[64];
+    private int _historyIndex;
+
+    public ConsonantTransientRenderer(PluginComponentTheme? theme = null)
+    {
+        _theme = theme ?? PluginComponentTheme.Default;
+        _presetBar = new PluginPresetBar(_theme);
+
+        AmountKnob = new KnobWidget(KnobRadius, 0f, 1f, "AMOUNT", "", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0.00"
+        };
+        ThresholdKnob = new KnobWidget(KnobRadius, 0f, 6f, "THRESH", "dB", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0.0"
+        };
+        HighCutKnob = new KnobWidget(KnobRadius, 3000f, 9000f, "HIGH CUT", "Hz", KnobStyle.Standard, _theme)
+        {
+            ValueFormat = "0",
+            IsLogarithmic = true
+        };
+
+        _backgroundPaint = new SKPaint
+        {
+            Color = _theme.PanelBackground,
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _titleBarPaint = new SKPaint
+        {
+            Color = _theme.PanelBackgroundLight,
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _borderPaint = new SKPaint
+        {
+            Color = _theme.PanelBorder,
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 1f
+        };
+
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
+
+        _bypassPaint = new SKPaint
+        {
+            Color = _theme.PanelBackgroundLight,
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _bypassActivePaint = new SKPaint
+        {
+            Color = new SKColor(0xFF, 0x50, 0x50),
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _envelopeBackgroundPaint = new SKPaint
+        {
+            Color = _theme.WaveformBackground,
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _fluxPaint = new SKPaint
+        {
+            Color = new SKColor(0xFF, 0xA0, 0x40), // Bright orange for onset
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 2f
+        };
+
+        _baselinePaint = new SKPaint
+        {
+            Color = new SKColor(0x80, 0x60, 0x40), // Dim brown for boost
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 2f
+        };
+
+        _transientPaint = new SKPaint
+        {
+            Color = new SKColor(0xFF, 0xFF, 0x40), // Bright yellow for transient
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _gateLedOnPaint = new SKPaint
+        {
+            Color = new SKColor(0xFF, 0x80, 0x40), // Orange for onset gate
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _gateLedOffPaint = new SKPaint
+        {
+            Color = _theme.GateClosed,
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _gateLedGlowPaint = new SKPaint
+        {
+            Color = new SKColor(0xFF, 0x80, 0x40, 0x60),
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill,
+            MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 6f)
+        };
+
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
+        _statusPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _scaleToggle = new ScaleToggleGroup(_theme);
+    }
+
+    public void Render(SKCanvas canvas, SKSize size, float dpiScale, ConsonantTransientState state)
+    {
+        canvas.Clear(SKColors.Transparent);
+        canvas.Save();
+        canvas.Scale(dpiScale);
+        size = new SKSize(size.Width / dpiScale, size.Height / dpiScale);
+
+        // Update onset history
+        _onsetHistory[_historyIndex] = state.OnsetDb;
+        _boostHistory[_historyIndex] = state.BoostDb;
+        _historyIndex = (_historyIndex + 1) % _onsetHistory.Length;
+
+        var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
+        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        canvas.DrawRoundRect(roundRect, _backgroundPaint);
+
+        DrawTitleBar(canvas, size, state);
+
+        float y = TitleBarHeight + Padding;
+
+        // Status message if any
+        if (!string.IsNullOrEmpty(state.StatusMessage))
+        {
+            _statusPaint.Color = new SKColor(0xFF, 0xA0, 0x40);
+            canvas.DrawText(state.StatusMessage, size.Width / 2, y + 10, _statusPaint);
+            y += 24;
+        }
+
+        // Onset gate LED + transient indicator
+        float gateX = Padding + 20f;
+        float gateY = y + 20f;
+        float gate = Math.Clamp(state.OnsetGate, 0f, 1f);
+        bool gateOpen = gate > 0.05f;
+
+        if (gateOpen)
+        {
+            int alpha = (int)(80f + gate * 175f);
+            byte glowAlpha = (byte)Math.Clamp(alpha, 0, 120);
+            byte ledAlpha = (byte)Math.Clamp(alpha, 0, 255);
+            _gateLedGlowPaint.Color = new SKColor(0xFF, 0x80, 0x40, glowAlpha);
+            _gateLedOnPaint.Color = new SKColor(0xFF, 0x80, 0x40, ledAlpha);
+            canvas.DrawCircle(gateX, gateY, 10f, _gateLedGlowPaint);
+            canvas.DrawCircle(gateX, gateY, 6f, _gateLedOnPaint);
+        }
+        else
+        {
+            canvas.DrawCircle(gateX, gateY, 6f, _gateLedOffPaint);
+        }
+        canvas.DrawText("ONSET", gateX, gateY + 18f, _labelPaint);
+
+        // Transient indicator
+        float transX = gateX + 60f;
+        if (state.TransientDetected > 0.5f)
+        {
+            canvas.DrawCircle(transX, gateY, 10f, _transientPaint);
+        }
+        else
+        {
+            using var dimPaint = new SKPaint
+            {
+                Color = new SKColor(0x40, 0x40, 0x20),
+                IsAntialias = true,
+                Style = SKPaintStyle.Fill
+            };
+            canvas.DrawCircle(transX, gateY, 6f, dimPaint);
+        }
+        canvas.DrawText("TRANS", transX, gateY + 18f, _labelPaint);
+
+        // Onset/boost display
+        float envX = transX + 50f;
+        float envWidth = size.Width - envX - Padding;
+        var envRect = new SKRect(envX, y, envX + envWidth, y + EnvelopeHeight);
+        DrawOnsetDisplay(canvas, envRect, state.Threshold);
+
+        y += EnvelopeHeight + Padding;
+
+        // Scale toggle row
+        float scaleRowY = y;
+        const string scaleLabel = "SCALE";
+        float scaleLabelWidth = _labelPaint.MeasureText(scaleLabel);
+        float scaleRowWidth = scaleLabelWidth + 6f + _scaleToggle.Width;
+        float scaleRowX = (size.Width - scaleRowWidth) / 2f;
+        float scaleLabelY = scaleRowY + _scaleToggle.Height / 2f + 3f;
+        _labelPaint.DrawText(canvas, scaleLabel, scaleRowX, scaleLabelY, SKTextAlign.Left);
+        _scaleToggle.Render(canvas, scaleRowX + scaleLabelWidth + 6f, scaleRowY, state.ScaleIndex);
+
+        y += _scaleToggle.Height + 10f;
+
+        // Knobs
+        float knobsY = y + KnobRadius + 10;
+        float knobsTotalWidth = 3 * KnobSpacing;
+        float knobsStartX = (size.Width - knobsTotalWidth) / 2 + KnobSpacing / 2;
+
+        AmountKnob.Center = new SKPoint(knobsStartX, knobsY);
+        AmountKnob.Value = state.Amount;
+        AmountKnob.Render(canvas);
+
+        ThresholdKnob.Center = new SKPoint(knobsStartX + KnobSpacing, knobsY);
+        ThresholdKnob.Value = state.Threshold;
+        ThresholdKnob.Render(canvas);
+
+        HighCutKnob.Center = new SKPoint(knobsStartX + KnobSpacing * 2, knobsY);
+        HighCutKnob.Value = state.HighCutHz;
+        HighCutKnob.Render(canvas);
+
+        canvas.DrawRoundRect(roundRect, _borderPaint);
+        canvas.Restore();
+    }
+
+    private void DrawTitleBar(SKCanvas canvas, SKSize size, ConsonantTransientState state)
+    {
+        _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
+        using (var titleClip = new SKPath())
+        {
+            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
+            canvas.Save();
+            canvas.ClipPath(titleClip);
+            canvas.DrawRect(_titleBarRect, _titleBarPaint);
+            canvas.Restore();
+        }
+        canvas.DrawLine(0, TitleBarHeight, size.Width, TitleBarHeight, _borderPaint);
+
+        canvas.DrawText("Consonant Transient", Padding, TitleBarHeight / 2f + 5, _titlePaint);
+
+        float presetBarX = 140f;
+        float presetBarY = (TitleBarHeight - PluginPresetBar.TotalHeight) / 2f;
+        _presetBar.Render(canvas, presetBarX, presetBarY, state.PresetName);
+
+        float bypassWidth = 60f;
+        _bypassButtonRect = new SKRect(
+            size.Width - Padding - 30 - bypassWidth - 8,
+            (TitleBarHeight - 24) / 2,
+            size.Width - Padding - 30 - 8,
+            (TitleBarHeight + 24) / 2);
+        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
+        canvas.DrawRoundRect(bypassRound, _borderPaint);
+
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
+        canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
+
+        if (state.LatencyMs >= 0f)
+        {
+            string latencyLabel = $"LAT {state.LatencyMs:0.0}ms";
+            canvas.DrawText(latencyLabel, _bypassButtonRect.Left - 6f, TitleBarHeight / 2f + 4, _latencyPaint);
+        }
+
+        _closeButtonRect = new SKRect(size.Width - Padding - 24, (TitleBarHeight - 24) / 2,
+            size.Width - Padding, (TitleBarHeight + 24) / 2);
+        canvas.DrawText("\u00D7", _closeButtonRect.MidX, _closeButtonRect.MidY + 6, _closeButtonPaint);
+    }
+
+    private void DrawOnsetDisplay(SKCanvas canvas, SKRect rect, float thresholdDb)
+    {
+        var roundRect = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(roundRect, _envelopeBackgroundPaint);
+
+        float padding = 4f;
+        float plotWidth = rect.Width - padding * 2;
+        float plotHeight = rect.Height - padding * 2;
+        int count = _onsetHistory.Length;
+        const float maxDb = 6f;
+
+        // Draw onset (foreground)
+        using var onsetPath = new SKPath();
+        for (int i = 0; i < count; i++)
+        {
+            int idx = (_historyIndex + i) % count;
+            float x = rect.Left + padding + (i / (float)(count - 1)) * plotWidth;
+            float level = Math.Clamp(_onsetHistory[idx] / maxDb, 0f, 1f);
+            float y = rect.Bottom - padding - level * plotHeight;
+
+            if (i == 0)
+                onsetPath.MoveTo(x, y);
+            else
+                onsetPath.LineTo(x, y);
+        }
+        canvas.DrawPath(onsetPath, _fluxPaint);
+
+        // Draw boost (overlay)
+        using var boostPath = new SKPath();
+        for (int i = 0; i < count; i++)
+        {
+            int idx = (_historyIndex + i) % count;
+            float x = rect.Left + padding + (i / (float)(count - 1)) * plotWidth;
+            float level = Math.Clamp(_boostHistory[idx] / maxDb, 0f, 1f);
+            float y = rect.Bottom - padding - level * plotHeight;
+
+            if (i == 0)
+                boostPath.MoveTo(x, y);
+            else
+                boostPath.LineTo(x, y);
+        }
+        canvas.DrawPath(boostPath, _baselinePaint);
+
+        // Threshold line (fixed scale)
+        float thresholdLevel = Math.Clamp(thresholdDb / maxDb, 0f, 1f);
+        float threshY = rect.Bottom - padding - thresholdLevel * plotHeight;
+        using var threshPaint = new SKPaint
+        {
+            Color = _theme.ThresholdLine,
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 1f,
+            PathEffect = SKPathEffect.CreateDash([4f, 3f], 0)
+        };
+        canvas.DrawLine(rect.Left + padding, threshY, rect.Right - padding, threshY, threshPaint);
+
+        var scaleLabel = "0-6 dB";
+        _labelPaint.DrawText(canvas, scaleLabel, rect.Left + padding + 2f, rect.Top + padding + 10f);
+        _labelPaint.DrawText(canvas, "ONSET", rect.Right - padding - 6f, rect.Top + padding + 10f, SKTextAlign.Right);
+        _labelPaint.DrawText(canvas, "BOOST", rect.Right - padding - 6f, rect.Top + padding + 22f, SKTextAlign.Right);
+
+        float lastOnset = _onsetHistory[(_historyIndex - 1 + count) % count];
+        float lastBoost = _boostHistory[(_historyIndex - 1 + count) % count];
+        _labelPaint.DrawText(canvas, $"{lastOnset:0.0} dB", rect.Left + padding + 2f, rect.Bottom - padding - 6f);
+        _labelPaint.DrawText(canvas, $"+{lastBoost:0.0} dB", rect.Right - padding - 2f, rect.Bottom - padding - 6f, SKTextAlign.Right);
+
+        canvas.DrawRoundRect(roundRect, _borderPaint);
+    }
+
+    public ConsonantTransientHitTest HitTest(float x, float y)
+    {
+        if (_closeButtonRect.Contains(x, y))
+            return new ConsonantTransientHitTest(ConsonantTransientHitArea.CloseButton, -1);
+
+        if (_bypassButtonRect.Contains(x, y))
+            return new ConsonantTransientHitTest(ConsonantTransientHitArea.BypassButton, -1);
+
+        var presetHit = _presetBar.HitTest(x, y);
+        if (presetHit == PresetBarHitArea.Dropdown)
+            return new ConsonantTransientHitTest(ConsonantTransientHitArea.PresetDropdown, -1);
+        if (presetHit == PresetBarHitArea.SaveButton)
+            return new ConsonantTransientHitTest(ConsonantTransientHitArea.PresetSave, -1);
+
+        int scaleIndex = _scaleToggle.HitTest(x, y);
+        if (scaleIndex >= 0)
+            return new ConsonantTransientHitTest(ConsonantTransientHitArea.ScaleToggle, scaleIndex);
+
+        if (AmountKnob.HitTest(x, y))
+            return new ConsonantTransientHitTest(ConsonantTransientHitArea.Knob, 0);
+        if (ThresholdKnob.HitTest(x, y))
+            return new ConsonantTransientHitTest(ConsonantTransientHitArea.Knob, 1);
+        if (HighCutKnob.HitTest(x, y))
+            return new ConsonantTransientHitTest(ConsonantTransientHitArea.Knob, 2);
+
+        if (_titleBarRect.Contains(x, y))
+            return new ConsonantTransientHitTest(ConsonantTransientHitArea.TitleBar, -1);
+
+        return new ConsonantTransientHitTest(ConsonantTransientHitArea.None, -1);
+    }
+
+    public SKRect GetPresetDropdownRect() => _presetBar.GetDropdownRect();
+
+    public static SKSize GetPreferredSize() => new(360, 300);
+
+    public void Dispose()
+    {
+        AmountKnob.Dispose();
+        ThresholdKnob.Dispose();
+        HighCutKnob.Dispose();
+        _presetBar.Dispose();
+        _backgroundPaint.Dispose();
+        _titleBarPaint.Dispose();
+        _borderPaint.Dispose();
+        _titlePaint.Dispose();
+        _closeButtonPaint.Dispose();
+        _bypassPaint.Dispose();
+        _bypassActivePaint.Dispose();
+        _envelopeBackgroundPaint.Dispose();
+        _fluxPaint.Dispose();
+        _baselinePaint.Dispose();
+        _transientPaint.Dispose();
+        _gateLedOnPaint.Dispose();
+        _gateLedOffPaint.Dispose();
+        _gateLedGlowPaint.Dispose();
+        _labelPaint.Dispose();
+        _latencyPaint.Dispose();
+        _statusPaint.Dispose();
+        _scaleToggle.Dispose();
+    }
+}
+
+public record struct ConsonantTransientState(
+    float Amount,
+    float Threshold,
+    float HighCutHz,
+    float OnsetGate,
+    float OnsetDb,
+    float BoostDb,
+    float TransientDetected,
+    int ScaleIndex,
+    float LatencyMs,
+    bool IsBypassed,
+    string StatusMessage = "",
+    string PresetName = "Custom");
+
+public enum ConsonantTransientHitArea
+{
+    None,
+    TitleBar,
+    CloseButton,
+    BypassButton,
+    ScaleToggle,
+    Knob,
+    PresetDropdown,
+    PresetSave
+}
+
+public record struct ConsonantTransientHitTest(ConsonantTransientHitArea Area, int KnobIndex);

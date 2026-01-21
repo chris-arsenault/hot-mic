@@ -16,7 +16,7 @@ public sealed class GainPlugin : IPlugin, IQualityConfigurablePlugin
     private float _phaseMultiplier = 1f;
     private float _smoothingMs = 5f;
     private int _sampleRate;
-    private LinearSmoother _gainSmoother = new();
+    private LinearSmoother _gainSmoother;
 
     private int _inputLevelBits;
     private int _outputLevelBits;
@@ -47,6 +47,11 @@ public sealed class GainPlugin : IPlugin, IQualityConfigurablePlugin
         _sampleRate = sampleRate;
         _gainSmoother.Configure(sampleRate, _smoothingMs, _gainLinear * _phaseMultiplier);
         UpdateCoefficients();
+    }
+
+    public void Process(Span<float> buffer, in PluginProcessContext context)
+    {
+        Process(buffer);
     }
 
     public void Process(Span<float> buffer)

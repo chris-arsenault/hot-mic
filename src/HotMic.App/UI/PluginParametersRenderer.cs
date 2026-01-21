@@ -19,15 +19,15 @@ public sealed class PluginParametersRenderer
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _panelPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _textPaint;
-    private readonly SKPaint _titlePaint;
+    private readonly SkiaTextPaint _textPaint;
+    private readonly SkiaTextPaint _titlePaint;
     private readonly SKPaint _buttonPaint;
     private readonly SKPaint _buttonActivePaint;
-    private readonly SKPaint _buttonTextPaint;
+    private readonly SkiaTextPaint _buttonTextPaint;
     private readonly SKPaint _sliderTrackPaint;
     private readonly SKPaint _sliderFillPaint;
-    private readonly SKPaint _latencyPaint;
-    private readonly SKPaint _statusPaint;
+    private readonly SkiaTextPaint _latencyPaint;
+    private readonly SkiaTextPaint _statusPaint;
 
     private readonly List<ParameterRect> _parameterRects = new();
     private SKRect _closeButtonRect;
@@ -73,12 +73,12 @@ public sealed class PluginParametersRenderer
         canvas.DrawLine(0, TitleBarHeight, size.Width, TitleBarHeight, _borderPaint);
 
         string title = string.IsNullOrWhiteSpace(viewModel.PluginName) ? "Parameters" : viewModel.PluginName;
-        canvas.DrawText(title, Padding, TitleBarHeight / 2f + _titlePaint.TextSize / 2.5f, _titlePaint);
+        canvas.DrawText(title, Padding, TitleBarHeight / 2f + _titlePaint.Size / 2.5f, _titlePaint);
 
         if (viewModel.LatencyMs >= 0f)
         {
             string latencyLabel = $"LAT {viewModel.LatencyMs:0.0}ms";
-            canvas.DrawText(latencyLabel, size.Width - Padding, TitleBarHeight / 2f + _latencyPaint.TextSize / 2.5f, _latencyPaint);
+            canvas.DrawText(latencyLabel, size.Width - Padding, TitleBarHeight / 2f + _latencyPaint.Size / 2.5f, _latencyPaint);
         }
 
         bool showGain = viewModel.GainReductionProvider is not null;
@@ -275,16 +275,10 @@ public sealed class PluginParametersRenderer
         StrokeWidth = strokeWidth
     };
 
-    private static SKPaint CreateTextPaint(SKColor color, float size, SKFontStyle? style = null, SKTextAlign align = SKTextAlign.Left) => new()
-    {
-        Color = color,
-        IsAntialias = true,
-        TextSize = size,
-        TextAlign = align,
-        Typeface = SKTypeface.FromFamilyName("Segoe UI", style ?? SKFontStyle.Normal)
-    };
+    private static SkiaTextPaint CreateTextPaint(SKColor color, float size, SKFontStyle? style = null, SKTextAlign align = SKTextAlign.Left) =>
+        new(color, size, style, align);
 
-    private static string TrimTextToWidth(string text, SKPaint paint, float maxWidth)
+    private static string TrimTextToWidth(string text, SkiaTextPaint paint, float maxWidth)
     {
         if (string.IsNullOrEmpty(text) || paint.MeasureText(text) <= maxWidth)
         {

@@ -14,18 +14,20 @@ public sealed class HighPassFilterRenderer : IDisposable
     private const float MeterHeight = 100f;
     private const float CurveHeight = 80f;
     private const float CornerRadius = 10f;
+    private static readonly float[] CutoffDash = [4f, 4f];
 
     private readonly PluginComponentTheme _theme;
-    private readonly RotaryKnob _knob;
     private readonly PluginPresetBar _presetBar;
     private readonly LevelMeter _inputMeter;
     private readonly LevelMeter _outputMeter;
 
+    public KnobWidget CutoffKnob { get; }
+
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _closeButtonPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
     private readonly SKPaint _meterBackgroundPaint;
@@ -35,27 +37,28 @@ public sealed class HighPassFilterRenderer : IDisposable
     private readonly SKPaint _curveAreaPaint;
     private readonly SKPaint _cutoffLinePaint;
     private readonly SKPaint _gridPaint;
-    private readonly SKPaint _labelPaint;
-    private readonly SKPaint _freqLabelPaint;
+    private readonly SkiaTextPaint _labelPaint;
+    private readonly SkiaTextPaint _freqLabelPaint;
     private readonly SKPaint _slopeButtonPaint;
     private readonly SKPaint _slopeButtonActivePaint;
-    private readonly SKPaint _latencyPaint;
+    private readonly SkiaTextPaint _latencyPaint;
     private readonly SKPaint _spectrumPaint;
 
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
-    private SKPoint _cutoffKnobCenter;
     private SKRect _slope12ButtonRect;
     private SKRect _slope18ButtonRect;
 
     public HighPassFilterRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
-        _knob = new RotaryKnob(_theme);
         _presetBar = new PluginPresetBar(_theme);
         _inputMeter = new LevelMeter();
         _outputMeter = new LevelMeter();
+
+        var knobStyle = KnobStyle.Standard;
+        CutoffKnob = new KnobWidget(KnobRadius, 40f, 200f, "CUTOFF", "Hz", knobStyle, _theme) { IsLogarithmic = true, ValueFormat = "0" };
 
         _backgroundPaint = new SKPaint
         {
@@ -79,22 +82,8 @@ public sealed class HighPassFilterRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _closeButtonPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 18f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _bypassPaint = new SKPaint
         {
@@ -152,7 +141,7 @@ public sealed class HighPassFilterRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1.5f,
-            PathEffect = SKPathEffect.CreateDash(new[] { 4f, 4f }, 0)
+            PathEffect = SKPathEffect.CreateDash(CutoffDash, 0)
         };
 
         _gridPaint = new SKPaint
@@ -163,23 +152,8 @@ public sealed class HighPassFilterRenderer : IDisposable
             StrokeWidth = 0.5f
         };
 
-        _labelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _freqLabelPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _labelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _freqLabelPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _slopeButtonPaint = new SKPaint
         {
@@ -195,14 +169,7 @@ public sealed class HighPassFilterRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _latencyPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Right,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
 
         _spectrumPaint = new SKPaint
         {
@@ -256,14 +223,7 @@ public sealed class HighPassFilterRenderer : IDisposable
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SKPaint
-        {
-            Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
 
         if (state.LatencyMs >= 0f)
@@ -297,15 +257,15 @@ public sealed class HighPassFilterRenderer : IDisposable
 
         // Cutoff knob
         float knobAreaX = outputMeterRect.Right + 30;
-        _cutoffKnobCenter = new SKPoint(knobAreaX + KnobRadius, meterY + 50);
-        float cutoffNorm = (MathF.Log10(state.CutoffHz) - MathF.Log10(40f)) / (MathF.Log10(200f) - MathF.Log10(40f));
-        _knob.Render(canvas, _cutoffKnobCenter, KnobRadius, cutoffNorm, "CUTOFF", $"{state.CutoffHz:0}", "Hz", state.HoveredElement == HpfElement.CutoffKnob);
+        CutoffKnob.Center = new SKPoint(knobAreaX + KnobRadius, meterY + 50);
+        CutoffKnob.Value = state.CutoffHz;
+        CutoffKnob.Render(canvas);
 
         // Slope selector buttons
         float slopeButtonY = meterY + MeterHeight - 34;
         float slopeButtonWidth = 50f;
         float slopeButtonHeight = 28f;
-        float slopeButtonX = _cutoffKnobCenter.X + KnobRadius + 20;
+        float slopeButtonX = CutoffKnob.Center.X + KnobRadius + 20;
 
         _slope12ButtonRect = new SKRect(slopeButtonX, slopeButtonY, slopeButtonX + slopeButtonWidth, slopeButtonY + slopeButtonHeight);
         _slope18ButtonRect = new SKRect(slopeButtonX, slopeButtonY - 36, slopeButtonX + slopeButtonWidth, slopeButtonY - 36 + slopeButtonHeight);
@@ -316,28 +276,14 @@ public sealed class HighPassFilterRenderer : IDisposable
         var slope18Round = new SKRoundRect(_slope18ButtonRect, 4f);
         canvas.DrawRoundRect(slope18Round, is18dB ? _slopeButtonActivePaint : _slopeButtonPaint);
         canvas.DrawRoundRect(slope18Round, _borderPaint);
-        using var slope18TextPaint = new SKPaint
-        {
-            Color = is18dB ? _theme.PanelBackground : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 11f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var slope18TextPaint = new SkiaTextPaint(is18dB ? _theme.PanelBackground : _theme.TextSecondary, 11f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("18dB", _slope18ButtonRect.MidX, _slope18ButtonRect.MidY + 4, slope18TextPaint);
 
         // 12 dB button
         var slope12Round = new SKRoundRect(_slope12ButtonRect, 4f);
         canvas.DrawRoundRect(slope12Round, !is18dB ? _slopeButtonActivePaint : _slopeButtonPaint);
         canvas.DrawRoundRect(slope12Round, _borderPaint);
-        using var slope12TextPaint = new SKPaint
-        {
-            Color = !is18dB ? _theme.PanelBackground : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 11f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var slope12TextPaint = new SkiaTextPaint(!is18dB ? _theme.PanelBackground : _theme.TextSecondary, 11f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("12dB", _slope12ButtonRect.MidX, _slope12ButtonRect.MidY + 4, slope12TextPaint);
 
         // Slope label
@@ -486,9 +432,7 @@ public sealed class HighPassFilterRenderer : IDisposable
         if (_slope18ButtonRect.Contains(x, y))
             return new HpfHitTest(HpfHitArea.SlopeButton, HpfElement.Slope18);
 
-        float dx = x - _cutoffKnobCenter.X;
-        float dy = y - _cutoffKnobCenter.Y;
-        if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
+        if (CutoffKnob.HitTest(x, y))
             return new HpfHitTest(HpfHitArea.Knob, HpfElement.CutoffKnob);
 
         if (_titleBarRect.Contains(x, y))
@@ -505,8 +449,8 @@ public sealed class HighPassFilterRenderer : IDisposable
     {
         _inputMeter.Dispose();
         _outputMeter.Dispose();
-        _knob.Dispose();
         _presetBar.Dispose();
+        CutoffKnob.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
         _borderPaint.Dispose();
@@ -537,7 +481,6 @@ public record struct HighPassFilterState(
     float OutputLevel,
     float LatencyMs,
     bool IsBypassed,
-    HpfElement HoveredElement = HpfElement.None,
     float[]? Spectrum = null,
     string PresetName = "Custom");
 

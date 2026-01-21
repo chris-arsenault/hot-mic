@@ -8,13 +8,8 @@ namespace HotMic.App.Controls;
 /// Shows RMS level as filled bar and peak level as line marker.
 /// Ballistics (peak hold, RMS smoothing) are handled by MeterProcessor.
 /// </summary>
-public class MeterControl : SkiaControl
+public class MeterControl : SkiaControl, IDisposable
 {
-    public static readonly DependencyProperty LevelProperty =
-        DependencyProperty.Register(nameof(Level), typeof(float), typeof(MeterControl),
-            new FrameworkPropertyMetadata(0f, FrameworkPropertyMetadataOptions.AffectsRender));
-
-    // Keep legacy properties for compatibility but they now feed into ballistics
     public static readonly DependencyProperty PeakLevelProperty =
         DependencyProperty.Register(nameof(PeakLevel), typeof(float), typeof(MeterControl),
             new FrameworkPropertyMetadata(0f, FrameworkPropertyMetadataOptions.AffectsRender));
@@ -24,16 +19,7 @@ public class MeterControl : SkiaControl
             new FrameworkPropertyMetadata(0f, FrameworkPropertyMetadataOptions.AffectsRender));
 
     /// <summary>
-    /// The input level (linear 0-1). Ballistics are applied internally.
-    /// </summary>
-    public float Level
-    {
-        get => (float)GetValue(LevelProperty);
-        set => SetValue(LevelProperty, value);
-    }
-
-    /// <summary>
-    /// Legacy peak level property. If Level is 0, this is used instead.
+    /// The peak level (linear 0-1).
     /// </summary>
     public float PeakLevel
     {
@@ -42,7 +28,7 @@ public class MeterControl : SkiaControl
     }
 
     /// <summary>
-    /// Legacy RMS level property. If Level is 0, this is used instead.
+    /// The RMS level (linear 0-1).
     /// </summary>
     public float RmsLevel
     {
@@ -53,10 +39,16 @@ public class MeterControl : SkiaControl
     private readonly SKPaint _backgroundPaint = new() { Color = new SKColor(0x24, 0x24, 0x24) };
     private readonly SKPaint _peakPaint = new() { Color = SKColors.White, StrokeWidth = 2f, IsAntialias = true, Style = SKPaintStyle.Stroke };
     private readonly SKPaint _tickPaint = new() { Color = new SKColor(0x44, 0x44, 0x44), StrokeWidth = 1f, IsAntialias = true };
-    private readonly SKPaint _tickLabelPaint = new() { Color = new SKColor(0x88, 0x88, 0x88), TextSize = 9f, IsAntialias = true };
+    private readonly SkiaTextPaint _tickLabelPaint = new(new SKColor(0x88, 0x88, 0x88), 9f);
     private readonly SKPaint _greenPaint = new() { Color = new SKColor(0x40, 0xC0, 0x40) };
     private readonly SKPaint _yellowPaint = new() { Color = new SKColor(0xFF, 0xC0, 0x40) };
     private readonly SKPaint _redPaint = new() { Color = new SKColor(0xFF, 0x50, 0x50) };
+    private bool _disposed;
+
+    public MeterControl()
+    {
+        Unloaded += (_, _) => Dispose();
+    }
 
     // dB thresholds for color changes (normalized values)
     private const float YellowThreshold = 0.5f;  // ~-6dB
@@ -68,7 +60,7 @@ public class MeterControl : SkiaControl
 
         // MeterProcessor already applies ballistics (peak hold, RMS smoothing)
         // Just convert to normalized dB and display directly
-        float peakLinear = Level > 0 ? Level : PeakLevel;
+        float peakLinear = PeakLevel;
         float rmsLinear = RmsLevel;
 
         // Convert to normalized (using -60dB to 0dB range)
@@ -151,5 +143,23 @@ public class MeterControl : SkiaControl
             canvas.DrawLine(0, y, width, y, _tickPaint);
             canvas.DrawText($"{db:0}dB", 4, y - 2, _tickLabelPaint);
         }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _backgroundPaint.Dispose();
+        _peakPaint.Dispose();
+        _tickPaint.Dispose();
+        _tickLabelPaint.Dispose();
+        _greenPaint.Dispose();
+        _yellowPaint.Dispose();
+        _redPaint.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

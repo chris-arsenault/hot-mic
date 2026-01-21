@@ -96,6 +96,11 @@ Always-on-top mode keeps controls within reach during calls or streams.
 - RNNoise, Speech Denoiser, and Voice Gate require 48 kHz and will auto-bypass at other sample rates.
 - Configuration is stored in `%AppData%\HotMic\config.json`.
 
+## Documentation
+
+- `docs/README.md` - documentation index (DSP/algorithm references, architecture, feature docs).
+- `docs/technical/README.md` - DSP/algorithm references.
+
 ## Building From Source
 
 Requires the .NET 8 SDK on Windows.

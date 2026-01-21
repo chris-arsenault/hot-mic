@@ -18,22 +18,30 @@ public sealed class SpeechDenoiserRenderer : IDisposable
 
     private readonly PluginComponentTheme _theme;
     private readonly AiProcessingIndicator _processingIndicator;
-    private readonly RotaryKnob _knob;
     private readonly PluginPresetBar _presetBar;
+
+    /// <summary>Dry/Wet mix knob (0-100%).</summary>
+    public KnobWidget MixKnob { get; }
+
+    /// <summary>Attenuation limit knob (0-100 dB).</summary>
+    public KnobWidget AttenLimitKnob { get; }
 
     private readonly SKPaint _backgroundPaint;
     private readonly SKPaint _titleBarPaint;
     private readonly SKPaint _borderPaint;
-    private readonly SKPaint _titlePaint;
-    private readonly SKPaint _closeButtonPaint;
+    private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SKPaint _bypassPaint;
     private readonly SKPaint _bypassActivePaint;
-    private readonly SKPaint _statusPaint;
-    private readonly SKPaint _descriptionPaint;
+    private readonly SkiaTextPaint _statusPaint;
+    private readonly SkiaTextPaint _descriptionPaint;
     private readonly SKPaint _togglePaint;
     private readonly SKPaint _toggleActivePaint;
-    private readonly SKPaint _toggleLabelPaint;
+    private readonly SkiaTextPaint _toggleLabelPaint;
     private readonly SKPaint _toggleCheckPaint;
+    private readonly SKPaint _learnPaint;
+    private readonly SKPaint _learnActivePaint;
+    private readonly SkiaTextPaint _learnTextPaint;
     private readonly SKPaint _warningPaint;
     private readonly SKPaint _warningStrokePaint;
     private readonly SKPaint _warningDotPaint;
@@ -42,15 +50,23 @@ public sealed class SpeechDenoiserRenderer : IDisposable
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
     private SKRect _attenToggleRect;
-    private readonly SKRect[] _knobRects = new SKRect[KnobCount];
-    private readonly SKPoint[] _knobCenters = new SKPoint[KnobCount];
+    private SKRect _learnButtonRect;
 
     public SpeechDenoiserRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
         _processingIndicator = new AiProcessingIndicator(_theme);
-        _knob = new RotaryKnob(_theme);
         _presetBar = new PluginPresetBar(_theme);
+
+        var knobStyle = KnobStyle.Standard;
+        MixKnob = new KnobWidget(KnobRadius, 0f, 100f, "DRY / WET", "%", knobStyle, _theme)
+        {
+            ValueFormat = "0"
+        };
+        AttenLimitKnob = new KnobWidget(KnobRadius, 0f, 100f, "ATTEN LIMIT", "dB", knobStyle, _theme)
+        {
+            ValueFormat = "0"
+        };
 
         _backgroundPaint = new SKPaint
         {
@@ -74,22 +90,8 @@ public sealed class SpeechDenoiserRenderer : IDisposable
             StrokeWidth = 1f
         };
 
-        _titlePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 14f,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
-
-        _closeButtonPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 18f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _bypassPaint = new SKPaint
         {
@@ -105,23 +107,8 @@ public sealed class SpeechDenoiserRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _statusPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
-
-        _descriptionPaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-        };
+        _statusPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _descriptionPaint = new SkiaTextPaint(_theme.TextMuted, 10f, SKFontStyle.Normal, SKTextAlign.Center);
 
         _togglePaint = new SKPaint
         {
@@ -137,14 +124,7 @@ public sealed class SpeechDenoiserRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
-        _toggleLabelPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 9f,
-            TextAlign = SKTextAlign.Left,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        _toggleLabelPaint = new SkiaTextPaint(_theme.TextSecondary, 9f, SKFontStyle.Bold, SKTextAlign.Left);
 
         _toggleCheckPaint = new SKPaint
         {
@@ -155,6 +135,22 @@ public sealed class SpeechDenoiserRenderer : IDisposable
             StrokeCap = SKStrokeCap.Round,
             StrokeJoin = SKStrokeJoin.Round
         };
+
+        _learnPaint = new SKPaint
+        {
+            Color = _theme.PanelBackgroundLight,
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _learnActivePaint = new SKPaint
+        {
+            Color = new SKColor(0x40, 0x80, 0xFF),
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        _learnTextPaint = new SkiaTextPaint(_theme.TextPrimary, 9f, SKFontStyle.Bold, SKTextAlign.Center);
 
         _warningPaint = new SKPaint
         {
@@ -213,27 +209,16 @@ public sealed class SpeechDenoiserRenderer : IDisposable
         var badgeRect = new SKRect(badgeX, (TitleBarHeight - 16) / 2, badgeX + 25, (TitleBarHeight + 16) / 2);
         using var badgePaint = new SKPaint { Color = new SKColor(0x40, 0x80, 0xFF), IsAntialias = true };
         canvas.DrawRoundRect(new SKRoundRect(badgeRect, 3f), badgePaint);
-        using var badgeTextPaint = new SKPaint
-        {
-            Color = SKColors.White,
-            IsAntialias = true,
-            TextSize = 8f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var badgeTextPaint = new SkiaTextPaint(SKColors.White, 8f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("AI", badgeRect.MidX, badgeRect.MidY + 3, badgeTextPaint);
 
         if (state.LatencyMs > 0)
         {
-            using var latencyPaint = new SKPaint
-            {
-                Color = _theme.TextMuted,
-                IsAntialias = true,
-                TextSize = 9f,
-                TextAlign = SKTextAlign.Right,
-                Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Normal)
-            };
-            canvas.DrawText($"LAT {state.LatencyMs:0.0}ms", size.Width - Padding - 100, TitleBarHeight / 2f + 4, latencyPaint);
+            using var latencyPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
+            string latencyText = state.LatencySamples > 0
+                ? $"LAT {state.LatencyMs:0.0}ms ({state.LatencySamples})"
+                : $"LAT {state.LatencyMs:0.0}ms";
+            canvas.DrawText(latencyText, size.Width - Padding - 100, TitleBarHeight / 2f + 4, latencyPaint);
         }
 
         float bypassWidth = 60f;
@@ -246,14 +231,7 @@ public sealed class SpeechDenoiserRenderer : IDisposable
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
-        using var bypassTextPaint = new SKPaint
-        {
-            Color = state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var bypassTextPaint = new SkiaTextPaint(state.IsBypassed ? _theme.TextPrimary : _theme.TextSecondary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("BYPASS", _bypassButtonRect.MidX, _bypassButtonRect.MidY + 4, bypassTextPaint);
 
         _closeButtonRect = new SKRect(size.Width - Padding - 24, (TitleBarHeight - 24) / 2,
@@ -272,24 +250,39 @@ public sealed class SpeechDenoiserRenderer : IDisposable
         canvas.DrawText("Streaming speech denoising (SpeechDenoiser)", size.Width / 2, y + 10, _descriptionPaint);
         y += 24;
 
+        if (!string.IsNullOrEmpty(state.LatencyReport))
+        {
+            _statusPaint.Color = _theme.TextMuted;
+            canvas.DrawText(state.LatencyReport, size.Width / 2, y + 10, _statusPaint);
+            y += 20;
+        }
+
+        float learnWidth = 150f;
+        float learnHeight = 22f;
+        float learnX = (size.Width - learnWidth) / 2f;
+        float learnY = y + 4f;
+        _learnButtonRect = new SKRect(learnX, learnY, learnX + learnWidth, learnY + learnHeight);
+        var learnRound = new SKRoundRect(_learnButtonRect, 4f);
+        canvas.DrawRoundRect(learnRound, state.IsLatencyLearning ? _learnActivePaint : _learnPaint);
+        canvas.DrawRoundRect(learnRound, _borderPaint);
+        string learnLabel = state.IsLatencyLearning ? "LEARNING..." : "LEARN LATENCY";
+        canvas.DrawText(learnLabel, _learnButtonRect.MidX, _learnButtonRect.MidY + 4, _learnTextPaint);
+        y = learnY + learnHeight + 18f;
+
         var indicatorCenter = new SKPoint(size.Width / 2, y + 45);
         _processingIndicator.Render(canvas, indicatorCenter, 36f, !state.IsBypassed, state.MixPercent / 100f, "STREAMING");
         y += 100;
 
         float knobsY = y + KnobRadius + 8;
         float knobsStartX = size.Width / 2 - KnobSpacing / 2f;
-        _knobCenters[0] = new SKPoint(knobsStartX, knobsY);
-        _knobCenters[1] = new SKPoint(knobsStartX + KnobSpacing, knobsY);
 
-        float mixNorm = state.MixPercent / 100f;
-        _knob.Render(canvas, _knobCenters[0], KnobRadius, mixNorm,
-            "DRY / WET", $"{state.MixPercent:0}", "%", state.HoveredKnob == 0);
-        _knobRects[0] = _knob.GetHitRect(_knobCenters[0], KnobRadius);
+        MixKnob.Center = new SKPoint(knobsStartX, knobsY);
+        MixKnob.Value = state.MixPercent;
+        MixKnob.Render(canvas);
 
-        float attenNorm = MathF.Min(MathF.Max(state.AttenLimitDb / 100f, 0f), 1f);
-        _knob.Render(canvas, _knobCenters[1], KnobRadius, attenNorm,
-            "ATTEN LIMIT", $"{state.AttenLimitDb:0}", "dB", state.HoveredKnob == 1);
-        _knobRects[1] = _knob.GetHitRect(_knobCenters[1], KnobRadius);
+        AttenLimitKnob.Center = new SKPoint(knobsStartX + KnobSpacing, knobsY);
+        AttenLimitKnob.Value = state.AttenLimitDb;
+        AttenLimitKnob.Render(canvas);
 
         float toggleHeight = 22f;
         float toggleWidth = 170f;
@@ -309,14 +302,7 @@ public sealed class SpeechDenoiserRenderer : IDisposable
         canvas.DrawRoundRect(new SKRoundRect(statusBarRect, 4f), barPaint);
         canvas.DrawRoundRect(new SKRoundRect(statusBarRect, 4f), _borderPaint);
 
-        using var statusTextPaint = new SKPaint
-        {
-            Color = _theme.TextPrimary,
-            IsAntialias = true,
-            TextSize = 10f,
-            TextAlign = SKTextAlign.Center,
-            Typeface = SKTypeface.FromFamilyName("Segoe UI", SKFontStyle.Bold)
-        };
+        using var statusTextPaint = new SkiaTextPaint(_theme.TextPrimary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText(statusText, statusBarRect.MidX, statusBarRect.MidY + 4, statusTextPaint);
 
         canvas.DrawRoundRect(roundRect, _borderPaint);
@@ -337,18 +323,17 @@ public sealed class SpeechDenoiserRenderer : IDisposable
         if (presetHit == PresetBarHitArea.SaveButton)
             return new SpeechDenoiserHitTest(SpeechDenoiserHitArea.PresetSave, -1);
 
-        for (int i = 0; i < KnobCount; i++)
-        {
-            float dx = x - _knobCenters[i].X;
-            float dy = y - _knobCenters[i].Y;
-            if (dx * dx + dy * dy <= KnobRadius * KnobRadius * 1.5f)
-            {
-                return new SpeechDenoiserHitTest(SpeechDenoiserHitArea.Knob, i);
-            }
-        }
+        if (MixKnob.HitTest(x, y))
+            return new SpeechDenoiserHitTest(SpeechDenoiserHitArea.Knob, 0);
+
+        if (AttenLimitKnob.HitTest(x, y))
+            return new SpeechDenoiserHitTest(SpeechDenoiserHitArea.Knob, 1);
 
         if (_attenToggleRect.Contains(x, y))
             return new SpeechDenoiserHitTest(SpeechDenoiserHitArea.AttenLimitToggle, -1);
+
+        if (_learnButtonRect.Contains(x, y))
+            return new SpeechDenoiserHitTest(SpeechDenoiserHitArea.LearnLatency, -1);
 
         if (_titleBarRect.Contains(x, y))
             return new SpeechDenoiserHitTest(SpeechDenoiserHitArea.TitleBar, -1);
@@ -363,7 +348,8 @@ public sealed class SpeechDenoiserRenderer : IDisposable
     public void Dispose()
     {
         _processingIndicator.Dispose();
-        _knob.Dispose();
+        MixKnob.Dispose();
+        AttenLimitKnob.Dispose();
         _presetBar.Dispose();
         _backgroundPaint.Dispose();
         _titleBarPaint.Dispose();
@@ -378,6 +364,9 @@ public sealed class SpeechDenoiserRenderer : IDisposable
         _toggleActivePaint.Dispose();
         _toggleLabelPaint.Dispose();
         _toggleCheckPaint.Dispose();
+        _learnPaint.Dispose();
+        _learnActivePaint.Dispose();
+        _learnTextPaint.Dispose();
         _warningPaint.Dispose();
         _warningStrokePaint.Dispose();
         _warningDotPaint.Dispose();
@@ -436,10 +425,12 @@ public record struct SpeechDenoiserState(
     float AttenLimitDb,
     bool AttenEnabled,
     float LatencyMs,
+    int LatencySamples,
     bool IsBypassed,
     string StatusMessage = "",
-    int HoveredKnob = -1,
-    string PresetName = "Custom");
+    string PresetName = "Custom",
+    string LatencyReport = "",
+    bool IsLatencyLearning = false);
 
 public enum SpeechDenoiserHitArea
 {
@@ -450,7 +441,8 @@ public enum SpeechDenoiserHitArea
     AttenLimitToggle,
     Knob,
     PresetDropdown,
-    PresetSave
+    PresetSave,
+    LearnLatency
 }
 
 public record struct SpeechDenoiserHitTest(SpeechDenoiserHitArea Area, int KnobIndex);

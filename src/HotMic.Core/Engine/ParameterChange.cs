@@ -21,7 +21,7 @@ public sealed class ParameterChange
 {
     public int ChannelId { get; init; }
     public ParameterType Type { get; init; }
-    public int PluginIndex { get; init; }
+    public int PluginInstanceId { get; init; }
     public int ParameterIndex { get; init; }
     public float Value { get; init; }
     public PluginCommandType Command { get; init; }
