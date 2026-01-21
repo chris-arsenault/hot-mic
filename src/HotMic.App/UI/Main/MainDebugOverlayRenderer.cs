@@ -7,10 +7,13 @@ namespace HotMic.App.UI;
 internal sealed class MainDebugOverlayRenderer
 {
     private readonly MainPaintCache _paints;
+    private readonly MainHitTargetRegistry _hitTargets;
+    private const long CopyIndicatorDurationMs = 1500;
 
-    public MainDebugOverlayRenderer(MainPaintCache paints)
+    public MainDebugOverlayRenderer(MainPaintCache paints, MainHitTargetRegistry hitTargets)
     {
         _paints = paints;
+        _hitTargets = hitTargets;
     }
 
     public void Render(SKCanvas canvas, MainLayoutFrame layout, MainViewModel viewModel)
@@ -30,7 +33,8 @@ internal sealed class MainDebugOverlayRenderer
 
         float lineHeight = 14f;
         int inputLines = Math.Max(1, inputCount);
-        int lineCount = 1 + 2 + 1 + inputLines + 1 + 4;
+        int outputLines = 10;
+        int lineCount = 1 + 2 + 1 + inputLines + 1 + outputLines;
         float overlayHeight = lineCount * lineHeight + 32f;
 
         float overlayX = MainLayoutMetrics.Padding;
@@ -48,7 +52,17 @@ internal sealed class MainDebugOverlayRenderer
         float col2X = overlayX + overlayWidth / 2f;
         float textY = overlayY + 18f;
 
-        canvas.DrawText("AUDIO ENGINE DIAGNOSTICS", col1X, textY, _paints.TextPaint);
+        string headerLabel = "AUDIO ENGINE DIAGNOSTICS";
+        bool copyActive = IsCopyIndicatorActive(viewModel.DebugOverlayCopyTicks);
+        var iconRect = DrawCopyIcon(canvas, col1X, textY, lineHeight);
+        float headerTextX = iconRect.Right + 6f;
+        canvas.DrawText(headerLabel, headerTextX, textY, _paints.TextPaint);
+        if (copyActive)
+        {
+            float labelWidth = _paints.TextPaint.MeasureText(headerLabel);
+            float copiedX = headerTextX + labelWidth + 8f;
+            canvas.DrawText("COPIED", copiedX, textY, MainRenderPrimitives.CreateTextPaint(_paints.Theme.Accent, 9f, SKFontStyle.Bold));
+        }
         textY += lineHeight + 4f;
 
         string outputStatus = diag.OutputActive ? "ACTIVE" : "INACTIVE";
@@ -85,7 +99,7 @@ internal sealed class MainDebugOverlayRenderer
                 var input = inputs[i];
                 float bufPct = input.BufferCapacity > 0 ? 100f * input.BufferedSamples / input.BufferCapacity : 0f;
                 string activeLabel = input.IsActive ? "ACTIVE" : "INACTIVE";
-                string line = $"Ch {input.ChannelId + 1}: {activeLabel} buf {input.BufferedSamples}/{input.BufferCapacity} ({bufPct:0}%) drop {input.DroppedSamples} under {input.UnderflowSamples} fmt {input.Channels}ch @{input.SampleRate}Hz";
+                string line = $"Ch {input.ChannelId + 1}: {activeLabel} buf {input.BufferedSamples}/{input.BufferCapacity} ({bufPct:0}%) drop {input.DroppedSamples} over {input.OverflowSamples} under {input.UnderflowSamples} fmt {input.Channels}ch @{input.SampleRate}Hz";
                 canvas.DrawText(line, col1X, textY, _paints.SmallTextPaint);
                 textY += lineHeight;
             }
@@ -98,8 +112,27 @@ internal sealed class MainDebugOverlayRenderer
 
         var dropColor = MainRenderPrimitives.CreateTextPaint(_paints.Theme.MeterClip, 9f);
         var okColor = _paints.SmallTextPaint;
-        string dropLine = $"Drops 30s: in {viewModel.InputDrops30Sec} out {viewModel.OutputUnderflowDrops30Sec} total {viewModel.Drops30Sec}";
+        string dropLine = $"Drops 30s: in-drop {viewModel.InputDrops30Sec} in-under {viewModel.InputUnderflowDrops30Sec} out {viewModel.OutputUnderflowDrops30Sec} total {viewModel.Drops30Sec}";
         canvas.DrawText(dropLine, col1X, textY, viewModel.Drops30Sec > 0 ? dropColor : okColor);
+        textY += lineHeight;
+
+        var procPaint = diag.BlockOverrunCount > 0 ? dropColor : okColor;
+        canvas.DrawText(viewModel.ProfilingLine, col1X, textY, procPaint);
+        textY += lineHeight;
+
+        canvas.DrawText(viewModel.WorstPluginLine, col1X, textY, procPaint);
+        textY += lineHeight;
+
+        canvas.DrawText(viewModel.AnalysisTapProfilingLine, col1X, textY, procPaint);
+        textY += lineHeight;
+
+        canvas.DrawText(viewModel.AnalysisTapPitchProfilingLine, col1X, textY, procPaint);
+        textY += lineHeight;
+
+        canvas.DrawText(viewModel.AnalysisTapGateLine, col1X, textY, procPaint);
+        textY += lineHeight;
+
+        canvas.DrawText(viewModel.VitalizerLine, col1X, textY, _paints.SmallTextPaint);
         textY += lineHeight;
 
         canvas.DrawText($"Graph: {viewModel.RoutingGraphOrder}", col1X, textY, _paints.SmallTextPaint);
@@ -109,5 +142,31 @@ internal sealed class MainDebugOverlayRenderer
         textY += lineHeight;
 
         canvas.DrawText($"Monitor: {diag.MonitorBufferedSamples}/{diag.MonitorBufferCapacity}", col1X, textY, _paints.SmallTextPaint);
+    }
+
+    private SKRect DrawCopyIcon(SKCanvas canvas, float iconX, float textBaselineY, float lineHeight)
+    {
+        float iconSize = 10f;
+        float headerTop = textBaselineY - lineHeight + 2f;
+        float iconY = headerTop + (lineHeight - iconSize) * 0.5f;
+        var iconRect = new SKRect(iconX, iconY, iconX + iconSize, iconY + iconSize);
+        _hitTargets.DebugOverlayCopyRect = iconRect;
+
+        float offset = 2.5f;
+        var backRect = new SKRect(iconRect.Left + offset, iconRect.Top + offset, iconRect.Right, iconRect.Bottom);
+        canvas.DrawRect(backRect, _paints.IconPaint);
+        canvas.DrawRect(iconRect, _paints.IconPaint);
+        return iconRect;
+    }
+
+    private static bool IsCopyIndicatorActive(long lastCopyTicks)
+    {
+        if (lastCopyTicks <= 0)
+        {
+            return false;
+        }
+
+        long now = Environment.TickCount64;
+        return now - lastCopyTicks <= CopyIndicatorDurationMs;
     }
 }

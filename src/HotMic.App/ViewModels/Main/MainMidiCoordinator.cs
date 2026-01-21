@@ -171,7 +171,7 @@ internal sealed class MainMidiCoordinator : IDisposable
                         return;
                     }
 
-                    _pluginCoordinator.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, "midi", value);
+                    _pluginCoordinator.ApplyPluginParameterByIndex(channelIndex, pluginInstanceId, paramIndex, value);
 
                     int slotIndex = MainPluginCoordinator.FindPluginSlotIndex(channel, pluginInstanceId);
                     if (slotIndex >= 0 && slotIndex < channel.PluginSlots.Count - 1)

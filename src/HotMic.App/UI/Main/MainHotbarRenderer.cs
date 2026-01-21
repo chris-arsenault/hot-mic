@@ -60,6 +60,18 @@ internal sealed class MainHotbarRenderer
         _hitTargets.TopButtons[MainButton.SavePreset] = saveRect;
 
         float statsRightX = layout.Size.Width - MainLayoutMetrics.Padding;
+        float resetWidth = 28f;
+        float resetHeight = 16f;
+        float resetX = statsRightX - resetWidth;
+        float resetY = toggleY;
+        _hitTargets.ReinitializeAudioRect = new SKRect(resetX, resetY, resetX + resetWidth, resetY + resetHeight);
+
+        canvas.DrawRoundRect(new SKRoundRect(_hitTargets.ReinitializeAudioRect, 3f), _paints.ButtonPaint);
+        canvas.DrawRoundRect(new SKRoundRect(_hitTargets.ReinitializeAudioRect, 3f), _paints.BorderPaint);
+        var resetPaint = MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextSecondary, 8.5f, SKFontStyle.Bold);
+        canvas.DrawText("RST", _hitTargets.ReinitializeAudioRect.MidX, _hitTargets.ReinitializeAudioRect.MidY + 3f, resetPaint);
+
+        statsRightX = resetX - 10f;
         float statsY = rect.Top + rect.Height / 2f + 3f;
         float statsX = statsRightX;
 

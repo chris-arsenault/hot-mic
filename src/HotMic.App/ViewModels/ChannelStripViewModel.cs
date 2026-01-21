@@ -9,6 +9,7 @@ namespace HotMic.App.ViewModels;
 public partial class ChannelStripViewModel : ObservableObject
 {
     private readonly Action<HotMic.Core.Engine.ParameterChange>? _parameterSink;
+    private readonly Action<int, int, int, float>? _pluginParameterSink;
     private readonly Action<int, int>? _pluginActionSink;
     private readonly Action<int>? _pluginRemoveSink;
     private readonly Action<int, int>? _pluginReorderSink;
@@ -18,11 +19,12 @@ public partial class ChannelStripViewModel : ObservableObject
     private readonly Action<int, bool>? _containerBypassSink;
     private readonly Action<int, int>? _containerReorderSink;
 
-    public ChannelStripViewModel(int channelId, string name, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int, int>? pluginActionSink = null, Action<int>? pluginRemoveSink = null, Action<int, int>? pluginReorderSink = null, Action<int, bool>? pluginBypassConfigSink = null, Action<int>? containerActionSink = null, Action<int>? containerRemoveSink = null, Action<int, bool>? containerBypassSink = null, Action<int, int>? containerReorderSink = null)
+    public ChannelStripViewModel(int channelId, string name, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int, int, int, float>? pluginParameterSink = null, Action<int, int>? pluginActionSink = null, Action<int>? pluginRemoveSink = null, Action<int, int>? pluginReorderSink = null, Action<int, bool>? pluginBypassConfigSink = null, Action<int>? containerActionSink = null, Action<int>? containerRemoveSink = null, Action<int, bool>? containerBypassSink = null, Action<int, int>? containerReorderSink = null)
     {
         ChannelId = channelId;
         Name = name;
         _parameterSink = parameterSink;
+        _pluginParameterSink = pluginParameterSink;
         _pluginActionSink = pluginActionSink;
         _pluginRemoveSink = pluginRemoveSink;
         _pluginReorderSink = pluginReorderSink;
@@ -35,7 +37,7 @@ public partial class ChannelStripViewModel : ObservableObject
         Containers = new ObservableCollection<PluginContainerViewModel>();
 
         // Start with just one add placeholder
-        PluginSlots.Add(PluginViewModel.CreateEmpty(ChannelId, 1, 0, () => _pluginActionSink?.Invoke(0, 0), () => _pluginRemoveSink?.Invoke(0), _parameterSink, (instanceId, value) => _pluginBypassConfigSink?.Invoke(instanceId, value)));
+        PluginSlots.Add(PluginViewModel.CreateEmpty(ChannelId, 1, 0, () => _pluginActionSink?.Invoke(0, 0), () => _pluginRemoveSink?.Invoke(0), _parameterSink, _pluginParameterSink, (instanceId, value) => _pluginBypassConfigSink?.Invoke(instanceId, value)));
 
         ToggleMuteCommand = new RelayCommand(() => IsMuted = !IsMuted);
         ToggleSoloCommand = new RelayCommand(() => IsSoloed = !IsSoloed);
@@ -187,6 +189,7 @@ public partial class ChannelStripViewModel : ObservableObject
                     () => _pluginActionSink?.Invoke(instanceId, 0),
                     () => _pluginRemoveSink?.Invoke(instanceId),
                     _parameterSink,
+                    _pluginParameterSink,
                     (id, value) => _pluginBypassConfigSink?.Invoke(id, value));
             }
             else
@@ -209,6 +212,7 @@ public partial class ChannelStripViewModel : ObservableObject
             () => _pluginActionSink?.Invoke(0, PluginSlots.Count - 1),
             () => { },
             _parameterSink,
+            _pluginParameterSink,
             (id, value) => { }));
     }
 

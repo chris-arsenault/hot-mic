@@ -1,3 +1,7 @@
+using System.Diagnostics;
+using System.Threading;
+using HotMic.Core.Threading;
+
 namespace HotMic.Core.Dsp.Analysis.Pitch;
 
 /// <summary>
@@ -23,6 +27,21 @@ public sealed class PyinPitchDetector
 
     private float _lastPitch;
     private float _lastConfidence;
+    private int _profilingEnabled;
+    private long _lastTotalTicks;
+    private long _maxTotalTicks;
+    private long _lastDiffTicks;
+    private long _maxDiffTicks;
+    private long _lastCmndTicks;
+    private long _maxCmndTicks;
+    private long _lastSearchTicks;
+    private long _maxSearchTicks;
+    private long _lastRefineTicks;
+    private long _maxRefineTicks;
+    private long _lastTotalCpuCycles;
+    private long _maxTotalCpuCycles;
+    private long _lastDiffCpuCycles;
+    private long _maxDiffCpuCycles;
 
     public PyinPitchDetector(int sampleRate, int frameSize, float minFrequency, float maxFrequency, float threshold = DefaultThreshold)
     {
@@ -48,6 +67,39 @@ public sealed class PyinPitchDetector
         }
     }
 
+    internal void SetProfilingEnabled(bool enabled)
+    {
+        int value = enabled ? 1 : 0;
+        int prior = Interlocked.Exchange(ref _profilingEnabled, value);
+        if (prior != value)
+        {
+            ResetProfiling();
+        }
+    }
+
+    internal PitchProfilingSnapshot GetProfilingSnapshot()
+    {
+        return new PitchProfilingSnapshot(
+            PitchDetectorType.Pyin,
+            Interlocked.Read(ref _lastTotalTicks),
+            Interlocked.Read(ref _maxTotalTicks),
+            Interlocked.Read(ref _lastDiffTicks),
+            Interlocked.Read(ref _maxDiffTicks),
+            Interlocked.Read(ref _lastCmndTicks),
+            Interlocked.Read(ref _maxCmndTicks),
+            Interlocked.Read(ref _lastSearchTicks),
+            Interlocked.Read(ref _maxSearchTicks),
+            Interlocked.Read(ref _lastRefineTicks),
+            Interlocked.Read(ref _maxRefineTicks),
+            _frameSize,
+            _minTau,
+            _maxTau,
+            Interlocked.Read(ref _lastTotalCpuCycles),
+            Interlocked.Read(ref _maxTotalCpuCycles),
+            Interlocked.Read(ref _lastDiffCpuCycles),
+            Interlocked.Read(ref _maxDiffCpuCycles));
+    }
+
     /// <summary>
     /// Detect pitch using probabilistic candidate scoring (pYIN-style).
     /// </summary>
@@ -58,8 +110,27 @@ public sealed class PyinPitchDetector
             return new PitchResult(null, 0f, false);
         }
 
+        bool profilingEnabled = Volatile.Read(ref _profilingEnabled) != 0;
+        long totalStart = 0;
+        long totalCpuStart = 0;
+        bool totalCpuTiming = false;
+        if (profilingEnabled)
+        {
+            totalStart = Stopwatch.GetTimestamp();
+            totalCpuTiming = ThreadCpuTimer.TryGetCurrentThreadCycles(out totalCpuStart);
+        }
+
         int size = _frameSize;
         int maxTau = _maxTau;
+
+        long diffStart = 0;
+        long diffCpuStart = 0;
+        bool diffCpuTiming = false;
+        if (profilingEnabled)
+        {
+            diffStart = Stopwatch.GetTimestamp();
+            diffCpuTiming = totalCpuTiming && ThreadCpuTimer.TryGetCurrentThreadCycles(out diffCpuStart);
+        }
 
         for (int tau = 0; tau <= maxTau; tau++)
         {
@@ -72,10 +143,27 @@ public sealed class PyinPitchDetector
             int limit = size - tau;
             for (int i = 0; i < limit; i++)
             {
-                float delta = frame[i] - frame[i + tau];
+                // Use double math to avoid subnormal float multiply slowdowns in silence.
+                double delta = (double)frame[i] - frame[i + tau];
                 sum += delta * delta;
             }
             _difference[tau] = (float)sum;
+        }
+
+        if (profilingEnabled)
+        {
+            long diffTicks = Stopwatch.GetTimestamp() - diffStart;
+            RecordProfiling(ref _lastDiffTicks, ref _maxDiffTicks, diffTicks);
+            if (diffCpuTiming && ThreadCpuTimer.TryGetCurrentThreadCycles(out long diffCpuEnd))
+            {
+                RecordProfiling(ref _lastDiffCpuCycles, ref _maxDiffCpuCycles, diffCpuEnd - diffCpuStart);
+            }
+        }
+
+        long cmndStart = 0;
+        if (profilingEnabled)
+        {
+            cmndStart = Stopwatch.GetTimestamp();
         }
 
         double runningSum = 0.0;
@@ -86,9 +174,22 @@ public sealed class PyinPitchDetector
             _cmnd[tau] = runningSum > 1e-12 ? (float)(_difference[tau] * tau / runningSum) : 1f;
         }
 
+        if (profilingEnabled)
+        {
+            long cmndTicks = Stopwatch.GetTimestamp() - cmndStart;
+            RecordProfiling(ref _lastCmndTicks, ref _maxCmndTicks, cmndTicks);
+        }
+
         int candidateCount = 0;
         float bestCmnd = float.MaxValue;
         int bestTau = -1;
+
+        long searchStart = 0;
+        if (profilingEnabled)
+        {
+            searchStart = Stopwatch.GetTimestamp();
+        }
+
         for (int tau = _minTau + 1; tau < maxTau; tau++)
         {
             float value = _cmnd[tau];
@@ -109,6 +210,12 @@ public sealed class PyinPitchDetector
             }
         }
 
+        if (profilingEnabled)
+        {
+            long searchTicks = Stopwatch.GetTimestamp() - searchStart;
+            RecordProfiling(ref _lastSearchTicks, ref _maxSearchTicks, searchTicks);
+        }
+
         if (candidateCount == 0 && bestTau > 0)
         {
             _candidateTau[0] = bestTau;
@@ -120,12 +227,27 @@ public sealed class PyinPitchDetector
         {
             _lastPitch = 0f;
             _lastConfidence = 0f;
+            if (profilingEnabled)
+            {
+                RecordProfiling(ref _lastRefineTicks, ref _maxRefineTicks, 0);
+                RecordProfiling(ref _lastTotalTicks, ref _maxTotalTicks, Stopwatch.GetTimestamp() - totalStart);
+                if (totalCpuTiming && ThreadCpuTimer.TryGetCurrentThreadCycles(out long totalCpuEnd))
+                {
+                    RecordProfiling(ref _lastTotalCpuCycles, ref _maxTotalCpuCycles, totalCpuEnd - totalCpuStart);
+                }
+            }
             return new PitchResult(null, 0f, false);
         }
 
         float bestScore = float.MinValue;
         float bestProb = 0f;
         float bestFreq = 0f;
+
+        long refineStart = 0;
+        if (profilingEnabled)
+        {
+            refineStart = Stopwatch.GetTimestamp();
+        }
 
         for (int i = 0; i < candidateCount; i++)
         {
@@ -162,11 +284,66 @@ public sealed class PyinPitchDetector
             }
         }
 
+        if (profilingEnabled)
+        {
+            long refineTicks = Stopwatch.GetTimestamp() - refineStart;
+            RecordProfiling(ref _lastRefineTicks, ref _maxRefineTicks, refineTicks);
+            RecordProfiling(ref _lastTotalTicks, ref _maxTotalTicks, Stopwatch.GetTimestamp() - totalStart);
+            if (totalCpuTiming && ThreadCpuTimer.TryGetCurrentThreadCycles(out long totalCpuEnd))
+            {
+                RecordProfiling(ref _lastTotalCpuCycles, ref _maxTotalCpuCycles, totalCpuEnd - totalCpuStart);
+            }
+        }
+
         bool voiced = bestProb >= VoicedThreshold;
         _lastPitch = voiced ? bestFreq : 0f;
         _lastConfidence = voiced ? bestProb : 0f;
         return voiced
             ? new PitchResult(bestFreq, bestProb, true)
             : new PitchResult(null, bestProb, false);
+    }
+
+    private void ResetProfiling()
+    {
+        Interlocked.Exchange(ref _lastTotalTicks, 0);
+        Interlocked.Exchange(ref _maxTotalTicks, 0);
+        Interlocked.Exchange(ref _lastDiffTicks, 0);
+        Interlocked.Exchange(ref _maxDiffTicks, 0);
+        Interlocked.Exchange(ref _lastCmndTicks, 0);
+        Interlocked.Exchange(ref _maxCmndTicks, 0);
+        Interlocked.Exchange(ref _lastSearchTicks, 0);
+        Interlocked.Exchange(ref _maxSearchTicks, 0);
+        Interlocked.Exchange(ref _lastRefineTicks, 0);
+        Interlocked.Exchange(ref _maxRefineTicks, 0);
+        Interlocked.Exchange(ref _lastTotalCpuCycles, 0);
+        Interlocked.Exchange(ref _maxTotalCpuCycles, 0);
+        Interlocked.Exchange(ref _lastDiffCpuCycles, 0);
+        Interlocked.Exchange(ref _maxDiffCpuCycles, 0);
+    }
+
+    private static void RecordProfiling(ref long lastTicks, ref long maxTicks, long elapsedTicks)
+    {
+        Interlocked.Exchange(ref lastTicks, elapsedTicks);
+        if (elapsedTicks <= 0)
+        {
+            return;
+        }
+
+        UpdateMax(ref maxTicks, elapsedTicks);
+    }
+
+    private static void UpdateMax(ref long location, long value)
+    {
+        long current = Interlocked.Read(ref location);
+        while (value > current)
+        {
+            long prior = Interlocked.CompareExchange(ref location, value, current);
+            if (prior == current)
+            {
+                break;
+            }
+
+            current = prior;
+        }
     }
 }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Diagnostics.CodeAnalysis;
 using HotMic.App.Models;
 using HotMic.Common.Configuration;
 using HotMic.Common.Models;
@@ -37,8 +38,6 @@ internal sealed class MainPluginCoordinator
     private readonly Func<AudioDevice?> _getSelectedOutputDevice;
     private readonly Func<bool> _getIsInitializing;
     private readonly Action<bool> _setIsInitializing;
-    private readonly Action<int, string> _setChannelInputDevice;
-    private readonly Action<int, InputChannelMode> _setChannelInputMode;
     private readonly Action<int, float> _setChannelInputGain;
     private PluginGraph[] _pluginGraphs = Array.Empty<PluginGraph>();
     private readonly Dictionary<(int ChannelIndex, int InstanceId), AnalysisSignalMask> _analysisTapRequests = new();
@@ -67,8 +66,6 @@ internal sealed class MainPluginCoordinator
         Func<AudioDevice?> getSelectedOutputDevice,
         Func<bool> getIsInitializing,
         Action<bool> setIsInitializing,
-        Action<int, string> setChannelInputDevice,
-        Action<int, InputChannelMode> setChannelInputMode,
         Action<int, float> setChannelInputGain)
     {
         _configManager = configManager;
@@ -91,8 +88,6 @@ internal sealed class MainPluginCoordinator
         _getSelectedOutputDevice = getSelectedOutputDevice;
         _getIsInitializing = getIsInitializing;
         _setIsInitializing = setIsInitializing;
-        _setChannelInputDevice = setChannelInputDevice;
-        _setChannelInputMode = setChannelInputMode;
         _setChannelInputGain = setChannelInputGain;
     }
 
@@ -246,30 +241,36 @@ internal sealed class MainPluginCoordinator
                 }
             }
 
-            bool appliedPreset = false;
-            if (pluginConfig.Parameters.Count == 0 &&
-                !string.IsNullOrWhiteSpace(pluginConfig.PresetName) &&
-                !IsCustomPreset(pluginConfig.PresetName) &&
-                _presetManager.TryGetPreset(plugin.Id, pluginConfig.PresetName, out var preset))
+            bool hasState = false;
+            if (pluginConfig.State is byte[] state && state.Length > 0)
             {
-                pluginConfig.Parameters = ApplyPresetParameters(plugin, preset);
-                appliedPreset = true;
+                plugin.SetState(state);
+                hasState = true;
             }
 
-            if (!appliedPreset)
+            bool appliedPreset = false;
+            bool skipParameters = plugin is Vst3PluginWrapper && hasState;
+            if (!skipParameters)
             {
-                foreach (var parameter in plugin.Parameters)
+                if (pluginConfig.Parameters.Count == 0 &&
+                    !string.IsNullOrWhiteSpace(pluginConfig.PresetName) &&
+                    !IsCustomPreset(pluginConfig.PresetName) &&
+                    _presetManager.TryGetPreset(plugin.Id, pluginConfig.PresetName, out var preset))
                 {
-                    if (pluginConfig.Parameters.TryGetValue(parameter.Name, out var value))
+                    pluginConfig.Parameters = ApplyPresetParameters(plugin, preset);
+                    appliedPreset = true;
+                }
+
+                if (!appliedPreset)
+                {
+                    foreach (var parameter in plugin.Parameters)
                     {
-                        plugin.SetParameter(parameter.Index, value);
+                        if (pluginConfig.Parameters.TryGetValue(parameter.Name, out var value))
+                        {
+                            plugin.SetParameter(parameter.Index, value);
+                        }
                     }
                 }
-            }
-
-            if (pluginConfig.State is not null && pluginConfig.State.Length > 0)
-            {
-                plugin.SetState(pluginConfig.State);
             }
 
             return new PluginSlot(pluginConfig.InstanceId, plugin, AudioEngine.SampleRate);
@@ -424,8 +425,8 @@ internal sealed class MainPluginCoordinator
             GetAnalysisUsageMask = GetAnalysisUsageMask,
             UpdateAnalysisTapRequest = UpdateAnalysisTapRequest,
             RequestNoiseLearn = RequestNoiseLearn,
-            SetChannelInputDevice = _setChannelInputDevice,
-            SetChannelInputMode = _setChannelInputMode,
+            SetInputPluginDevice = SetInputPluginDevice,
+            SetInputPluginMode = SetInputPluginMode,
             SetChannelInputGain = _setChannelInputGain
         };
 
@@ -702,6 +703,8 @@ internal sealed class MainPluginCoordinator
         var config = _getOrCreateChannelConfig(channelIndex);
         MarkChannelPresetCustom(config);
         _configManager.Save(Config);
+        RefreshPluginViewModels(channelIndex);
+        NormalizeOutputSendPlugins();
     }
 
     public void RenameContainer(int channelIndex, int containerId, string newName)
@@ -807,6 +810,7 @@ internal sealed class MainPluginCoordinator
             instanceId => RemovePlugin(channelIndex, instanceId),
             (instanceId, toIndex) => ReorderContainerPlugin(channelIndex, containerId, instanceId, toIndex),
             EnqueueParameterChange,
+            ApplyPluginParameterByIndex,
             (instanceId, bypass) => UpdatePluginBypassConfig(channelIndex, instanceId, bypass),
             _getMeterScaleVox());
 
@@ -842,17 +846,28 @@ internal sealed class MainPluginCoordinator
                 if (elevDefs is not null)
                 {
                     elevatedValues = new float[elevDefs.Length];
-                    var state = plugin.GetState();
                     for (int j = 0; j < elevDefs.Length; j++)
                     {
-                        var param = plugin.Parameters.FirstOrDefault(p => p.Index == elevDefs[j].Index);
-                        if (param is not null && state.Length >= (elevDefs[j].Index + 1) * sizeof(float))
+                        elevatedValues[j] = elevDefs[j].Default;
+                    }
+
+                    if (plugin is OutputSendPlugin send)
+                    {
+                        if (elevDefs.Length > 0)
                         {
-                            elevatedValues[j] = BitConverter.ToSingle(state, elevDefs[j].Index * sizeof(float));
+                            elevatedValues[0] = (float)send.OutputMode;
                         }
-                        else
+                    }
+                    else
+                    {
+                        var state = plugin.GetState();
+                        for (int j = 0; j < elevDefs.Length; j++)
                         {
-                            elevatedValues[j] = elevDefs[j].Default;
+                            var param = plugin.Parameters.FirstOrDefault(p => p.Index == elevDefs[j].Index);
+                            if (param is not null && state.Length >= (elevDefs[j].Index + 1) * sizeof(float))
+                            {
+                                elevatedValues[j] = BitConverter.ToSingle(state, elevDefs[j].Index * sizeof(float));
+                            }
                         }
                     }
                 }
@@ -966,6 +981,31 @@ internal sealed class MainPluginCoordinator
         }
     }
 
+    public void ApplyPluginParameterByIndex(int channelIndex, int pluginInstanceId, int parameterIndex, float value)
+    {
+        if ((uint)channelIndex >= (uint)AudioEngine.Channels.Count || pluginInstanceId <= 0)
+        {
+            return;
+        }
+
+        string parameterName = string.Empty;
+        var strip = AudioEngine.Channels[channelIndex];
+        if (strip.PluginChain.TryGetSlotById(pluginInstanceId, out var slot, out _) && slot?.Plugin is { } plugin)
+        {
+            var parameters = plugin.Parameters;
+            for (int i = 0; i < parameters.Count; i++)
+            {
+                if (parameters[i].Index == parameterIndex)
+                {
+                    parameterName = parameters[i].Name;
+                    break;
+                }
+            }
+        }
+
+        ApplyPluginParameter(channelIndex, pluginInstanceId, parameterIndex, parameterName, value);
+    }
+
     public void SetPluginBypass(int channelIndex, int pluginInstanceId, bool bypassed)
     {
         if (pluginInstanceId <= 0)
@@ -1008,8 +1048,49 @@ internal sealed class MainPluginCoordinator
         });
     }
 
-    public void RefreshPluginViewModels(int channelIndex)
+    public void SetInputPluginDevice(int channelIndex, int pluginInstanceId, string deviceId)
     {
+        if (!TryGetInputPlugin(channelIndex, pluginInstanceId, out var plugin))
+        {
+            return;
+        }
+
+        plugin.SetDeviceId(deviceId);
+        UpdatePluginStateConfig(channelIndex, pluginInstanceId);
+        RefreshPluginViewModels(channelIndex);
+    }
+
+    public void SetInputPluginMode(int channelIndex, int pluginInstanceId, InputChannelMode mode)
+    {
+        if (!TryGetInputPlugin(channelIndex, pluginInstanceId, out var plugin))
+        {
+            return;
+        }
+
+        plugin.SetChannelMode(mode);
+        UpdatePluginStateConfig(channelIndex, pluginInstanceId);
+        RefreshPluginViewModels(channelIndex);
+    }
+
+    public void ApplyChannelInputsToEngine()
+    {
+        for (int i = 0; i < AudioEngine.Channels.Count; i++)
+        {
+            bool adjusted = ApplyChannelInputSelection(i);
+            if (adjusted)
+            {
+                RefreshPluginViewModels(i, applyInputs: false);
+            }
+        }
+    }
+
+    public void RefreshPluginViewModels(int channelIndex, bool applyInputs = true)
+    {
+        if (applyInputs)
+        {
+            ApplyChannelInputSelection(channelIndex);
+        }
+
         var strip = AudioEngine.Channels[channelIndex];
         var slots = strip.PluginChain.GetSnapshot();
         var slotInfos = new List<PluginSlotInfo>(slots.Length);
@@ -1032,9 +1113,9 @@ internal sealed class MainPluginCoordinator
                     latencyMs = plugin.LatencySamples * 1000f / AudioEngine.SampleRate;
                 }
 
-                if (plugin is InputPlugin)
+                if (plugin is InputPlugin inputPlugin)
                 {
-                    string deviceLabel = _getInputDeviceLabel(_getOrCreateChannelConfig(channelIndex).InputDeviceId);
+                    string deviceLabel = _getInputDeviceLabel(inputPlugin.DeviceId);
                     displayName = $"Input ({deviceLabel})";
                 }
                 else if (plugin is BusInputPlugin)
@@ -1058,15 +1139,26 @@ internal sealed class MainPluginCoordinator
                     elevatedValues = new float[elevDefs.Length];
                     for (int j = 0; j < elevDefs.Length; j++)
                     {
-                        var state = plugin.GetState();
-                        var param = plugin.Parameters.FirstOrDefault(p => p.Index == elevDefs[j].Index);
-                        if (param is not null && state.Length >= (elevDefs[j].Index + 1) * sizeof(float))
+                        elevatedValues[j] = elevDefs[j].Default;
+                    }
+
+                    if (plugin is OutputSendPlugin send)
+                    {
+                        if (elevDefs.Length > 0)
                         {
-                            elevatedValues[j] = BitConverter.ToSingle(state, elevDefs[j].Index * sizeof(float));
+                            elevatedValues[0] = (float)send.OutputMode;
                         }
-                        else
+                    }
+                    else
+                    {
+                        var state = plugin.GetState();
+                        for (int j = 0; j < elevDefs.Length; j++)
                         {
-                            elevatedValues[j] = elevDefs[j].Default;
+                            var param = plugin.Parameters.FirstOrDefault(p => p.Index == elevDefs[j].Index);
+                            if (param is not null && state.Length >= (elevDefs[j].Index + 1) * sizeof(float))
+                            {
+                                elevatedValues[j] = BitConverter.ToSingle(state, elevDefs[j].Index * sizeof(float));
+                            }
                         }
                     }
                 }
@@ -1102,6 +1194,90 @@ internal sealed class MainPluginCoordinator
         }
 
         UpdateOpenContainerWindows(channelIndex, slotInfos);
+    }
+
+    private bool ApplyChannelInputSelection(int channelIndex)
+    {
+        if ((uint)channelIndex >= (uint)AudioEngine.Channels.Count)
+        {
+            return false;
+        }
+
+        var strip = AudioEngine.Channels[channelIndex];
+        var slots = strip.PluginChain.GetSnapshot();
+        int selectedPriority = int.MinValue;
+        ChannelInputKind selectedKind = ChannelInputKind.Device;
+        InputPlugin? selectedDeviceInput = null;
+        int selectedInstanceId = 0;
+
+        for (int i = 0; i < slots.Length; i++)
+        {
+            var slot = slots[i];
+            if (slot?.Plugin is not IChannelInputPlugin input || slot.Plugin.IsBypassed)
+            {
+                continue;
+            }
+
+            int priority = (int)input.InputKind;
+            if (selectedPriority < 0 || priority > selectedPriority)
+            {
+                selectedPriority = priority;
+                selectedKind = input.InputKind;
+                selectedInstanceId = slot.InstanceId;
+                selectedDeviceInput = slot.Plugin as InputPlugin;
+            }
+        }
+
+        bool hasDeviceInput = selectedPriority >= 0 &&
+                              selectedKind == ChannelInputKind.Device &&
+                              selectedDeviceInput is not null;
+        bool hasBusInput = selectedPriority >= 0 && selectedKind == ChannelInputKind.Bus;
+
+        string requestedDeviceId = hasDeviceInput ? selectedDeviceInput!.DeviceId : string.Empty;
+        InputChannelMode mode = hasDeviceInput ? selectedDeviceInput!.ChannelMode : InputChannelMode.Sum;
+        string resolved = AudioEngine.ConfigureChannelInput(channelIndex, requestedDeviceId, mode);
+
+        bool stateAdjusted = false;
+        if (hasDeviceInput &&
+            !string.Equals(resolved, requestedDeviceId, StringComparison.OrdinalIgnoreCase))
+        {
+            selectedDeviceInput!.SetDeviceId(resolved);
+            stateAdjusted = true;
+            UpdatePluginStateConfig(channelIndex, selectedInstanceId);
+        }
+
+        var channels = _getChannels();
+        if ((uint)channelIndex < (uint)channels.Count)
+        {
+            var viewModel = channels[channelIndex];
+            viewModel.InputDeviceId = resolved;
+            viewModel.InputChannelMode = mode;
+            viewModel.InputDeviceLabel = hasBusInput ? "Bus In" : _getInputDeviceLabel(resolved);
+        }
+
+        return stateAdjusted;
+    }
+
+    private bool TryGetInputPlugin(int channelIndex, int pluginInstanceId, [NotNullWhen(true)] out InputPlugin? plugin)
+    {
+        plugin = null;
+        if ((uint)channelIndex >= (uint)AudioEngine.Channels.Count)
+        {
+            return false;
+        }
+
+        if (!AudioEngine.Channels[channelIndex].PluginChain.TryGetSlotById(pluginInstanceId, out var slot, out _))
+        {
+            return false;
+        }
+
+        if (slot?.Plugin is not InputPlugin inputPlugin)
+        {
+            return false;
+        }
+
+        plugin = inputPlugin;
+        return true;
     }
 
     public IReadOnlyList<PluginContainerInfo> BuildContainerInfos(int channelIndex)
@@ -1186,9 +1362,17 @@ internal sealed class MainPluginCoordinator
         var strip = AudioEngine.Channels.ElementAtOrDefault(channelIndex);
         if (strip is not null &&
             strip.PluginChain.TryGetSlotById(instanceId, out var slot, out _) &&
-            slot?.Plugin is IChannelOutputPlugin)
+            slot?.Plugin is not null)
         {
-            NormalizeOutputSendPlugins();
+            if (slot.Plugin is IChannelOutputPlugin)
+            {
+                NormalizeOutputSendPlugins();
+            }
+
+            if (slot.Plugin is IChannelInputPlugin)
+            {
+                ApplyChannelInputSelection(channelIndex);
+            }
         }
     }
 
@@ -1784,6 +1968,29 @@ internal sealed class MainPluginCoordinator
     public void EnqueueParameterChange(ParameterChange change)
     {
         AudioEngine.EnqueueParameterChange(change);
+    }
+
+    public void SavePluginStates()
+    {
+        for (int channelIndex = 0; channelIndex < AudioEngine.Channels.Count; channelIndex++)
+        {
+            var graph = GetGraph(channelIndex);
+            if (graph is null)
+            {
+                continue;
+            }
+
+            var slots = AudioEngine.Channels[channelIndex].PluginChain.GetSnapshot();
+            for (int i = 0; i < slots.Length; i++)
+            {
+                if (slots[i] is { } slot)
+                {
+                    graph.SetPluginState(slot.InstanceId);
+                }
+            }
+        }
+
+        _configManager.Save(Config);
     }
 
     public bool TryParseVstPluginType(string type, out VstPluginFormat format, out string path)

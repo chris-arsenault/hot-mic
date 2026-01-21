@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Threading;
+
 namespace HotMic.Core.Dsp.Analysis.Pitch;
 
 /// <summary>
@@ -13,6 +16,9 @@ public sealed class AutocorrelationPitchDetector
 
     private float[] _autocorr = Array.Empty<float>();
     private double[] _energyPrefix = Array.Empty<double>();
+    private int _profilingEnabled;
+    private long _lastTotalTicks;
+    private long _maxTotalTicks;
 
     public AutocorrelationPitchDetector(int sampleRate, int frameSize, float minFrequency, float maxFrequency, float confidenceThreshold = 0.3f)
     {
@@ -45,6 +51,35 @@ public sealed class AutocorrelationPitchDetector
         }
     }
 
+    internal void SetProfilingEnabled(bool enabled)
+    {
+        int value = enabled ? 1 : 0;
+        int prior = Interlocked.Exchange(ref _profilingEnabled, value);
+        if (prior != value)
+        {
+            ResetProfiling();
+        }
+    }
+
+    internal PitchProfilingSnapshot GetProfilingSnapshot()
+    {
+        return new PitchProfilingSnapshot(
+            PitchDetectorType.Autocorrelation,
+            Interlocked.Read(ref _lastTotalTicks),
+            Interlocked.Read(ref _maxTotalTicks),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            _frameSize,
+            _minLag,
+            _maxLag);
+    }
+
     /// <summary>
     /// Detects pitch for the provided frame (length must be >= configured frame size).
     /// </summary>
@@ -53,6 +88,13 @@ public sealed class AutocorrelationPitchDetector
         if (frame.Length < _frameSize || _maxLag <= _minLag)
         {
             return new PitchResult(null, 0f, false);
+        }
+
+        bool profilingEnabled = Volatile.Read(ref _profilingEnabled) != 0;
+        long totalStart = 0;
+        if (profilingEnabled)
+        {
+            totalStart = Stopwatch.GetTimestamp();
         }
 
         int size = _frameSize;
@@ -88,6 +130,11 @@ public sealed class AutocorrelationPitchDetector
             }
         }
 
+        if (profilingEnabled)
+        {
+            RecordProfiling(ref _lastTotalTicks, ref _maxTotalTicks, Stopwatch.GetTimestamp() - totalStart);
+        }
+
         if (bestLag <= 0 || bestCorr < _confidenceThreshold)
         {
             return new PitchResult(null, Math.Clamp((float)bestCorr, 0f, 1f), false);
@@ -109,5 +156,37 @@ public sealed class AutocorrelationPitchDetector
         float frequency = _sampleRate / refinedLag;
         float confidence = Math.Clamp((float)bestCorr, 0f, 1f);
         return new PitchResult(frequency, confidence, true);
+    }
+
+    private void ResetProfiling()
+    {
+        Interlocked.Exchange(ref _lastTotalTicks, 0);
+        Interlocked.Exchange(ref _maxTotalTicks, 0);
+    }
+
+    private static void RecordProfiling(ref long lastTicks, ref long maxTicks, long elapsedTicks)
+    {
+        Interlocked.Exchange(ref lastTicks, elapsedTicks);
+        if (elapsedTicks <= 0)
+        {
+            return;
+        }
+
+        UpdateMax(ref maxTicks, elapsedTicks);
+    }
+
+    private static void UpdateMax(ref long location, long value)
+    {
+        long current = Interlocked.Read(ref location);
+        while (value > current)
+        {
+            long prior = Interlocked.CompareExchange(ref location, value, current);
+            if (prior == current)
+            {
+                break;
+            }
+
+            current = prior;
+        }
     }
 }

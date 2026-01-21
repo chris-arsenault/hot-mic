@@ -11,9 +11,10 @@ public partial class PluginContainerWindowViewModel : ObservableObject
     private readonly Action<int>? _pluginRemoveSink;
     private readonly Action<int, int>? _pluginReorderSink;
     private readonly Action<HotMic.Core.Engine.ParameterChange>? _parameterSink;
+    private readonly Action<int, int, int, float>? _pluginParameterSink;
     private readonly Action<int, bool>? _pluginBypassConfigSink;
 
-    public PluginContainerWindowViewModel(int channelIndex, int containerId, string name, Action<int, int>? pluginActionSink, Action<int>? pluginRemoveSink, Action<int, int>? pluginReorderSink, Action<HotMic.Core.Engine.ParameterChange>? parameterSink, Action<int, bool>? pluginBypassConfigSink, bool meterScaleVox)
+    public PluginContainerWindowViewModel(int channelIndex, int containerId, string name, Action<int, int>? pluginActionSink, Action<int>? pluginRemoveSink, Action<int, int>? pluginReorderSink, Action<HotMic.Core.Engine.ParameterChange>? parameterSink, Action<int, int, int, float>? pluginParameterSink, Action<int, bool>? pluginBypassConfigSink, bool meterScaleVox)
     {
         ChannelIndex = channelIndex;
         ContainerId = containerId;
@@ -21,6 +22,7 @@ public partial class PluginContainerWindowViewModel : ObservableObject
         _pluginRemoveSink = pluginRemoveSink;
         _pluginReorderSink = pluginReorderSink;
         _parameterSink = parameterSink;
+        _pluginParameterSink = pluginParameterSink;
         _pluginBypassConfigSink = pluginBypassConfigSink;
         Name = name;
         MeterScaleVox = meterScaleVox;
@@ -96,6 +98,7 @@ public partial class PluginContainerWindowViewModel : ObservableObject
                     () => _pluginActionSink?.Invoke(slot.InstanceId, 0),
                     () => _pluginRemoveSink?.Invoke(slot.InstanceId),
                     _parameterSink,
+                    _pluginParameterSink,
                     (id, value) => _pluginBypassConfigSink?.Invoke(id, value));
             }
             else
@@ -118,6 +121,7 @@ public partial class PluginContainerWindowViewModel : ObservableObject
             () => _pluginActionSink?.Invoke(0, PluginSlots.Count - 1),
             () => { },
             _parameterSink,
+            _pluginParameterSink,
             (id, value) => { }));
         UpdateWindowSize();
     }

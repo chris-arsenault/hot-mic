@@ -19,8 +19,8 @@ public struct OnePoleHighPass
     {
         float output = _a * (_prevOutput + input - _prevInput);
         _prevInput = input;
-        _prevOutput = output;
-        return output;
+        _prevOutput = DspUtils.FlushDenormal(output);
+        return _prevOutput;
     }
 
     public void Reset()

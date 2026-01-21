@@ -57,6 +57,7 @@ public static class ElevatedParameterDefinitions
         ["builtin:speechdenoiser"] = [new(0, "Dry/Wet", 0f, 100f, 100f, "%"), new(1, "Atten", 0f, 100f, 100f, "dB")],
         ["builtin:voice-gate"] = [new(0, "Thresh", 0f, 100f, 50f, "%"), new(2, "Release", 10f, 500f, 150f, "ms")],
         ["builtin:reverb"] = [new(0, "D/W", 0f, 100f, 30f, "%"), new(1, "Decay", 0.1f, 10f, 1.5f, "s")],
+        ["builtin:output-send"] = [new(0, "Send Mode", 0f, 2f, 2f, "")],
         ["builtin:signal-generator"] = [new(2, "Slot 1", -60f, 12f, -12f, "dB"), new(22, "Slot 2", -60f, 12f, -12f, "dB")],
     };
 

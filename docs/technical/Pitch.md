@@ -34,6 +34,7 @@ Algorithm-specific defaults:
 ## Rate
 - Pitch and CPP are evaluated every 2 analysis frames to reduce CPU cost.
 - Pitch/CPP work is skipped when Pitch, Pitch Meter, Harmonics, Voicing, and Clarity are all off.
+- Pitch/voicing work is gated off when the Analysis Tap Speech Presence (UseExisting or Generate) is <= 0.05.
 
 ## Real-time Considerations
 - Detectors preallocate buffers and are reconfigured on FFT size changes.

@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -15,6 +16,8 @@ public partial class AnalysisTapWindow : Window, IDisposable
 {
     private readonly AnalysisTapRenderer _renderer = new();
     private readonly AnalysisTapPlugin _plugin;
+    private readonly int _channelIndex;
+    private readonly int _pluginInstanceId;
     private readonly Action<int, float> _parameterCallback;
     private readonly Action<bool> _bypassCallback;
     private readonly Func<AnalysisSignalMask> _usedLaterProvider;
@@ -22,12 +25,16 @@ public partial class AnalysisTapWindow : Window, IDisposable
     private readonly DispatcherTimer _renderTimer;
     private readonly AnalysisTapSignalState[] _signalStates;
     private readonly float[] _smoothedValues;
+    private readonly long[] _lastNonFiniteLogTicks;
     private AnalysisSignalMask _usedLaterMask;
     private AnalysisSignalMask _requestedMask;
     private bool _disposed;
+    private static readonly long NonFiniteLogIntervalTicks = Math.Max(1, Stopwatch.Frequency * 2);
 
     public AnalysisTapWindow(
         AnalysisTapPlugin plugin,
+        int channelIndex,
+        int pluginInstanceId,
         Action<int, float> parameterCallback,
         Action<bool> bypassCallback,
         Func<AnalysisSignalMask> usedLaterProvider,
@@ -35,6 +42,8 @@ public partial class AnalysisTapWindow : Window, IDisposable
     {
         InitializeComponent();
         _plugin = plugin;
+        _channelIndex = channelIndex;
+        _pluginInstanceId = pluginInstanceId;
         _parameterCallback = parameterCallback;
         _bypassCallback = bypassCallback;
         _usedLaterProvider = usedLaterProvider;
@@ -43,6 +52,7 @@ public partial class AnalysisTapWindow : Window, IDisposable
         int signalCount = (int)AnalysisSignalId.Count;
         _signalStates = new AnalysisTapSignalState[signalCount];
         _smoothedValues = new float[signalCount];
+        _lastNonFiniteLogTicks = new long[signalCount];
 
         var preferredSize = AnalysisTapRenderer.GetPreferredSize(signalCount);
         Width = preferredSize.Width;
@@ -57,12 +67,43 @@ public partial class AnalysisTapWindow : Window, IDisposable
     private void OnRenderTick(object? sender, EventArgs e)
     {
         _usedLaterMask = _usedLaterProvider?.Invoke() ?? AnalysisSignalMask.None;
+        int nonFiniteMask = _plugin.ConsumeNonFiniteSignalMask();
+        if (nonFiniteMask != 0)
+        {
+            long now = Stopwatch.GetTimestamp();
+            for (int i = 0; i < _signalStates.Length; i++)
+            {
+                if ((nonFiniteMask & (1 << i)) == 0)
+                {
+                    continue;
+                }
+
+                if (now - _lastNonFiniteLogTicks[i] < NonFiniteLogIntervalTicks)
+                {
+                    continue;
+                }
+
+                _lastNonFiniteLogTicks[i] = now;
+                var signal = (AnalysisSignalId)i;
+                string message = $"[AnalysisTap] non-finite signal ch{_channelIndex + 1} slot={_pluginInstanceId} signal={signal}";
+                Console.WriteLine(message);
+            }
+        }
 
         int count = _signalStates.Length;
         for (int i = 0; i < count; i++)
         {
             var signal = (AnalysisSignalId)i;
             float raw = _plugin.GetValue(signal);
+            if (!float.IsFinite(raw))
+            {
+                raw = 0f;
+            }
+
+            if (!float.IsFinite(_smoothedValues[i]))
+            {
+                _smoothedValues[i] = 0f;
+            }
             _smoothedValues[i] = _smoothedValues[i] * 0.7f + raw * 0.3f;
 
             _signalStates[i] = new AnalysisTapSignalState(

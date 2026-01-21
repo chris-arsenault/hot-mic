@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Threading;
+
 namespace HotMic.Core.Dsp.Analysis.Pitch;
 
 /// <summary>
@@ -16,6 +19,9 @@ public sealed class SwipePitchDetector
     private float _binResolution;
 
     private float[] _candidates = Array.Empty<float>();
+    private int _profilingEnabled;
+    private long _lastTotalTicks;
+    private long _maxTotalTicks;
 
     public SwipePitchDetector(int sampleRate, int fftSize, float minFrequency, float maxFrequency)
     {
@@ -46,6 +52,37 @@ public sealed class SwipePitchDetector
         }
     }
 
+    internal void SetProfilingEnabled(bool enabled)
+    {
+        int value = enabled ? 1 : 0;
+        int prior = Interlocked.Exchange(ref _profilingEnabled, value);
+        if (prior != value)
+        {
+            ResetProfiling();
+        }
+    }
+
+    internal PitchProfilingSnapshot GetProfilingSnapshot()
+    {
+        int minPeriod = _maxFrequency > 0f ? Math.Max(2, (int)(_sampleRate / _maxFrequency)) : 0;
+        int maxPeriod = _minFrequency > 0f ? Math.Min(_fftSize - 2, (int)(_sampleRate / _minFrequency)) : 0;
+        return new PitchProfilingSnapshot(
+            PitchDetectorType.Swipe,
+            Interlocked.Read(ref _lastTotalTicks),
+            Interlocked.Read(ref _maxTotalTicks),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            _fftSize,
+            minPeriod,
+            maxPeriod);
+    }
+
     /// <summary>
     /// Detect pitch from the magnitude spectrum.
     /// </summary>
@@ -54,6 +91,13 @@ public sealed class SwipePitchDetector
         if (magnitudes.IsEmpty || _candidates.Length == 0)
         {
             return new PitchResult(null, 0f, false);
+        }
+
+        bool profilingEnabled = Volatile.Read(ref _profilingEnabled) != 0;
+        long totalStart = 0;
+        if (profilingEnabled)
+        {
+            totalStart = Stopwatch.GetTimestamp();
         }
 
         int half = magnitudes.Length;
@@ -69,6 +113,10 @@ public sealed class SwipePitchDetector
 
         if (maxMag <= 1e-12f)
         {
+            if (profilingEnabled)
+            {
+                RecordProfiling(ref _lastTotalTicks, ref _maxTotalTicks, Stopwatch.GetTimestamp() - totalStart);
+            }
             return new PitchResult(null, 0f, false);
         }
 
@@ -118,11 +166,51 @@ public sealed class SwipePitchDetector
         confidence = Math.Clamp(confidence, 0f, 1f);
         if (confidence < ConfidenceThreshold)
         {
+            if (profilingEnabled)
+            {
+                RecordProfiling(ref _lastTotalTicks, ref _maxTotalTicks, Stopwatch.GetTimestamp() - totalStart);
+            }
             return new PitchResult(null, confidence, false);
         }
 
         float separation = bestScore > 0f ? (bestScore - secondScore) / bestScore : 0f;
         float blendedConfidence = Math.Clamp((confidence + separation) * 0.5f, 0f, 1f);
+        if (profilingEnabled)
+        {
+            RecordProfiling(ref _lastTotalTicks, ref _maxTotalTicks, Stopwatch.GetTimestamp() - totalStart);
+        }
         return new PitchResult(bestFreq, blendedConfidence, true);
+    }
+
+    private void ResetProfiling()
+    {
+        Interlocked.Exchange(ref _lastTotalTicks, 0);
+        Interlocked.Exchange(ref _maxTotalTicks, 0);
+    }
+
+    private static void RecordProfiling(ref long lastTicks, ref long maxTicks, long elapsedTicks)
+    {
+        Interlocked.Exchange(ref lastTicks, elapsedTicks);
+        if (elapsedTicks <= 0)
+        {
+            return;
+        }
+
+        UpdateMax(ref maxTicks, elapsedTicks);
+    }
+
+    private static void UpdateMax(ref long location, long value)
+    {
+        long current = Interlocked.Read(ref location);
+        while (value > current)
+        {
+            long prior = Interlocked.CompareExchange(ref location, value, current);
+            if (prior == current)
+            {
+                break;
+            }
+
+            current = prior;
+        }
     }
 }

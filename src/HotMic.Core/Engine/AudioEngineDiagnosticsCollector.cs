@@ -18,7 +18,13 @@ internal sealed class AudioEngineDiagnosticsCollector
         int lastOutputFrames,
         int monitorBufferedSamples,
         int monitorBufferCapacity,
-        long outputUnderflowSamples)
+        long outputUnderflowSamples,
+        long blockBudgetTicks,
+        long lastBlockTicks,
+        long maxBlockTicks,
+        long blockOverrunCount,
+        long lastBlockCpuTicks,
+        long maxBlockCpuTicks)
     {
         var inputs = _inputCaptureManager.GetDiagnostics();
         return new AudioEngineDiagnosticsSnapshot(
@@ -31,6 +37,12 @@ internal sealed class AudioEngineDiagnosticsCollector
             monitorBufferedSamples: monitorBufferedSamples,
             monitorBufferCapacity: monitorBufferCapacity,
             outputUnderflowSamples: outputUnderflowSamples,
+            blockBudgetTicks: blockBudgetTicks,
+            lastBlockTicks: lastBlockTicks,
+            maxBlockTicks: maxBlockTicks,
+            blockOverrunCount: blockOverrunCount,
+            lastBlockCpuTicks: lastBlockCpuTicks,
+            maxBlockCpuTicks: maxBlockCpuTicks,
             inputs: inputs);
     }
 }

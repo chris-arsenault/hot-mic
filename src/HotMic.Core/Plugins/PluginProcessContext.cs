@@ -6,7 +6,7 @@ namespace HotMic.Core.Plugins;
 public readonly struct PluginProcessContext
 {
     public PluginProcessContext(int sampleRate, int blockSize, long sampleClock, long sampleTime,
-        int slotIndex, int cumulativeLatencySamples, int channelId, IRoutingContext routingContext,
+        int slotIndex, int cumulativeLatencySamples, int channelId, bool profilingEnabled, IRoutingContext routingContext,
         AnalysisCaptureLink? analysisCapture, AnalysisSignalBus? analysisSignalBus, int[] signalProducers,
         AnalysisSignalMask producedSignals, AnalysisSignalMask requestedSignals)
     {
@@ -17,6 +17,7 @@ public readonly struct PluginProcessContext
         SlotIndex = slotIndex;
         CumulativeLatencySamples = cumulativeLatencySamples;
         ChannelId = channelId;
+        ProfilingEnabled = profilingEnabled;
         Routing = routingContext;
         AnalysisCapture = analysisCapture;
         AnalysisSignalBus = analysisSignalBus;
@@ -32,6 +33,7 @@ public readonly struct PluginProcessContext
     public int SlotIndex { get; }
     public int CumulativeLatencySamples { get; }
     public int ChannelId { get; }
+    public bool ProfilingEnabled { get; }
     public IRoutingContext Routing { get; }
     public AnalysisCaptureLink? AnalysisCapture { get; }
     public AnalysisSignalBus? AnalysisSignalBus { get; }

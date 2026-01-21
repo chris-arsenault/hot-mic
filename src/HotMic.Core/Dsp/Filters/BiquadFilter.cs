@@ -48,7 +48,9 @@ public sealed class BiquadFilter
         float output = _b0 * input + _z1;
         _z1 = _b1 * input - _a1 * output + _z2;
         _z2 = _b2 * input - _a2 * output;
-        return output;
+        _z1 = DspUtils.FlushDenormal(_z1);
+        _z2 = DspUtils.FlushDenormal(_z2);
+        return DspUtils.FlushDenormal(output);
     }
 
     public void Reset()

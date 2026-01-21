@@ -176,6 +176,7 @@ internal sealed class InputCaptureManager : IDisposable
                     channels: capture.Channels,
                     sampleRate: capture.SampleRate,
                     droppedSamples: capture.DroppedSamples,
+                    overflowSamples: capture.Source.OverflowSamples,
                     underflowSamples: capture.Source.UnderflowSamples));
             }
         }
@@ -365,7 +366,8 @@ internal sealed class InputCaptureManager : IDisposable
         {
             _manager = manager;
             _channelId = channelId;
-            _source = new InputSource(manager._blockSize * 32);
+            int minCapacity = Math.Max(manager._blockSize * 32, manager._sampleRate);
+            _source = new InputSource(minCapacity);
         }
 
         public int ChannelId => _channelId;

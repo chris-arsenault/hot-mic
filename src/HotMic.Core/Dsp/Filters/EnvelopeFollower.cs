@@ -17,6 +17,7 @@ public sealed class EnvelopeFollower
         float abs = MathF.Abs(input);
         float coeff = abs > _envelope ? _attackCoeff : _releaseCoeff;
         _envelope += coeff * (abs - _envelope);
+        _envelope = DspUtils.FlushDenormal(_envelope);
         return _envelope;
     }
 

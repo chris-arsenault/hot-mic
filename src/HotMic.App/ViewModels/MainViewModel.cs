@@ -71,8 +71,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
             () => SelectedOutputDevice,
             () => IsInitializing,
             value => IsInitializing = value,
-            (channelIndex, deviceId) => SetChannelInputDevice(channelIndex, deviceId),
-            (channelIndex, mode) => ApplyChannelInputMode(channelIndex, mode),
             (channelIndex, gain) => ApplyChannelInputGain(channelIndex, gain));
 
         _channelCoordinator = new MainChannelCoordinator(
@@ -81,8 +79,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             _pluginCoordinator,
             () => _audioEngine,
             () => _config,
-            GetOrCreateChannelConfig,
-            GetInputDeviceLabel);
+            GetOrCreateChannelConfig);
 
         _audioEngineCoordinator = new MainAudioEngineCoordinator(
             this,
@@ -227,10 +224,34 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private long inputDrops30Sec;
 
     [ObservableProperty]
+    private long inputUnderflowDrops30Sec;
+
+    [ObservableProperty]
     private long outputUnderflowDrops30Sec;
 
     [ObservableProperty]
+    private string profilingLine = "Proc: n/a";
+
+    [ObservableProperty]
+    private string worstPluginLine = "Worst: n/a";
+
+    [ObservableProperty]
+    private string analysisTapProfilingLine = "Tap: n/a";
+
+    [ObservableProperty]
+    private string analysisTapPitchProfilingLine = "Pitch: n/a";
+
+    [ObservableProperty]
+    private string analysisTapGateLine = "Gate: n/a";
+
+    [ObservableProperty]
+    private string vitalizerLine = "Vitalizer: n/a";
+
+    [ObservableProperty]
     private bool showDebugOverlay;
+
+    [ObservableProperty]
+    private long debugOverlayCopyTicks;
 
     [ObservableProperty]
     private AudioEngineDiagnosticsSnapshot diagnostics;
@@ -321,6 +342,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _windowRouter.ShowAnalyzerWindow(_audioEngineCoordinator.AnalysisOrchestrator);
     }
 
+    public void ReinitializeAudioEngine()
+    {
+        _audioEngineCoordinator.ReinitializeAudioEngine();
+    }
+
     public void AddChannel()
     {
         _channelCoordinator.AddChannel();
@@ -341,19 +367,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _pluginCoordinator.RenameContainer(channelIndex, containerId, newName);
     }
 
-    public void SetChannelInputDevice(int channelIndex, string deviceId)
-    {
-        _channelCoordinator.SetChannelInputDevice(channelIndex, deviceId);
-    }
-
-    public void ApplyChannelInputMode(int channelIndex, InputChannelMode mode)
-    {
-        _channelCoordinator.ApplyChannelInputMode(channelIndex, mode);
-    }
-
     public void ApplyChannelInputGain(int channelIndex, float gainDb)
     {
         _channelCoordinator.ApplyChannelInputGain(channelIndex, gainDb);
+    }
+
+    public void SetInputPluginMode(int channelIndex, int pluginInstanceId, InputChannelMode mode)
+    {
+        _pluginCoordinator.SetInputPluginMode(channelIndex, pluginInstanceId, mode);
     }
 
     public void AddContainer(int channelIndex)
@@ -379,6 +400,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _meterTimer.Stop();
         _containerWindowManager.CloseAll();
+        _pluginCoordinator.SavePluginStates();
         _midiCoordinator.Dispose();
         _audioEngine.Dispose();
         _audioEngineCoordinator.Dispose();
@@ -487,7 +509,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             Id = 1,
             Name = "Mic 1",
-            InputChannel = InputChannelMode.Sum,
             Plugins =
             [
                 new PluginConfig
@@ -515,7 +536,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 Id = _config.Channels.Count + 1,
                 Name = $"Channel {_config.Channels.Count + 1}",
-                InputChannel = InputChannelMode.Sum,
                 Plugins =
                 [
                     new PluginConfig

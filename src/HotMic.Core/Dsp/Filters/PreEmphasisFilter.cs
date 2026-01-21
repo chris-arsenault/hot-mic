@@ -16,8 +16,8 @@ public struct PreEmphasisFilter
     public float Process(float input)
     {
         float output = input - _alpha * _prev;
-        _prev = input;
-        return output;
+        _prev = DspUtils.FlushDenormal(input);
+        return DspUtils.FlushDenormal(output);
     }
 
     public void Reset()

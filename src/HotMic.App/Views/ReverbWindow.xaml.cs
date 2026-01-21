@@ -196,7 +196,11 @@ public partial class ReverbWindow : Window, IDisposable
 
         if (dialog.ShowDialog() == true)
         {
-            _plugin.LoadImpulseResponse(dialog.FileName);
+            if (_plugin.LoadImpulseResponse(dialog.FileName))
+            {
+                _parameterCallback(ConvolutionReverbPlugin.IrPresetIndex, _plugin.IrPreset);
+                _presetHelper.MarkAsCustom();
+            }
             SkiaCanvas.InvalidateVisual();
         }
     }

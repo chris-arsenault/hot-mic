@@ -97,14 +97,14 @@ internal static class EnhanceDebug
         foreach (var (tag, stats) in CollectionStats)
         {
             var line = new StringBuilder();
-            line.Append($"[EnhanceDebugSummary] {tag} lines={stats.LineCount}");
+            line.Append(CultureInfo.InvariantCulture, $"[EnhanceDebugSummary] {tag} lines={stats.LineCount}");
 
             foreach (var metric in stats.Metrics)
             {
                 var m = metric.Value;
                 if (m.Count == 0) continue;
                 float avg = (float)(m.Sum / m.Count);
-                line.Append($" {metric.Key}=min:{m.Min:0.###} max:{m.Max:0.###} avg:{avg:0.###}");
+                line.Append(CultureInfo.InvariantCulture, $" {metric.Key}=min:{m.Min:0.###} max:{m.Max:0.###} avg:{avg:0.###}");
             }
 
             Trace.WriteLine(line.ToString());

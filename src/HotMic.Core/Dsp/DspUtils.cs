@@ -4,6 +4,7 @@ public static class DspUtils
 {
     private const float Ln10Over20 = 0.115129254f;
     private const float InvLn10Over20 = 8.68588964f;
+    private const float DenormalThreshold = 1e-20f;
 
     public static float DbToLinear(float db)
     {
@@ -19,6 +20,12 @@ public static class DspUtils
     {
         float timeSeconds = MathF.Max(0.0001f, timeMs * 0.001f);
         return 1f - MathF.Exp(-1f / (timeSeconds * sampleRate));
+    }
+
+    public static float FlushDenormal(float value)
+    {
+        // Avoid denormals on near-silence to prevent sporadic CPU spikes.
+        return MathF.Abs(value) < DenormalThreshold ? 0f : value;
     }
 
     public static float ComputeBandEnergyRatio(ReadOnlySpan<float> magnitudes, float binResolutionHz, float minHz, float maxHz)

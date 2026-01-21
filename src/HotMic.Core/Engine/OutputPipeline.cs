@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 using HotMic.Core.Analysis;
@@ -21,6 +22,13 @@ internal sealed class OutputPipeline : IWaveProvider
     private LockFreeRingBuffer? _monitorBuffer;
     private int _masterMuted;
     private long _sampleClock;
+    private readonly long _blockBudgetTicks;
+    private int _profilingEnabled;
+    private long _lastBlockTicks;
+    private long _maxBlockTicks;
+    private long _blockOverrunCount;
+    private long _lastBlockCpuTicks;
+    private long _maxBlockCpuTicks;
 
     public OutputPipeline(
         RoutingSnapshot snapshot,
@@ -44,9 +52,22 @@ internal sealed class OutputPipeline : IWaveProvider
         _masterLufsRight = masterLufsRight;
         _analysisCapture = analysisCapture;
         WaveFormat = waveFormat;
+        _blockBudgetTicks = Math.Max(1, (long)Math.Round(blockSize * (double)Stopwatch.Frequency / waveFormat.SampleRate));
     }
 
     public WaveFormat WaveFormat { get; }
+
+    public long BlockBudgetTicks => _blockBudgetTicks;
+
+    public long LastBlockTicks => Interlocked.Read(ref _lastBlockTicks);
+
+    public long MaxBlockTicks => Interlocked.Read(ref _maxBlockTicks);
+
+    public long BlockOverrunCount => Interlocked.Read(ref _blockOverrunCount);
+
+    public long LastBlockCpuTicks => Interlocked.Read(ref _lastBlockCpuTicks);
+
+    public long MaxBlockCpuTicks => Interlocked.Read(ref _maxBlockCpuTicks);
 
     public void UpdateSnapshot(RoutingSnapshot snapshot)
     {
@@ -58,6 +79,19 @@ internal sealed class OutputPipeline : IWaveProvider
         Interlocked.Exchange(ref _sampleClock, 0);
     }
 
+    public void SetProfilingEnabled(bool enabled)
+    {
+        Volatile.Write(ref _profilingEnabled, enabled ? 1 : 0);
+        if (!enabled)
+        {
+            Interlocked.Exchange(ref _lastBlockTicks, 0);
+            Interlocked.Exchange(ref _maxBlockTicks, 0);
+            Interlocked.Exchange(ref _blockOverrunCount, 0);
+            Interlocked.Exchange(ref _lastBlockCpuTicks, 0);
+            Interlocked.Exchange(ref _maxBlockCpuTicks, 0);
+        }
+    }
+
     public int Read(byte[] buffer, int offset, int count)
     {
         ApplyParameterChanges();
@@ -66,6 +100,7 @@ internal sealed class OutputPipeline : IWaveProvider
         int totalFrames = output.Length / 2;
         int processed = 0;
         _reportOutput(totalFrames);
+        bool profilingEnabled = Volatile.Read(ref _profilingEnabled) != 0;
 
         if (!_isProcessingEnabled())
         {
@@ -76,6 +111,14 @@ internal sealed class OutputPipeline : IWaveProvider
         long sampleClock = _sampleClock;
         while (processed < totalFrames)
         {
+            long blockStartTicks = 0;
+            if (profilingEnabled)
+            {
+                blockStartTicks = Stopwatch.GetTimestamp();
+            }
+            long cpuStartTicks = 0;
+            bool cpuTiming = profilingEnabled && TryGetThreadCpuTicks(out cpuStartTicks);
+
             int chunk = Math.Min(_blockSize, totalFrames - processed);
             var snapshot = Volatile.Read(ref _snapshot);
             var routing = snapshot.Routing;
@@ -149,6 +192,17 @@ internal sealed class OutputPipeline : IWaveProvider
 
             var monitorBuffer = Volatile.Read(ref _monitorBuffer);
             monitorBuffer?.Write(outputSlice);
+
+            if (profilingEnabled)
+            {
+                long elapsedTicks = Stopwatch.GetTimestamp() - blockStartTicks;
+                RecordBlockTiming(elapsedTicks);
+                if (cpuTiming && TryGetThreadCpuTicks(out long cpuEndTicks))
+                {
+                    RecordBlockCpuTiming(cpuEndTicks - cpuStartTicks);
+                }
+            }
+
             processed += chunk;
             sampleClock += chunk;
         }
@@ -166,6 +220,77 @@ internal sealed class OutputPipeline : IWaveProvider
     public void SetMasterMute(bool muted)
     {
         Volatile.Write(ref _masterMuted, muted ? 1 : 0);
+    }
+
+    private void RecordBlockTiming(long elapsedTicks)
+    {
+        Interlocked.Exchange(ref _lastBlockTicks, elapsedTicks);
+        UpdateMax(ref _maxBlockTicks, elapsedTicks);
+        if (elapsedTicks > _blockBudgetTicks)
+        {
+            Interlocked.Increment(ref _blockOverrunCount);
+        }
+    }
+
+    private void RecordBlockCpuTiming(long cpuTicks)
+    {
+        if (cpuTicks <= 0)
+        {
+            return;
+        }
+
+        Interlocked.Exchange(ref _lastBlockCpuTicks, cpuTicks);
+        UpdateMax(ref _maxBlockCpuTicks, cpuTicks);
+    }
+
+    private static void UpdateMax(ref long location, long value)
+    {
+        long current = Interlocked.Read(ref location);
+        while (value > current)
+        {
+            long prior = Interlocked.CompareExchange(ref location, value, current);
+            if (prior == current)
+            {
+                break;
+            }
+
+            current = prior;
+        }
+    }
+
+    private static bool TryGetThreadCpuTicks(out long cpuTicks)
+    {
+        if (!GetThreadTimes(GetCurrentThread(), out _, out _, out var kernel, out var user))
+        {
+            cpuTicks = 0;
+            return false;
+        }
+
+        cpuTicks = FileTimeToTicks(kernel) + FileTimeToTicks(user);
+        return cpuTicks > 0;
+    }
+
+    private static long FileTimeToTicks(FILETIME time)
+    {
+        return ((long)time.dwHighDateTime << 32) | time.dwLowDateTime;
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentThread();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetThreadTimes(
+        IntPtr hThread,
+        out FILETIME lpCreationTime,
+        out FILETIME lpExitTime,
+        out FILETIME lpKernelTime,
+        out FILETIME lpUserTime);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FILETIME
+    {
+        public uint dwLowDateTime;
+        public uint dwHighDateTime;
     }
 
     private void ApplyParameterChanges()

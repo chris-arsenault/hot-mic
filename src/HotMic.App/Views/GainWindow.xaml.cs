@@ -166,6 +166,7 @@ public partial class GainWindow : Window, IDisposable
             int paramIndex = name switch
             {
                 "Gain" => GainPlugin.GainIndex,
+                "Phase" => GainPlugin.PhaseInvertIndex,
                 "PhaseInvert" => GainPlugin.PhaseInvertIndex,
                 _ => -1
             };
@@ -182,7 +183,7 @@ public partial class GainWindow : Window, IDisposable
         return new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
         {
             ["Gain"] = _plugin.GainDb,
-            ["PhaseInvert"] = _plugin.IsPhaseInverted ? 1f : 0f
+            ["Phase"] = _plugin.IsPhaseInverted ? 1f : 0f
         };
     }
 

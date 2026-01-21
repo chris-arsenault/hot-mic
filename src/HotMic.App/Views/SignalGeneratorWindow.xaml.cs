@@ -837,10 +837,46 @@ public partial class SignalGeneratorWindow : Window, IDisposable
     private Dictionary<string, float> GetCurrentParameters()
     {
         var result = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
-        foreach (var param in _plugin.Parameters)
+
+        for (int slot = 0; slot < SignalGeneratorPlugin.SlotCount; slot++)
         {
-            result[param.Name] = param.DefaultValue;
+            var state = _plugin.GetSlotState(slot);
+            string prefix = $"Slot {slot + 1} ";
+
+            result[prefix + "Type"] = (float)state.Type;
+            result[prefix + "Frequency"] = state.Frequency;
+            result[prefix + "Gain"] = state.GainDb;
+            result[prefix + "Mute"] = state.Muted ? 1f : 0f;
+            result[prefix + "Solo"] = state.Solo ? 1f : 0f;
+            result[prefix + "Sweep"] = state.SweepEnabled ? 1f : 0f;
+            result[prefix + "Sweep Start"] = state.SweepStartHz;
+            result[prefix + "Sweep End"] = state.SweepEndHz;
+            result[prefix + "Sweep Duration"] = state.SweepDurationMs;
+            result[prefix + "Sweep Dir"] = (float)state.SweepDirection;
+            result[prefix + "Sweep Curve"] = (float)state.SweepCurve;
+            result[prefix + "Pulse Width"] = state.PulseWidth;
+            result[prefix + "Impulse Interval"] = state.ImpulseIntervalMs;
+            result[prefix + "Chirp Duration"] = state.ChirpDurationMs;
+            result[prefix + "Loop Mode"] = (float)state.LoopMode;
+            result[prefix + "Speed"] = state.SampleSpeed;
+            result[prefix + "Trim Start"] = state.TrimStart;
+            result[prefix + "Trim End"] = state.TrimEnd;
         }
+
+        var masterState = _plugin.GetMasterState();
+        result["Master Gain"] = masterState.GainDb;
+        result["Master Mute"] = masterState.Muted ? 1f : 0f;
+        result["Headroom"] = (float)masterState.Headroom;
+
+        var stateBytes = _plugin.GetState();
+        int slotBytes = SignalGeneratorPlugin.SlotCount * 18 * sizeof(float);
+        if (stateBytes.Length >= slotBytes + 5 * sizeof(float))
+        {
+            int offset = slotBytes + 3 * sizeof(float);
+            result["Output Preset"] = BitConverter.ToSingle(stateBytes, offset);
+            result["Mix Mode"] = BitConverter.ToSingle(stateBytes, offset + sizeof(float));
+        }
+
         return result;
     }
 

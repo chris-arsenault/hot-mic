@@ -12,6 +12,12 @@ public readonly struct AudioEngineDiagnosticsSnapshot
         int monitorBufferedSamples,
         int monitorBufferCapacity,
         long outputUnderflowSamples,
+        long blockBudgetTicks,
+        long lastBlockTicks,
+        long maxBlockTicks,
+        long blockOverrunCount,
+        long lastBlockCpuTicks,
+        long maxBlockCpuTicks,
         IReadOnlyList<InputDiagnosticsSnapshot> inputs)
     {
         OutputActive = outputActive;
@@ -23,6 +29,12 @@ public readonly struct AudioEngineDiagnosticsSnapshot
         MonitorBufferedSamples = monitorBufferedSamples;
         MonitorBufferCapacity = monitorBufferCapacity;
         OutputUnderflowSamples = outputUnderflowSamples;
+        BlockBudgetTicks = blockBudgetTicks;
+        LastBlockTicks = lastBlockTicks;
+        MaxBlockTicks = maxBlockTicks;
+        BlockOverrunCount = blockOverrunCount;
+        LastBlockCpuTicks = lastBlockCpuTicks;
+        MaxBlockCpuTicks = maxBlockCpuTicks;
         Inputs = inputs;
     }
 
@@ -35,6 +47,12 @@ public readonly struct AudioEngineDiagnosticsSnapshot
     public int MonitorBufferedSamples { get; }
     public int MonitorBufferCapacity { get; }
     public long OutputUnderflowSamples { get; }
+    public long BlockBudgetTicks { get; }
+    public long LastBlockTicks { get; }
+    public long MaxBlockTicks { get; }
+    public long BlockOverrunCount { get; }
+    public long LastBlockCpuTicks { get; }
+    public long MaxBlockCpuTicks { get; }
     public IReadOnlyList<InputDiagnosticsSnapshot> Inputs { get; }
 }
 
@@ -52,6 +70,7 @@ public readonly struct InputDiagnosticsSnapshot
         int channels,
         int sampleRate,
         long droppedSamples,
+        long overflowSamples,
         long underflowSamples)
     {
         ChannelId = channelId;
@@ -65,6 +84,7 @@ public readonly struct InputDiagnosticsSnapshot
         Channels = channels;
         SampleRate = sampleRate;
         DroppedSamples = droppedSamples;
+        OverflowSamples = overflowSamples;
         UnderflowSamples = underflowSamples;
     }
 
@@ -79,5 +99,6 @@ public readonly struct InputDiagnosticsSnapshot
     public int Channels { get; }
     public int SampleRate { get; }
     public long DroppedSamples { get; }
+    public long OverflowSamples { get; }
     public long UnderflowSamples { get; }
 }

@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Threading;
 using HotMic.Core.Analysis;
+using HotMic.Core.Threading;
 using HotMic.Core.Engine;
 
 namespace HotMic.Core.Plugins;
@@ -11,6 +13,7 @@ public sealed class PluginChain
     private int _nextInstanceId;
     private readonly int _sampleRate;
     private readonly int _blockSize;
+    private readonly long _blockBudgetTicks;
     private readonly int _analysisSignalCapacity;
     private readonly int[] _lastProducerScratch;
     private AnalysisSignalBus? _analysisSignalBus;
@@ -18,6 +21,7 @@ public sealed class PluginChain
     private int _visualRequestedSignalsRaw;
     private AnalysisCaptureLink? _analysisCapture;
     private int _inputStageIndex = -1;
+    private int _profilingEnabled;
 
     public PluginChain(int sampleRate, int blockSize, int initialCapacity = 0)
     {
@@ -26,6 +30,7 @@ public sealed class PluginChain
         _slots = initialCapacity > 0 ? new PluginSlot?[initialCapacity] : [];
         _analysisSignalCapacity = Math.Max(sampleRate * 2, blockSize * 4);
         _lastProducerScratch = new int[(int)AnalysisSignalId.Count];
+        _blockBudgetTicks = Math.Max(1, (long)Math.Round(blockSize * (double)Stopwatch.Frequency / sampleRate));
         RebuildIdIndexMap(_slots);
         RebuildAnalysisSignalBus();
         RebuildDownstreamRequiredSignals(_slots);
@@ -290,6 +295,15 @@ public sealed class PluginChain
         Volatile.Write(ref _visualRequestedSignalsRaw, (int)requestedSignals);
     }
 
+    public void SetProfilingEnabled(bool enabled)
+    {
+        Volatile.Write(ref _profilingEnabled, enabled ? 1 : 0);
+        if (!enabled)
+        {
+            ResetProfiling(Volatile.Read(ref _slots));
+        }
+    }
+
     public int Process(Span<float> buffer, long sampleClock, int channelId, IRoutingContext routingContext)
     {
         return ProcessInternal(buffer, sampleClock, channelId, routingContext, splitIndex: -1, onSplit: null);
@@ -308,6 +322,8 @@ public sealed class PluginChain
         var bus = Volatile.Read(ref _analysisSignalBus);
         var downstreamRequiredSignals = UpdateDownstreamRequiredSignals(slots);
         var visualRequestedSignals = (AnalysisSignalMask)Volatile.Read(ref _visualRequestedSignalsRaw);
+        bool profilingEnabled = Volatile.Read(ref _profilingEnabled) != 0;
+        long budgetTicks = _blockBudgetTicks;
         int cumulativeLatency = 0;
         var lastProducer = _lastProducerScratch;
         for (int s = 0; s < lastProducer.Length; s++)
@@ -378,13 +394,34 @@ public sealed class PluginChain
                     i,
                     cumulativeLatency,
                     channelId,
+                    profilingEnabled,
                     routingContext,
                     Volatile.Read(ref _analysisCapture),
                     bus,
                     lastProducer,
                     producedSignals,
                     requestedSignals);
+                long startTicks = 0;
+                long cpuStartCycles = 0;
+                bool cpuTiming = false;
+                if (profilingEnabled)
+                {
+                    startTicks = Stopwatch.GetTimestamp();
+                    cpuTiming = ThreadCpuTimer.TryGetCurrentThreadCycles(out cpuStartCycles);
+                }
+
                 plugin.Process(buffer, context);
+
+                if (profilingEnabled)
+                {
+                    long elapsedTicks = Stopwatch.GetTimestamp() - startTicks;
+                    long cpuCycles = 0;
+                    if (cpuTiming && ThreadCpuTimer.TryGetCurrentThreadCycles(out long cpuEndCycles))
+                    {
+                        cpuCycles = cpuEndCycles - cpuStartCycles;
+                    }
+                    slot.RecordProfiling(elapsedTicks, budgetTicks, cpuCycles);
+                }
             }
 
             if (shouldCaptureDelta)
@@ -428,6 +465,26 @@ public sealed class PluginChain
             {
                 slot.Meter.Process(buffer, trackClip: false);
             }
+        }
+    }
+
+    /// <summary>
+    /// Clears meter, delta, and profiling state for all plugin slots.
+    /// </summary>
+    public void ResetMeters()
+    {
+        var slots = Volatile.Read(ref _slots);
+        for (int i = 0; i < slots.Length; i++)
+        {
+            var slot = slots[i];
+            if (slot is null)
+            {
+                continue;
+            }
+
+            slot.Meter.Reset();
+            slot.Delta.Reset();
+            slot.ResetProfiling();
         }
     }
 
@@ -729,5 +786,13 @@ public sealed class PluginChain
         }
 
         return true;
+    }
+
+    private static void ResetProfiling(PluginSlot?[] slots)
+    {
+        for (int i = 0; i < slots.Length; i++)
+        {
+            slots[i]?.ResetProfiling();
+        }
     }
 }

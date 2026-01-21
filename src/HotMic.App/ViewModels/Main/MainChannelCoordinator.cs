@@ -14,7 +14,6 @@ internal sealed class MainChannelCoordinator
     private readonly Func<AudioEngine> _getAudioEngine;
     private readonly Func<AppConfig> _getConfig;
     private readonly Func<int, ChannelConfig> _getOrCreateChannelConfig;
-    private readonly Func<string, string> _getInputDeviceLabel;
     private Action<int>? _rebuildForChannelTopologyChange;
     private bool _suppressChannelConfig;
 
@@ -24,8 +23,7 @@ internal sealed class MainChannelCoordinator
         MainPluginCoordinator pluginCoordinator,
         Func<AudioEngine> getAudioEngine,
         Func<AppConfig> getConfig,
-        Func<int, ChannelConfig> getOrCreateChannelConfig,
-        Func<string, string> getInputDeviceLabel)
+        Func<int, ChannelConfig> getOrCreateChannelConfig)
     {
         _viewModel = viewModel;
         _configManager = configManager;
@@ -33,7 +31,6 @@ internal sealed class MainChannelCoordinator
         _getAudioEngine = getAudioEngine;
         _getConfig = getConfig;
         _getOrCreateChannelConfig = getOrCreateChannelConfig;
-        _getInputDeviceLabel = getInputDeviceLabel;
     }
 
     public void SetRebuildHandler(Action<int> rebuildForChannelTopologyChange)
@@ -72,42 +69,8 @@ internal sealed class MainChannelCoordinator
             channelViewModel.OutputGainDb = channelConfig.OutputGainDb;
             channelViewModel.IsMuted = channelConfig.IsMuted;
             channelViewModel.IsSoloed = channelConfig.IsSoloed;
-            channelViewModel.InputDeviceId = channelConfig.InputDeviceId;
-            channelViewModel.InputChannelMode = channelConfig.InputChannel;
-            channelViewModel.InputDeviceLabel = _getInputDeviceLabel(channelConfig.InputDeviceId);
         }
         _suppressChannelConfig = false;
-    }
-
-    public void ApplyChannelInputsToEngine()
-    {
-        bool changed = false;
-        int count = Math.Min(_getAudioEngine().Channels.Count, _viewModel.Channels.Count);
-        _suppressChannelConfig = true;
-
-        for (int i = 0; i < count; i++)
-        {
-            var viewModel = _viewModel.Channels[i];
-            var config = _getOrCreateChannelConfig(i);
-            string resolved = _getAudioEngine().ConfigureChannelInput(i, viewModel.InputDeviceId, viewModel.InputChannelMode);
-            if (!string.Equals(resolved, viewModel.InputDeviceId, StringComparison.OrdinalIgnoreCase))
-            {
-                viewModel.InputDeviceId = resolved;
-                viewModel.InputDeviceLabel = _getInputDeviceLabel(resolved);
-                config.InputDeviceId = resolved;
-                changed = true;
-            }
-            else
-            {
-                viewModel.InputDeviceLabel = _getInputDeviceLabel(resolved);
-            }
-        }
-
-        _suppressChannelConfig = false;
-        if (changed)
-        {
-            _configManager.Save(_getConfig());
-        }
     }
 
     public void UpdateDynamicWindowWidth()
@@ -132,45 +95,6 @@ internal sealed class MainChannelCoordinator
 
         _viewModel.WindowWidth = MainLayoutMetrics.GetFullViewWidth(maxSlots);
         _viewModel.WindowHeight = MainLayoutMetrics.GetFullViewHeight(channelCount);
-    }
-
-    public void SetChannelInputDevice(int channelIndex, string deviceId)
-    {
-        if ((uint)channelIndex >= (uint)_viewModel.Channels.Count)
-        {
-            return;
-        }
-
-        var viewModel = _viewModel.Channels[channelIndex];
-        var config = _getOrCreateChannelConfig(channelIndex);
-
-        string resolved = _getAudioEngine().ConfigureChannelInput(channelIndex, deviceId, viewModel.InputChannelMode);
-        _suppressChannelConfig = true;
-        viewModel.InputDeviceId = resolved;
-        viewModel.InputDeviceLabel = _getInputDeviceLabel(resolved);
-        _suppressChannelConfig = false;
-        config.InputDeviceId = resolved;
-
-        _configManager.Save(_getConfig());
-    }
-
-    public void ApplyChannelInputMode(int channelIndex, InputChannelMode mode)
-    {
-        if ((uint)channelIndex >= (uint)_viewModel.Channels.Count)
-        {
-            return;
-        }
-
-        var viewModel = _viewModel.Channels[channelIndex];
-        var config = _getOrCreateChannelConfig(channelIndex);
-
-        _suppressChannelConfig = true;
-        viewModel.InputChannelMode = mode;
-        _suppressChannelConfig = false;
-
-        config.InputChannel = mode;
-        ApplyChannelInput(channelIndex, viewModel, config);
-        _configManager.Save(_getConfig());
     }
 
     public void ApplyChannelInputGain(int channelIndex, float gainDb)
@@ -203,13 +127,9 @@ internal sealed class MainChannelCoordinator
         viewModel.OutputGainDb = channelConfig.OutputGainDb;
         viewModel.IsMuted = channelConfig.IsMuted;
         viewModel.IsSoloed = channelConfig.IsSoloed;
-        viewModel.InputDeviceId = channelConfig.InputDeviceId;
-        viewModel.InputChannelMode = channelConfig.InputChannel;
-        viewModel.InputDeviceLabel = _getInputDeviceLabel(channelConfig.InputDeviceId);
         _suppressChannelConfig = false;
 
         _pluginCoordinator.LoadChannelPlugins(channelIndex, channelConfig);
-        ApplyChannelInput(channelIndex, viewModel, channelConfig);
         _pluginCoordinator.RefreshPluginViewModels(channelIndex);
         UpdateDynamicWindowWidth();
         _configManager.Save(config);
@@ -270,8 +190,6 @@ internal sealed class MainChannelCoordinator
         {
             Id = channelIndex + 1,
             Name = $"Copy {sourceChannelIndex + 1} -> {channelIndex + 1}",
-            InputChannel = InputChannelMode.Sum,
-            InputDeviceId = string.Empty,
             Plugins =
             [
                 new PluginConfig
@@ -295,9 +213,6 @@ internal sealed class MainChannelCoordinator
         viewModel.OutputGainDb = channelConfig.OutputGainDb;
         viewModel.IsMuted = channelConfig.IsMuted;
         viewModel.IsSoloed = channelConfig.IsSoloed;
-        viewModel.InputDeviceId = channelConfig.InputDeviceId;
-        viewModel.InputChannelMode = channelConfig.InputChannel;
-        viewModel.InputDeviceLabel = _getInputDeviceLabel(channelConfig.InputDeviceId);
         _suppressChannelConfig = false;
 
         _pluginCoordinator.LoadChannelPlugins(channelIndex, channelConfig);
@@ -314,6 +229,7 @@ internal sealed class MainChannelCoordinator
             channelIndex,
             name,
             _pluginCoordinator.EnqueueParameterChange,
+            _pluginCoordinator.ApplyPluginParameterByIndex,
             (instanceId, slotIndex) => _pluginCoordinator.HandlePluginAction(channelIndex, instanceId, slotIndex),
             instanceId => _pluginCoordinator.RemovePlugin(channelIndex, instanceId),
             (instanceId, toIndex) => _pluginCoordinator.ReorderPlugins(channelIndex, instanceId, toIndex),
@@ -332,6 +248,7 @@ internal sealed class MainChannelCoordinator
         }
 
         var config = _getOrCreateChannelConfig(channelIndex);
+        bool changed = true;
         switch (propertyName)
         {
             case nameof(ChannelStripViewModel.InputGainDb):
@@ -349,44 +266,14 @@ internal sealed class MainChannelCoordinator
             case nameof(ChannelStripViewModel.Name):
                 config.Name = viewModel.Name;
                 break;
-            case nameof(ChannelStripViewModel.InputDeviceId):
-                config.InputDeviceId = viewModel.InputDeviceId;
-                if (!_viewModel.IsInitializing)
-                {
-                    ApplyChannelInput(channelIndex, viewModel, config);
-                    _pluginCoordinator.RefreshPluginViewModels(channelIndex);
-                }
-                else
-                {
-                    viewModel.InputDeviceLabel = _getInputDeviceLabel(viewModel.InputDeviceId);
-                }
-                break;
-            case nameof(ChannelStripViewModel.InputChannelMode):
-                config.InputChannel = viewModel.InputChannelMode;
-                if (!_viewModel.IsInitializing)
-                {
-                    ApplyChannelInput(channelIndex, viewModel, config);
-                }
+            default:
+                changed = false;
                 break;
         }
 
-        _configManager.Save(_getConfig());
-    }
-
-    private void ApplyChannelInput(int channelIndex, ChannelStripViewModel viewModel, ChannelConfig config)
-    {
-        string resolved = _getAudioEngine().ConfigureChannelInput(channelIndex, viewModel.InputDeviceId, viewModel.InputChannelMode);
-        if (!string.Equals(resolved, viewModel.InputDeviceId, StringComparison.OrdinalIgnoreCase))
+        if (changed)
         {
-            _suppressChannelConfig = true;
-            viewModel.InputDeviceId = resolved;
-            viewModel.InputDeviceLabel = _getInputDeviceLabel(resolved);
-            _suppressChannelConfig = false;
-            config.InputDeviceId = resolved;
-        }
-        else
-        {
-            viewModel.InputDeviceLabel = _getInputDeviceLabel(resolved);
+            _configManager.Save(_getConfig());
         }
     }
 
@@ -459,7 +346,6 @@ internal sealed class MainChannelCoordinator
         {
             Id = id,
             Name = $"Channel {id}",
-            InputChannel = InputChannelMode.Sum,
             Plugins =
             [
                 new PluginConfig

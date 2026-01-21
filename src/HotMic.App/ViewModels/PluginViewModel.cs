@@ -10,10 +10,11 @@ public partial class PluginViewModel : ObservableObject
     private Action? _action;
     private Action? _remove;
     private readonly Action<HotMic.Core.Engine.ParameterChange>? _parameterSink;
+    private readonly Action<int, int, int, float>? _pluginParameterSink;
     private readonly Action<int, bool>? _bypassConfigSink;
     private readonly int _channelId;
 
-    private PluginViewModel(int channelId, int slotIndex, int instanceId, Action? action, Action? remove, Action<HotMic.Core.Engine.ParameterChange>? parameterSink, Action<int, bool>? bypassConfigSink)
+    private PluginViewModel(int channelId, int slotIndex, int instanceId, Action? action, Action? remove, Action<HotMic.Core.Engine.ParameterChange>? parameterSink, Action<int, int, int, float>? pluginParameterSink, Action<int, bool>? bypassConfigSink)
     {
         _channelId = channelId;
         SlotIndex = slotIndex;
@@ -21,6 +22,7 @@ public partial class PluginViewModel : ObservableObject
         _action = action;
         _remove = remove;
         _parameterSink = parameterSink;
+        _pluginParameterSink = pluginParameterSink;
         _bypassConfigSink = bypassConfigSink;
         ActionCommand = new RelayCommand(() => _action?.Invoke());
         RemoveCommand = new RelayCommand(() => _remove?.Invoke());
@@ -93,9 +95,9 @@ public partial class PluginViewModel : ObservableObject
             : DeltaDisplayMode.VocalRange;
     }
 
-    public static PluginViewModel CreateEmpty(int channelId, int slotIndex, int instanceId, Action? action = null, Action? remove = null, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int, bool>? bypassConfigSink = null)
+    public static PluginViewModel CreateEmpty(int channelId, int slotIndex, int instanceId, Action? action = null, Action? remove = null, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int, int, int, float>? pluginParameterSink = null, Action<int, bool>? bypassConfigSink = null)
     {
-        var viewModel = new PluginViewModel(channelId, slotIndex, instanceId, action, remove, parameterSink, bypassConfigSink)
+        var viewModel = new PluginViewModel(channelId, slotIndex, instanceId, action, remove, parameterSink, pluginParameterSink, bypassConfigSink)
         {
             IsEmpty = true,
             DisplayName = $"Slot {slotIndex}",
@@ -105,9 +107,9 @@ public partial class PluginViewModel : ObservableObject
         return viewModel;
     }
 
-    public static PluginViewModel CreateFilled(int channelId, int slotIndex, int instanceId, string pluginId, string name, float latencyMs, float[] elevatedValues, Action? action = null, Action? remove = null, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int, bool>? bypassConfigSink = null)
+    public static PluginViewModel CreateFilled(int channelId, int slotIndex, int instanceId, string pluginId, string name, float latencyMs, float[] elevatedValues, Action? action = null, Action? remove = null, Action<HotMic.Core.Engine.ParameterChange>? parameterSink = null, Action<int, int, int, float>? pluginParameterSink = null, Action<int, bool>? bypassConfigSink = null)
     {
-        var viewModel = new PluginViewModel(channelId, slotIndex, instanceId, action, remove, parameterSink, bypassConfigSink)
+        var viewModel = new PluginViewModel(channelId, slotIndex, instanceId, action, remove, parameterSink, pluginParameterSink, bypassConfigSink)
         {
             IsEmpty = false,
             PluginId = pluginId,
@@ -209,6 +211,12 @@ public partial class PluginViewModel : ObservableObject
             return;
         }
 
+        if (_pluginParameterSink is not null)
+        {
+            _pluginParameterSink(_channelId, InstanceId, ElevatedParams[0].Index, value);
+            return;
+        }
+
         _parameterSink?.Invoke(new HotMic.Core.Engine.ParameterChange
         {
             ChannelId = _channelId,
@@ -228,6 +236,12 @@ public partial class PluginViewModel : ObservableObject
 
         if (InstanceId <= 0)
         {
+            return;
+        }
+
+        if (_pluginParameterSink is not null)
+        {
+            _pluginParameterSink(_channelId, InstanceId, ElevatedParams[1].Index, value);
             return;
         }
 

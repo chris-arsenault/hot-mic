@@ -162,6 +162,10 @@ internal sealed class MainHitTester
 
     public bool HitTestStatsArea(float x, float y) => _targets.StatsAreaRect.Contains(x, y);
 
+    public bool HitTestReinitializeAudio(float x, float y) => _targets.ReinitializeAudioRect.Contains(x, y);
+
+    public bool HitTestDebugOverlayCopy(float x, float y) => _targets.DebugOverlayCopyRect.Contains(x, y);
+
     public bool HitTestTitleBar(float x, float y) => _targets.TitleBarRect.Contains(x, y);
 
     public bool HitTestPresetDropdown(float x, float y) => _targets.PresetDropdownRect.Contains(x, y);

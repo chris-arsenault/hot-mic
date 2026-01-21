@@ -13,6 +13,7 @@ public sealed class MeterProcessor
     private int _peakBits;
     private int _rmsBits;
     private int _clipHoldRemaining;
+    private int _nonFiniteSampleCount;
     private float _peakSmoothed;
     private float _rmsSmoothed;
 
@@ -53,6 +54,7 @@ public sealed class MeterProcessor
 
         float peak = 0f;
         bool clipped = false;
+        int nonFiniteCount = 0;
         double sumSquares = 0d;
         int validSamples = 0;
         for (int i = 0; i < buffer.Length; i++)
@@ -60,6 +62,7 @@ public sealed class MeterProcessor
             float sample = buffer[i];
             if (!float.IsFinite(sample))
             {
+                nonFiniteCount++;
                 if (trackClip)
                 {
                     clipped = true;
@@ -104,6 +107,11 @@ public sealed class MeterProcessor
         Interlocked.Exchange(ref _peakBits, BitConverter.SingleToInt32Bits(_peakSmoothed));
         Interlocked.Exchange(ref _rmsBits, BitConverter.SingleToInt32Bits(_rmsSmoothed));
 
+        if (nonFiniteCount > 0)
+        {
+            Interlocked.Add(ref _nonFiniteSampleCount, nonFiniteCount);
+        }
+
         if (trackClip && clipped)
         {
             Volatile.Write(ref _clipHoldRemaining, _clipHoldSamples);
@@ -132,5 +140,26 @@ public sealed class MeterProcessor
     public bool GetClipHoldActive()
     {
         return Volatile.Read(ref _clipHoldRemaining) > 0;
+    }
+
+    /// <summary>
+    /// Returns the number of non-finite samples observed since the last call.
+    /// </summary>
+    public int ConsumeNonFiniteSamples()
+    {
+        return Interlocked.Exchange(ref _nonFiniteSampleCount, 0);
+    }
+
+    /// <summary>
+    /// Resets smoothing, clip hold, and non-finite tracking.
+    /// </summary>
+    public void Reset()
+    {
+        _peakSmoothed = 0f;
+        _rmsSmoothed = 0f;
+        Interlocked.Exchange(ref _peakBits, BitConverter.SingleToInt32Bits(0f));
+        Interlocked.Exchange(ref _rmsBits, BitConverter.SingleToInt32Bits(0f));
+        Volatile.Write(ref _clipHoldRemaining, 0);
+        Interlocked.Exchange(ref _nonFiniteSampleCount, 0);
     }
 }

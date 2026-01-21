@@ -36,6 +36,7 @@ public sealed class AudioEngine : IDisposable
     private int _processingEnabled = 1;
     private int _monitorActive;
     private long _outputUnderflowSamples;
+    private int _profilingEnabled;
 
     private WasapiOut? _output;
     private WasapiOut? _monitorOutput;
@@ -180,6 +181,7 @@ public sealed class AudioEngine : IDisposable
         }
 
         Interlocked.Exchange(ref _channels, next);
+        SetProfilingEnabled(Volatile.Read(ref _profilingEnabled) != 0);
         _inputCaptureManager.RemoveCapturesAbove(channelCount);
         RebuildRoutingSnapshot(next);
     }
@@ -278,6 +280,7 @@ public sealed class AudioEngine : IDisposable
             _masterLufsRight,
             _analysisCaptureLink,
             outputFormat);
+        _outputPipeline.SetProfilingEnabled(Volatile.Read(ref _profilingEnabled) != 0);
 
         _output = new WasapiOut(outputDevice, AudioClientShareMode.Shared, true, _latencyMs);
         _output.Init(_outputPipeline);
@@ -337,6 +340,46 @@ public sealed class AudioEngine : IDisposable
         DrainPendingPluginDisposals(force: true);
     }
 
+    /// <summary>
+    /// Clears transient buffers, counters, and metering state without changing configuration.
+    /// </summary>
+    public void ResetState()
+    {
+        _parameterQueue.Clear();
+        _inputCaptureManager.ClearBuffers();
+        _monitorBuffer?.Clear();
+        _analysisCaptureLink.Reset();
+        _outputPipeline?.ResetSampleClock();
+
+        Interlocked.Exchange(ref _outputUnderflowSamples, 0);
+        Interlocked.Exchange(ref _outputCallbackCount, 0);
+        Interlocked.Exchange(ref _lastOutputFrames, 0);
+        Interlocked.Exchange(ref _lastOutputCallbackTicks, 0);
+
+        _masterLufsLeft.Reset();
+        _masterLufsRight.Reset();
+
+        var channels = Volatile.Read(ref _channels);
+        for (int i = 0; i < channels.Length; i++)
+        {
+            channels[i].InputMeter.Reset();
+            channels[i].OutputMeter.Reset();
+            channels[i].PluginChain.ResetMeters();
+        }
+    }
+
+    public void SetProfilingEnabled(bool enabled)
+    {
+        Volatile.Write(ref _profilingEnabled, enabled ? 1 : 0);
+        _outputPipeline?.SetProfilingEnabled(enabled);
+
+        var channels = Volatile.Read(ref _channels);
+        for (int i = 0; i < channels.Length; i++)
+        {
+            channels[i].PluginChain.SetProfilingEnabled(enabled);
+        }
+    }
+
     public void EnqueueParameterChange(ParameterChange change)
     {
         _parameterQueue.Enqueue(change);
@@ -360,6 +403,7 @@ public sealed class AudioEngine : IDisposable
 
     public AudioEngineDiagnosticsSnapshot GetDiagnosticsSnapshot()
     {
+        var pipeline = _outputPipeline;
         return _diagnosticsCollector.Build(
             outputActive: Volatile.Read(ref _outputActive) == 1,
             monitorActive: Volatile.Read(ref _monitorActive) == 1,
@@ -369,7 +413,13 @@ public sealed class AudioEngine : IDisposable
             lastOutputFrames: Volatile.Read(ref _lastOutputFrames),
             monitorBufferedSamples: _monitorBuffer?.AvailableRead ?? 0,
             monitorBufferCapacity: _monitorBuffer?.Capacity ?? 0,
-            outputUnderflowSamples: Interlocked.Read(ref _outputUnderflowSamples));
+            outputUnderflowSamples: Interlocked.Read(ref _outputUnderflowSamples),
+            blockBudgetTicks: pipeline?.BlockBudgetTicks ?? 0,
+            lastBlockTicks: pipeline?.LastBlockTicks ?? 0,
+            maxBlockTicks: pipeline?.MaxBlockTicks ?? 0,
+            blockOverrunCount: pipeline?.BlockOverrunCount ?? 0,
+            lastBlockCpuTicks: pipeline?.LastBlockCpuTicks ?? 0,
+            maxBlockCpuTicks: pipeline?.MaxBlockCpuTicks ?? 0);
     }
 
     public void Dispose()

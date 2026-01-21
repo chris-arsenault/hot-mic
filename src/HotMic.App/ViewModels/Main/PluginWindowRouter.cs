@@ -59,6 +59,7 @@ internal sealed class PluginWindowRouter
             new() { Id = "builtin:spectral-contrast", Name = "Spectral Contrast", IsVst3 = false, Category = PluginCategory.Effects, Description = "Enhances spectral detail via lateral inhibition" },
             new() { Id = "builtin:air-exciter", Name = "Air Exciter", IsVst3 = false, Category = PluginCategory.Effects, Description = "Keyed high-frequency excitation" },
             new() { Id = "builtin:bass-enhancer", Name = "Bass Enhancer", IsVst3 = false, Category = PluginCategory.Effects, Description = "Psychoacoustic low-end harmonics" },
+            new() { Id = "builtin:vitalizer-mk2t", Name = "Vitalizer Mk2-T", IsVst3 = false, Category = PluginCategory.Effects, Description = "Psychoacoustic de-masking with tube stage (mono)" },
             new() { Id = "builtin:room-tone", Name = "Room Tone", IsVst3 = false, Category = PluginCategory.Effects, Description = "Controlled ambience bed with ducking" }
         };
 
@@ -216,6 +217,12 @@ internal sealed class PluginWindowRouter
             return;
         }
 
+        if (plugin is VitalizerMk2TPlugin vitalizer)
+        {
+            ShowVitalizerWindow(channelIndex, pluginInstanceId, vitalizer, request);
+            return;
+        }
+
         if (plugin is ConsonantTransientPlugin consonantTransient)
         {
             ShowConsonantTransientWindow(channelIndex, pluginInstanceId, consonantTransient, request);
@@ -303,7 +310,7 @@ internal sealed class PluginWindowRouter
             () => channel.OutputPeakLevel,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -328,7 +335,7 @@ internal sealed class PluginWindowRouter
         var window = new NoiseGateWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -343,7 +350,7 @@ internal sealed class PluginWindowRouter
         var window = new CompressorWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -358,7 +365,7 @@ internal sealed class PluginWindowRouter
         var window = new SignalGeneratorWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters.FirstOrDefault(p => p.Index == paramIndex)?.Name ?? string.Empty;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -373,7 +380,7 @@ internal sealed class PluginWindowRouter
         var window = new GainWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -397,13 +404,13 @@ internal sealed class PluginWindowRouter
 
         var window = new InputSourceWindow(
             devices,
-            () => channel.InputDeviceId,
-            () => channel.InputChannelMode,
+            () => plugin.DeviceId,
+            () => plugin.ChannelMode,
             () => channel.InputGainDb,
             () => channel.InputPeakLevel,
             () => plugin.IsBypassed,
-            deviceId => request.SetChannelInputDevice(channelIndex, deviceId),
-            mode => request.SetChannelInputMode(channelIndex, mode),
+            deviceId => request.SetInputPluginDevice(channelIndex, pluginInstanceId, deviceId),
+            mode => request.SetInputPluginMode(channelIndex, pluginInstanceId, mode),
             gainDb => request.SetChannelInputGain(channelIndex, gainDb),
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
@@ -417,7 +424,7 @@ internal sealed class PluginWindowRouter
         var window = new EqWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -432,7 +439,7 @@ internal sealed class PluginWindowRouter
         var window = new FFTNoiseWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed),
@@ -448,7 +455,7 @@ internal sealed class PluginWindowRouter
         var window = new FrequencyAnalyzerWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -463,7 +470,7 @@ internal sealed class PluginWindowRouter
         var window = new VocalSpectrographWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -478,7 +485,7 @@ internal sealed class PluginWindowRouter
         var window = new VoiceGateWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -493,7 +500,7 @@ internal sealed class PluginWindowRouter
         var window = new RNNoiseWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -508,7 +515,7 @@ internal sealed class PluginWindowRouter
         var window = new SpeechDenoiserWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -523,7 +530,7 @@ internal sealed class PluginWindowRouter
         var window = new ReverbWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -538,7 +545,7 @@ internal sealed class PluginWindowRouter
         var window = new LimiterWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -553,7 +560,7 @@ internal sealed class PluginWindowRouter
         var window = new DeEsserWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -568,7 +575,7 @@ internal sealed class PluginWindowRouter
         var window = new HighPassFilterWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -583,7 +590,7 @@ internal sealed class PluginWindowRouter
         var window = new SaturationWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -598,7 +605,7 @@ internal sealed class PluginWindowRouter
         var window = new AirExciterWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -613,7 +620,22 @@ internal sealed class PluginWindowRouter
         var window = new BassEnhancerWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
+                request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
+            },
+            bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowVitalizerWindow(int channelIndex, int pluginInstanceId, VitalizerMk2TPlugin plugin, PluginWindowRequest request)
+    {
+        var window = new VitalizerWindow(plugin,
+            (paramIndex, value) =>
+            {
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -628,7 +650,7 @@ internal sealed class PluginWindowRouter
         var window = new ConsonantTransientWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -643,7 +665,7 @@ internal sealed class PluginWindowRouter
         var window = new DynamicEqWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -658,7 +680,7 @@ internal sealed class PluginWindowRouter
         var window = new RoomToneWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -671,9 +693,11 @@ internal sealed class PluginWindowRouter
     private void ShowAnalysisTapWindow(int channelIndex, int pluginInstanceId, AnalysisTapPlugin plugin, PluginWindowRequest request)
     {
         var window = new AnalysisTapWindow(plugin,
+            channelIndex,
+            pluginInstanceId,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed),
@@ -690,7 +714,7 @@ internal sealed class PluginWindowRouter
         var window = new SpectralContrastWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -705,7 +729,7 @@ internal sealed class PluginWindowRouter
         var window = new UpwardExpanderWindow(plugin,
             (paramIndex, value) =>
             {
-                string paramName = plugin.Parameters[paramIndex].Name;
+                string paramName = GetParameterName(plugin, paramIndex);
                 request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
@@ -713,6 +737,24 @@ internal sealed class PluginWindowRouter
             Owner = System.Windows.Application.Current?.MainWindow
         };
         window.Show();
+    }
+
+    private static string GetParameterName(IPlugin plugin, int paramIndex)
+    {
+        foreach (var parameter in plugin.Parameters)
+        {
+            if (parameter.Index == paramIndex)
+            {
+                return parameter.Name;
+            }
+        }
+
+        if (paramIndex >= 0 && paramIndex < plugin.Parameters.Count)
+        {
+            return plugin.Parameters[paramIndex].Name;
+        }
+
+        return string.Empty;
     }
 }
 
@@ -731,7 +773,7 @@ internal sealed record PluginWindowRequest
     public Func<int, int, AnalysisSignalMask> GetAnalysisUsageMask { get; init; } = (_, _) => AnalysisSignalMask.None;
     public Action<int, int, AnalysisSignalMask> UpdateAnalysisTapRequest { get; init; } = (_, _, _) => { };
     public Action<int, int> RequestNoiseLearn { get; init; } = (_, _) => { };
-    public Action<int, string> SetChannelInputDevice { get; init; } = (_, _) => { };
-    public Action<int, InputChannelMode> SetChannelInputMode { get; init; } = (_, _) => { };
+    public Action<int, int, string> SetInputPluginDevice { get; init; } = (_, _, _) => { };
+    public Action<int, int, InputChannelMode> SetInputPluginMode { get; init; } = (_, _, _) => { };
     public Action<int, float> SetChannelInputGain { get; init; } = (_, _) => { };
 }

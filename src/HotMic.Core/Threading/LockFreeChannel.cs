@@ -16,4 +16,11 @@ public sealed class LockFreeChannel<T>
     {
         return _queue.TryDequeue(out item);
     }
+
+    public void Clear()
+    {
+        while (_queue.TryDequeue(out _))
+        {
+        }
+    }
 }

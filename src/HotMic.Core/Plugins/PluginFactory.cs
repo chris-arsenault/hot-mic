@@ -31,6 +31,7 @@ public static class PluginFactory
             "builtin:room-tone" => new RoomTonePlugin(),
             "builtin:air-exciter" => new AirExciterPlugin(),
             "builtin:bass-enhancer" => new BassEnhancerPlugin(),
+            "builtin:vitalizer-mk2t" => new VitalizerMk2TPlugin(),
             "builtin:consonant-transient" => new ConsonantTransientPlugin(),
             "builtin:input" => new InputPlugin(),
             "builtin:copy" => new CopyToChannelPlugin(),

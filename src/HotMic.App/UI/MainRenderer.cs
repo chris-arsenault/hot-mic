@@ -36,7 +36,7 @@ public sealed class MainRenderer : IDisposable
         _masterRenderer = new MainMasterSectionRenderer(_paints, _primitives, _meterRenderer, _hitTargets);
         _fullViewRenderer = new MainFullViewRenderer(_paints, _primitives, _hitTargets, _channelStripRenderer, _masterRenderer);
         _minimalViewRenderer = new MainMinimalViewRenderer(_paints, _meterRenderer);
-        _debugOverlayRenderer = new MainDebugOverlayRenderer(_paints);
+        _debugOverlayRenderer = new MainDebugOverlayRenderer(_paints, _hitTargets);
         _titleBarRenderer = new MainTitleBarRenderer(_paints, _primitives, _hitTargets);
         _hotbarRenderer = new MainHotbarRenderer(_paints, _primitives, _hitTargets);
         _pluginStripRenderer = new MainPluginStripRenderer(_paints, _meterRenderer, _pluginShellRenderer);
@@ -129,6 +129,10 @@ public sealed class MainRenderer : IDisposable
     public bool HitTestQualityToggle(float x, float y) => _hitTester.HitTestQualityToggle(x, y);
 
     public bool HitTestStatsArea(float x, float y) => _hitTester.HitTestStatsArea(x, y);
+
+    public bool HitTestReinitializeAudio(float x, float y) => _hitTester.HitTestReinitializeAudio(x, y);
+
+    public bool HitTestDebugOverlayCopy(float x, float y) => _hitTester.HitTestDebugOverlayCopy(x, y);
 
     public bool HitTestTitleBar(float x, float y) => _hitTester.HitTestTitleBar(x, y);
 

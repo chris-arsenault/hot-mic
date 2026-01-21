@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading;
 using HotMic.Common.Configuration;
 using HotMic.Core.Analysis;
 using HotMic.Core.Engine;
@@ -22,16 +23,26 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
     private readonly Action<AudioEngine> _setAudioEngine;
     private readonly Func<AppConfig> _getConfig;
     private readonly AnalysisOrchestrator _analysisOrchestrator = new();
-    private readonly Queue<(long ticks, long inputDrops, long outputUnderflow)> _dropHistory = new();
+    private readonly Queue<(long ticks, long inputDrops, long inputUnderflow, long outputUnderflow)> _dropHistory = new();
     private bool[] _inputUsageScratch = Array.Empty<bool>();
+    private bool[] _lastInputUsage = Array.Empty<bool>();
+    private bool _lastInputUsageValid;
+    private long _lastInputDrops;
+    private long _lastInputUnderflow;
+    private long _lastOutputUnderflow;
     private AnalysisSignalMask[] _analysisTapRequestedSignals = Array.Empty<AnalysisSignalMask>();
     private AnalysisSignalMask _analysisVisualRequestedSignals;
     private bool _analysisRequestedSubscribed;
     private bool _disposed;
+    private int _isReinitializing;
+    private readonly Dictionary<(int ChannelIndex, int InstanceId), ClipLogState> _clipLogStates = new();
     private long _lastMeterUpdateTicks;
     private long _nextDebugUpdateTicks;
+    private bool _lastProfilingEnabled;
     private static readonly long DebugUpdateIntervalTicks = Math.Max(1, Stopwatch.Frequency / 4);
     private static readonly long ThirtySecondsInTicks = Stopwatch.Frequency * 30;
+    private static readonly long ClipLogIntervalTicks = Math.Max(1, Stopwatch.Frequency * 2);
+    private static readonly long NonFiniteLogIntervalTicks = Math.Max(1, Stopwatch.Frequency * 2);
 
     public MainAudioEngineCoordinator(
         MainViewModel viewModel,
@@ -130,7 +141,7 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
             _pluginCoordinator.InitializePluginGraphs();
         }
 
-        _channelCoordinator.ApplyChannelInputsToEngine();
+        _pluginCoordinator.ApplyChannelInputsToEngine();
         AudioEngine.RebuildRoutingGraph();
         ApplyChannelStateToEngine();
         try
@@ -189,7 +200,6 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
             _viewModel.SelectedOutputDevice?.Id ?? string.Empty,
             _viewModel.SelectedMonitorDevice?.Id ?? string.Empty);
         engine.EnsureChannelCount(Math.Max(1, _viewModel.Channels.Count));
-        _channelCoordinator.ApplyChannelInputsToEngine();
         engine.RebuildRoutingGraph();
         ApplyChannelStateToEngine();
 
@@ -197,6 +207,7 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         _pluginCoordinator.InitializePluginGraphs();
         _pluginCoordinator.SyncGraphsWithConfig();
         _pluginCoordinator.NormalizeOutputSendPlugins();
+        _pluginCoordinator.ApplyChannelInputsToEngine();
 
         try
         {
@@ -211,6 +222,32 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         for (int i = 0; i < engine.Channels.Count; i++)
         {
             _pluginCoordinator.RefreshPluginViewModels(i);
+        }
+    }
+
+    public void ReinitializeAudioEngine()
+    {
+        if (Interlocked.Exchange(ref _isReinitializing, 1) == 1)
+        {
+            return;
+        }
+
+        try
+        {
+            _viewModel.StatusMessage = "Reinitializing audio engine...";
+            _clipLogStates.Clear();
+            _dropHistory.Clear();
+            _lastInputDrops = 0;
+            _lastInputUnderflow = 0;
+            _lastOutputUnderflow = 0;
+            _lastInputUsageValid = false;
+
+            var profile = AudioQualityProfiles.ForMode(_viewModel.QualityMode, _viewModel.SelectedSampleRate);
+            RestartAudioEngineForQuality(profile);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _isReinitializing, 0);
         }
     }
 
@@ -252,6 +289,11 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
 
     public void UpdateMeters()
     {
+        if (Volatile.Read(ref _isReinitializing) == 1)
+        {
+            return;
+        }
+
         int channelCount = Math.Min(AudioEngine.Channels.Count, _viewModel.Channels.Count);
         if (channelCount == 0)
         {
@@ -259,6 +301,12 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         }
 
         long nowTicks = Stopwatch.GetTimestamp();
+        bool profilingEnabled = _viewModel.ShowDebugOverlay;
+        if (profilingEnabled != _lastProfilingEnabled)
+        {
+            AudioEngine.SetProfilingEnabled(profilingEnabled);
+            _lastProfilingEnabled = profilingEnabled;
+        }
 
         for (int i = 0; i < channelCount; i++)
         {
@@ -269,7 +317,7 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
             viewModel.OutputPeakLevel = channel.OutputMeter.GetPeakLevel();
             viewModel.OutputRmsLevel = channel.OutputMeter.GetRmsLevel();
 
-            UpdatePluginMeters(viewModel, channel);
+            UpdatePluginMeters(i, viewModel, channel);
             UpdateContainerMeters(viewModel, channel);
             UpdateContainerWindowMeters(i, channel);
         }
@@ -289,20 +337,45 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         _viewModel.LatencyMs = baseLatencyMs + chainLatencyMs;
 
         var inputUsage = BuildInputUsageMap();
+        bool hadUsage = _lastInputUsageValid;
         long inputDrops = 0;
+        long inputUnderflows = 0;
         var inputs = _viewModel.Diagnostics.Inputs;
         for (int i = 0; i < inputs.Count; i++)
         {
             int channelId = inputs[i].ChannelId;
             if ((uint)channelId < (uint)inputUsage.Length && inputUsage[channelId])
             {
-                inputDrops += inputs[i].DroppedSamples;
+                inputDrops += inputs[i].DroppedSamples + inputs[i].OverflowSamples;
+                inputUnderflows += inputs[i].UnderflowSamples;
             }
         }
 
-        _viewModel.TotalDrops = inputDrops + _viewModel.Diagnostics.OutputUnderflowSamples;
+        bool usageChanged = UpdateLastInputUsage(inputUsage);
+        bool countersReset = false;
+        if (hadUsage)
+        {
+            countersReset = inputDrops < _lastInputDrops ||
+                            inputUnderflows < _lastInputUnderflow ||
+                            _viewModel.Diagnostics.OutputUnderflowSamples < _lastOutputUnderflow;
+        }
 
-        _dropHistory.Enqueue((nowTicks, inputDrops, _viewModel.Diagnostics.OutputUnderflowSamples));
+        _lastInputDrops = inputDrops;
+        _lastInputUnderflow = inputUnderflows;
+        _lastOutputUnderflow = _viewModel.Diagnostics.OutputUnderflowSamples;
+
+        if (usageChanged || countersReset)
+        {
+            _dropHistory.Clear();
+            _viewModel.InputDrops30Sec = 0;
+            _viewModel.InputUnderflowDrops30Sec = 0;
+            _viewModel.OutputUnderflowDrops30Sec = 0;
+            _viewModel.Drops30Sec = 0;
+        }
+
+        _viewModel.TotalDrops = inputDrops + inputUnderflows + _viewModel.Diagnostics.OutputUnderflowSamples;
+
+        _dropHistory.Enqueue((nowTicks, inputDrops, inputUnderflows, _viewModel.Diagnostics.OutputUnderflowSamples));
 
         long cutoffTicks = nowTicks - ThirtySecondsInTicks;
         while (_dropHistory.Count > 0 && _dropHistory.Peek().ticks < cutoffTicks)
@@ -314,8 +387,9 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         {
             var oldest = _dropHistory.Peek();
             _viewModel.InputDrops30Sec = inputDrops - oldest.inputDrops;
+            _viewModel.InputUnderflowDrops30Sec = inputUnderflows - oldest.inputUnderflow;
             _viewModel.OutputUnderflowDrops30Sec = _viewModel.Diagnostics.OutputUnderflowSamples - oldest.outputUnderflow;
-            _viewModel.Drops30Sec = _viewModel.InputDrops30Sec + _viewModel.OutputUnderflowDrops30Sec;
+            _viewModel.Drops30Sec = _viewModel.InputDrops30Sec + _viewModel.InputUnderflowDrops30Sec + _viewModel.OutputUnderflowDrops30Sec;
         }
 
         UpdateDebugInfo(nowTicks, inputUsage);
@@ -366,6 +440,8 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
                 }
 
                 ReinitializePluginForQuality(slot.Plugin, profile);
+                slot.Meter.Reset();
+                slot.Delta.Reset();
                 pluginList.Add(slot);
             }
 
@@ -563,7 +639,7 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         }
     }
 
-    private static void UpdatePluginMeters(ChannelStripViewModel viewModel, ChannelStrip channel)
+    private void UpdatePluginMeters(int channelIndex, ChannelStripViewModel viewModel, ChannelStrip channel)
     {
         var slots = channel.PluginChain.GetSnapshot();
         int pluginSlots = Math.Max(0, viewModel.PluginSlots.Count - 1);
@@ -577,7 +653,10 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
             {
                 slot.OutputPeakLevel = chainSlot.Meter.GetPeakLevel();
                 slot.OutputRmsLevel = chainSlot.Meter.GetRmsLevel();
-                slot.IsClipping = chainSlot.Meter.GetClipHoldActive();
+                bool isClipping = chainSlot.Meter.GetClipHoldActive();
+                int nonFiniteSamples = chainSlot.Meter.ConsumeNonFiniteSamples();
+                slot.IsClipping = isClipping;
+                UpdateClipLogging(channelIndex, i, chainSlot, slots, isClipping, nonFiniteSamples);
                 slot.SetBypassSilent(chainSlot.Plugin.IsBypassed);
             }
             else
@@ -668,6 +747,51 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         }
     }
 
+    private void UpdateClipLogging(int channelIndex, int slotIndex, PluginSlot chainSlot, PluginSlot?[] slots, bool isClipping, int nonFiniteSamples)
+    {
+        var key = (channelIndex, chainSlot.InstanceId);
+        _clipLogStates.TryGetValue(key, out var state);
+        long now = Stopwatch.GetTimestamp();
+
+        if (isClipping && !state.WasClipping && now - state.LastClipLogTicks >= ClipLogIntervalTicks)
+        {
+            string upstream = GetUpstreamPluginLabel(slots, slotIndex);
+            string pluginLabel = $"{chainSlot.Plugin.Name} ({chainSlot.Plugin.Id})";
+            string nonFiniteLabel = nonFiniteSamples > 0 ? $" nonFinite={nonFiniteSamples}" : string.Empty;
+            string message = $"[Clip] ch{channelIndex + 1} slot{slotIndex + 1} id={chainSlot.InstanceId} plugin=\"{pluginLabel}\" upstream=\"{upstream}\" peak={chainSlot.Meter.GetPeakLevel():0.###} rms={chainSlot.Meter.GetRmsLevel():0.###}{nonFiniteLabel}";
+            Console.WriteLine(message);
+            state.LastClipLogTicks = now;
+        }
+
+        if (nonFiniteSamples > 0 && now - state.LastNonFiniteLogTicks >= NonFiniteLogIntervalTicks)
+        {
+            string upstream = GetUpstreamPluginLabel(slots, slotIndex);
+            string pluginLabel = $"{chainSlot.Plugin.Name} ({chainSlot.Plugin.Id})";
+            string message = $"[Clip] non-finite ch{channelIndex + 1} slot{slotIndex + 1} id={chainSlot.InstanceId} plugin=\"{pluginLabel}\" upstream=\"{upstream}\" samples={nonFiniteSamples}";
+            Console.WriteLine(message);
+            state.LastNonFiniteLogTicks = now;
+        }
+
+        state.WasClipping = isClipping;
+        _clipLogStates[key] = state;
+    }
+
+    private static string GetUpstreamPluginLabel(PluginSlot?[] slots, int slotIndex)
+    {
+        for (int i = slotIndex - 1; i >= 0; i--)
+        {
+            var slot = slots[i];
+            if (slot is null || slot.Plugin.IsBypassed)
+            {
+                continue;
+            }
+
+            return $"{slot.Plugin.Name} ({slot.Plugin.Id})";
+        }
+
+        return "input";
+    }
+
     private void UpdateDebugInfo(long nowTicks, bool[] inputUsage)
     {
         if (nowTicks < _nextDebugUpdateTicks)
@@ -707,10 +831,17 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
             int channelId = inputs[i].ChannelId;
             if ((uint)channelId < (uint)inputUsage.Length && inputUsage[channelId])
             {
-                inputDrops += inputs[i].DroppedSamples;
+                inputDrops += inputs[i].DroppedSamples + inputs[i].OverflowSamples;
                 inputUnderflows += inputs[i].UnderflowSamples;
             }
         }
+
+        _viewModel.ProfilingLine = BuildProfilingLine(diagnostics);
+        _viewModel.WorstPluginLine = BuildWorstPluginLine(diagnostics.BlockBudgetTicks);
+        _viewModel.AnalysisTapProfilingLine = BuildAnalysisTapProfilingLine();
+        _viewModel.AnalysisTapPitchProfilingLine = BuildAnalysisTapPitchProfilingLine();
+        _viewModel.AnalysisTapGateLine = BuildAnalysisTapGateLine();
+        _viewModel.VitalizerLine = BuildVitalizerLine();
 
         _viewModel.DebugLines =
         [
@@ -720,8 +851,294 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
             $"Graph: {graphOrder}",
             $"Drops: in {inputDrops} under {inputUnderflows} out {diagnostics.OutputUnderflowSamples}",
             $"Formats: out {_viewModel.SelectedSampleRate}Hz/2ch",
-            $"UI {uiAge}ms"
+            $"UI {uiAge}ms",
+            _viewModel.VitalizerLine
         ];
+    }
+
+    private string BuildProfilingLine(AudioEngineDiagnosticsSnapshot diagnostics)
+    {
+        if (diagnostics.BlockBudgetTicks <= 0 || (diagnostics.LastBlockTicks == 0 && diagnostics.MaxBlockTicks == 0))
+        {
+            return "Proc: n/a";
+        }
+
+        double budgetMs = diagnostics.BlockBudgetTicks * 1000.0 / Stopwatch.Frequency;
+        double lastMs = diagnostics.LastBlockTicks * 1000.0 / Stopwatch.Frequency;
+        double maxMs = diagnostics.MaxBlockTicks * 1000.0 / Stopwatch.Frequency;
+        string line = $"Proc: last {lastMs:0.00}ms max {maxMs:0.00}ms budget {budgetMs:0.00}ms over {diagnostics.BlockOverrunCount}";
+
+        if (diagnostics.LastBlockCpuTicks > 0 || diagnostics.MaxBlockCpuTicks > 0)
+        {
+            double lastCpuMs = diagnostics.LastBlockCpuTicks / 10_000.0;
+            double maxCpuMs = diagnostics.MaxBlockCpuTicks / 10_000.0;
+            line += $" cpu {lastCpuMs:0.00}/{maxCpuMs:0.00}ms";
+        }
+
+        return line;
+    }
+
+    private string BuildWorstPluginLine(long budgetTicks)
+    {
+        var channels = AudioEngine.Channels;
+        long worstMax = 0;
+        long worstLast = 0;
+        long worstCpuLast = 0;
+        long worstCpuMax = 0;
+        long worstOver = 0;
+        string worstName = string.Empty;
+        int worstChannel = -1;
+
+        for (int i = 0; i < channels.Count; i++)
+        {
+            var slots = channels[i].PluginChain.GetSnapshot();
+            for (int s = 0; s < slots.Length; s++)
+            {
+                var slot = slots[s];
+                if (slot is null)
+                {
+                    continue;
+                }
+
+                var plugin = slot.Plugin;
+                if (plugin.IsBypassed)
+                {
+                    continue;
+                }
+
+                long maxTicks = slot.MaxProcessTicks;
+                if (maxTicks <= 0)
+                {
+                    continue;
+                }
+
+                if (maxTicks > worstMax)
+                {
+                    worstMax = maxTicks;
+                    worstLast = slot.LastProcessTicks;
+                    worstCpuLast = slot.LastProcessCpuCycles;
+                    worstCpuMax = slot.MaxProcessCpuCycles;
+                    worstOver = slot.OverBudgetCount;
+                    worstName = plugin.Name;
+                    worstChannel = i;
+                }
+            }
+        }
+
+        if (worstChannel < 0)
+        {
+            return "Worst: n/a";
+        }
+
+        double lastMs = worstLast * 1000.0 / Stopwatch.Frequency;
+        double maxMs = worstMax * 1000.0 / Stopwatch.Frequency;
+        double pct = budgetTicks > 0 ? worstMax * 100.0 / budgetTicks : 0.0;
+
+        string line = $"Worst: ch{worstChannel + 1} {worstName} last {lastMs:0.00}ms max {maxMs:0.00}ms ({pct:0}%)";
+        if (worstOver > 0)
+        {
+            line += $" over {worstOver}";
+        }
+        if (worstCpuLast > 0 || worstCpuMax > 0)
+        {
+            line += $" cpu {FormatCycles(worstCpuLast)}/{FormatCycles(worstCpuMax)}";
+        }
+
+        return line;
+    }
+
+    private string BuildAnalysisTapProfilingLine()
+    {
+        if (!TryGetWorstAnalysisTapSnapshot(out var worstSnapshot, out int worstChannel))
+        {
+            return "Tap: n/a";
+        }
+
+        double lastTotalMs = TicksToMs(worstSnapshot.ProcessorLastTicks);
+        double maxTotalMs = TicksToMs(worstSnapshot.ProcessorMaxTicks);
+        double preLastMs = TicksToMs(worstSnapshot.PreprocessLastTicks);
+        double preMaxMs = TicksToMs(worstSnapshot.PreprocessMaxTicks);
+        double fftLastMs = TicksToMs(worstSnapshot.FftLastTicks);
+        double fftMaxMs = TicksToMs(worstSnapshot.FftMaxTicks);
+        double pitchLastMs = TicksToMs(worstSnapshot.PitchLastTicks);
+        double pitchMaxMs = TicksToMs(worstSnapshot.PitchMaxTicks);
+        double voiceLastMs = TicksToMs(worstSnapshot.VoicingLastTicks);
+        double voiceMaxMs = TicksToMs(worstSnapshot.VoicingMaxTicks);
+        double featLastMs = TicksToMs(worstSnapshot.FeatureLastTicks);
+        double featMaxMs = TicksToMs(worstSnapshot.FeatureMaxTicks);
+        double writeLastMs = TicksToMs(worstSnapshot.WriteLastTicks);
+        double writeMaxMs = TicksToMs(worstSnapshot.WriteMaxTicks);
+        double resolveLastMs = TicksToMs(worstSnapshot.ResolveLastTicks);
+        double resolveMaxMs = TicksToMs(worstSnapshot.ResolveMaxTicks);
+        double captureLastMs = TicksToMs(worstSnapshot.CaptureLastTicks);
+        double captureMaxMs = TicksToMs(worstSnapshot.CaptureMaxTicks);
+        string channelLabel = worstChannel >= 0 ? $"ch{worstChannel + 1} " : string.Empty;
+
+        return $"Tap: {channelLabel}total {lastTotalMs:0.00}/{maxTotalMs:0.00}ms pre {preLastMs:0.00}/{preMaxMs:0.00} fft {fftLastMs:0.00}/{fftMaxMs:0.00} pitch {pitchLastMs:0.00}/{pitchMaxMs:0.00} voice {voiceLastMs:0.00}/{voiceMaxMs:0.00} feat {featLastMs:0.00}/{featMaxMs:0.00} write {writeLastMs:0.00}/{writeMaxMs:0.00} res {resolveLastMs:0.00}/{resolveMaxMs:0.00} cap {captureLastMs:0.00}/{captureMaxMs:0.00}";
+    }
+
+    private string BuildAnalysisTapPitchProfilingLine()
+    {
+        if (!TryGetWorstAnalysisTapSnapshot(out var worstSnapshot, out int worstChannel))
+        {
+            return "Pitch: n/a";
+        }
+
+        var pitchProfile = worstSnapshot.PitchProfile;
+        double lastTotalMs = TicksToMs(pitchProfile.LastTotalTicks);
+        double maxTotalMs = TicksToMs(pitchProfile.MaxTotalTicks);
+        string channelLabel = worstChannel >= 0 ? $"ch{worstChannel + 1} " : string.Empty;
+        string algorithmLabel = pitchProfile.Algorithm.ToString();
+        string rangeSuffix = string.Empty;
+        if (pitchProfile.HasFrameInfo)
+        {
+            rangeSuffix = $" n {pitchProfile.FrameSize}";
+            if (pitchProfile.HasPeriodRange)
+            {
+                rangeSuffix += $" lag {pitchProfile.MinPeriod}-{pitchProfile.MaxPeriod}";
+            }
+        }
+        string cpuSuffix = string.Empty;
+        if (pitchProfile.HasCpuCycles)
+        {
+            cpuSuffix = $" cpu {FormatCycles(pitchProfile.LastTotalCpuCycles)}/{FormatCycles(pitchProfile.MaxTotalCpuCycles)}";
+            if (pitchProfile.HasDiffCpuCycles)
+            {
+                cpuSuffix += $" dcpu {FormatCycles(pitchProfile.LastDiffCpuCycles)}/{FormatCycles(pitchProfile.MaxDiffCpuCycles)}";
+            }
+        }
+
+        if (pitchProfile.HasDetail)
+        {
+            double diffLastMs = TicksToMs(pitchProfile.LastDiffTicks);
+            double diffMaxMs = TicksToMs(pitchProfile.MaxDiffTicks);
+            double cmndLastMs = TicksToMs(pitchProfile.LastCmndTicks);
+            double cmndMaxMs = TicksToMs(pitchProfile.MaxCmndTicks);
+            double searchLastMs = TicksToMs(pitchProfile.LastSearchTicks);
+            double searchMaxMs = TicksToMs(pitchProfile.MaxSearchTicks);
+            double refineLastMs = TicksToMs(pitchProfile.LastRefineTicks);
+            double refineMaxMs = TicksToMs(pitchProfile.MaxRefineTicks);
+
+            return $"Pitch: {channelLabel}{algorithmLabel} total {lastTotalMs:0.00}/{maxTotalMs:0.00}ms diff {diffLastMs:0.00}/{diffMaxMs:0.00} cmnd {cmndLastMs:0.00}/{cmndMaxMs:0.00} search {searchLastMs:0.00}/{searchMaxMs:0.00} ref {refineLastMs:0.00}/{refineMaxMs:0.00}{rangeSuffix}{cpuSuffix}";
+        }
+
+        if (lastTotalMs <= 0.0 && maxTotalMs <= 0.0)
+        {
+            return $"Pitch: {channelLabel}{algorithmLabel} n/a{rangeSuffix}{cpuSuffix}";
+        }
+
+        return $"Pitch: {channelLabel}{algorithmLabel} total {lastTotalMs:0.00}/{maxTotalMs:0.00}ms{rangeSuffix}{cpuSuffix}";
+    }
+
+    private string BuildAnalysisTapGateLine()
+    {
+        if (!TryGetWorstAnalysisTapSnapshot(out var worstSnapshot, out int worstChannel))
+        {
+            return "Gate: n/a";
+        }
+
+        string channelLabel = worstChannel >= 0 ? $"ch{worstChannel + 1} " : string.Empty;
+        string modeLabel = worstSnapshot.SpeechPresenceMode switch
+        {
+            AnalysisTapMode.UseExisting => "use",
+            AnalysisTapMode.Generate => "gen",
+            AnalysisTapMode.Disabled => "off",
+            _ => "?"
+        };
+
+        string sourceLabel = worstSnapshot.SpeechPresenceHasSource ? "yes" : "no";
+        string gateLabel = worstSnapshot.SpeechPresenceGateEnabled ? "on" : "off";
+        float gateValue = worstSnapshot.SpeechPresenceGateValue;
+        string valueLabel = float.IsFinite(gateValue) ? $"{gateValue:0.###}" : "nan";
+        string stateLabel = worstSnapshot.SpeechPresenceGateEnabled
+            ? (gateValue > AnalysisSignalProcessor.SpeechPresenceGateThreshold ? "open" : "closed")
+            : "n/a";
+
+        return $"Gate: {channelLabel}speech {modeLabel} src {sourceLabel} gate {gateLabel} val {valueLabel} {stateLabel}";
+    }
+
+    private string BuildVitalizerLine()
+    {
+        var channels = AudioEngine.Channels;
+        for (int i = 0; i < channels.Count; i++)
+        {
+            var slots = channels[i].PluginChain.GetSnapshot();
+            for (int s = 0; s < slots.Length; s++)
+            {
+                var slot = slots[s];
+                if (slot?.Plugin is not VitalizerMk2TPlugin vitalizer)
+                {
+                    continue;
+                }
+
+                string channelLabel = $"ch{i + 1}";
+                string bypassLabel = vitalizer.IsBypassed ? "bypass" : "active";
+                string tubeLabel = vitalizer.TubeEnabled ? "tube on" : "tube off";
+                string limitLabel = vitalizer.LimitEnabled ? "limit on" : "limit off";
+
+                if (!vitalizer.TubeEnabled)
+                {
+                    return $"Vitalizer: {channelLabel} {bypassLabel} {tubeLabel} {limitLabel}";
+                }
+
+                float pre = vitalizer.TubePreRms;
+                float post = vitalizer.TubePostRms;
+                float target = vitalizer.TubeMakeupTarget;
+                float current = vitalizer.TubeMakeupCurrent;
+                string deltaLabel = "n/a";
+                if (pre > 1e-6f && post > 1e-6f)
+                {
+                    float deltaDb = DspUtils.LinearToDb(post / pre);
+                    deltaLabel = $"{deltaDb:0.0}dB";
+                }
+
+                return $"Vitalizer: {channelLabel} {bypassLabel} {tubeLabel} {limitLabel} pre {pre:0.000} post {post:0.000} Δ{deltaLabel} makeup {current:0.00}->{target:0.00}";
+            }
+        }
+
+        return "Vitalizer: n/a";
+    }
+
+    private bool TryGetWorstAnalysisTapSnapshot(out AnalysisTapProfilingSnapshot worstSnapshot, out int worstChannel)
+    {
+        worstSnapshot = default;
+        worstChannel = -1;
+        if (!_viewModel.ShowDebugOverlay)
+        {
+            return false;
+        }
+
+        var channels = AudioEngine.Channels;
+        long worstTicks = 0;
+
+        for (int i = 0; i < channels.Count; i++)
+        {
+            var slots = channels[i].PluginChain.GetSnapshot();
+            for (int s = 0; s < slots.Length; s++)
+            {
+                var slot = slots[s];
+                if (slot?.Plugin is not AnalysisTapPlugin tap || tap.IsBypassed)
+                {
+                    continue;
+                }
+
+                var snapshot = tap.ProfilingSnapshot;
+                long candidate = snapshot.ProcessorMaxTicks > 0 ? snapshot.ProcessorMaxTicks : snapshot.ProcessorLastTicks;
+                if (candidate <= 0)
+                {
+                    continue;
+                }
+
+                if (candidate > worstTicks)
+                {
+                    worstTicks = candidate;
+                    worstSnapshot = snapshot;
+                    worstChannel = i;
+                }
+            }
+        }
+
+        return worstTicks > 0;
     }
 
     private static string FormatAgeMs(long nowTicks, long lastTicks)
@@ -740,6 +1157,40 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         return $"{ms:0}";
     }
 
+    private static double TicksToMs(long ticks)
+    {
+        if (ticks <= 0)
+        {
+            return 0.0;
+        }
+
+        return ticks * 1000.0 / Stopwatch.Frequency;
+    }
+
+    private static string FormatCycles(long cycles)
+    {
+        if (cycles <= 0)
+        {
+            return "0cy";
+        }
+
+        double value = cycles;
+        if (value >= 1_000_000_000)
+        {
+            return $"{value / 1_000_000_000:0.00}Gcy";
+        }
+        if (value >= 1_000_000)
+        {
+            return $"{value / 1_000_000:0.00}Mcy";
+        }
+        if (value >= 1_000)
+        {
+            return $"{value / 1_000:0.0}kcy";
+        }
+
+        return $"{cycles}cy";
+    }
+
     private static string FormatFlag(bool value) => value ? "on" : "off";
 
     private bool[] BuildInputUsageMap()
@@ -755,17 +1206,59 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         for (int i = 0; i < channelCount; i++)
         {
             var slots = AudioEngine.Channels[i].PluginChain.GetSnapshot();
+            int selectedPriority = int.MinValue;
+            bool deviceSelected = false;
             for (int s = 0; s < slots.Length; s++)
             {
-                if (slots[s]?.Plugin is InputPlugin inputPlugin && !inputPlugin.IsBypassed)
+                var slot = slots[s];
+                if (slot?.Plugin is not IChannelInputPlugin input || slot.Plugin.IsBypassed)
                 {
-                    _inputUsageScratch[i] = true;
+                    continue;
+                }
+
+                int priority = (int)input.InputKind;
+                if (selectedPriority < 0 || priority > selectedPriority)
+                {
+                    selectedPriority = priority;
+                    deviceSelected = slot.Plugin is InputPlugin;
+                }
+            }
+
+            _inputUsageScratch[i] = selectedPriority >= 0 && deviceSelected;
+        }
+
+        return _inputUsageScratch;
+    }
+
+    private bool UpdateLastInputUsage(bool[] inputUsage)
+    {
+        int length = inputUsage.Length;
+        if (_lastInputUsage.Length != length)
+        {
+            _lastInputUsage = new bool[length];
+            _lastInputUsageValid = false;
+        }
+
+        bool changed = !_lastInputUsageValid;
+        if (!changed)
+        {
+            for (int i = 0; i < length; i++)
+            {
+                if (_lastInputUsage[i] != inputUsage[i])
+                {
+                    changed = true;
                     break;
                 }
             }
         }
 
-        return _inputUsageScratch;
+        if (changed)
+        {
+            Array.Copy(inputUsage, _lastInputUsage, length);
+            _lastInputUsageValid = true;
+        }
+
+        return changed;
     }
 
     private void EnsureAnalysisTapRequestCapacity(int channelCount)
@@ -830,5 +1323,12 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
 
         _analysisOrchestrator.Dispose();
         GC.SuppressFinalize(this);
+    }
+
+    private struct ClipLogState
+    {
+        public bool WasClipping;
+        public long LastClipLogTicks;
+        public long LastNonFiniteLogTicks;
     }
 }

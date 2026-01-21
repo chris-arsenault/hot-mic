@@ -4,9 +4,12 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using System.Text;
+using System.Globalization;
 using HotMic.App.Models;
 using HotMic.App.UI;
 using HotMic.App.ViewModels;
+using HotMic.Core.Engine;
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
 using ContextMenu = System.Windows.Controls.ContextMenu;
@@ -127,6 +130,20 @@ public partial class MainWindow : Window, IDisposable
         if (_renderer.HitTestVisualizerButton(x, y))
         {
             viewModel.OpenAnalyzerWindow();
+            e.Handled = true;
+            return;
+        }
+
+        if (viewModel.ShowDebugOverlay && _renderer.HitTestDebugOverlayCopy(x, y))
+        {
+            CopyDebugOverlayToClipboard(viewModel);
+            e.Handled = true;
+            return;
+        }
+
+        if (_renderer.HitTestReinitializeAudio(x, y))
+        {
+            viewModel.ReinitializeAudioEngine();
             e.Handled = true;
             return;
         }
@@ -707,12 +724,13 @@ public partial class MainWindow : Window, IDisposable
         {
             case RoutingBadgeType.InputChannelMode:
                 // Cycle: Left -> Right -> Sum -> Left
-                channel.InputChannelMode = channel.InputChannelMode switch
+                var nextMode = channel.InputChannelMode switch
                 {
                     HotMic.Common.Configuration.InputChannelMode.Left => HotMic.Common.Configuration.InputChannelMode.Right,
                     HotMic.Common.Configuration.InputChannelMode.Right => HotMic.Common.Configuration.InputChannelMode.Sum,
                     _ => HotMic.Common.Configuration.InputChannelMode.Left
                 };
+                viewModel.SetInputPluginMode(hit.ChannelIndex, hit.PluginInstanceId, nextMode);
                 break;
             case RoutingBadgeType.OutputSendMode:
                 // Cycle through output send mode parameter
@@ -1266,6 +1284,77 @@ public partial class MainWindow : Window, IDisposable
     {
         var source = PresentationSource.FromVisual(this);
         return (float)(source?.CompositionTarget?.TransformToDevice.M11 ?? 1.0);
+    }
+
+    private static void CopyDebugOverlayToClipboard(MainViewModel viewModel)
+    {
+        string text = BuildDebugOverlayText(viewModel);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        try
+        {
+            System.Windows.Clipboard.SetText(text);
+            viewModel.DebugOverlayCopyTicks = Environment.TickCount64;
+        }
+        catch
+        {
+        }
+    }
+
+    private static string BuildDebugOverlayText(MainViewModel viewModel)
+    {
+        var diagnostics = viewModel.Diagnostics;
+        var inputs = diagnostics.Inputs ?? Array.Empty<InputDiagnosticsSnapshot>();
+        int inputCount = inputs.Count;
+        int activeInputs = 0;
+        for (int i = 0; i < inputCount; i++)
+        {
+            if (inputs[i].IsActive)
+            {
+                activeInputs++;
+            }
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine("AUDIO ENGINE DIAGNOSTICS");
+        builder.AppendLine(CultureInfo.InvariantCulture, $"Output: {(diagnostics.OutputActive ? "ACTIVE" : "INACTIVE")} | Monitor: {(diagnostics.MonitorActive ? "ACTIVE" : "INACTIVE")}");
+        string recover = diagnostics.IsRecovering ? " | RECOVERING..." : string.Empty;
+        builder.AppendLine(CultureInfo.InvariantCulture, $"Inputs: {activeInputs}/{inputCount} active{recover}");
+        builder.AppendLine("INPUTS");
+
+        if (inputCount == 0)
+        {
+            builder.AppendLine("No inputs configured");
+        }
+        else
+        {
+            for (int i = 0; i < inputCount; i++)
+            {
+                var input = inputs[i];
+                float bufPct = input.BufferCapacity > 0 ? 100f * input.BufferedSamples / input.BufferCapacity : 0f;
+                string activeLabel = input.IsActive ? "ACTIVE" : "INACTIVE";
+                string line = FormattableString.Invariant(
+                    $"Ch {input.ChannelId + 1}: {activeLabel} buf {input.BufferedSamples}/{input.BufferCapacity} ({bufPct:0}%) drop {input.DroppedSamples} over {input.OverflowSamples} under {input.UnderflowSamples} fmt {input.Channels}ch @{input.SampleRate}Hz");
+                builder.AppendLine(line);
+            }
+        }
+
+        builder.AppendLine("OUTPUT");
+        builder.AppendLine(CultureInfo.InvariantCulture, $"Drops 30s: in-drop {viewModel.InputDrops30Sec} in-under {viewModel.InputUnderflowDrops30Sec} out {viewModel.OutputUnderflowDrops30Sec} total {viewModel.Drops30Sec}");
+        builder.AppendLine(viewModel.ProfilingLine);
+        builder.AppendLine(viewModel.WorstPluginLine);
+        builder.AppendLine(viewModel.AnalysisTapProfilingLine);
+        builder.AppendLine(viewModel.AnalysisTapPitchProfilingLine);
+        builder.AppendLine(viewModel.AnalysisTapGateLine);
+        builder.AppendLine(viewModel.VitalizerLine);
+        builder.AppendLine(CultureInfo.InvariantCulture, $"Graph: {viewModel.RoutingGraphOrder}");
+        builder.AppendLine(CultureInfo.InvariantCulture, $"Output: {diagnostics.OutputCallbackCount} ({diagnostics.LastOutputFrames} frames) under {diagnostics.OutputUnderflowSamples}");
+        builder.AppendLine(CultureInfo.InvariantCulture, $"Monitor: {diagnostics.MonitorBufferedSamples}/{diagnostics.MonitorBufferCapacity}");
+
+        return builder.ToString().TrimEnd();
     }
 
     private void UpdateWindowPosition()

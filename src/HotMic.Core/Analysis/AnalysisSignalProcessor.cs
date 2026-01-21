@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using HotMic.Core.Dsp;
 using HotMic.Core.Dsp.Analysis;
@@ -37,6 +38,22 @@ public readonly record struct AnalysisSignalProcessorSettings
     };
 }
 
+internal readonly record struct AnalysisSignalProfilingSnapshot(
+    long LastTotalTicks,
+    long MaxTotalTicks,
+    long LastPreprocessTicks,
+    long MaxPreprocessTicks,
+    long LastFftTicks,
+    long MaxFftTicks,
+    long LastPitchTicks,
+    long MaxPitchTicks,
+    long LastVoicingTicks,
+    long MaxVoicingTicks,
+    long LastFeatureTicks,
+    long MaxFeatureTicks,
+    long LastWriteTicks,
+    long MaxWriteTicks);
+
 public sealed class AnalysisSignalProcessor
 {
     private const float SpeechThresholdDb = -50f;
@@ -46,6 +63,9 @@ public sealed class AnalysisSignalProcessor
     private const float SibilanceQ = 1.2f;
     private const float DcCutoffHz = 10f;
     private const float DefaultPreEmphasis = 0.97f;
+    public const float SpeechPresenceGateThreshold = 0.05f;
+    // Pitch/CPP are evaluated every 2 analysis frames to reduce CPU cost (docs/technical/Pitch.md).
+    private const int PitchFrameStride = 2;
 
     private int _sampleRate;
     private int _hopSize;
@@ -100,6 +120,26 @@ public sealed class AnalysisSignalProcessor
     private float _lastCpp;
     private float _lastCentroid;
     private float _lastSlope;
+    private int _pitchFrameIndex;
+    private int _pitchAlgorithmRaw;
+    private float _externalSpeechPresenceGate;
+    private int _externalSpeechPresenceGateEnabled;
+    private int _generatedSpeechPresenceGateEnabled;
+    private int _profilingEnabled;
+    private long _lastTotalTicks;
+    private long _maxTotalTicks;
+    private long _lastPreprocessTicks;
+    private long _maxPreprocessTicks;
+    private long _lastFftTicks;
+    private long _maxFftTicks;
+    private long _lastPitchTicks;
+    private long _maxPitchTicks;
+    private long _lastVoicingTicks;
+    private long _maxVoicingTicks;
+    private long _lastFeatureTicks;
+    private long _maxFeatureTicks;
+    private long _lastWriteTicks;
+    private long _maxWriteTicks;
 
     public int SampleRate => _sampleRate;
     public int HopSize => _hopSize;
@@ -119,11 +159,104 @@ public sealed class AnalysisSignalProcessor
         return Volatile.Read(ref _lastValues[index]);
     }
 
+    internal void SetProfilingEnabled(bool enabled)
+    {
+        int value = enabled ? 1 : 0;
+        int prior = Interlocked.Exchange(ref _profilingEnabled, value);
+        if (prior != value)
+        {
+            ResetProfiling();
+            SetPitchProfilingEnabled(enabled);
+        }
+    }
+
+    internal AnalysisSignalProfilingSnapshot GetProfilingSnapshot()
+    {
+        return new AnalysisSignalProfilingSnapshot(
+            Interlocked.Read(ref _lastTotalTicks),
+            Interlocked.Read(ref _maxTotalTicks),
+            Interlocked.Read(ref _lastPreprocessTicks),
+            Interlocked.Read(ref _maxPreprocessTicks),
+            Interlocked.Read(ref _lastFftTicks),
+            Interlocked.Read(ref _maxFftTicks),
+            Interlocked.Read(ref _lastPitchTicks),
+            Interlocked.Read(ref _maxPitchTicks),
+            Interlocked.Read(ref _lastVoicingTicks),
+            Interlocked.Read(ref _maxVoicingTicks),
+            Interlocked.Read(ref _lastFeatureTicks),
+            Interlocked.Read(ref _maxFeatureTicks),
+            Interlocked.Read(ref _lastWriteTicks),
+            Interlocked.Read(ref _maxWriteTicks));
+    }
+
+    internal PitchProfilingSnapshot GetPitchProfilingSnapshot()
+    {
+        PitchDetectorType algorithm = GetPitchAlgorithm();
+        PitchProfilingSnapshot snapshot = algorithm switch
+        {
+            PitchDetectorType.Yin when _yinPitchDetector is not null => _yinPitchDetector.GetProfilingSnapshot(),
+            PitchDetectorType.Pyin when _pyinPitchDetector is not null => _pyinPitchDetector.GetProfilingSnapshot(),
+            PitchDetectorType.Autocorrelation when _autocorrPitchDetector is not null => _autocorrPitchDetector.GetProfilingSnapshot(),
+            PitchDetectorType.Cepstral when _cepstralPitchDetector is not null => _cepstralPitchDetector.GetProfilingSnapshot(),
+            PitchDetectorType.Swipe when _swipePitchDetector is not null => _swipePitchDetector.GetProfilingSnapshot(),
+            _ => default
+        };
+
+        if (snapshot.LastTotalTicks == 0 && snapshot.MaxTotalTicks == 0)
+        {
+            GetPitchPeriodRange(out int minPeriod, out int maxPeriod);
+            snapshot = new PitchProfilingSnapshot(
+                algorithm,
+                Interlocked.Read(ref _lastPitchTicks),
+                Interlocked.Read(ref _maxPitchTicks),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                _analysisSize,
+                minPeriod,
+                maxPeriod);
+        }
+
+        return snapshot;
+    }
+
+    internal void SetPitchAlgorithm(PitchDetectorType algorithm)
+    {
+        Interlocked.Exchange(ref _pitchAlgorithmRaw, (int)algorithm);
+    }
+
+    internal void SetExternalSpeechPresenceGate(float value)
+    {
+        if (!float.IsFinite(value))
+        {
+            value = 0f;
+        }
+        value = Math.Clamp(value, 0f, 1f);
+        Volatile.Write(ref _externalSpeechPresenceGate, value);
+        Volatile.Write(ref _externalSpeechPresenceGateEnabled, 1);
+    }
+
+    internal void ClearExternalSpeechPresenceGate()
+    {
+        Volatile.Write(ref _externalSpeechPresenceGateEnabled, 0);
+    }
+
+    internal void SetGeneratedSpeechPresenceGateEnabled(bool enabled)
+    {
+        Volatile.Write(ref _generatedSpeechPresenceGateEnabled, enabled ? 1 : 0);
+    }
+
     public void Configure(int sampleRate, int hopSize, AnalysisSignalProcessorSettings settings)
     {
         _sampleRate = Math.Max(1, sampleRate);
         _hopSize = Math.Max(1, hopSize);
         _settings = settings;
+        _pitchAlgorithmRaw = (int)settings.PitchDetector;
 
         int desiredSize = Math.Max(_hopSize, Math.Max(64, settings.AnalysisSize));
         _analysisSize = NextPowerOfTwo(desiredSize);
@@ -161,6 +294,7 @@ public sealed class AnalysisSignalProcessor
         ConfigureFilters(settings);
         ConfigurePitchDetectors(settings.MinFrequency, settings.MaxFrequency);
         _voicingDetector.Configure(_sampleRate, _hopSize, _binResolution, settings.VoicingSettings);
+        _pitchFrameIndex = 0;
     }
 
     public void Reset()
@@ -174,8 +308,28 @@ public sealed class AnalysisSignalProcessor
         _fricativeHighPass.Reset();
         _sibilanceBand.Reset();
         _featureExtractor.Reset();
+        Array.Clear(_analysisBufferRaw, 0, _analysisBufferRaw.Length);
+        Array.Clear(_analysisBufferProcessed, 0, _analysisBufferProcessed.Length);
+        Array.Clear(_fftReal, 0, _fftReal.Length);
+        Array.Clear(_fftImag, 0, _fftImag.Length);
+        Array.Clear(_fftMagnitudes, 0, _fftMagnitudes.Length);
         Array.Clear(_highFluxPrevious, 0, _highFluxPrevious.Length);
+        Array.Clear(_speechBuffer, 0, _speechBuffer.Length);
+        Array.Clear(_voicingScoreBuffer, 0, _voicingScoreBuffer.Length);
+        Array.Clear(_voicingStateBuffer, 0, _voicingStateBuffer.Length);
+        Array.Clear(_fricativeBuffer, 0, _fricativeBuffer.Length);
+        Array.Clear(_sibilanceBuffer, 0, _sibilanceBuffer.Length);
+        Array.Clear(_onsetFluxBuffer, 0, _onsetFluxBuffer.Length);
+        Array.Clear(_pitchBuffer, 0, _pitchBuffer.Length);
+        Array.Clear(_pitchConfidenceBuffer, 0, _pitchConfidenceBuffer.Length);
+        Array.Clear(_spectralFluxBuffer, 0, _spectralFluxBuffer.Length);
+        Array.Clear(_hnrDbBuffer, 0, _hnrDbBuffer.Length);
+        Array.Clear(_lastValues, 0, _lastValues.Length);
         _highFluxInitialized = false;
+        _lastCpp = 0f;
+        _lastCentroid = 0f;
+        _lastSlope = 0f;
+        _pitchFrameIndex = 0;
     }
 
     public void ProcessBlock(ReadOnlySpan<float> hop, long sampleTime, in AnalysisSignalWriter writer, AnalysisSignalMask requestedSignals)
@@ -184,6 +338,13 @@ public sealed class AnalysisSignalProcessor
         if (count == 0 || sampleTime < 0)
         {
             return;
+        }
+
+        bool profilingEnabled = Volatile.Read(ref _profilingEnabled) != 0;
+        long totalStart = 0;
+        if (profilingEnabled)
+        {
+            totalStart = Stopwatch.GetTimestamp();
         }
 
         if (count > _analysisSize)
@@ -206,18 +367,30 @@ public sealed class AnalysisSignalProcessor
 
         AnalysisSignalMask computeSignals = AnalysisSignalDependencies.Expand(requestedSignals);
 
+        bool gateWithGeneratedSpeech = Volatile.Read(ref _generatedSpeechPresenceGateEnabled) != 0;
         bool needSpeech = (computeSignals & AnalysisSignalMask.SpeechPresence) != 0;
+        bool needSpeechPresence = needSpeech || gateWithGeneratedSpeech;
         bool needFricative = (computeSignals & AnalysisSignalMask.FricativeActivity) != 0;
         bool needSibilance = (computeSignals & AnalysisSignalMask.SibilanceEnergy) != 0;
-        bool needStreaming = needSpeech || needFricative || needSibilance;
+        bool needStreaming = needSpeechPresence || needFricative || needSibilance;
 
         float speechSum = 0f;
         float fricativeSum = 0f;
         float sibilanceSum = 0f;
 
+        long preprocessStart = 0;
+        if (profilingEnabled)
+        {
+            preprocessStart = Stopwatch.GetTimestamp();
+        }
+
         for (int i = 0; i < count; i++)
         {
             float input = hop[i];
+            if (!float.IsFinite(input))
+            {
+                input = 0f;
+            }
             float dcRemoved = _dcHighPass.Process(input);
             float filtered = _settings.HighPassEnabled
                 ? _rumbleHighPass.Process(dcRemoved)
@@ -239,15 +412,18 @@ public sealed class AnalysisSignalProcessor
             }
 
             float env = _speechEnv.Process(filtered);
-            float envDb = DspUtils.LinearToDb(env);
-            float presence = Math.Clamp((envDb - SpeechThresholdDb) / SpeechRangeDb, 0f, 1f);
-            speechSum += presence;
-            if (needSpeech)
-            {
-                _speechBuffer[i] = presence;
-            }
-
             float total = MathF.Max(env, 1e-6f);
+
+            if (needSpeechPresence)
+            {
+                float envDb = DspUtils.LinearToDb(env);
+                float presence = Math.Clamp((envDb - SpeechThresholdDb) / SpeechRangeDb, 0f, 1f);
+                speechSum += presence;
+                if (needSpeech)
+                {
+                    _speechBuffer[i] = presence;
+                }
+            }
 
             if (needFricative)
             {
@@ -268,7 +444,13 @@ public sealed class AnalysisSignalProcessor
             }
         }
 
-        if (needSpeech)
+        if (profilingEnabled)
+        {
+            long preprocessTicks = Stopwatch.GetTimestamp() - preprocessStart;
+            RecordProfiling(ref _lastPreprocessTicks, ref _maxPreprocessTicks, preprocessTicks);
+        }
+
+        if (needSpeechPresence)
         {
             WriteLastValue(AnalysisSignalId.SpeechPresence, speechSum / Math.Max(1, count));
         }
@@ -282,14 +464,57 @@ public sealed class AnalysisSignalProcessor
         }
 
         bool needsFrame = NeedsFrameSignals(computeSignals);
+        long fftTicks = 0;
         if (needsFrame)
         {
+            long fftStart = 0;
+            if (profilingEnabled)
+            {
+                fftStart = Stopwatch.GetTimestamp();
+            }
+
             EnsureFftMagnitudes();
-            ProcessFrameCore(_analysisBufferRaw, _analysisBufferProcessed, _fftMagnitudes, computeSignals);
+
+            if (profilingEnabled)
+            {
+                fftTicks = Stopwatch.GetTimestamp() - fftStart;
+            }
+
+            ProcessFrameCore(_analysisBufferRaw, _analysisBufferProcessed, _fftMagnitudes, computeSignals, profilingEnabled);
+        }
+
+        if (profilingEnabled)
+        {
+            RecordProfiling(ref _lastFftTicks, ref _maxFftTicks, fftTicks);
+            if (!needsFrame)
+            {
+                RecordProfiling(ref _lastPitchTicks, ref _maxPitchTicks, 0);
+                RecordProfiling(ref _lastVoicingTicks, ref _maxVoicingTicks, 0);
+                RecordProfiling(ref _lastFeatureTicks, ref _maxFeatureTicks, 0);
+            }
+        }
+
+        long writeStart = 0;
+        if (profilingEnabled)
+        {
+            writeStart = Stopwatch.GetTimestamp();
+        }
+
+        if (needsFrame)
+        {
             FillFrameBuffers(count, requestedSignals);
         }
 
         WriteSignals(writer, requestedSignals, sampleTime, count);
+
+        if (profilingEnabled)
+        {
+            long writeTicks = Stopwatch.GetTimestamp() - writeStart;
+            RecordProfiling(ref _lastWriteTicks, ref _maxWriteTicks, writeTicks);
+
+            long totalTicks = Stopwatch.GetTimestamp() - totalStart;
+            RecordProfiling(ref _lastTotalTicks, ref _maxTotalTicks, totalTicks);
+        }
     }
 
     public void ProcessStreaming(ReadOnlySpan<float> hop, AnalysisSignalMask requestedSignals)
@@ -301,10 +526,12 @@ public sealed class AnalysisSignalProcessor
         }
 
         AnalysisSignalMask computeSignals = AnalysisSignalDependencies.Expand(requestedSignals);
+        bool gateWithGeneratedSpeech = Volatile.Read(ref _generatedSpeechPresenceGateEnabled) != 0;
         bool needSpeech = (computeSignals & AnalysisSignalMask.SpeechPresence) != 0;
+        bool needSpeechPresence = needSpeech || gateWithGeneratedSpeech;
         bool needFricative = (computeSignals & AnalysisSignalMask.FricativeActivity) != 0;
         bool needSibilance = (computeSignals & AnalysisSignalMask.SibilanceEnergy) != 0;
-        bool needStreaming = needSpeech || needFricative || needSibilance;
+        bool needStreaming = needSpeechPresence || needFricative || needSibilance;
         if (!needStreaming)
         {
             return;
@@ -317,17 +544,24 @@ public sealed class AnalysisSignalProcessor
         for (int i = 0; i < count; i++)
         {
             float input = hop[i];
+            if (!float.IsFinite(input))
+            {
+                input = 0f;
+            }
             float dcRemoved = _dcHighPass.Process(input);
             float filtered = _settings.HighPassEnabled
                 ? _rumbleHighPass.Process(dcRemoved)
                 : dcRemoved;
 
             float env = _speechEnv.Process(filtered);
-            float envDb = DspUtils.LinearToDb(env);
-            float presence = Math.Clamp((envDb - SpeechThresholdDb) / SpeechRangeDb, 0f, 1f);
-            speechSum += presence;
-
             float total = MathF.Max(env, 1e-6f);
+
+            if (needSpeechPresence)
+            {
+                float envDb = DspUtils.LinearToDb(env);
+                float presence = Math.Clamp((envDb - SpeechThresholdDb) / SpeechRangeDb, 0f, 1f);
+                speechSum += presence;
+            }
 
             if (needFricative)
             {
@@ -344,7 +578,7 @@ public sealed class AnalysisSignalProcessor
             }
         }
 
-        if (needSpeech)
+        if (needSpeechPresence)
         {
             WriteLastValue(AnalysisSignalId.SpeechPresence, speechSum / Math.Max(1, count));
         }
@@ -366,11 +600,11 @@ public sealed class AnalysisSignalProcessor
         }
 
         AnalysisSignalMask computeSignals = AnalysisSignalDependencies.Expand(requestedSignals);
-        ProcessFrameCore(rawFrame, processedFrame, magnitudes, computeSignals);
+        ProcessFrameCore(rawFrame, processedFrame, magnitudes, computeSignals, profilingEnabled: false);
     }
 
     private void ProcessFrameCore(ReadOnlySpan<float> rawFrame, ReadOnlySpan<float> processedFrame,
-        ReadOnlySpan<float> magnitudes, AnalysisSignalMask computeSignals)
+        ReadOnlySpan<float> magnitudes, AnalysisSignalMask computeSignals, bool profilingEnabled)
     {
         bool needsPitch = (computeSignals & (AnalysisSignalMask.PitchHz | AnalysisSignalMask.PitchConfidence)) != 0;
         bool needsVoicing = (computeSignals & (AnalysisSignalMask.VoicingScore | AnalysisSignalMask.VoicingState)) != 0;
@@ -382,32 +616,99 @@ public sealed class AnalysisSignalProcessor
         {
             needsPitch = true;
         }
+        else if (!needsPitch)
+        {
+            _pitchFrameIndex = 0;
+        }
 
         float pitch = 0f;
         float pitchConfidence = 0f;
 
+        long pitchTicks = 0;
+        bool pitchComputed = false;
         if (needsPitch)
         {
-            DetectPitch(_settings.PitchDetector, rawFrame, magnitudes, ref pitch, ref pitchConfidence);
-            WriteLastValue(AnalysisSignalId.PitchHz, pitch);
-            WriteLastValue(AnalysisSignalId.PitchConfidence, pitchConfidence);
+            bool shouldComputePitch = (_pitchFrameIndex++ % PitchFrameStride) == 0;
+            if (shouldComputePitch)
+            {
+                long pitchStart = 0;
+                if (profilingEnabled)
+                {
+                    pitchStart = Stopwatch.GetTimestamp();
+                }
+
+                bool gateOpen = ShouldRunPitch();
+                if (gateOpen)
+                {
+                    DetectPitch(GetPitchAlgorithm(), rawFrame, magnitudes, ref pitch, ref pitchConfidence);
+                }
+                else
+                {
+                    pitch = 0f;
+                    pitchConfidence = 0f;
+                    Volatile.Write(ref _lastCpp, 0f);
+                }
+                WriteLastValue(AnalysisSignalId.PitchHz, pitch);
+                WriteLastValue(AnalysisSignalId.PitchConfidence, pitchConfidence);
+                pitchComputed = true;
+
+                if (profilingEnabled)
+                {
+                    pitchTicks = Stopwatch.GetTimestamp() - pitchStart;
+                }
+            }
+            else
+            {
+                pitch = GetLastValue(AnalysisSignalId.PitchHz);
+                pitchConfidence = GetLastValue(AnalysisSignalId.PitchConfidence);
+            }
         }
 
         VoicingState voicing = VoicingState.Silence;
         float voicingScore = 0f;
 
+        long voicingTicks = 0;
         if (needsVoicing)
         {
-            float cpp = Volatile.Read(ref _lastCpp);
-            var voicingResult = _voicingDetector.Process(rawFrame, magnitudes, pitchConfidence, cpp);
-            voicing = voicingResult.State;
-            voicingScore = voicing == VoicingState.Silence ? 0f : voicingResult.Score;
-            WriteLastValue(AnalysisSignalId.VoicingState, (float)voicing);
-            WriteLastValue(AnalysisSignalId.VoicingScore, voicingScore);
+            bool gateOpen = ShouldRunPitch();
+            if (gateOpen)
+            {
+                long voicingStart = 0;
+                if (profilingEnabled)
+                {
+                    voicingStart = Stopwatch.GetTimestamp();
+                }
+
+                float cpp = Volatile.Read(ref _lastCpp);
+                var voicingResult = _voicingDetector.Process(rawFrame, magnitudes, pitchConfidence, cpp);
+                voicing = voicingResult.State;
+                voicingScore = voicing == VoicingState.Silence ? 0f : voicingResult.Score;
+                WriteLastValue(AnalysisSignalId.VoicingState, (float)voicing);
+                WriteLastValue(AnalysisSignalId.VoicingScore, voicingScore);
+
+                if (profilingEnabled)
+                {
+                    voicingTicks = Stopwatch.GetTimestamp() - voicingStart;
+                }
+            }
+            else
+            {
+                voicing = VoicingState.Silence;
+                voicingScore = 0f;
+                WriteLastValue(AnalysisSignalId.VoicingState, (float)voicing);
+                WriteLastValue(AnalysisSignalId.VoicingScore, voicingScore);
+            }
         }
 
-        if (needsSpectralFlux || needsOnsetFlux)
+        long featureTicks = 0;
+        if (needsSpectralFlux || needsOnsetFlux || needsHnr)
         {
+            long featureStart = 0;
+            if (profilingEnabled)
+            {
+                featureStart = Stopwatch.GetTimestamp();
+            }
+
             if (needsSpectralFlux)
             {
                 _featureExtractor.Compute(magnitudes, Math.Min(_analysisBins, magnitudes.Length),
@@ -422,14 +723,29 @@ public sealed class AnalysisSignalProcessor
                 float fluxHigh = ComputeHighBandFlux(magnitudes);
                 WriteLastValue(AnalysisSignalId.OnsetFluxHigh, fluxHigh);
             }
+
+            if (needsHnr)
+            {
+                float flatness = ComputeSpectralFlatness(magnitudes);
+                // HNR approximation: -10 * log10(flatness), flatness in [0,1].
+                float hnr = -10f * MathF.Log10(MathF.Max(flatness, 1e-6f));
+                WriteLastValue(AnalysisSignalId.HnrDb, hnr);
+            }
+
+            if (profilingEnabled)
+            {
+                featureTicks = Stopwatch.GetTimestamp() - featureStart;
+            }
         }
 
-        if (needsHnr)
+        if (profilingEnabled)
         {
-            float flatness = ComputeSpectralFlatness(magnitudes);
-            // HNR approximation: -10 * log10(flatness), flatness in [0,1].
-            float hnr = -10f * MathF.Log10(MathF.Max(flatness, 1e-6f));
-            WriteLastValue(AnalysisSignalId.HnrDb, hnr);
+            if (pitchComputed)
+            {
+                RecordProfiling(ref _lastPitchTicks, ref _maxPitchTicks, pitchTicks);
+            }
+            RecordProfiling(ref _lastVoicingTicks, ref _maxVoicingTicks, voicingTicks);
+            RecordProfiling(ref _lastFeatureTicks, ref _maxFeatureTicks, featureTicks);
         }
     }
 
@@ -511,6 +827,50 @@ public sealed class AnalysisSignalProcessor
         if ((requestedSignals & AnalysisSignalMask.HnrDb) != 0)
         {
             _hnrDbBuffer.AsSpan(0, count).Fill(GetLastValue(AnalysisSignalId.HnrDb));
+        }
+    }
+
+    private void ResetProfiling()
+    {
+        Interlocked.Exchange(ref _lastTotalTicks, 0);
+        Interlocked.Exchange(ref _maxTotalTicks, 0);
+        Interlocked.Exchange(ref _lastPreprocessTicks, 0);
+        Interlocked.Exchange(ref _maxPreprocessTicks, 0);
+        Interlocked.Exchange(ref _lastFftTicks, 0);
+        Interlocked.Exchange(ref _maxFftTicks, 0);
+        Interlocked.Exchange(ref _lastPitchTicks, 0);
+        Interlocked.Exchange(ref _maxPitchTicks, 0);
+        Interlocked.Exchange(ref _lastVoicingTicks, 0);
+        Interlocked.Exchange(ref _maxVoicingTicks, 0);
+        Interlocked.Exchange(ref _lastFeatureTicks, 0);
+        Interlocked.Exchange(ref _maxFeatureTicks, 0);
+        Interlocked.Exchange(ref _lastWriteTicks, 0);
+        Interlocked.Exchange(ref _maxWriteTicks, 0);
+    }
+
+    private static void RecordProfiling(ref long lastTicks, ref long maxTicks, long elapsedTicks)
+    {
+        Interlocked.Exchange(ref lastTicks, elapsedTicks);
+        if (elapsedTicks <= 0)
+        {
+            return;
+        }
+
+        UpdateMax(ref maxTicks, elapsedTicks);
+    }
+
+    private static void UpdateMax(ref long location, long value)
+    {
+        long current = Interlocked.Read(ref location);
+        while (value > current)
+        {
+            long prior = Interlocked.CompareExchange(ref location, value, current);
+            if (prior == current)
+            {
+                break;
+            }
+
+            current = prior;
         }
     }
 
@@ -659,6 +1019,74 @@ public sealed class AnalysisSignalProcessor
 
         _swipePitchDetector ??= new SwipePitchDetector(_sampleRate, _analysisSize, minFrequency, maxFrequency);
         _swipePitchDetector.Configure(_sampleRate, _analysisSize, minFrequency, maxFrequency);
+
+        SetPitchProfilingEnabled(Volatile.Read(ref _profilingEnabled) != 0);
+    }
+
+    private void SetPitchProfilingEnabled(bool enabled)
+    {
+        _yinPitchDetector?.SetProfilingEnabled(enabled);
+        _pyinPitchDetector?.SetProfilingEnabled(enabled);
+        _autocorrPitchDetector?.SetProfilingEnabled(enabled);
+        _cepstralPitchDetector?.SetProfilingEnabled(enabled);
+        _swipePitchDetector?.SetProfilingEnabled(enabled);
+    }
+
+    private PitchDetectorType GetPitchAlgorithm()
+    {
+        int raw = Volatile.Read(ref _pitchAlgorithmRaw);
+        if ((uint)raw > (uint)PitchDetectorType.Swipe)
+        {
+            return PitchDetectorType.Yin;
+        }
+
+        return (PitchDetectorType)raw;
+    }
+
+    private bool ShouldRunPitch()
+    {
+        if (Volatile.Read(ref _externalSpeechPresenceGateEnabled) != 0)
+        {
+            float presence = Volatile.Read(ref _externalSpeechPresenceGate);
+            if (!float.IsFinite(presence))
+            {
+                return false;
+            }
+
+            return presence > SpeechPresenceGateThreshold;
+        }
+
+        if (Volatile.Read(ref _generatedSpeechPresenceGateEnabled) != 0)
+        {
+            float presence = GetLastValue(AnalysisSignalId.SpeechPresence);
+            if (!float.IsFinite(presence))
+            {
+                return false;
+            }
+
+            return presence > SpeechPresenceGateThreshold;
+        }
+
+        return true;
+    }
+
+    private void GetPitchPeriodRange(out int minPeriod, out int maxPeriod)
+    {
+        if (_analysisSize <= 0 || _sampleRate <= 0)
+        {
+            minPeriod = 0;
+            maxPeriod = 0;
+            return;
+        }
+
+        float maxFreq = Math.Clamp(_settings.MaxFrequency, 40f, _sampleRate * 0.45f);
+        float minFreq = Math.Clamp(_settings.MinFrequency, 20f, maxFreq - 1f);
+        minPeriod = Math.Max(2, (int)(_sampleRate / maxFreq));
+        maxPeriod = Math.Min(_analysisSize - 2, (int)(_sampleRate / minFreq));
+        if (maxPeriod < minPeriod)
+        {
+            maxPeriod = minPeriod;
+        }
     }
 
     private static void EnsureBuffer(ref float[] buffer, int length)

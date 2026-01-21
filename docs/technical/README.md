@@ -32,4 +32,5 @@ are intentionally omitted.
 - `docs/technical/Enhance-Room-Tone.md` - placeholder (room tone).
 - `docs/technical/Enhance-Spectral-Contrast.md` - placeholder (spectral contrast).
 - `docs/technical/Enhance-Upward-Expander.md` - placeholder (upward expander).
+- `docs/technical/Vitalizer-Mk2T.md` - Vitalizer Mk2-T (Tube) approximation (mono, no stereo expander).
 - `docs/technical/MultiChannel-Routing.md` - multi-channel routing, copy/merge, and output send design.

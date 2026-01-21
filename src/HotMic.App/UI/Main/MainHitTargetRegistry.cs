@@ -16,6 +16,8 @@ internal sealed class MainHitTargetRegistry
     public SKRect MeterScaleToggleRect { get; set; } = SKRect.Empty;
     public SKRect QualityToggleRect { get; set; } = SKRect.Empty;
     public SKRect StatsAreaRect { get; set; } = SKRect.Empty;
+    public SKRect ReinitializeAudioRect { get; set; } = SKRect.Empty;
+    public SKRect DebugOverlayCopyRect { get; set; } = SKRect.Empty;
     public SKRect PresetDropdownRect { get; set; } = SKRect.Empty;
     public SKRect MasterMeterRect { get; set; } = SKRect.Empty;
     public SKRect VisualizerButtonRect { get; set; } = SKRect.Empty;
@@ -34,6 +36,8 @@ internal sealed class MainHitTargetRegistry
         MeterScaleToggleRect = SKRect.Empty;
         QualityToggleRect = SKRect.Empty;
         StatsAreaRect = SKRect.Empty;
+        ReinitializeAudioRect = SKRect.Empty;
+        DebugOverlayCopyRect = SKRect.Empty;
         PresetDropdownRect = SKRect.Empty;
         MasterMeterRect = SKRect.Empty;
         VisualizerButtonRect = SKRect.Empty;
