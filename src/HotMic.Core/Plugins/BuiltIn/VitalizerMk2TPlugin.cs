@@ -52,8 +52,8 @@ public sealed class VitalizerMk2TPlugin : IPlugin
 
     private const float LimitThresholdLinear = 4f; // +12 dB
 
-    private float _driveDb = 0f;
-    private float _bass = 0f;
+    private float _driveDb;
+    private float _bass;
     private float _bassCompRatio = 1f;
     private int _bassLcEnabled;
     private float _midHiTuneHz = 6000f;
@@ -63,7 +63,7 @@ public sealed class VitalizerMk2TPlugin : IPlugin
     private float _highCompRatio = 1f;
     private int _highLcEnabled;
     private int _tubeEnabled;
-    private float _outputDb = 0f;
+    private float _outputDb;
     private int _limitEnabled;
 
     private int _sampleRate;

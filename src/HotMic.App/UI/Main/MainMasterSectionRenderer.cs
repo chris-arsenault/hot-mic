@@ -114,6 +114,18 @@ internal sealed class MainMasterSectionRenderer
         _hitTargets.VisualizerButtonRect = new SKRect(toggleX, vizY, toggleX + MainLayoutMetrics.ToggleSize, vizY + MainLayoutMetrics.ToggleSize);
         DrawVisualizerButton(canvas, _hitTargets.VisualizerButtonRect);
 
+        float settingsY = vizY + toggleSpacing;
+        _hitTargets.AnalysisSettingsButtonRect = new SKRect(toggleX, settingsY, toggleX + MainLayoutMetrics.ToggleSize, settingsY + MainLayoutMetrics.ToggleSize);
+        DrawSettingsButton(canvas, _hitTargets.AnalysisSettingsButtonRect);
+
+        float waveformY = settingsY + toggleSpacing;
+        _hitTargets.WaveformButtonRect = new SKRect(toggleX, waveformY, toggleX + MainLayoutMetrics.ToggleSize, waveformY + MainLayoutMetrics.ToggleSize);
+        DrawWaveformButton(canvas, _hitTargets.WaveformButtonRect);
+
+        float speechY = waveformY + toggleSpacing;
+        _hitTargets.SpeechCoachButtonRect = new SKRect(toggleX, speechY, toggleX + MainLayoutMetrics.ToggleSize, speechY + MainLayoutMetrics.ToggleSize);
+        DrawSpeechCoachButton(canvas, _hitTargets.SpeechCoachButtonRect);
+
         float dbY = rect.Bottom - 8f;
         string leftLabel = $"{leftReadout:0.0}";
         string rightLabel = $"{rightReadout:0.0}";
@@ -147,5 +159,113 @@ internal sealed class MainMasterSectionRenderer
             IsAntialias = true
         };
         canvas.DrawPath(path, iconPaint);
+    }
+
+    private void DrawSettingsButton(SKCanvas canvas, SKRect rect)
+    {
+        var roundRect = new SKRoundRect(rect, 3f);
+        canvas.DrawRoundRect(roundRect, _paints.ButtonPaint);
+        canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
+
+        // Gear icon
+        float cx = rect.MidX;
+        float cy = rect.MidY;
+        float outerRadius = rect.Width * 0.32f;
+        float innerRadius = outerRadius * 0.5f;
+        int teeth = 6;
+
+        using var iconPaint = new SKPaint
+        {
+            Color = _paints.Theme.Accent,
+            StrokeWidth = 1.5f,
+            Style = SKPaintStyle.Stroke,
+            IsAntialias = true
+        };
+
+        using var path = new SKPath();
+        for (int i = 0; i < teeth * 2; i++)
+        {
+            float angle = (float)(i * Math.PI / teeth - Math.PI / 2);
+            float r = (i % 2 == 0) ? outerRadius : outerRadius * 0.7f;
+            float x = cx + MathF.Cos(angle) * r;
+            float y = cy + MathF.Sin(angle) * r;
+
+            if (i == 0)
+                path.MoveTo(x, y);
+            else
+                path.LineTo(x, y);
+        }
+        path.Close();
+
+        canvas.DrawPath(path, iconPaint);
+        canvas.DrawCircle(cx, cy, innerRadius, iconPaint);
+    }
+
+    private void DrawWaveformButton(SKCanvas canvas, SKRect rect)
+    {
+        var roundRect = new SKRoundRect(rect, 3f);
+        canvas.DrawRoundRect(roundRect, _paints.ButtonPaint);
+        canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
+
+        // Waveform icon (sine-like wave)
+        float midY = rect.MidY;
+        float left = rect.Left + 4f;
+        float width = rect.Width - 8f;
+        float amp = rect.Height * 0.25f;
+
+        using var iconPaint = new SKPaint
+        {
+            Color = _paints.Theme.Accent,
+            StrokeWidth = 1.5f,
+            Style = SKPaintStyle.Stroke,
+            IsAntialias = true
+        };
+
+        using var path = new SKPath();
+        path.MoveTo(left, midY);
+        for (int i = 0; i <= 20; i++)
+        {
+            float t = i / 20f;
+            float x = left + t * width;
+            float y = midY - amp * MathF.Sin(t * MathF.PI * 2);
+            if (i == 0)
+                path.MoveTo(x, y);
+            else
+                path.LineTo(x, y);
+        }
+
+        canvas.DrawPath(path, iconPaint);
+    }
+
+    private void DrawSpeechCoachButton(SKCanvas canvas, SKRect rect)
+    {
+        var roundRect = new SKRoundRect(rect, 3f);
+        canvas.DrawRoundRect(roundRect, _paints.ButtonPaint);
+        canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
+
+        // Speech bubble icon
+        float cx = rect.MidX;
+        float cy = rect.MidY - 1f;
+        float w = rect.Width * 0.4f;
+        float h = rect.Height * 0.3f;
+
+        using var iconPaint = new SKPaint
+        {
+            Color = _paints.Theme.Accent,
+            StrokeWidth = 1.5f,
+            Style = SKPaintStyle.Stroke,
+            IsAntialias = true
+        };
+
+        // Bubble body
+        var bubbleRect = new SKRect(cx - w, cy - h, cx + w, cy + h);
+        canvas.DrawRoundRect(new SKRoundRect(bubbleRect, 3f), iconPaint);
+
+        // Tail
+        using var tailPath = new SKPath();
+        tailPath.MoveTo(cx - 2f, cy + h);
+        tailPath.LineTo(cx - 4f, cy + h + 4f);
+        tailPath.LineTo(cx + 2f, cy + h);
+        canvas.DrawPath(tailPath, iconPaint);
     }
 }

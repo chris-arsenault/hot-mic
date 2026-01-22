@@ -24,4 +24,31 @@ internal sealed class MainWindowRouter
         };
         window.Show();
     }
+
+    public void ShowAnalysisSettingsWindow(AnalysisOrchestrator orchestrator)
+    {
+        var window = new AnalysisSettingsWindow(orchestrator)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    public void ShowWaveformWindow(AnalysisOrchestrator orchestrator)
+    {
+        var window = new WaveformWindow(orchestrator)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    public void ShowSpeechCoachWindow(AnalysisOrchestrator orchestrator)
+    {
+        var window = new SpeechCoachWindow(orchestrator)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        window.Show();
+    }
 }

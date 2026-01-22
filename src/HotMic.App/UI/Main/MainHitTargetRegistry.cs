@@ -21,6 +21,9 @@ internal sealed class MainHitTargetRegistry
     public SKRect PresetDropdownRect { get; set; } = SKRect.Empty;
     public SKRect MasterMeterRect { get; set; } = SKRect.Empty;
     public SKRect VisualizerButtonRect { get; set; } = SKRect.Empty;
+    public SKRect AnalysisSettingsButtonRect { get; set; } = SKRect.Empty;
+    public SKRect WaveformButtonRect { get; set; } = SKRect.Empty;
+    public SKRect SpeechCoachButtonRect { get; set; } = SKRect.Empty;
     public SKRect AddChannelRect { get; set; } = SKRect.Empty;
 
     public void Clear()
@@ -41,6 +44,9 @@ internal sealed class MainHitTargetRegistry
         PresetDropdownRect = SKRect.Empty;
         MasterMeterRect = SKRect.Empty;
         VisualizerButtonRect = SKRect.Empty;
+        AnalysisSettingsButtonRect = SKRect.Empty;
+        WaveformButtonRect = SKRect.Empty;
+        SpeechCoachButtonRect = SKRect.Empty;
         AddChannelRect = SKRect.Empty;
     }
 }

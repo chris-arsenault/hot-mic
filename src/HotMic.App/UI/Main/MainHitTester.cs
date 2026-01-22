@@ -156,6 +156,12 @@ internal sealed class MainHitTester
 
     public bool HitTestVisualizerButton(float x, float y) => _targets.VisualizerButtonRect.Contains(x, y);
 
+    public bool HitTestAnalysisSettingsButton(float x, float y) => _targets.AnalysisSettingsButtonRect.Contains(x, y);
+
+    public bool HitTestWaveformButton(float x, float y) => _targets.WaveformButtonRect.Contains(x, y);
+
+    public bool HitTestSpeechCoachButton(float x, float y) => _targets.SpeechCoachButtonRect.Contains(x, y);
+
     public bool HitTestMeterScaleToggle(float x, float y) => _targets.MeterScaleToggleRect.Contains(x, y);
 
     public bool HitTestQualityToggle(float x, float y) => _targets.QualityToggleRect.Contains(x, y);

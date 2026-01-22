@@ -134,6 +134,27 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
+        if (_renderer.HitTestAnalysisSettingsButton(x, y))
+        {
+            viewModel.OpenAnalysisSettingsWindow();
+            e.Handled = true;
+            return;
+        }
+
+        if (_renderer.HitTestWaveformButton(x, y))
+        {
+            viewModel.OpenWaveformWindow();
+            e.Handled = true;
+            return;
+        }
+
+        if (_renderer.HitTestSpeechCoachButton(x, y))
+        {
+            viewModel.OpenSpeechCoachWindow();
+            e.Handled = true;
+            return;
+        }
+
         if (viewModel.ShowDebugOverlay && _renderer.HitTestDebugOverlayCopy(x, y))
         {
             CopyDebugOverlayToClipboard(viewModel);

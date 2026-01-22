@@ -154,14 +154,6 @@ public sealed class AnalysisOrchestrator : IDisposable
     private int _debugTransformPath; // 0=FFT, 1=CQT, 2=ZoomFFT
     private float _debugLastProcessedMax;
     private int _debugAnalysisFilled;
-    private int _debugReassignMinOffset;
-    private int _debugReassignMaxOffset;
-    private int _debugReassignWritesMinus2;
-    private int _debugReassignWritesMinus1;
-    private int _debugReassignWritesZero;
-    private int _debugReassignBinsConsidered;
-    private int _debugReassignBinsPassed;
-    private long _debugReassignFrameId;
 
     public long DebugEnqueueCalls => Interlocked.Read(ref _debugEnqueueCalls);
     public long DebugEnqueueSkippedChannel => Interlocked.Read(ref _debugEnqueueSkippedChannel);
@@ -189,14 +181,6 @@ public sealed class AnalysisOrchestrator : IDisposable
     public int DebugTransformPath => Volatile.Read(ref _debugTransformPath);
     public float DebugLastProcessedMax => Volatile.Read(ref _debugLastProcessedMax);
     public int DebugAnalysisFilled => Volatile.Read(ref _debugAnalysisFilled);
-    public int DebugReassignMinOffset => Volatile.Read(ref _debugReassignMinOffset);
-    public int DebugReassignMaxOffset => Volatile.Read(ref _debugReassignMaxOffset);
-    public int DebugReassignWritesMinus2 => Volatile.Read(ref _debugReassignWritesMinus2);
-    public int DebugReassignWritesMinus1 => Volatile.Read(ref _debugReassignWritesMinus1);
-    public int DebugReassignWritesZero => Volatile.Read(ref _debugReassignWritesZero);
-    public int DebugReassignBinsConsidered => Volatile.Read(ref _debugReassignBinsConsidered);
-    public int DebugReassignBinsPassed => Volatile.Read(ref _debugReassignBinsPassed);
-    public long DebugReassignFrameId => Volatile.Read(ref _debugReassignFrameId);
 
     public IAnalysisResultStore Results => _resultStore;
     public VisualizerSyncHub SyncHub => _syncHub;

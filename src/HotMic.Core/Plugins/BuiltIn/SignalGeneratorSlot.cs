@@ -102,17 +102,17 @@ internal sealed class SignalGeneratorSlot
     {
         float sample = _sample.Next(_sampleBuffer, out var flags);
 
-        if ((flags & SamplePlaybackFlags.Started) != 0)
+        if ((flags & SamplePlaybackEvent.Started) != 0)
         {
             Interlocked.Increment(ref _sampleStartCount);
         }
 
-        if ((flags & SamplePlaybackFlags.LoopRestart) != 0)
+        if ((flags & SamplePlaybackEvent.LoopRestart) != 0)
         {
             Interlocked.Increment(ref _sampleLoopCount);
         }
 
-        if ((flags & SamplePlaybackFlags.Stopped) != 0)
+        if ((flags & SamplePlaybackEvent.Stopped) != 0)
         {
             Interlocked.Increment(ref _sampleStopCount);
         }

@@ -342,6 +342,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _windowRouter.ShowAnalyzerWindow(_audioEngineCoordinator.AnalysisOrchestrator);
     }
 
+    public void OpenAnalysisSettingsWindow()
+    {
+        _windowRouter.ShowAnalysisSettingsWindow(_audioEngineCoordinator.AnalysisOrchestrator);
+    }
+
+    public void OpenWaveformWindow()
+    {
+        _windowRouter.ShowWaveformWindow(_audioEngineCoordinator.AnalysisOrchestrator);
+    }
+
+    public void OpenSpeechCoachWindow()
+    {
+        _windowRouter.ShowSpeechCoachWindow(_audioEngineCoordinator.AnalysisOrchestrator);
+    }
+
     public void ReinitializeAudioEngine()
     {
         _audioEngineCoordinator.ReinitializeAudioEngine();

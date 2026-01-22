@@ -124,6 +124,12 @@ public sealed class MainRenderer : IDisposable
 
     public bool HitTestVisualizerButton(float x, float y) => _hitTester.HitTestVisualizerButton(x, y);
 
+    public bool HitTestAnalysisSettingsButton(float x, float y) => _hitTester.HitTestAnalysisSettingsButton(x, y);
+
+    public bool HitTestWaveformButton(float x, float y) => _hitTester.HitTestWaveformButton(x, y);
+
+    public bool HitTestSpeechCoachButton(float x, float y) => _hitTester.HitTestSpeechCoachButton(x, y);
+
     public bool HitTestMeterScaleToggle(float x, float y) => _hitTester.HitTestMeterScaleToggle(x, y);
 
     public bool HitTestQualityToggle(float x, float y) => _hitTester.HitTestQualityToggle(x, y);
