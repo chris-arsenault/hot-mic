@@ -1,6 +1,4 @@
 using System;
-using System.Runtime.InteropServices;
-using System.Windows;
 using System.Windows.Input;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Analysis;
@@ -8,42 +6,49 @@ using HotMic.Core.Dsp;
 using HotMic.Core.Dsp.Analysis;
 using HotMic.Core.Dsp.Spectrogram;
 using SkiaSharp;
+using SkiaSharp.Views.Desktop;
 
 namespace HotMic.App.Views;
 
 public partial class AnalysisSettingsWindow : AnalysisWindowBase
 {
-    private const int WmNcLButtonDown = 0x00A1;
-    private const int HtCaption = 0x0002;
-
-    private readonly AnalysisSettingsRenderer _renderer;
+    private readonly AnalysisSettingsRenderer _renderer = new(PluginComponentTheme.BlueOnBlack);
 
     public AnalysisSettingsWindow(AnalysisOrchestrator orchestrator)
         : base(orchestrator)
     {
         InitializeComponent();
-        _renderer = new AnalysisSettingsRenderer(PluginComponentTheme.BlueOnBlack);
         InitializeSkiaSurface(SkiaHost);
+
         WireKnobHandlers();
         SyncKnobsFromConfig();
     }
 
-    private void WireKnobHandlers()
+    protected override AnalysisCapabilities ComputeRequiredCapabilities() => AnalysisCapabilities.None;
+
+    protected override void OnRenderTick(object? sender, EventArgs e)
     {
-        _renderer.MinFreqKnob.ValueChanged += v => SetConfigValue(cfg => cfg.MinFrequency = v);
-        _renderer.MaxFreqKnob.ValueChanged += v => SetConfigValue(cfg => cfg.MaxFrequency = v);
-        _renderer.TimeKnob.ValueChanged += v => SetConfigValue(cfg => cfg.TimeWindow = v);
-        _renderer.HpfKnob.ValueChanged += v => SetConfigValue(cfg => cfg.HighPassCutoff = v);
-        _renderer.ReassignThresholdKnob.ValueChanged += v => SetConfigValue(cfg => cfg.ReassignThreshold = v);
-        _renderer.ReassignSpreadKnob.ValueChanged += v => SetConfigValue(cfg => cfg.ReassignSpread = v / 100f);
-        _renderer.ClarityNoiseKnob.ValueChanged += v => SetConfigValue(cfg => cfg.ClarityNoise = v / 100f);
-        _renderer.ClarityHarmonicKnob.ValueChanged += v => SetConfigValue(cfg => cfg.ClarityHarmonic = v / 100f);
-        _renderer.ClaritySmoothingKnob.ValueChanged += v => SetConfigValue(cfg => cfg.ClaritySmoothing = v / 100f);
+        // Sync button states from config each tick (in case another window changes them)
+        SyncButtonStatesFromConfig();
+        InvalidateRenderSurface();
     }
 
-    private void SetConfigValue(Action<AnalysisConfiguration> setter)
+    protected override void OnRender(SKCanvas canvas, int width, int height)
     {
-        setter(Orchestrator.Config);
+        _renderer.Render(canvas, width, height);
+    }
+
+    private void WireKnobHandlers()
+    {
+        _renderer.MinFreqKnob.ValueChanged += v => Orchestrator.Config.MinFrequency = v;
+        _renderer.MaxFreqKnob.ValueChanged += v => Orchestrator.Config.MaxFrequency = v;
+        _renderer.TimeKnob.ValueChanged += v => Orchestrator.Config.TimeWindow = v;
+        _renderer.HpfKnob.ValueChanged += v => Orchestrator.Config.HighPassCutoff = v;
+        _renderer.ReassignThresholdKnob.ValueChanged += v => Orchestrator.Config.ReassignThreshold = v;
+        _renderer.ReassignSpreadKnob.ValueChanged += v => Orchestrator.Config.ReassignSpread = v / 100f;
+        _renderer.ClarityNoiseKnob.ValueChanged += v => Orchestrator.Config.ClarityNoise = v / 100f;
+        _renderer.ClarityHarmonicKnob.ValueChanged += v => Orchestrator.Config.ClarityHarmonic = v / 100f;
+        _renderer.ClaritySmoothingKnob.ValueChanged += v => Orchestrator.Config.ClaritySmoothing = v / 100f;
     }
 
     private void SyncKnobsFromConfig()
@@ -74,19 +79,6 @@ public partial class AnalysisSettingsWindow : AnalysisWindowBase
         _renderer.HighPassEnabled = config.HighPassEnabled;
     }
 
-    protected override AnalysisCapabilities ComputeRequiredCapabilities()
-    {
-        // Settings window doesn't need to subscribe to analysis data
-        return AnalysisCapabilities.None;
-    }
-
-    protected override void OnRenderTick(object? sender, EventArgs e)
-    {
-        // Sync button states from config each tick (in case another window changes them)
-        SyncButtonStatesFromConfig();
-        InvalidateRenderSurface();
-    }
-
     private void SyncButtonStatesFromConfig()
     {
         var config = Orchestrator.Config;
@@ -94,18 +86,103 @@ public partial class AnalysisSettingsWindow : AnalysisWindowBase
         _renderer.HighPassEnabled = config.HighPassEnabled;
     }
 
-    protected override void OnRender(SKCanvas canvas, int width, int height)
-    {
-        _renderer.Render(canvas, width, height);
-    }
-
-    #region Mouse Handling
+    #region WPF Mouse Handlers (CPU mode)
 
     protected override void OnSkiaMouseDown(object sender, MouseButtonEventArgs e)
     {
-        var pos = e.GetPosition(SkiaCanvas);
+        var element = sender as System.Windows.FrameworkElement;
+        if (element is null) return;
+
+        var pos = e.GetPosition(element);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Let knobs handle their own input (drag, right-click edit)
+        foreach (var knob in _renderer.AllKnobs)
+        {
+            if (knob.HandleMouseDown(x, y, e.ChangedButton, element))
+            {
+                if (knob.IsDragging)
+                    element.CaptureMouse();
+                e.Handled = true;
+                return;
+            }
+        }
+
+        if (e.ChangedButton != MouseButton.Left)
+            return;
+
+        // Close button (check before title bar drag since it's inside the title bar)
+        if (_renderer.CloseButtonRect.Contains(x, y))
+        {
+            Close();
+            e.Handled = true;
+            return;
+        }
+
+        // Title bar drag
+        if (y < 40)
+        {
+            DragMove();
+            e.Handled = true;
+            return;
+        }
+
+        // Button clicks
+        HandleButtonClick(x, y);
+    }
+
+    protected override void OnSkiaMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        var element = sender as System.Windows.FrameworkElement;
+        if (element is null) return;
+
+        var pos = e.GetPosition(element);
+        float x = (float)pos.X;
+        float y = (float)pos.Y;
+
+        foreach (var knob in _renderer.AllKnobs)
+        {
+            knob.HandleMouseMove(x, y, e.LeftButton == MouseButtonState.Pressed);
+        }
+    }
+
+    protected override void OnSkiaMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        var element = sender as System.Windows.FrameworkElement;
+        if (element is null) return;
+
+        foreach (var knob in _renderer.AllKnobs)
+        {
+            knob.HandleMouseUp(e.ChangedButton);
+        }
+
+        if (e.ChangedButton == MouseButton.Left)
+            element.ReleaseMouseCapture();
+    }
+
+    #endregion
+
+    #region WinForms Mouse Handlers (GPU mode)
+
+    protected override void OnSkiaMouseDownWinForms(object? sender, System.Windows.Forms.MouseEventArgs e)
+    {
+        float x = e.X;
+        float y = e.Y;
+
+        var wpfButton = ToWpfMouseButton(e.Button);
+
+        // Let knobs handle their own input (drag, right-click edit)
+        foreach (var knob in _renderer.AllKnobs)
+        {
+            if (wpfButton.HasValue && knob.HandleMouseDown(x, y, wpfButton.Value, SkiaCanvas))
+            {
+                return;
+            }
+        }
+
+        if (e.Button != System.Windows.Forms.MouseButtons.Left)
+            return;
 
         // Close button (check before title bar drag since it's inside the title bar)
         if (_renderer.CloseButtonRect.Contains(x, y))
@@ -115,62 +192,13 @@ public partial class AnalysisSettingsWindow : AnalysisWindowBase
         }
 
         // Title bar drag
-        if (y < 40 && e.LeftButton == MouseButtonState.Pressed)
+        if (y < 40)
         {
             DragWindow();
             return;
         }
 
-        // Check knob interaction
-        if (TryHandleKnobMouseDown(x, y, e.ChangedButton))
-        {
-            return;
-        }
-
-        // Check button clicks
-        HandleButtonClick(x, y);
-    }
-
-    protected override void OnSkiaMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
-    {
-        var pos = e.GetPosition(SkiaCanvas);
-        float x = (float)pos.X;
-        float y = (float)pos.Y;
-        bool leftDown = e.LeftButton == MouseButtonState.Pressed;
-        bool shiftHeld = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
-
-        HandleKnobMouseMove(x, y, leftDown, shiftHeld);
-    }
-
-    protected override void OnSkiaMouseUp(object sender, MouseButtonEventArgs e)
-    {
-        HandleKnobMouseUp(e.ChangedButton);
-    }
-
-    protected override void OnSkiaMouseDownWinForms(object? sender, System.Windows.Forms.MouseEventArgs e)
-    {
-        float x = e.X;
-        float y = e.Y;
-
-        // Close button (check before title bar drag since it's inside the title bar)
-        if (_renderer.CloseButtonRect.Contains(x, y))
-        {
-            Close();
-            return;
-        }
-
-        if (y < 40 && e.Button == System.Windows.Forms.MouseButtons.Left)
-        {
-            DragWindow();
-            return;
-        }
-
-        var button = ToWpfMouseButton(e.Button);
-        if (button.HasValue && TryHandleKnobMouseDown(x, y, button.Value))
-        {
-            return;
-        }
-
+        // Button clicks
         HandleButtonClick(x, y);
     }
 
@@ -178,50 +206,27 @@ public partial class AnalysisSettingsWindow : AnalysisWindowBase
     {
         float x = e.X;
         float y = e.Y;
-        bool leftDown = (e.Button & System.Windows.Forms.MouseButtons.Left) != 0;
-        bool shiftHeld = (System.Windows.Forms.Control.ModifierKeys & System.Windows.Forms.Keys.Shift) != 0;
+        bool leftPressed = (e.Button & System.Windows.Forms.MouseButtons.Left) != 0;
 
-        HandleKnobMouseMove(x, y, leftDown, shiftHeld);
+        foreach (var knob in _renderer.AllKnobs)
+        {
+            knob.HandleMouseMove(x, y, leftPressed);
+        }
     }
 
     protected override void OnSkiaMouseUpWinForms(object? sender, System.Windows.Forms.MouseEventArgs e)
     {
-        var button = ToWpfMouseButton(e.Button);
-        if (button.HasValue)
+        var wpfButton = ToWpfMouseButton(e.Button);
+        if (wpfButton.HasValue)
         {
-            HandleKnobMouseUp(button.Value);
-        }
-    }
-
-    private bool TryHandleKnobMouseDown(float x, float y, MouseButton button)
-    {
-        if (SkiaCanvas is null) return false;
-
-        foreach (var knob in _renderer.AllKnobs)
-        {
-            if (knob.HandleMouseDown(x, y, button, SkiaCanvas))
+            foreach (var knob in _renderer.AllKnobs)
             {
-                return true;
+                knob.HandleMouseUp(wpfButton.Value);
             }
         }
-        return false;
     }
 
-    private void HandleKnobMouseMove(float x, float y, bool leftDown, bool shiftHeld)
-    {
-        foreach (var knob in _renderer.AllKnobs)
-        {
-            knob.HandleMouseMove(x, y, leftDown, shiftHeld);
-        }
-    }
-
-    private void HandleKnobMouseUp(MouseButton button)
-    {
-        foreach (var knob in _renderer.AllKnobs)
-        {
-            knob.HandleMouseUp(button);
-        }
-    }
+    #endregion
 
     private void HandleButtonClick(float x, float y)
     {
@@ -349,28 +354,14 @@ public partial class AnalysisSettingsWindow : AnalysisWindowBase
         {
             config.HighPassEnabled = !config.HighPassEnabled;
             _renderer.HighPassEnabled = config.HighPassEnabled;
-            return;
         }
     }
 
-    [DllImport("user32.dll")]
-    private static extern bool ReleaseCapture();
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
-
-    private void DragWindow()
-    {
-        ReleaseCapture();
-        var helper = new System.Windows.Interop.WindowInteropHelper(this);
-        SendMessage(helper.Handle, WmNcLButtonDown, (IntPtr)HtCaption, IntPtr.Zero);
-    }
-
-    #endregion
-
     public override void Dispose()
     {
+        if (IsDisposed) return;
         _renderer.Dispose();
         base.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

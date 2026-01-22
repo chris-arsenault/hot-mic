@@ -33,21 +33,36 @@ public sealed class PitchContourAnalyzer
     public float MonotoneThresholdSemitones { get; set; } = 2f;
 
     /// <summary>
+    /// Threshold in semitones above which speech has good variety.
+    /// </summary>
+    public float GoodVarietyThresholdSemitones { get; set; } = 4f;
+
+    /// <summary>
     /// Record a pitch value for a voiced frame.
     /// </summary>
     /// <param name="pitchHz">Pitch frequency in Hz (0 if unvoiced).</param>
+    /// <param name="pitchConfidence">Pitch confidence (0-1).</param>
     /// <param name="voicing">Voicing state.</param>
     /// <param name="frameId">Current frame ID.</param>
-    public void RecordPitch(float pitchHz, VoicingState voicing, long frameId)
+    public void RecordPitch(float pitchHz, float pitchConfidence, VoicingState voicing, long frameId)
     {
         // Only record voiced frames with valid pitch
-        if (voicing != VoicingState.Voiced || pitchHz <= 0f)
+        if (voicing != VoicingState.Voiced || pitchHz <= 0f || pitchConfidence < 0.3f)
         {
             return;
         }
 
         // Convert to semitones relative to reference
+        if (!float.IsFinite(pitchHz) || !float.IsFinite(pitchConfidence))
+        {
+            return;
+        }
+
         float semitones = 12f * MathF.Log2(pitchHz / ReferenceFrequency);
+        if (!float.IsFinite(semitones))
+        {
+            return;
+        }
 
         _pitchHistory[_historyHead] = semitones;
         _frameHistory[_historyHead] = frameId;
@@ -157,10 +172,23 @@ public sealed class PitchContourAnalyzer
             pitchSlopeSemitones *= framesPerSecond;
         }
 
-        // Monotone score: inverse of variation normalized by threshold
-        // Score = 1 means highly monotone, 0 means varied
-        monotoneScore = 1f - MathF.Min(pitchVariationSemitones / MonotoneThresholdSemitones, 1f);
-        monotoneScore = MathF.Max(0f, monotoneScore);
+        // Monotone score: 1 when σ <= monotone threshold, 0 when σ >= good variety threshold.
+        // SPEECH.md 8.3: monotone threshold = 2 semitones, good variety = 4 semitones.
+        float monotoneThreshold = MonotoneThresholdSemitones;
+        float goodThreshold = MathF.Max(monotoneThreshold + 0.1f, GoodVarietyThresholdSemitones);
+        if (pitchVariationSemitones <= monotoneThreshold)
+        {
+            monotoneScore = 1f;
+        }
+        else if (pitchVariationSemitones >= goodThreshold)
+        {
+            monotoneScore = 0f;
+        }
+        else
+        {
+            float t = (pitchVariationSemitones - monotoneThreshold) / (goodThreshold - monotoneThreshold);
+            monotoneScore = Math.Clamp(1f - t, 0f, 1f);
+        }
 
         // Convert mean back to Hz
         meanPitchHz = ReferenceFrequency * MathF.Pow(2f, mean / 12f);

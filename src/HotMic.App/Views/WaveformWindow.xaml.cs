@@ -1,6 +1,4 @@
 using System;
-using System.Runtime.InteropServices;
-using System.Windows;
 using System.Windows.Input;
 using HotMic.App.UI.PluginComponents;
 using HotMic.Core.Analysis;
@@ -10,10 +8,7 @@ namespace HotMic.App.Views;
 
 public partial class WaveformWindow : AnalysisWindowBase
 {
-    private const int WmNcLButtonDown = 0x00A1;
-    private const int HtCaption = 0x0002;
-
-    private readonly WaveformWindowRenderer _renderer;
+    private readonly WaveformWindowRenderer _renderer = new(PluginComponentTheme.BlueOnBlack);
 
     // Data buffers
     private float[] _waveformMin = Array.Empty<float>();
@@ -29,10 +24,32 @@ public partial class WaveformWindow : AnalysisWindowBase
         : base(orchestrator)
     {
         InitializeComponent();
-        _renderer = new WaveformWindowRenderer(PluginComponentTheme.BlueOnBlack);
         InitializeSkiaSurface(SkiaHost);
+
         WireKnobHandlers();
         SyncKnobsFromSettings();
+    }
+
+    protected override AnalysisCapabilities ComputeRequiredCapabilities() => AnalysisCapabilities.Waveform;
+
+    protected override void OnRenderTick(object? sender, EventArgs e)
+    {
+        EnsureBuffers();
+        CopyWaveformData();
+        InvalidateRenderSurface();
+    }
+
+    protected override void OnRender(SKCanvas canvas, int width, int height)
+    {
+        _renderer.Render(
+            canvas,
+            width,
+            height,
+            _waveformMin,
+            _waveformMax,
+            Store.AvailableFrames,
+            _minDb,
+            _maxDb);
     }
 
     private void WireKnobHandlers()
@@ -47,18 +64,6 @@ public partial class WaveformWindow : AnalysisWindowBase
         _renderer.MinDbKnob.Value = _minDb;
         _renderer.MaxDbKnob.Value = _maxDb;
         _renderer.TimeKnob.Value = Orchestrator.Config.TimeWindow;
-    }
-
-    protected override AnalysisCapabilities ComputeRequiredCapabilities()
-    {
-        return AnalysisCapabilities.Waveform;
-    }
-
-    protected override void OnRenderTick(object? sender, EventArgs e)
-    {
-        EnsureBuffers();
-        CopyWaveformData();
-        InvalidateRenderSurface();
     }
 
     private void EnsureBuffers()
@@ -86,26 +91,99 @@ public partial class WaveformWindow : AnalysisWindowBase
         _lastCopiedFrameId = latestFrameId;
     }
 
-    protected override void OnRender(SKCanvas canvas, int width, int height)
-    {
-        _renderer.Render(
-            canvas,
-            width,
-            height,
-            _waveformMin,
-            _waveformMax,
-            Store.AvailableFrames,
-            _minDb,
-            _maxDb);
-    }
-
-    #region Mouse Handling
+    #region WPF Mouse Handlers (CPU mode)
 
     protected override void OnSkiaMouseDown(object sender, MouseButtonEventArgs e)
     {
-        var pos = e.GetPosition(SkiaCanvas);
+        var element = sender as System.Windows.FrameworkElement;
+        if (element is null) return;
+
+        var pos = e.GetPosition(element);
         float x = (float)pos.X;
         float y = (float)pos.Y;
+
+        // Let knobs handle their own input (drag, right-click edit)
+        foreach (var knob in _renderer.AllKnobs)
+        {
+            if (knob.HandleMouseDown(x, y, e.ChangedButton, element))
+            {
+                if (knob.IsDragging)
+                    element.CaptureMouse();
+                e.Handled = true;
+                return;
+            }
+        }
+
+        if (e.ChangedButton != MouseButton.Left)
+            return;
+
+        // Close button (check before title bar drag since it's inside the title bar)
+        if (_renderer.CloseButtonRect.Contains(x, y))
+        {
+            Close();
+            e.Handled = true;
+            return;
+        }
+
+        // Title bar drag
+        if (y < 36)
+        {
+            DragMove();
+            e.Handled = true;
+        }
+    }
+
+    protected override void OnSkiaMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        var element = sender as System.Windows.FrameworkElement;
+        if (element is null) return;
+
+        var pos = e.GetPosition(element);
+        float x = (float)pos.X;
+        float y = (float)pos.Y;
+
+        foreach (var knob in _renderer.AllKnobs)
+        {
+            knob.HandleMouseMove(x, y, e.LeftButton == MouseButtonState.Pressed);
+        }
+    }
+
+    protected override void OnSkiaMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        var element = sender as System.Windows.FrameworkElement;
+        if (element is null) return;
+
+        foreach (var knob in _renderer.AllKnobs)
+        {
+            knob.HandleMouseUp(e.ChangedButton);
+        }
+
+        if (e.ChangedButton == MouseButton.Left)
+            element.ReleaseMouseCapture();
+    }
+
+    #endregion
+
+    #region WinForms Mouse Handlers (GPU mode)
+
+    protected override void OnSkiaMouseDownWinForms(object? sender, System.Windows.Forms.MouseEventArgs e)
+    {
+        float x = e.X;
+        float y = e.Y;
+
+        var wpfButton = ToWpfMouseButton(e.Button);
+
+        // Let knobs handle their own input (drag, right-click edit)
+        foreach (var knob in _renderer.AllKnobs)
+        {
+            if (wpfButton.HasValue && knob.HandleMouseDown(x, y, wpfButton.Value, SkiaCanvas))
+            {
+                return;
+            }
+        }
+
+        if (e.Button != System.Windows.Forms.MouseButtons.Left)
+            return;
 
         // Close button (check before title bar drag since it's inside the title bar)
         if (_renderer.CloseButtonRect.Contains(x, y))
@@ -115,121 +193,43 @@ public partial class WaveformWindow : AnalysisWindowBase
         }
 
         // Title bar drag
-        if (y < 36 && e.LeftButton == MouseButtonState.Pressed)
+        if (y < 36)
         {
             DragWindow();
-            return;
-        }
-
-        // Knob interaction
-        TryHandleKnobMouseDown(x, y, e.ChangedButton);
-    }
-
-    protected override void OnSkiaMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
-    {
-        var pos = e.GetPosition(SkiaCanvas);
-        float x = (float)pos.X;
-        float y = (float)pos.Y;
-        bool leftDown = e.LeftButton == MouseButtonState.Pressed;
-        bool shiftHeld = (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
-
-        HandleKnobMouseMove(x, y, leftDown, shiftHeld);
-    }
-
-    protected override void OnSkiaMouseUp(object sender, MouseButtonEventArgs e)
-    {
-        HandleKnobMouseUp(e.ChangedButton);
-    }
-
-    protected override void OnSkiaMouseDownWinForms(object? sender, System.Windows.Forms.MouseEventArgs e)
-    {
-        float x = e.X;
-        float y = e.Y;
-
-        // Close button (check before title bar drag since it's inside the title bar)
-        if (_renderer.CloseButtonRect.Contains(x, y))
-        {
-            Close();
-            return;
-        }
-
-        if (y < 36 && e.Button == System.Windows.Forms.MouseButtons.Left)
-        {
-            DragWindow();
-            return;
-        }
-
-        var button = ToWpfMouseButton(e.Button);
-        if (button.HasValue)
-        {
-            TryHandleKnobMouseDown(x, y, button.Value);
         }
     }
 
     protected override void OnSkiaMouseMoveWinForms(object? sender, System.Windows.Forms.MouseEventArgs e)
     {
-        bool leftDown = (e.Button & System.Windows.Forms.MouseButtons.Left) != 0;
-        bool shiftHeld = (System.Windows.Forms.Control.ModifierKeys & System.Windows.Forms.Keys.Shift) != 0;
-        HandleKnobMouseMove(e.X, e.Y, leftDown, shiftHeld);
+        float x = e.X;
+        float y = e.Y;
+        bool leftPressed = (e.Button & System.Windows.Forms.MouseButtons.Left) != 0;
+
+        foreach (var knob in _renderer.AllKnobs)
+        {
+            knob.HandleMouseMove(x, y, leftPressed);
+        }
     }
 
     protected override void OnSkiaMouseUpWinForms(object? sender, System.Windows.Forms.MouseEventArgs e)
     {
-        var button = ToWpfMouseButton(e.Button);
-        if (button.HasValue)
+        var wpfButton = ToWpfMouseButton(e.Button);
+        if (wpfButton.HasValue)
         {
-            HandleKnobMouseUp(button.Value);
-        }
-    }
-
-    private bool TryHandleKnobMouseDown(float x, float y, MouseButton button)
-    {
-        if (SkiaCanvas is null) return false;
-
-        foreach (var knob in _renderer.AllKnobs)
-        {
-            if (knob.HandleMouseDown(x, y, button, SkiaCanvas))
+            foreach (var knob in _renderer.AllKnobs)
             {
-                return true;
+                knob.HandleMouseUp(wpfButton.Value);
             }
         }
-        return false;
-    }
-
-    private void HandleKnobMouseMove(float x, float y, bool leftDown, bool shiftHeld)
-    {
-        foreach (var knob in _renderer.AllKnobs)
-        {
-            knob.HandleMouseMove(x, y, leftDown, shiftHeld);
-        }
-    }
-
-    private void HandleKnobMouseUp(MouseButton button)
-    {
-        foreach (var knob in _renderer.AllKnobs)
-        {
-            knob.HandleMouseUp(button);
-        }
-    }
-
-    [DllImport("user32.dll")]
-    private static extern bool ReleaseCapture();
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
-
-    private void DragWindow()
-    {
-        ReleaseCapture();
-        var helper = new System.Windows.Interop.WindowInteropHelper(this);
-        SendMessage(helper.Handle, WmNcLButtonDown, (IntPtr)HtCaption, IntPtr.Zero);
     }
 
     #endregion
 
     public override void Dispose()
     {
+        if (IsDisposed) return;
         _renderer.Dispose();
         base.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

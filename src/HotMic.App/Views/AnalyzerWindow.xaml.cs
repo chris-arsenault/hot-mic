@@ -75,12 +75,34 @@ public partial class AnalyzerWindow : Window, IDisposable
     // Speech Coach buffers
     private byte[] _speakingStateTrack = Array.Empty<byte>();
     private byte[] _syllableMarkers = Array.Empty<byte>();
-    private float _lastSyllableRate;
-    private float _lastArticulationRate;
+    private byte[] _emphasisMarkers = Array.Empty<byte>();
+    private float[] _syllableRateTrack = Array.Empty<float>();
+    private float[] _articulationRateTrack = Array.Empty<float>();
+    private float[] _wordsPerMinuteTrack = Array.Empty<float>();
+    private float[] _articulationWpmTrack = Array.Empty<float>();
+    private float[] _pauseRatioTrack = Array.Empty<float>();
+    private float[] _meanPauseDurationTrack = Array.Empty<float>();
+    private float[] _pausesPerMinuteTrack = Array.Empty<float>();
+    private float[] _filledPauseRatioTrack = Array.Empty<float>();
+    private float[] _pauseMicroCountTrack = Array.Empty<float>();
+    private float[] _pauseShortCountTrack = Array.Empty<float>();
+    private float[] _pauseMediumCountTrack = Array.Empty<float>();
+    private float[] _pauseLongCountTrack = Array.Empty<float>();
+    private float[] _monotoneScoreTrack = Array.Empty<float>();
+    private float[] _clarityScoreTrack = Array.Empty<float>();
+    private float[] _intelligibilityTrack = Array.Empty<float>();
+    private float[] _bandLowRatioTrack = Array.Empty<float>();
+    private float[] _bandMidRatioTrack = Array.Empty<float>();
+    private float[] _bandPresenceRatioTrack = Array.Empty<float>();
+    private float[] _bandHighRatioTrack = Array.Empty<float>();
+    private float[] _clarityRatioTrack = Array.Empty<float>();
+    private float _lastWordsPerMinute;
+    private float _lastArticulationWpm;
     private float _lastPauseRatio;
     private float _lastMonotoneScore;
     private float _lastClarityScore;
     private float _lastIntelligibilityScore;
+    private long _lastSpeechCopiedFrameId = -1;
 
     private int _bufferFrameCount;
     private int _bufferBins;
@@ -700,9 +722,52 @@ public partial class AnalyzerWindow : Window, IDisposable
             // Copy speech metrics if enabled
             if (_speechCoachEnabled)
             {
-                // Speech metrics from store - use TryGetSpeechMetrics if available
-                // For now, speech metrics are tracked per-frame in the store
-                // but we don't have a single-value getter, so leave at defaults
+                bool speechCopied = _store.TryGetSpeechMetrics(
+                    _lastSpeechCopiedFrameId,
+                    _syllableRateTrack,
+                    _articulationRateTrack,
+                    _wordsPerMinuteTrack,
+                    _articulationWpmTrack,
+                    _pauseRatioTrack,
+                    _meanPauseDurationTrack,
+                    _pausesPerMinuteTrack,
+                    _filledPauseRatioTrack,
+                    _pauseMicroCountTrack,
+                    _pauseShortCountTrack,
+                    _pauseMediumCountTrack,
+                    _pauseLongCountTrack,
+                    _monotoneScoreTrack,
+                    _clarityScoreTrack,
+                    _intelligibilityTrack,
+                    _bandLowRatioTrack,
+                    _bandMidRatioTrack,
+                    _bandPresenceRatioTrack,
+                    _bandHighRatioTrack,
+                    _clarityRatioTrack,
+                    _speakingStateTrack,
+                    _syllableMarkers,
+                    _emphasisMarkers,
+                    out long speechLatestFrameId,
+                    out int speechAvailableFrames,
+                    out _);
+
+                if (speechCopied && speechAvailableFrames > 0 && _bufferFrameCount > 0)
+                {
+                    _lastSpeechCopiedFrameId = speechLatestFrameId;
+
+                    int latestIndex = (int)(speechLatestFrameId % _bufferFrameCount);
+                    if (latestIndex < 0)
+                    {
+                        latestIndex += _bufferFrameCount;
+                    }
+
+                    _lastWordsPerMinute = _wordsPerMinuteTrack[latestIndex];
+                    _lastArticulationWpm = _articulationWpmTrack[latestIndex];
+                    _lastPauseRatio = _pauseRatioTrack[latestIndex];
+                    _lastMonotoneScore = _monotoneScoreTrack[latestIndex];
+                    _lastClarityScore = _clarityScoreTrack[latestIndex];
+                    _lastIntelligibilityScore = _intelligibilityTrack[latestIndex];
+                }
             }
         }
 
@@ -1015,6 +1080,27 @@ public partial class AnalyzerWindow : Window, IDisposable
         {
             _speakingStateTrack = new byte[frames];
             _syllableMarkers = new byte[frames];
+            _emphasisMarkers = new byte[frames];
+            _syllableRateTrack = new float[frames];
+            _articulationRateTrack = new float[frames];
+            _wordsPerMinuteTrack = new float[frames];
+            _articulationWpmTrack = new float[frames];
+            _pauseRatioTrack = new float[frames];
+            _meanPauseDurationTrack = new float[frames];
+            _pausesPerMinuteTrack = new float[frames];
+            _filledPauseRatioTrack = new float[frames];
+            _pauseMicroCountTrack = new float[frames];
+            _pauseShortCountTrack = new float[frames];
+            _pauseMediumCountTrack = new float[frames];
+            _pauseLongCountTrack = new float[frames];
+            _monotoneScoreTrack = new float[frames];
+            _clarityScoreTrack = new float[frames];
+            _intelligibilityTrack = new float[frames];
+            _bandLowRatioTrack = new float[frames];
+            _bandMidRatioTrack = new float[frames];
+            _bandPresenceRatioTrack = new float[frames];
+            _bandHighRatioTrack = new float[frames];
+            _clarityRatioTrack = new float[frames];
             _lastDataVersion = -1;
             resized = true;
         }
@@ -1202,8 +1288,8 @@ public partial class AnalyzerWindow : Window, IDisposable
             ShowSyllableMarkers: _showSyllableMarkers,
             ShowPauseOverlay: _showPauseOverlay,
             ShowFillerMarkers: _showFillerMarkers,
-            SyllableRate: _lastSyllableRate,
-            ArticulationRate: _lastArticulationRate,
+            WordsPerMinute: _lastWordsPerMinute,
+            ArticulationWpm: _lastArticulationWpm,
             PauseRatio: _lastPauseRatio,
             MonotoneScore: _lastMonotoneScore,
             ClarityScore: _lastClarityScore,
@@ -1785,12 +1871,34 @@ public partial class AnalyzerWindow : Window, IDisposable
         // Speech Coach buffers
         Array.Clear(_speakingStateTrack, 0, _speakingStateTrack.Length);
         Array.Clear(_syllableMarkers, 0, _syllableMarkers.Length);
-        _lastSyllableRate = 0f;
-        _lastArticulationRate = 0f;
+        Array.Clear(_emphasisMarkers, 0, _emphasisMarkers.Length);
+        Array.Clear(_syllableRateTrack, 0, _syllableRateTrack.Length);
+        Array.Clear(_articulationRateTrack, 0, _articulationRateTrack.Length);
+        Array.Clear(_wordsPerMinuteTrack, 0, _wordsPerMinuteTrack.Length);
+        Array.Clear(_articulationWpmTrack, 0, _articulationWpmTrack.Length);
+        Array.Clear(_pauseRatioTrack, 0, _pauseRatioTrack.Length);
+        Array.Clear(_meanPauseDurationTrack, 0, _meanPauseDurationTrack.Length);
+        Array.Clear(_pausesPerMinuteTrack, 0, _pausesPerMinuteTrack.Length);
+        Array.Clear(_filledPauseRatioTrack, 0, _filledPauseRatioTrack.Length);
+        Array.Clear(_pauseMicroCountTrack, 0, _pauseMicroCountTrack.Length);
+        Array.Clear(_pauseShortCountTrack, 0, _pauseShortCountTrack.Length);
+        Array.Clear(_pauseMediumCountTrack, 0, _pauseMediumCountTrack.Length);
+        Array.Clear(_pauseLongCountTrack, 0, _pauseLongCountTrack.Length);
+        Array.Clear(_monotoneScoreTrack, 0, _monotoneScoreTrack.Length);
+        Array.Clear(_clarityScoreTrack, 0, _clarityScoreTrack.Length);
+        Array.Clear(_intelligibilityTrack, 0, _intelligibilityTrack.Length);
+        Array.Clear(_bandLowRatioTrack, 0, _bandLowRatioTrack.Length);
+        Array.Clear(_bandMidRatioTrack, 0, _bandMidRatioTrack.Length);
+        Array.Clear(_bandPresenceRatioTrack, 0, _bandPresenceRatioTrack.Length);
+        Array.Clear(_bandHighRatioTrack, 0, _bandHighRatioTrack.Length);
+        Array.Clear(_clarityRatioTrack, 0, _clarityRatioTrack.Length);
+        _lastWordsPerMinute = 0f;
+        _lastArticulationWpm = 0f;
         _lastPauseRatio = 0f;
         _lastMonotoneScore = 0f;
         _lastClarityScore = 0f;
         _lastIntelligibilityScore = 0f;
+        _lastSpeechCopiedFrameId = -1;
         _lastDataVersion = -1;
         _lastCopiedFrameId = -1;
         _lastMappedFrameId = -1;

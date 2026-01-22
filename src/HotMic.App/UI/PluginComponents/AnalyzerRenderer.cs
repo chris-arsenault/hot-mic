@@ -1075,12 +1075,12 @@ public sealed class AnalyzerRenderer : IDisposable
 
             // Rate metric
             DrawSpeechMetric(canvas, rect.Left + 8f, y, rect.Width - 16f, metricHeight, barHeight,
-                "Rate", $"{state.SyllableRate:F0} syl/m", state.SyllableRate, 100f, 200f);
+                "WPM", $"{state.WordsPerMinute:F0}", state.WordsPerMinute, 110f, 190f);
             y += metricHeight + 4f;
 
             // Articulation rate
             DrawSpeechMetric(canvas, rect.Left + 8f, y, rect.Width - 16f, metricHeight, barHeight,
-                "Artic", $"{state.ArticulationRate:F0} syl/m", state.ArticulationRate, 100f, 200f);
+                "Artic", $"{state.ArticulationWpm:F0}", state.ArticulationWpm, 120f, 210f);
             y += metricHeight + 4f;
 
             // Pause ratio
@@ -2881,8 +2881,8 @@ public record struct SpectroState(
     bool ShowSyllableMarkers,
     bool ShowPauseOverlay,
     bool ShowFillerMarkers,
-    float SyllableRate,
-    float ArticulationRate,
+    float WordsPerMinute,
+    float ArticulationWpm,
     float PauseRatio,
     float MonotoneScore,
     float ClarityScore,

@@ -1,8 +1,10 @@
 using System;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Forms.Integration;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Threading;
 using HotMic.Core.Analysis;
 using SkiaSharp;
@@ -213,6 +215,26 @@ public abstract class AnalysisWindowBase : Window, IDisposable
     }
 
     #region Input Handling
+
+    private const int WM_NCLBUTTONDOWN = 0xA1;
+    private const int HT_CAPTION = 0x2;
+
+    [DllImport("user32.dll")]
+    private static extern int SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool ReleaseCapture();
+
+    /// <summary>
+    /// Initiates window drag from WinForms control (GPU mode).
+    /// Use DragMove() for CPU mode (WPF controls).
+    /// </summary>
+    protected void DragWindow()
+    {
+        ReleaseCapture();
+        var hwnd = new WindowInteropHelper(this).Handle;
+        _ = SendMessage(hwnd, WM_NCLBUTTONDOWN, HT_CAPTION, 0);
+    }
 
     protected virtual void AttachInputHandlers(UIElement element)
     {

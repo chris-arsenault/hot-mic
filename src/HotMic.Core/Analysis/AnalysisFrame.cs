@@ -147,10 +147,25 @@ public struct SpeechMetricsFrame
 {
     public float SyllableRate { get; set; }
     public float ArticulationRate { get; set; }
+    public float WordsPerMinute { get; set; }
+    public float ArticulationWpm { get; set; }
     public float PauseRatio { get; set; }
+    public float MeanPauseDurationMs { get; set; }
+    public float PausesPerMinute { get; set; }
+    public float FilledPauseRatio { get; set; }
+    public float PauseMicroCount { get; set; }
+    public float PauseShortCount { get; set; }
+    public float PauseMediumCount { get; set; }
+    public float PauseLongCount { get; set; }
     public float MonotoneScore { get; set; }
     public float ClarityScore { get; set; }
     public float IntelligibilityScore { get; set; }
+    public float BandLowRatio { get; set; }
+    public float BandMidRatio { get; set; }
+    public float BandPresenceRatio { get; set; }
+    public float BandHighRatio { get; set; }
+    public float ClarityRatio { get; set; }
     public byte SpeakingState { get; set; }
     public bool SyllableDetected { get; set; }
+    public bool EmphasisDetected { get; set; }
 }
