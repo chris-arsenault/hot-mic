@@ -11,9 +11,10 @@ namespace HotMic.Core.Dsp.Analysis.Speech;
 /// </summary>
 public sealed class SyllableDetector
 {
-    private const int MaxHistoryFrames = 8;
+    private const int MaxHistoryFrames = 512;
     private const float DefaultProminenceDb = 3f;
     private const float DefaultMinIntervalMs = 50f;
+    private const float DefaultPeakSpanMs = 60f;
     private const string DebugEnvVar = "HOTMIC_SPEECH_DEBUG";
     private static readonly bool DebugLoggingEnabled = GetDebugLoggingEnabled();
     private static readonly long DebugIntervalTicks = Stopwatch.Frequency; // ~1s
@@ -32,6 +33,37 @@ public sealed class SyllableDetector
     private float _debugMinEnergy = float.PositiveInfinity;
     private float _debugMaxEnergy = float.NegativeInfinity;
     private long _debugLastDetectedFrame = -1;
+    private long _statsFrames;
+    private long _statsWarmupFrames;
+    private long _statsPeaks;
+    private long _statsVoicedPeaks;
+    private long _statsDetected;
+    private long _statsRejectNotPeak;
+    private long _statsRejectUnvoiced;
+    private long _statsRejectLowProminence;
+    private long _statsRejectMinInterval;
+    private float _statsMinEnergyDb = float.PositiveInfinity;
+    private float _statsMaxEnergyDb = float.NegativeInfinity;
+    private float _statsMaxProminenceDb;
+    private long _statsLastDetectedFrame = -1;
+
+    /// <summary>
+    /// Snapshot of debug counters for diagnostics.
+    /// </summary>
+    public SyllableDetectorDebugStats DebugStats => new(
+        _statsFrames,
+        _statsWarmupFrames,
+        _statsPeaks,
+        _statsVoicedPeaks,
+        _statsDetected,
+        _statsRejectNotPeak,
+        _statsRejectUnvoiced,
+        _statsRejectLowProminence,
+        _statsRejectMinInterval,
+        float.IsPositiveInfinity(_statsMinEnergyDb) ? 0f : _statsMinEnergyDb,
+        float.IsNegativeInfinity(_statsMaxEnergyDb) ? 0f : _statsMaxEnergyDb,
+        _statsMaxProminenceDb,
+        _statsLastDetectedFrame);
 
     /// <summary>
     /// Minimum prominence in dB for a peak to be considered a syllable nucleus.
@@ -44,9 +76,14 @@ public sealed class SyllableDetector
     public float MinIntervalMs { get; set; } = DefaultMinIntervalMs;
 
     /// <summary>
-    /// Smoothing factor for energy envelope (0-1, higher = more smoothing).
+    /// Smoothing factor for energy envelope (0-1).
     /// </summary>
     public float SmoothingAlpha { get; set; } = 0.15f;
+
+    /// <summary>
+    /// Time span used for peak comparison on each side of the center frame.
+    /// </summary>
+    public float PeakSpanMs { get; set; } = DefaultPeakSpanMs;
 
     /// <summary>
     /// Process a frame and detect if it contains a syllable nucleus.
@@ -59,6 +96,10 @@ public sealed class SyllableDetector
     /// <returns>True if a syllable nucleus was detected at this frame.</returns>
     public bool Process(float energyDb, VoicingState voicing, long frameId, int hopSize, int sampleRate)
     {
+        _statsFrames++;
+
+        float frameDurationMs = sampleRate > 0 ? 1000f * hopSize / sampleRate : 0f;
+
         // Update smoothed energy
         if (!_initialized)
         {
@@ -78,6 +119,14 @@ public sealed class SyllableDetector
         {
             _debugMaxEnergy = _smoothedEnergyDb;
         }
+        if (_smoothedEnergyDb < _statsMinEnergyDb)
+        {
+            _statsMinEnergyDb = _smoothedEnergyDb;
+        }
+        if (_smoothedEnergyDb > _statsMaxEnergyDb)
+        {
+            _statsMaxEnergyDb = _smoothedEnergyDb;
+        }
 
         // Store in history buffer
         int prevIndex = _historyIndex;
@@ -86,17 +135,24 @@ public sealed class SyllableDetector
         _historyIndex = (_historyIndex + 1) % MaxHistoryFrames;
         _historyCount = Math.Min(_historyCount + 1, MaxHistoryFrames);
 
-        // Need at least 3 frames to detect a peak
-        if (_historyCount < 3)
+        // Compare the center frame to samples ~PeakSpanMs apart to avoid hop-size aliasing.
+        int peakSpanFrames = frameDurationMs > 0f
+            ? Math.Max(1, (int)MathF.Round(PeakSpanMs / frameDurationMs))
+            : 1;
+        int requiredHistory = 2 * peakSpanFrames + 1;
+
+        // Need enough frames to detect a peak with the configured span.
+        if (_historyCount < requiredHistory)
         {
+            _statsWarmupFrames++;
             MaybeLogDebug(frameId, hopSize, sampleRate, isPeak: false, prominence: 0f, voicedCenter: false,
                 centerEnergy: 0f, prevEnergy: 0f, currentEnergy: 0f, detected: false);
             return false;
         }
 
-        // Check the frame 1 position back (center of 3-frame window)
-        int centerIdx = (prevIndex - 1 + MaxHistoryFrames) % MaxHistoryFrames;
-        int prevIdx = (prevIndex - 2 + MaxHistoryFrames) % MaxHistoryFrames;
+        // Check the frame peakSpanFrames back (center of comparison window)
+        int centerIdx = (prevIndex - peakSpanFrames + MaxHistoryFrames) % MaxHistoryFrames;
+        int prevIdx = (prevIndex - 2 * peakSpanFrames + MaxHistoryFrames) % MaxHistoryFrames;
 
         // Peak detection: center > prev AND center > current
         float centerEnergy = _energyHistory[centerIdx];
@@ -106,22 +162,26 @@ public sealed class SyllableDetector
         bool isPeak = centerEnergy > prevEnergy && centerEnergy > currentEnergy;
         if (!isPeak)
         {
+            _statsRejectNotPeak++;
             MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence: 0f, voicedCenter: _voicedHistory[centerIdx],
                 centerEnergy, prevEnergy, currentEnergy, detected: false);
             return false;
         }
 
+        _statsPeaks++;
         _debugPeakCount++;
 
         // Check voicing at center frame
         bool voicedCenter = _voicedHistory[centerIdx];
         if (!voicedCenter)
         {
+            _statsRejectUnvoiced++;
             MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence: 0f, voicedCenter,
                 centerEnergy, prevEnergy, currentEnergy, detected: false);
             return false;
         }
 
+        _statsVoicedPeaks++;
         _debugVoicedPeakCount++;
 
         // Check prominence (dip before and after)
@@ -131,20 +191,25 @@ public sealed class SyllableDetector
         {
             _debugMaxProminence = prominence;
         }
+        if (prominence > _statsMaxProminenceDb)
+        {
+            _statsMaxProminenceDb = prominence;
+        }
         if (prominence < ProminenceThresholdDb)
         {
+            _statsRejectLowProminence++;
             MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence, voicedCenter,
                 centerEnergy, prevEnergy, currentEnergy, detected: false);
             return false;
         }
 
         // Check minimum interval
-        float frameDurationMs = 1000f * hopSize / sampleRate;
         float minIntervalFrames = MinIntervalMs / frameDurationMs;
-        long centerFrame = frameId - 1; // The peak is at the previous frame
+        long centerFrame = frameId - peakSpanFrames; // The peak is at the center frame
 
         if (centerFrame - _lastSyllableFrame < minIntervalFrames)
         {
+            _statsRejectMinInterval++;
             MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence, voicedCenter,
                 centerEnergy, prevEnergy, currentEnergy, detected: false);
             return false;
@@ -153,6 +218,8 @@ public sealed class SyllableDetector
         // Syllable detected
         _lastSyllableFrame = centerFrame;
         _debugLastDetectedFrame = centerFrame;
+        _statsDetected++;
+        _statsLastDetectedFrame = centerFrame;
         MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence, voicedCenter,
             centerEnergy, prevEnergy, currentEnergy, detected: true);
         return true;
@@ -177,6 +244,19 @@ public sealed class SyllableDetector
         _debugMinEnergy = float.PositiveInfinity;
         _debugMaxEnergy = float.NegativeInfinity;
         _debugLastDetectedFrame = -1;
+        _statsFrames = 0;
+        _statsWarmupFrames = 0;
+        _statsPeaks = 0;
+        _statsVoicedPeaks = 0;
+        _statsDetected = 0;
+        _statsRejectNotPeak = 0;
+        _statsRejectUnvoiced = 0;
+        _statsRejectLowProminence = 0;
+        _statsRejectMinInterval = 0;
+        _statsMinEnergyDb = float.PositiveInfinity;
+        _statsMaxEnergyDb = float.NegativeInfinity;
+        _statsMaxProminenceDb = 0f;
+        _statsLastDetectedFrame = -1;
     }
 
     private static bool GetDebugLoggingEnabled()
@@ -241,3 +321,18 @@ public sealed class SyllableDetector
         _debugMaxEnergy = float.NegativeInfinity;
     }
 }
+
+public readonly record struct SyllableDetectorDebugStats(
+    long Frames,
+    long WarmupFrames,
+    long Peaks,
+    long VoicedPeaks,
+    long Detected,
+    long RejectNotPeak,
+    long RejectUnvoiced,
+    long RejectLowProminence,
+    long RejectMinInterval,
+    float MinEnergyDb,
+    float MaxEnergyDb,
+    float MaxProminenceDb,
+    long LastDetectedFrame);

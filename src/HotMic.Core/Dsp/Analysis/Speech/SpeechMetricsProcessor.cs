@@ -12,6 +12,7 @@ public sealed class SpeechMetricsProcessor
     private const float SyllableBandLowHz = 300f;
     private const float SyllableBandHighHz = 2000f;
     private const float SyllableBandQ = 0.707f;
+    private const float SyllableEnergyWindowMs = 20f;
 
     private readonly SpeechCoach _speechCoach = new();
     private readonly BiquadFilter _syllableHighPass = new();
@@ -22,15 +23,21 @@ public sealed class SpeechMetricsProcessor
     private float _bandPresenceSmooth;
     private float _bandHighSmooth;
     private bool _bandSmoothInitialized;
+    private int _syllableWindowSamples;
 
     public float LastEnergyDb { get; private set; }
     public float LastSyllableEnergyDb { get; private set; }
     public float LastSyllableEnergyRatio { get; private set; }
+    public SyllableDetectorDebugStats SyllableDebugStats => _speechCoach.SyllableDebugStats;
+    public SpeechRateDebugStats RateDebugStats => _speechCoach.RateDebugStats;
 
     public void Configure(int hopSize, int sampleRate)
     {
         _speechCoach.Configure(hopSize, sampleRate);
         ConfigureSyllableFilters(sampleRate);
+        _syllableWindowSamples = sampleRate > 0
+            ? Math.Max(1, (int)MathF.Round(sampleRate * (SyllableEnergyWindowMs / 1000f)))
+            : 0;
         ResetBandSmoothing();
     }
 
@@ -48,10 +55,11 @@ public sealed class SpeechMetricsProcessor
     public SpeechMetricsFrame Process(
         float waveformMin,
         float waveformMax,
-        ReadOnlySpan<float> hopRaw,
+        ReadOnlySpan<float> analysisRaw,
         ReadOnlySpan<float> speechMagnitudes,
         ReadOnlySpan<float> binCentersHz,
         float binResolutionHz,
+        float speechPresence,
         float pitchHz,
         float pitchConfidence,
         VoicingState voicing,
@@ -60,8 +68,21 @@ public sealed class SpeechMetricsProcessor
         float hnr,
         long frameId)
     {
+        if (!float.IsFinite(speechPresence))
+        {
+            speechPresence = 0f;
+        }
+
+        bool hasSpeech = speechPresence > AnalysisSignalProcessor.SpeechPresenceGateThreshold;
+        if (!hasSpeech)
+        {
+            pitchHz = 0f;
+            pitchConfidence = 0f;
+            voicing = VoicingState.Silence;
+        }
+
         float energyDb = ComputePeakDb(waveformMin, waveformMax);
-        float syllableEnergyDb = ComputeSyllableEnergyDb(hopRaw);
+        float syllableEnergyDb = ComputeSyllableEnergyDb(analysisRaw);
         float spectralFlatness = ComputeSpectralFlatness(speechMagnitudes);
 
         float bandLowRatio = 0f;
@@ -265,15 +286,24 @@ public sealed class SpeechMetricsProcessor
             return -80f;
         }
 
-        double sum = 0.0;
+        // Use a short trailing window to reduce pitch-period peaks in the envelope.
+        if (_syllableWindowSamples > 0 && hopRaw.Length > _syllableWindowSamples)
+        {
+            hopRaw = hopRaw.Slice(hopRaw.Length - _syllableWindowSamples, _syllableWindowSamples);
+        }
+
+        float peak = 0f;
         for (int i = 0; i < hopRaw.Length; i++)
         {
             float filtered = _syllableLowPass.Process(_syllableHighPass.Process(hopRaw[i]));
-            sum += filtered * filtered;
+            float abs = MathF.Abs(filtered);
+            if (abs > peak)
+            {
+                peak = abs;
+            }
         }
 
-        float rms = sum > 0.0 ? MathF.Sqrt((float)(sum / hopRaw.Length)) : 0f;
-        return rms > 1e-8f ? 20f * MathF.Log10(rms) : -80f;
+        return peak > 1e-8f ? 20f * MathF.Log10(peak) : -80f;
     }
 
     private void ConfigureSyllableFilters(int sampleRate)

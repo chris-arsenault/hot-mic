@@ -29,6 +29,14 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
     private AnalysisSignalMask _blockedMask;
 
     private readonly AnalysisSignalProcessor _processor = new();
+    private AnalysisSignalProcessorSettings _cachedSettings;
+    private int _cachedHopSize;
+    private int _cachedSampleRate;
+    private bool _hasCachedSettings;
+    private int _analysisHopSize;
+    private float[] _analysisHopBuffer = Array.Empty<float>();
+    private int _analysisHopFill;
+    private long _analysisHopStartSampleTime;
     private int _profilingEnabled;
     private long _lastResolveTicks;
     private long _maxResolveTicks;
@@ -90,8 +98,20 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
     public void Initialize(int sampleRate, int blockSize)
     {
         SampleRate = sampleRate;
+        int maxFft = AnalysisConfiguration.FftSizes[^1];
+        float minOverlap = AnalysisConfiguration.OverlapOptions[0];
+        int maxHop = Math.Max(1, (int)MathF.Ceiling(maxFft * (1f - minOverlap)));
+        _processor.Preallocate(maxFft, maxHop);
+        _analysisHopBuffer = new float[maxHop];
+        _analysisHopFill = 0;
+        _analysisHopStartSampleTime = 0;
+        _analysisHopSize = maxHop;
         _processor.Configure(sampleRate, blockSize, AnalysisSignalProcessorSettings.Default);
         _processor.Reset();
+        _cachedSettings = default;
+        _cachedHopSize = blockSize;
+        _cachedSampleRate = sampleRate;
+        _hasCachedSettings = false;
         Array.Clear(_meterValues, 0, _meterValues.Length);
         Array.Clear(_hasSource, 0, _hasSource.Length);
         for (int i = 0; i < _sources.Length; i++)
@@ -109,6 +129,7 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
             return;
         }
 
+        UpdateProcessorSettings(context.AnalysisCapture);
         UpdatePitchAlgorithm(context.AnalysisCapture);
         UpdateProfilingEnabled(context.ProfilingEnabled);
         bool profilingEnabled = Volatile.Read(ref _profilingEnabled) != 0;
@@ -124,7 +145,6 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
 
         int lastIndex = buffer.Length - 1;
         long sampleTime = context.SampleTime;
-        UpdateSpeechPresenceGate(sampleTime, lastIndex);
 
         if (IsBypassed)
         {
@@ -134,7 +154,35 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
         AnalysisSignalMask computeMask = _generatedMask & context.RequestedSignals;
         if (computeMask != AnalysisSignalMask.None)
         {
-            _processor.ProcessBlock(buffer, context.SampleTime, context.AnalysisSignalWriter, computeMask);
+            int hopSize = Math.Max(1, _analysisHopSize);
+            int offset = 0;
+            while (offset < buffer.Length)
+            {
+                int remaining = buffer.Length - offset;
+                int needed = hopSize - _analysisHopFill;
+                int copyCount = remaining < needed ? remaining : needed;
+
+                buffer.Slice(offset, copyCount).CopyTo(_analysisHopBuffer.AsSpan(_analysisHopFill, copyCount));
+                if (_analysisHopFill == 0)
+                {
+                    _analysisHopStartSampleTime = sampleTime + offset;
+                }
+
+                _analysisHopFill += copyCount;
+                offset += copyCount;
+
+                if (_analysisHopFill >= hopSize)
+                {
+                    UpdateSpeechPresenceGate(_analysisHopStartSampleTime, hopSize - 1);
+                    _processor.ProcessBlock(_analysisHopBuffer.AsSpan(0, hopSize), _analysisHopStartSampleTime,
+                        context.AnalysisSignalWriter, computeMask);
+                    _analysisHopFill = 0;
+                }
+            }
+        }
+        else
+        {
+            UpdateSpeechPresenceGate(sampleTime, lastIndex);
         }
 
         long resolveStart = 0;
@@ -310,6 +358,54 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
         if (prior != raw)
         {
             _processor.SetPitchAlgorithm(algorithm);
+        }
+    }
+
+    private void UpdateProcessorSettings(AnalysisCaptureLink? capture)
+    {
+        var orchestrator = capture?.Orchestrator;
+        if (orchestrator is null)
+        {
+            return;
+        }
+
+        var config = orchestrator.Config;
+        var algorithm = config.PitchAlgorithm;
+        if (config.TransformType == SpectrogramTransformType.Cqt && algorithm == PitchDetectorType.Swipe)
+        {
+            algorithm = PitchDetectorType.Yin;
+        }
+
+        var settings = new AnalysisSignalProcessorSettings
+        {
+            AnalysisSize = config.FftSize,
+            PitchDetector = algorithm,
+            VoicingSettings = config.VoicingSettings,
+            MinFrequency = config.MinFrequency,
+            MaxFrequency = config.MaxFrequency,
+            WindowFunction = config.WindowFunction,
+            PreEmphasisEnabled = config.PreEmphasis,
+            HighPassEnabled = config.HighPassEnabled,
+            HighPassCutoff = config.HighPassCutoff
+        };
+
+        int hopSize = Math.Max(1, config.ComputeHopSize());
+        int sampleRate = SampleRate;
+        bool changed = !_hasCachedSettings ||
+                       _cachedHopSize != hopSize ||
+                       _cachedSampleRate != sampleRate ||
+                       !_cachedSettings.Equals(settings);
+
+        if (changed)
+        {
+            _processor.Configure(sampleRate, hopSize, settings);
+            _processor.Reset();
+            _cachedSettings = settings;
+            _cachedHopSize = hopSize;
+            _cachedSampleRate = sampleRate;
+            _hasCachedSettings = true;
+            _analysisHopSize = hopSize;
+            _analysisHopFill = 0;
         }
     }
 

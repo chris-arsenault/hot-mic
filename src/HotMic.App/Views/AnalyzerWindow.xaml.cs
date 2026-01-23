@@ -156,29 +156,10 @@ public partial class AnalyzerWindow : Window, IDisposable
     private const ModifierKeys ProfilerHotkeyModifiers = ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt;
     private const Key ProfilerHotkeyKey = Key.P;
 
-    private static readonly int[] FftSizes = { 1024, 2048, 4096, 8192 };
-    private static readonly WindowFunction[] WindowFunctions =
-    {
-        WindowFunction.Hann,
-        WindowFunction.Hamming,
-        WindowFunction.BlackmanHarris,
-        WindowFunction.Gaussian,
-        WindowFunction.Kaiser
-    };
-    private static readonly FrequencyScale[] Scales =
-    {
-        FrequencyScale.Linear,
-        FrequencyScale.Logarithmic,
-        FrequencyScale.Mel,
-        FrequencyScale.Erb,
-        FrequencyScale.Bark
-    };
     private static readonly string[] NoteNames =
     {
         "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
     };
-
-    private static readonly float[] OverlapOptions = { 0.5f, 0.75f, 0.875f, 0.9375f, 0.96875f };
 
     private const int ParamFftSize = 0;
     private const int ParamWindowFunction = 1;
@@ -274,17 +255,9 @@ public partial class AnalyzerWindow : Window, IDisposable
 
     private void WireKnobHandlers()
     {
-        _renderer.MinFreqKnob.ValueChanged += value => OnKnobValueChanged(ParamMinFrequency, value);
-        _renderer.MaxFreqKnob.ValueChanged += value => OnKnobValueChanged(ParamMaxFrequency, value);
+        // Display knobs only - processing knobs are in AnalysisSettingsWindow
         _renderer.MinDbKnob.ValueChanged += value => OnKnobValueChanged(ParamMinDb, value);
         _renderer.MaxDbKnob.ValueChanged += value => OnKnobValueChanged(ParamMaxDb, value);
-        _renderer.TimeKnob.ValueChanged += value => OnKnobValueChanged(ParamTimeWindow, value);
-        _renderer.HpfKnob.ValueChanged += value => OnKnobValueChanged(ParamHighPassCutoff, value);
-        _renderer.ReassignThresholdKnob.ValueChanged += value => OnKnobValueChanged(ParamReassignThreshold, value);
-        _renderer.ReassignSpreadKnob.ValueChanged += value => OnKnobValueChanged(ParamReassignSpread, value / 100f);
-        _renderer.ClarityNoiseKnob.ValueChanged += value => OnKnobValueChanged(ParamClarityNoise, value / 100f);
-        _renderer.ClarityHarmonicKnob.ValueChanged += value => OnKnobValueChanged(ParamClarityHarmonic, value / 100f);
-        _renderer.ClaritySmoothingKnob.ValueChanged += value => OnKnobValueChanged(ParamClaritySmoothing, value / 100f);
         _renderer.BrightnessKnob.ValueChanged += value => OnKnobValueChanged(ParamBrightness, value);
         _renderer.GammaKnob.ValueChanged += value => OnKnobValueChanged(ParamGamma, value);
         _renderer.ContrastKnob.ValueChanged += value => OnKnobValueChanged(ParamContrast, value);
@@ -1440,38 +1413,11 @@ public partial class AnalyzerWindow : Window, IDisposable
             case SpectroHitArea.BypassButton:
                 _isBypassed = !_isBypassed; // Local display bypass only
                 return true;
-            case SpectroHitArea.FftButton:
-                CycleFftSize();
-                return true;
-            case SpectroHitArea.TransformButton:
-                CycleTransformType();
-                return true;
-            case SpectroHitArea.WindowButton:
-                CycleWindow();
-                return true;
-            case SpectroHitArea.OverlapButton:
-                CycleOverlap();
-                return true;
-            case SpectroHitArea.ScaleButton:
-                CycleScale();
-                return true;
             case SpectroHitArea.ColorButton:
                 CycleColorMap();
                 return true;
-            case SpectroHitArea.ReassignButton:
-                CycleReassignMode();
-                return true;
-            case SpectroHitArea.ClarityButton:
-                CycleClarityMode();
-                return true;
-            case SpectroHitArea.PitchAlgorithmButton:
-                CyclePitchAlgorithm();
-                return true;
             case SpectroHitArea.AxisModeButton:
                 CycleAxisMode();
-                return true;
-            case SpectroHitArea.SmoothingModeButton:
-                CycleSmoothingMode();
                 return true;
             case SpectroHitArea.PauseButton:
                 TogglePause();
@@ -1500,12 +1446,6 @@ public partial class AnalyzerWindow : Window, IDisposable
             case SpectroHitArea.VoicingToggle:
                 ToggleParameter(ParamShowVoicing, _showVoicing);
                 return true;
-            case SpectroHitArea.PreEmphasisToggle:
-                ToggleParameter(ParamPreEmphasis, _orchestrator.Config.PreEmphasis);
-                return true;
-            case SpectroHitArea.HpfToggle:
-                ToggleParameter(ParamHighPassEnabled, _orchestrator.Config.HighPassEnabled);
-                return true;
             case SpectroHitArea.RangeToggle:
                 ToggleParameter(ParamShowRange, _showRange);
                 return true;
@@ -1515,39 +1455,14 @@ public partial class AnalyzerWindow : Window, IDisposable
             case SpectroHitArea.VoiceRangeButton:
                 CycleVoiceRange();
                 return true;
-            case SpectroHitArea.NormalizationButton:
-                CycleNormalizationMode();
-                return true;
             case SpectroHitArea.DynamicRangeButton:
                 CycleDynamicRangeMode();
-                return true;
-            case SpectroHitArea.WaveformToggle:
-                ToggleParameter(ParamShowWaveform, _showWaveform);
                 return true;
             case SpectroHitArea.SpectrumToggle:
                 ToggleParameter(ParamShowSpectrum, _showSpectrum);
                 return true;
             case SpectroHitArea.PitchMeterToggle:
                 ToggleParameter(ParamShowPitchMeter, _showPitchMeter);
-                return true;
-            case SpectroHitArea.SpeechToggle:
-                ToggleParameter(ParamSpeechCoachEnabled, _speechCoachEnabled);
-                return true;
-            // Speech Coach toggles
-            case SpectroHitArea.SpeechCoachToggle:
-                ToggleParameter(ParamSpeechCoachEnabled, _speechCoachEnabled);
-                return true;
-            case SpectroHitArea.SpeechMetricsToggle:
-                ToggleParameter(ParamShowSpeechMetrics, _showSpeechMetrics);
-                return true;
-            case SpectroHitArea.SyllableMarkersToggle:
-                ToggleParameter(ParamShowSyllableMarkers, _showSyllableMarkers);
-                return true;
-            case SpectroHitArea.PauseOverlayToggle:
-                ToggleParameter(ParamShowPauseOverlay, _showPauseOverlay);
-                return true;
-            case SpectroHitArea.FillerMarkersToggle:
-                ToggleParameter(ParamShowFillerMarkers, _showFillerMarkers);
                 return true;
             case SpectroHitArea.Spectrogram:
                 return TrySetReferenceLine(x);
@@ -1666,109 +1581,12 @@ public partial class AnalyzerWindow : Window, IDisposable
         // Preset tracking removed - using shared orchestrator config
     }
 
-    private void CycleFftSize()
-    {
-        int current = _orchestrator.Config.FftSize;
-        int index = Array.IndexOf(FftSizes, current);
-        int next = FftSizes[(index + 1) % FftSizes.Length];
-        SetParameter(ParamFftSize, next);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleTransformType()
-    {
-        SpectrogramTransformType next = _orchestrator.Config.TransformType switch
-        {
-            SpectrogramTransformType.Fft => SpectrogramTransformType.ZoomFft,
-            SpectrogramTransformType.ZoomFft => SpectrogramTransformType.Cqt,
-            _ => SpectrogramTransformType.Fft
-        };
-        SetParameter(ParamTransformType, (float)next);
-        if (next == SpectrogramTransformType.Cqt && _orchestrator.Config.PitchAlgorithm == PitchDetectorType.Swipe)
-        {
-            SetParameter(ParamPitchAlgorithm, (float)PitchDetectorType.Yin);
-        }
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleWindow()
-    {
-        var current = _orchestrator.Config.WindowFunction;
-        int index = Array.IndexOf(WindowFunctions, current);
-        int nextIndex = (index + 1) % WindowFunctions.Length;
-        SetParameter(ParamWindowFunction, (float)WindowFunctions[nextIndex]);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleOverlap()
-    {
-        float current = _orchestrator.Config.Overlap;
-        int index = Array.IndexOf(OverlapOptions, current);
-        int nextIndex = (index + 1) % OverlapOptions.Length;
-        SetParameter(ParamOverlap, OverlapOptions[nextIndex]);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleScale()
-    {
-        var current = _orchestrator.Config.FrequencyScale;
-        int index = Array.IndexOf(Scales, current);
-        int nextIndex = (index + 1) % Scales.Length;
-        SetParameter(ParamScale, (float)Scales[nextIndex]);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
     private void CycleColorMap()
     {
         int current = _colorMap;
         int count = Enum.GetValues<SpectrogramColorMap>().Length;
         int next = (current + 1) % count;
         SetParameter(ParamColorMap, next);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleReassignMode()
-    {
-        SpectrogramReassignMode next = _orchestrator.Config.ReassignMode switch
-        {
-            SpectrogramReassignMode.Off => SpectrogramReassignMode.Frequency,
-            SpectrogramReassignMode.Frequency => SpectrogramReassignMode.Time,
-            SpectrogramReassignMode.Time => SpectrogramReassignMode.TimeFrequency,
-            _ => SpectrogramReassignMode.Off
-        };
-        SetParameter(ParamReassignMode, (float)next);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleClarityMode()
-    {
-        ClarityProcessingMode next = _orchestrator.Config.ClarityMode switch
-        {
-            ClarityProcessingMode.None => ClarityProcessingMode.Noise,
-            ClarityProcessingMode.Noise => ClarityProcessingMode.Harmonic,
-            ClarityProcessingMode.Harmonic => ClarityProcessingMode.Full,
-            _ => ClarityProcessingMode.None
-        };
-        SetParameter(ParamClarityMode, (float)next);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CyclePitchAlgorithm()
-    {
-        bool allowSwipe = _orchestrator.Config.TransformType != SpectrogramTransformType.Cqt;
-        PitchDetectorType next = _orchestrator.Config.PitchAlgorithm switch
-        {
-            PitchDetectorType.Yin => PitchDetectorType.Pyin,
-            PitchDetectorType.Pyin => PitchDetectorType.Autocorrelation,
-            PitchDetectorType.Autocorrelation => PitchDetectorType.Cepstral,
-            PitchDetectorType.Cepstral => allowSwipe ? PitchDetectorType.Swipe : PitchDetectorType.Yin,
-            _ => PitchDetectorType.Yin
-        };
-        if (!allowSwipe && next == PitchDetectorType.Swipe)
-        {
-            next = PitchDetectorType.Yin;
-        }
-        SetParameter(ParamPitchAlgorithm, (float)next);
         // Preset tracking removed - using shared orchestrator config
     }
 
@@ -1796,31 +1614,6 @@ public partial class AnalyzerWindow : Window, IDisposable
             _ => VocalRangeType.Bass
         };
         SetParameter(ParamVoiceRange, (float)next);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleSmoothingMode()
-    {
-        SpectrogramSmoothingMode next = _orchestrator.Config.SmoothingMode switch
-        {
-            SpectrogramSmoothingMode.Off => SpectrogramSmoothingMode.Ema,
-            SpectrogramSmoothingMode.Ema => SpectrogramSmoothingMode.Bilateral,
-            _ => SpectrogramSmoothingMode.Off
-        };
-        SetParameter(ParamSmoothingMode, (float)next);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleNormalizationMode()
-    {
-        SpectrogramNormalizationMode next = _orchestrator.Config.NormalizationMode switch
-        {
-            SpectrogramNormalizationMode.None => SpectrogramNormalizationMode.Peak,
-            SpectrogramNormalizationMode.Peak => SpectrogramNormalizationMode.Rms,
-            SpectrogramNormalizationMode.Rms => SpectrogramNormalizationMode.AWeighted,
-            _ => SpectrogramNormalizationMode.None
-        };
-        SetParameter(ParamNormalizationMode, (float)next);
         // Preset tracking removed - using shared orchestrator config
     }
 

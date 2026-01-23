@@ -33,11 +33,8 @@ public sealed class AnalyzerRenderer : IDisposable
     private const float PanelSpacing = 10f;
     private const float PanelCornerRadius = 8f;
 
-    // Panel widths (5 panels + Speech panel)
-    private const float FrequencyPanelWidth = 240f;
-    private const float AnalysisPanelWidth = 300f;
-    private const float ClarityPanelWidth = 220f;
-    private const float DisplayPanelWidth = 300f;
+    // Panel widths (Display + View Options only - processing settings in AnalysisSettingsWindow)
+    private const float DisplayPanelWidth = 360f;
     // ViewOptionsPanelWidth is calculated as remaining space
 
     private readonly PluginComponentTheme _theme;
@@ -46,37 +43,9 @@ public sealed class AnalyzerRenderer : IDisposable
     private readonly TooltipManager _tooltip;
     private readonly SkiaTextPaint _panelHeaderPaint;
 
-    // Tooltip content for all controls
+    // Tooltip content for display controls only (processing tooltips in AnalysisSettingsWindow)
     private static readonly Dictionary<string, (string Title, string Description)> TooltipData = new()
     {
-        // Frequency Range Panel
-        ["MinFreq"] = ("Min Frequency", "Lower frequency bound (20-2000 Hz). Voice fundamentals: 80-300 Hz"),
-        ["MaxFreq"] = ("Max Frequency", "Upper frequency bound (2000-12000 Hz). Harmonics extend to 8-12 kHz"),
-        ["HPF"] = ("High-Pass Filter", "Removes low-frequency rumble below the cutoff frequency"),
-        ["HpfCutoff"] = ("HPF Cutoff", "High-pass filter cutoff frequency (20-120 Hz)"),
-        ["Time"] = ("Time Window", "Visible time span (1-60 seconds)"),
-        ["Scale"] = ("Frequency Scale", "Lin=linear, Log=logarithmic, Mel/Erb/Bark=perceptual scales"),
-        ["Axis"] = ("Axis Labels", "Display Hz, musical notes, or both on the frequency axis"),
-
-        // Analysis Engine Panel
-        ["Transform"] = ("Transform Type", "FFT=standard, ZoomFFT=high resolution, CQT=logarithmic bins"),
-        ["FftSize"] = ("FFT Size", "Larger = better frequency resolution but more latency"),
-        ["Window"] = ("Window Function", "Hann=general purpose, BlackmanHarris=low sidelobes"),
-        ["Overlap"] = ("Overlap", "Higher overlap = smoother time resolution, more CPU usage"),
-        ["Reassign"] = ("Reassignment", "Sharpens blurry spectral energy by correcting bin positions"),
-        ["ReassignThresh"] = ("Reassign Threshold", "Minimum level (dB) for reassignment processing"),
-        ["ReassignSpread"] = ("Reassign Spread", "How far energy can be redistributed (0-100%)"),
-        ["PreEmphasis"] = ("Pre-Emphasis", "Boosts high frequencies to compensate for voice rolloff"),
-        ["Smoothing"] = ("Smoothing Mode", "EMA=temporal smoothing, Bilateral=edge-preserving"),
-
-        // Clarity Processing Panel
-        ["Clarity"] = ("Clarity Mode", "None=off, Noise=suppress broadband, Harmonic=enhance pitch"),
-        ["ClarityNoise"] = ("Noise Reduction", "Amount of broadband noise floor suppression (0-100%)"),
-        ["ClarityHarmonic"] = ("Harmonic Boost", "Emphasis on pitched/harmonic content (0-100%)"),
-        ["ClaritySmooth"] = ("Clarity Smoothing", "Temporal smoothing of clarity processing (0-100%)"),
-        ["Normalization"] = ("Normalization", "None/Peak/RMS/A-weighted level normalization"),
-        ["DynamicRange"] = ("Dynamic Range", "Preset dB ranges for different use cases"),
-
         // Display Tuning Panel
         ["MinDb"] = ("Min dB", "Floor level for color mapping. Increase to hide noise"),
         ["MaxDb"] = ("Max dB", "Ceiling level. Decrease to see quiet signal details"),
@@ -85,9 +54,11 @@ public sealed class AnalyzerRenderer : IDisposable
         ["Contrast"] = ("Contrast", "Difference between quiet and loud regions (0.8-1.5x)"),
         ["Levels"] = ("Color Levels", "Quantization steps (16-64). More = smoother gradients"),
         ["ColorMap"] = ("Color Map", "Color palette for magnitude visualization"),
+        ["DynamicRange"] = ("Dynamic Range", "Preset dB ranges for different use cases"),
+        ["Axis"] = ("Axis Labels", "Display Hz, musical notes, or both on the frequency axis"),
 
         // View Options Panel - Overlays
-        ["PitchOverlay"] = ("Pitch Track", "Yellow line showing detected fundamental frequency (F0). Pitch/voicing work is skipped when Pitch/Meter/Harmonics/Voicing/Clarity are all off."),
+        ["PitchOverlay"] = ("Pitch Track", "Yellow line showing detected fundamental frequency (F0)"),
         ["HarmonicOverlay"] = ("Harmonics", "Dots marking detected harmonic peaks"),
         ["HarmonicMode"] = ("Harmonic Mode", "D=Detected only, T=Theoretical positions, B=Both"),
         ["VoicingOverlay"] = ("Voicing", "Lane showing voiced/unvoiced/silence segments"),
@@ -100,22 +71,12 @@ public sealed class AnalyzerRenderer : IDisposable
 
         // Other buttons
         ["VoiceRange"] = ("Voice Range", "Select Bass/Baritone/Tenor/Alto/MezzoSoprano/Soprano"),
-        ["PitchAlgo"] = ("Pitch Algorithm", "YIN/PYIN/Autocorr/Cepstral are time-domain; SWIPE uses FFT. With CQT, SWIPE is forced to YIN. Pitch/voicing work runs only when Pitch/Meter/Harmonics/Voicing/Clarity are enabled."),
         ["Pause"] = ("Pause/Run", "Pause or resume the spectrograph visualization"),
     };
 
-    // KnobWidgets for all 15 knobs
-    public KnobWidget MinFreqKnob { get; }
-    public KnobWidget MaxFreqKnob { get; }
+    // KnobWidgets for display settings only (processing knobs are in AnalysisSettingsWindow)
     public KnobWidget MinDbKnob { get; }
     public KnobWidget MaxDbKnob { get; }
-    public KnobWidget TimeKnob { get; }
-    public KnobWidget HpfKnob { get; }
-    public KnobWidget ReassignThresholdKnob { get; }
-    public KnobWidget ReassignSpreadKnob { get; }
-    public KnobWidget ClarityNoiseKnob { get; }
-    public KnobWidget ClarityHarmonicKnob { get; }
-    public KnobWidget ClaritySmoothingKnob { get; }
     public KnobWidget BrightnessKnob { get; }
     public KnobWidget GammaKnob { get; }
     public KnobWidget ContrastKnob { get; }
@@ -191,38 +152,24 @@ public sealed class AnalyzerRenderer : IDisposable
     private SKRect _titleBarRect;
     private SKRect _closeRect;
     private SKRect _bypassRect;
-    private SKRect _fftRect;
-    private SKRect _transformRect;
-    private SKRect _windowRect;
-    private SKRect _overlapRect;
-    private SKRect _scaleRect;
+    // Display control rects (processing controls in AnalysisSettingsWindow)
     private SKRect _colorRect;
-    private SKRect _reassignRect;
-    private SKRect _clarityRect;
-    private SKRect _pitchAlgoRect;
     private SKRect _axisModeRect;
-    private SKRect _smoothingModeRect;
     private SKRect _pauseRect;
     private SKRect _pitchToggleRect;
     private SKRect _harmonicToggleRect;
     private SKRect _harmonicModeRect;
     private SKRect _voicingToggleRect;
-    private SKRect _preEmphasisToggleRect;
-    private SKRect _hpfToggleRect;
     private SKRect _rangeToggleRect;
     private SKRect _guidesToggleRect;
     private SKRect _voiceRangeRect;
-    private SKRect _normalizationRect;
     private SKRect _dynamicRangeRect;
     private SKRect _spectrumToggleRect;
     private SKRect _pitchMeterToggleRect;
     private SKRect _spectrogramRect;
 
-    // New layout rects for reorganized UI
+    // Layout rects
     private SKRect _sidebarRect;
-    private SKRect _frequencyPanelRect;
-    private SKRect _analysisPanelRect;
-    private SKRect _clarityPanelRect;
     private SKRect _displayPanelRect;
     private SKRect _viewOptionsPanelRect;
 
@@ -281,26 +228,15 @@ public sealed class AnalyzerRenderer : IDisposable
         _tooltip = new TooltipManager(_theme);
         _panelHeaderPaint = new SkiaTextPaint(_theme.TextMuted, 11f, SKFontStyle.Bold);
 
-        // Initialize all KnobWidgets with default values for double-click reset
+        // Initialize display KnobWidgets (processing knobs are in AnalysisSettingsWindow)
         var knobStyle = KnobStyle.Compact with { ShowLabels = true };
-        MinFreqKnob = new KnobWidget(KnobRadius, 20f, 2000f, "MIN FREQ", "Hz", knobStyle, _theme) { IsLogarithmic = true, ValueFormat = "0", DefaultValue = 80f };
-        MaxFreqKnob = new KnobWidget(KnobRadius, 2000f, 12000f, "MAX FREQ", "Hz", knobStyle, _theme) { IsLogarithmic = true, ValueFormat = "0", DefaultValue = 8000f };
         MinDbKnob = new KnobWidget(KnobRadius, -120f, -20f, "MIN dB", "dB", knobStyle, _theme) { ValueFormat = "0", DefaultValue = -80f };
         MaxDbKnob = new KnobWidget(KnobRadius, -40f, 0f, "MAX dB", "dB", knobStyle, _theme) { ValueFormat = "0", DefaultValue = 0f };
-        TimeKnob = new KnobWidget(KnobRadius, 1f, 60f, "TIME", "s", knobStyle, _theme) { ValueFormat = "0.0", DefaultValue = 5f };
-        HpfKnob = new KnobWidget(KnobRadius, 20f, 120f, "HPF", "Hz", knobStyle, _theme) { ValueFormat = "0", DefaultValue = 60f };
-        ReassignThresholdKnob = new KnobWidget(KnobRadius, -120f, -20f, "R THRESH", "dB", knobStyle, _theme) { ValueFormat = "0", DefaultValue = -60f };
-        ReassignSpreadKnob = new KnobWidget(KnobRadius, 0f, 100f, "R SPREAD", "%", knobStyle, _theme) { ValueFormat = "0", DefaultValue = 50f };
-        ClarityNoiseKnob = new KnobWidget(KnobRadius, 0f, 100f, "NOISE", "%", knobStyle, _theme) { ValueFormat = "0", DefaultValue = 50f };
-        ClarityHarmonicKnob = new KnobWidget(KnobRadius, 0f, 100f, "HARM", "%", knobStyle, _theme) { ValueFormat = "0", DefaultValue = 50f };
-        ClaritySmoothingKnob = new KnobWidget(KnobRadius, 0f, 100f, "SMOOTH", "%", knobStyle, _theme) { ValueFormat = "0", DefaultValue = 50f };
         BrightnessKnob = new KnobWidget(KnobRadius, 0.5f, 2f, "BRIGHT", "x", knobStyle, _theme) { ValueFormat = "0.00", DefaultValue = 1f };
         GammaKnob = new KnobWidget(KnobRadius, 0.6f, 1.2f, "GAMMA", "", knobStyle, _theme) { ValueFormat = "0.00", DefaultValue = 0.85f };
         ContrastKnob = new KnobWidget(KnobRadius, 0.8f, 1.5f, "CONTRAST", "x", knobStyle, _theme) { ValueFormat = "0.00", DefaultValue = 1f };
         LevelsKnob = new KnobWidget(KnobRadius, 16f, 64f, "LEVELS", "", knobStyle, _theme) { ValueFormat = "0", DefaultValue = 64f };
-        _allKnobs = new[] { MinFreqKnob, MaxFreqKnob, MinDbKnob, MaxDbKnob, TimeKnob, HpfKnob,
-            ReassignThresholdKnob, ReassignSpreadKnob, ClarityNoiseKnob, ClarityHarmonicKnob,
-            ClaritySmoothingKnob, BrightnessKnob, GammaKnob, ContrastKnob, LevelsKnob };
+        _allKnobs = new[] { MinDbKnob, MaxDbKnob, BrightnessKnob, GammaKnob, ContrastKnob, LevelsKnob };
 
         _backgroundPaint = new SKPaint { Color = _theme.PanelBackground, IsAntialias = true, Style = SKPaintStyle.Fill };
         _panelPaint = new SKPaint { Color = _theme.PanelBackgroundLight, IsAntialias = true, Style = SKPaintStyle.Fill };
@@ -634,32 +570,13 @@ public sealed class AnalyzerRenderer : IDisposable
         float toggleHeight = 20f;
         float buttonSpacing = 4f;
 
-        // Panel 1: Frequency Range
-        _frequencyPanelRect = new SKRect(x, panelTop, x + FrequencyPanelWidth, size.Height - Padding);
-        DrawPanelBackground(canvas, _frequencyPanelRect, "FREQUENCY");
-        DrawFrequencyPanelContents(canvas, _frequencyPanelRect, state, buttonHeight, toggleHeight, buttonSpacing);
-        x = _frequencyPanelRect.Right + PanelSpacing;
-
-        // Panel 2: Analysis Engine
-        _analysisPanelRect = new SKRect(x, panelTop, x + AnalysisPanelWidth, size.Height - Padding);
-        DrawPanelBackground(canvas, _analysisPanelRect, "ANALYSIS");
-        DrawAnalysisPanelContents(canvas, _analysisPanelRect, state, buttonHeight, toggleHeight, buttonSpacing);
-        x = _analysisPanelRect.Right + PanelSpacing;
-
-        // Panel 3: Clarity Processing
-        _clarityPanelRect = new SKRect(x, panelTop, x + ClarityPanelWidth, size.Height - Padding);
-        DrawPanelBackground(canvas, _clarityPanelRect, "CLARITY");
-        DrawClarityPanelContents(canvas, _clarityPanelRect, state, buttonHeight, buttonSpacing);
-        x = _clarityPanelRect.Right + PanelSpacing;
-
-        // Panel 4: Display Tuning
+        // Panel 1: Display Tuning (processing settings are in AnalysisSettingsWindow)
         _displayPanelRect = new SKRect(x, panelTop, x + DisplayPanelWidth, size.Height - Padding);
         DrawPanelBackground(canvas, _displayPanelRect, "DISPLAY");
         DrawDisplayPanelContents(canvas, _displayPanelRect, state, buttonHeight, buttonSpacing);
         x = _displayPanelRect.Right + PanelSpacing;
 
-        // Panel 5: View Options (remaining width)
-        float viewPanelWidth = size.Width - Padding - x;
+        // Panel 2: View Options (remaining width)
         _viewOptionsPanelRect = new SKRect(x, panelTop, size.Width - Padding, size.Height - Padding);
         DrawPanelBackground(canvas, _viewOptionsPanelRect, "VIEW");
         DrawViewOptionsPanelContents(canvas, _viewOptionsPanelRect, state, toggleHeight, buttonSpacing);
@@ -669,140 +586,6 @@ public sealed class AnalyzerRenderer : IDisposable
     {
         canvas.DrawRoundRect(new SKRoundRect(rect, PanelCornerRadius), _panelPaint);
         canvas.DrawText(header, rect.Left + 10f, rect.Top + 16f, _panelHeaderPaint);
-    }
-
-    private void DrawFrequencyPanelContents(SKCanvas canvas, SKRect rect, SpectroState state,
-        float buttonHeight, float toggleHeight, float buttonSpacing)
-    {
-        // Knobs: MinFreq, MaxFreq, HPF, Time (2x2 grid)
-        float knobY1 = rect.Top + PanelHeaderHeight + 35f;
-        float knobY2 = knobY1 + 70f;
-        float knobSpacingX = rect.Width / 3f;
-
-        MinFreqKnob.Value = state.MinFrequency;
-        MinFreqKnob.Center = new SKPoint(rect.Left + knobSpacingX, knobY1);
-        MinFreqKnob.Render(canvas);
-
-        MaxFreqKnob.Value = state.MaxFrequency;
-        MaxFreqKnob.Center = new SKPoint(rect.Left + knobSpacingX * 2, knobY1);
-        MaxFreqKnob.Render(canvas);
-
-        HpfKnob.Value = state.HighPassCutoff;
-        HpfKnob.Center = new SKPoint(rect.Left + knobSpacingX, knobY2);
-        HpfKnob.Render(canvas);
-
-        TimeKnob.Value = state.TimeWindowSeconds;
-        TimeKnob.Center = new SKPoint(rect.Left + knobSpacingX * 2, knobY2);
-        TimeKnob.Render(canvas);
-
-        // Buttons row
-        float buttonY = rect.Bottom - 32f;
-        float buttonWidth = 58f;
-        float bx = rect.Left + 8f;
-
-        _hpfToggleRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + toggleHeight);
-        DrawPillButton(canvas, _hpfToggleRect, "HPF", state.HighPassEnabled);
-        bx = _hpfToggleRect.Right + buttonSpacing;
-
-        _scaleRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + buttonHeight);
-        DrawPillButton(canvas, _scaleRect, state.Scale.ToString(), false);
-        bx = _scaleRect.Right + buttonSpacing;
-
-        _axisModeRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + buttonHeight);
-        DrawPillButton(canvas, _axisModeRect, FormatAxisLabel(state.AxisMode), false);
-    }
-
-    private void DrawAnalysisPanelContents(SKCanvas canvas, SKRect rect, SpectroState state,
-        float buttonHeight, float toggleHeight, float buttonSpacing)
-    {
-        // Knobs: Reassign Threshold, Reassign Spread
-        float knobY = rect.Top + PanelHeaderHeight + 35f;
-        float knobSpacingX = rect.Width / 3f;
-
-        ReassignThresholdKnob.Value = state.ReassignThresholdDb;
-        ReassignThresholdKnob.Center = new SKPoint(rect.Left + knobSpacingX, knobY);
-        ReassignThresholdKnob.Render(canvas);
-
-        ReassignSpreadKnob.Value = state.ReassignSpread * 100f;
-        ReassignSpreadKnob.Center = new SKPoint(rect.Left + knobSpacingX * 2, knobY);
-        ReassignSpreadKnob.Render(canvas);
-
-        // Buttons row 1
-        float buttonY1 = rect.Top + PanelHeaderHeight + 75f;
-        float buttonWidth = 54f;
-        float bx = rect.Left + 6f;
-
-        _transformRect = new SKRect(bx, buttonY1, bx + buttonWidth, buttonY1 + buttonHeight);
-        DrawPillButton(canvas, _transformRect, FormatTransformLabel(state.TransformType),
-            state.TransformType != SpectrogramTransformType.Fft);
-        bx = _transformRect.Right + buttonSpacing;
-
-        _fftRect = new SKRect(bx, buttonY1, bx + buttonWidth, buttonY1 + buttonHeight);
-        DrawPillButton(canvas, _fftRect, $"FFT {state.FftSize}", false);
-        bx = _fftRect.Right + buttonSpacing;
-
-        _windowRect = new SKRect(bx, buttonY1, bx + buttonWidth + 8f, buttonY1 + buttonHeight);
-        DrawPillButton(canvas, _windowRect, state.WindowFunction.ToString(), false);
-        bx = _windowRect.Right + buttonSpacing;
-
-        _overlapRect = new SKRect(bx, buttonY1, bx + buttonWidth, buttonY1 + buttonHeight);
-        DrawPillButton(canvas, _overlapRect, $"{state.Overlap * 100f:0}%", false);
-
-        // Buttons row 2
-        float buttonY2 = buttonY1 + buttonHeight + buttonSpacing;
-        bx = rect.Left + 6f;
-
-        _reassignRect = new SKRect(bx, buttonY2, bx + buttonWidth + 10f, buttonY2 + buttonHeight);
-        DrawPillButton(canvas, _reassignRect, FormatReassignLabel(state.ReassignMode),
-            state.ReassignMode != SpectrogramReassignMode.Off);
-        bx = _reassignRect.Right + buttonSpacing;
-
-        _smoothingModeRect = new SKRect(bx, buttonY2, bx + buttonWidth + 10f, buttonY2 + buttonHeight);
-        DrawPillButton(canvas, _smoothingModeRect, FormatSmoothingLabel(state.SmoothingMode),
-            state.SmoothingMode != SpectrogramSmoothingMode.Off);
-        bx = _smoothingModeRect.Right + buttonSpacing;
-
-        _preEmphasisToggleRect = new SKRect(bx, buttonY2, bx + buttonWidth, buttonY2 + toggleHeight);
-        DrawPillButton(canvas, _preEmphasisToggleRect, "Emph", state.PreEmphasisEnabled);
-    }
-
-    private void DrawClarityPanelContents(SKCanvas canvas, SKRect rect, SpectroState state,
-        float buttonHeight, float buttonSpacing)
-    {
-        // Knobs: Noise, Harmonic, Smoothing
-        float knobY = rect.Top + PanelHeaderHeight + 35f;
-        float knobSpacingX = rect.Width / 4f;
-
-        ClarityNoiseKnob.Value = state.ClarityNoise * 100f;
-        ClarityNoiseKnob.Center = new SKPoint(rect.Left + knobSpacingX, knobY);
-        ClarityNoiseKnob.Render(canvas);
-
-        ClarityHarmonicKnob.Value = state.ClarityHarmonic * 100f;
-        ClarityHarmonicKnob.Center = new SKPoint(rect.Left + knobSpacingX * 2, knobY);
-        ClarityHarmonicKnob.Render(canvas);
-
-        ClaritySmoothingKnob.Value = state.ClaritySmoothing * 100f;
-        ClaritySmoothingKnob.Center = new SKPoint(rect.Left + knobSpacingX * 3, knobY);
-        ClaritySmoothingKnob.Render(canvas);
-
-        // Buttons row
-        float buttonY = rect.Bottom - 32f;
-        float buttonWidth = 60f;
-        float bx = rect.Left + 6f;
-
-        _clarityRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + buttonHeight);
-        DrawPillButton(canvas, _clarityRect, FormatClarityLabel(state.ClarityMode),
-            state.ClarityMode != ClarityProcessingMode.None);
-        bx = _clarityRect.Right + buttonSpacing;
-
-        _normalizationRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + buttonHeight);
-        DrawPillButton(canvas, _normalizationRect, FormatNormalizationLabel(state.NormalizationMode),
-            state.NormalizationMode != SpectrogramNormalizationMode.None);
-        bx = _normalizationRect.Right + buttonSpacing;
-
-        _dynamicRangeRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + buttonHeight);
-        DrawPillButton(canvas, _dynamicRangeRect, FormatDynamicRangeLabel(state.DynamicRangeMode),
-            state.DynamicRangeMode != SpectrogramDynamicRangeMode.Custom);
     }
 
     private void DrawDisplayPanelContents(SKCanvas canvas, SKRect rect, SpectroState state,
@@ -837,13 +620,22 @@ public sealed class AnalyzerRenderer : IDisposable
         LevelsKnob.Center = new SKPoint(rect.Left + knobSpacingX * 3, knobY2);
         LevelsKnob.Render(canvas);
 
-        // Color map button
+        // Buttons row
         float buttonY = rect.Bottom - 32f;
         float bx = rect.Left + 6f;
         float buttonWidth = 70f;
 
         _colorRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + buttonHeight);
         DrawPillButton(canvas, _colorRect, ((SpectrogramColorMap)state.ColorMap).ToString(), false);
+        bx = _colorRect.Right + buttonSpacing;
+
+        _dynamicRangeRect = new SKRect(bx, buttonY, bx + buttonWidth, buttonY + buttonHeight);
+        DrawPillButton(canvas, _dynamicRangeRect, FormatDynamicRangeLabel(state.DynamicRangeMode),
+            state.DynamicRangeMode != SpectrogramDynamicRangeMode.Custom);
+        bx = _dynamicRangeRect.Right + buttonSpacing;
+
+        _axisModeRect = new SKRect(bx, buttonY, bx + buttonWidth - 10f, buttonY + buttonHeight);
+        DrawPillButton(canvas, _axisModeRect, FormatAxisLabel(state.AxisMode), false);
     }
 
     private void DrawViewOptionsPanelContents(SKCanvas canvas, SKRect rect, SpectroState state,
@@ -913,10 +705,6 @@ public sealed class AnalyzerRenderer : IDisposable
         DrawPillButton(canvas, _voiceRangeRect, FormatVoiceRangeLabel(state.VoiceRange), state.ShowRange);
         tx = _voiceRangeRect.Right + buttonSpacing;
 
-        _pitchAlgoRect = new SKRect(tx, row3Y, tx + 70f, row3Y + buttonHeight);
-        DrawPillButton(canvas, _pitchAlgoRect, FormatPitchLabel(state.PitchAlgorithm), false);
-        tx = _pitchAlgoRect.Right + buttonSpacing;
-
         _pauseRect = new SKRect(tx, row3Y, tx + 60f, row3Y + buttonHeight);
         DrawPillButton(canvas, _pauseRect, state.IsPaused ? "PAUSE" : "RUN", state.IsPaused);
     }
@@ -948,29 +736,20 @@ public sealed class AnalyzerRenderer : IDisposable
             return new SpectroHitTest(SpectroHitArea.TitleBar, -1);
         }
 
-        if (_fftRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.FftButton, -1);
-        if (_transformRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.TransformButton, -1);
-        if (_windowRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.WindowButton, -1);
-        if (_overlapRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.OverlapButton, -1);
-        if (_scaleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.ScaleButton, -1);
+        // Display control buttons (processing buttons in AnalysisSettingsWindow)
         if (_colorRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.ColorButton, -1);
-        if (_reassignRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.ReassignButton, -1);
-        if (_clarityRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.ClarityButton, -1);
-        if (_pitchAlgoRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.PitchAlgorithmButton, -1);
         if (_axisModeRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.AxisModeButton, -1);
-        if (_smoothingModeRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.SmoothingModeButton, -1);
+        if (_dynamicRangeRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.DynamicRangeButton, -1);
         if (_pauseRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.PauseButton, -1);
+
+        // View option toggles
         if (_pitchToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.PitchToggle, -1);
         if (_harmonicToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.HarmonicToggle, -1);
         if (_harmonicModeRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.HarmonicModeToggle, -1);
         if (_voicingToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.VoicingToggle, -1);
-        if (_preEmphasisToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.PreEmphasisToggle, -1);
-        if (_hpfToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.HpfToggle, -1);
         if (_rangeToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.RangeToggle, -1);
         if (_guidesToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.GuidesToggle, -1);
         if (_voiceRangeRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.VoiceRangeButton, -1);
-        if (_normalizationRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.NormalizationButton, -1);
-        if (_dynamicRangeRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.DynamicRangeButton, -1);
         if (_spectrumToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.SpectrumToggle, -1);
         if (_pitchMeterToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.PitchMeterToggle, -1);
 
@@ -992,45 +771,26 @@ public sealed class AnalyzerRenderer : IDisposable
     /// </summary>
     public string? GetControlIdAt(float x, float y)
     {
-        // Check buttons and toggles
-        if (_fftRect.Contains(x, y)) return "FftSize";
-        if (_transformRect.Contains(x, y)) return "Transform";
-        if (_windowRect.Contains(x, y)) return "Window";
-        if (_overlapRect.Contains(x, y)) return "Overlap";
-        if (_scaleRect.Contains(x, y)) return "Scale";
+        // Display control buttons (processing tooltips in AnalysisSettingsWindow)
         if (_colorRect.Contains(x, y)) return "ColorMap";
-        if (_reassignRect.Contains(x, y)) return "Reassign";
-        if (_clarityRect.Contains(x, y)) return "Clarity";
-        if (_pitchAlgoRect.Contains(x, y)) return "PitchAlgo";
         if (_axisModeRect.Contains(x, y)) return "Axis";
-        if (_smoothingModeRect.Contains(x, y)) return "Smoothing";
+        if (_dynamicRangeRect.Contains(x, y)) return "DynamicRange";
         if (_pauseRect.Contains(x, y)) return "Pause";
+
+        // View option toggles
         if (_pitchToggleRect.Contains(x, y)) return "PitchOverlay";
         if (_harmonicToggleRect.Contains(x, y)) return "HarmonicOverlay";
         if (_harmonicModeRect.Contains(x, y)) return "HarmonicMode";
         if (_voicingToggleRect.Contains(x, y)) return "VoicingOverlay";
-        if (_preEmphasisToggleRect.Contains(x, y)) return "PreEmphasis";
-        if (_hpfToggleRect.Contains(x, y)) return "HPF";
         if (_rangeToggleRect.Contains(x, y)) return "RangeOverlay";
         if (_guidesToggleRect.Contains(x, y)) return "GuidesOverlay";
         if (_voiceRangeRect.Contains(x, y)) return "VoiceRange";
-        if (_normalizationRect.Contains(x, y)) return "Normalization";
-        if (_dynamicRangeRect.Contains(x, y)) return "DynamicRange";
         if (_spectrumToggleRect.Contains(x, y)) return "SpectrumView";
         if (_pitchMeterToggleRect.Contains(x, y)) return "PitchMeterView";
 
-        // Check knobs
-        if (MinFreqKnob.HitTest(x, y)) return "MinFreq";
-        if (MaxFreqKnob.HitTest(x, y)) return "MaxFreq";
+        // Check display knobs only (processing knobs in AnalysisSettingsWindow)
         if (MinDbKnob.HitTest(x, y)) return "MinDb";
         if (MaxDbKnob.HitTest(x, y)) return "MaxDb";
-        if (TimeKnob.HitTest(x, y)) return "Time";
-        if (HpfKnob.HitTest(x, y)) return "HpfCutoff";
-        if (ReassignThresholdKnob.HitTest(x, y)) return "ReassignThresh";
-        if (ReassignSpreadKnob.HitTest(x, y)) return "ReassignSpread";
-        if (ClarityNoiseKnob.HitTest(x, y)) return "ClarityNoise";
-        if (ClarityHarmonicKnob.HitTest(x, y)) return "ClarityHarmonic";
-        if (ClaritySmoothingKnob.HitTest(x, y)) return "ClaritySmooth";
         if (BrightnessKnob.HitTest(x, y)) return "Brightness";
         if (GammaKnob.HitTest(x, y)) return "Gamma";
         if (ContrastKnob.HitTest(x, y)) return "Contrast";
@@ -2134,39 +1894,6 @@ public sealed class AnalyzerRenderer : IDisposable
         return $"{name}{octave}";
     }
 
-    private static string FormatReassignLabel(SpectrogramReassignMode mode)
-    {
-        return mode switch
-        {
-            SpectrogramReassignMode.Frequency => "SYNC",
-            SpectrogramReassignMode.Time => "R:T",
-            SpectrogramReassignMode.TimeFrequency => "R:TF",
-            _ => "R:Off"
-        };
-    }
-
-    private static string FormatTransformLabel(SpectrogramTransformType transform)
-    {
-        return transform switch
-        {
-            SpectrogramTransformType.ZoomFft => "XF:Zoom",
-            SpectrogramTransformType.Cqt => "XF:CQT",
-            _ => "XF:FFT"
-        };
-    }
-
-    private static string FormatPitchLabel(PitchDetectorType algorithm)
-    {
-        return algorithm switch
-        {
-            PitchDetectorType.Autocorrelation => "P:ACF",
-            PitchDetectorType.Cepstral => "P:CEP",
-            PitchDetectorType.Pyin => "P:pYIN",
-            PitchDetectorType.Swipe => "P:SWP",
-            _ => "P:YIN"
-        };
-    }
-
     private static string FormatAxisLabel(SpectrogramAxisMode mode)
     {
         return mode switch
@@ -2174,27 +1901,6 @@ public sealed class AnalyzerRenderer : IDisposable
             SpectrogramAxisMode.Note => "AX:Note",
             SpectrogramAxisMode.Both => "AX:Both",
             _ => "AX:Hz"
-        };
-    }
-
-    private static string FormatSmoothingLabel(SpectrogramSmoothingMode mode)
-    {
-        return mode switch
-        {
-            SpectrogramSmoothingMode.Ema => "SM:EMA",
-            SpectrogramSmoothingMode.Bilateral => "SM:BIL",
-            _ => "SM:Off"
-        };
-    }
-
-    private static string FormatNormalizationLabel(SpectrogramNormalizationMode mode)
-    {
-        return mode switch
-        {
-            SpectrogramNormalizationMode.Peak => "N:Peak",
-            SpectrogramNormalizationMode.Rms => "N:RMS",
-            SpectrogramNormalizationMode.AWeighted => "N:A",
-            _ => "N:Off"
         };
     }
 
@@ -2221,17 +1927,6 @@ public sealed class AnalyzerRenderer : IDisposable
             VocalRangeType.MezzoSoprano => "Mezzo",
             VocalRangeType.Soprano => "Sop",
             _ => "Vocal"
-        };
-    }
-
-    private static string FormatClarityLabel(ClarityProcessingMode mode)
-    {
-        return mode switch
-        {
-            ClarityProcessingMode.Noise => "CLR:N",
-            ClarityProcessingMode.Harmonic => "CLR:H",
-            ClarityProcessingMode.Full => "CLR:All",
-            _ => "CLR:Off"
         };
     }
 
@@ -2328,6 +2023,9 @@ public sealed class AnalyzerRenderer : IDisposable
     }
 }
 
+/// <summary>
+/// Hit areas for display controls only. Processing controls are in AnalysisSettingsWindow.
+/// </summary>
 public enum SpectroHitArea
 {
     None,
@@ -2336,31 +2034,22 @@ public enum SpectroHitArea
     BypassButton,
     PresetDropdown,
     PresetSave,
-    FftButton,
-    TransformButton,
-    WindowButton,
-    OverlapButton,
-    ScaleButton,
-    AxisModeButton,
+    // Display controls
     ColorButton,
-    ReassignButton,
-    ClarityButton,
-    PitchAlgorithmButton,
-    SmoothingModeButton,
+    AxisModeButton,
+    DynamicRangeButton,
     PauseButton,
+    // View option toggles
     PitchToggle,
     HarmonicToggle,
     HarmonicModeToggle,
     VoicingToggle,
-    PreEmphasisToggle,
-    HpfToggle,
     RangeToggle,
     GuidesToggle,
     VoiceRangeButton,
-    NormalizationButton,
-    DynamicRangeButton,
     SpectrumToggle,
     PitchMeterToggle,
+    // Main areas
     Spectrogram,
     Knob
 }

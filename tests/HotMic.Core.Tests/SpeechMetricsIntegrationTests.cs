@@ -1,12 +1,11 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using HotMic.Core.Analysis;
 using HotMic.Core.Dsp;
 using HotMic.Core.Dsp.Analysis;
 using HotMic.Core.Dsp.Analysis.Pitch;
 using HotMic.Core.Dsp.Analysis.Speech;
-using HotMic.Core.Dsp.Filters;
-using HotMic.Core.Dsp.Fft;
 using HotMic.Core.Plugins;
 using NAudio.Wave;
 using Xunit;
@@ -16,9 +15,9 @@ namespace HotMic.Core.Tests;
 public class SpeechMetricsIntegrationTests
 {
     private const string TestWavRelativePath = "tests/HotMic.Core.Tests/data/noisy_voice_4sec.wav";
-    private const float ExpectedSingleWpm = 0f; // Baseline from current pipeline.
-    private const float ExpectedSerialWpm = 0f; // Baseline from current pipeline.
-    private const float ExpectedTolerance = 0.5f;
+    private const float ExpectedSingleWpm = 24f; // Baseline from current pipeline.
+    private const float ExpectedSerialWpm = 68f; // Baseline from current pipeline.
+    private const float ExpectedTolerance = 1.0f;
 
     [Fact]
     public void SpeechMetrics_WpmMatchesBaseline()
@@ -26,11 +25,14 @@ public class SpeechMetricsIntegrationTests
         string path = FindRepoFile(TestWavRelativePath);
         float[] samples = LoadMonoSamples(path, out int sampleRate);
 
-        float singleWpm = SpeechMetricsOfflineAnalyzer.ComputeWpm(samples, sampleRate);
-        float serialWpm = SpeechMetricsOfflineAnalyzer.ComputeWpm(Repeat(samples, 5), sampleRate);
+        var single = SpeechMetricsOfflineAnalyzer.Analyze(samples, sampleRate);
+        var serial = SpeechMetricsOfflineAnalyzer.Analyze(Repeat(samples, 5), sampleRate);
 
-        Assert.InRange(singleWpm, ExpectedSingleWpm - ExpectedTolerance, ExpectedSingleWpm + ExpectedTolerance);
-        Assert.InRange(serialWpm, ExpectedSerialWpm - ExpectedTolerance, ExpectedSerialWpm + ExpectedTolerance);
+        Console.WriteLine(single.FormatDebugSummary("single"));
+        Console.WriteLine(serial.FormatDebugSummary("serial"));
+
+        Assert.InRange(single.WordsPerMinute, ExpectedSingleWpm - ExpectedTolerance, ExpectedSingleWpm + ExpectedTolerance);
+        Assert.InRange(serial.WordsPerMinute, ExpectedSerialWpm - ExpectedTolerance, ExpectedSerialWpm + ExpectedTolerance);
     }
 
     private static float[] LoadMonoSamples(string path, out int sampleRate)
@@ -119,28 +121,16 @@ public class SpeechMetricsIntegrationTests
     private sealed class SpeechMetricsOfflineAnalyzer
     {
         private readonly int _sampleRate;
-        private readonly int _fftSize;
         private readonly int _hopSize;
         private readonly int _analysisSize;
         private readonly float _binResolution;
-        private readonly float _fftNormalization;
-        private readonly FastFft _fft;
-        private readonly float[] _analysisBufferRaw;
-        private readonly float[] _analysisBufferProcessed;
         private readonly float[] _hopBuffer;
-        private readonly float[] _fftReal;
-        private readonly float[] _fftImag;
-        private readonly float[] _fftWindow;
-        private readonly float[] _fftMagnitudes;
-        private readonly OnePoleHighPass _dcHighPass = new();
-        private readonly BiquadFilter _rumbleHighPass = new();
-        private readonly PreEmphasisFilter _preEmphasisFilter = new();
-        private readonly bool _preEmphasisEnabled;
-        private readonly bool _highPassEnabled;
-        private readonly float _highPassCutoff;
+        private readonly AnalysisBufferPipeline _analysisPipeline = new();
+        private readonly FftTransformProcessor _fftProcessor = new();
         private readonly AnalysisSignalProcessor _signalProcessor = new();
         private readonly SpeechMetricsProcessor _metricsProcessor = new();
-        private int _analysisFilled;
+        private readonly SyllableDetector _energySyllableDetector = new();
+        private SyllableDetectorDebugStats _energySyllableStats;
         private long _frameId;
         private long _sampleTime;
         private SpeechMetricsFrame _lastMetrics;
@@ -149,40 +139,24 @@ public class SpeechMetricsIntegrationTests
         {
             var config = new AnalysisConfiguration();
             _sampleRate = sampleRate;
-            _fftSize = config.FftSize;
-            _analysisSize = _fftSize;
+            _analysisSize = config.FftSize;
             _hopSize = config.ComputeHopSize();
-            _binResolution = sampleRate / (float)_fftSize;
-            _fft = new FastFft(_fftSize);
-            _analysisBufferRaw = new float[_analysisSize];
-            _analysisBufferProcessed = new float[_analysisSize];
+            _analysisPipeline.Configure(
+                sampleRate,
+                _hopSize,
+                _analysisSize,
+                config.HighPassEnabled,
+                config.HighPassCutoff,
+                config.PreEmphasis,
+                0.97f,
+                10f);
+            _fftProcessor.Configure(sampleRate, _analysisSize, config.WindowFunction);
+            _binResolution = _fftProcessor.BinResolution;
             _hopBuffer = new float[_hopSize];
-            _fftReal = new float[_fftSize];
-            _fftImag = new float[_fftSize];
-            _fftWindow = new float[_fftSize];
-            _fftMagnitudes = new float[_fftSize / 2];
-            _preEmphasisEnabled = config.PreEmphasis;
-            _highPassEnabled = config.HighPassEnabled;
-            _highPassCutoff = config.HighPassCutoff;
-
-            WindowFunctions.Fill(_fftWindow, config.WindowFunction);
-            double sum = 0.0;
-            for (int i = 0; i < _fftWindow.Length; i++)
-            {
-                sum += _fftWindow[i];
-            }
-            _fftNormalization = 2f / (float)Math.Max(1e-6, sum);
-
-            _dcHighPass.Configure(10f, sampleRate);
-            _dcHighPass.Reset();
-            _rumbleHighPass.SetHighPass(sampleRate, _highPassCutoff, 0.707f);
-            _rumbleHighPass.Reset();
-            _preEmphasisFilter.Configure(0.97f);
-            _preEmphasisFilter.Reset();
 
             var settings = new AnalysisSignalProcessorSettings
             {
-                AnalysisSize = _fftSize,
+                AnalysisSize = _analysisSize,
                 PitchDetector = PitchDetectorType.Yin,
                 VoicingSettings = config.VoicingSettings,
                 MinFrequency = config.MinFrequency,
@@ -193,15 +167,17 @@ public class SpeechMetricsIntegrationTests
                 HighPassCutoff = config.HighPassCutoff
             };
             _signalProcessor.Configure(sampleRate, _hopSize, settings);
+            _signalProcessor.SetGeneratedSpeechPresenceGateEnabled(true);
             _signalProcessor.Reset();
             _metricsProcessor.Configure(_hopSize, sampleRate);
+            _energySyllableDetector.Reset();
         }
 
-        public static float ComputeWpm(float[] samples, int sampleRate)
+        public static SpeechMetricsOfflineResult Analyze(float[] samples, int sampleRate)
         {
             var analyzer = new SpeechMetricsOfflineAnalyzer(sampleRate);
             analyzer.Process(samples);
-            return analyzer._lastMetrics.WordsPerMinute;
+            return analyzer.CreateResult();
         }
 
         private void Process(float[] samples)
@@ -218,52 +194,17 @@ public class SpeechMetricsIntegrationTests
         private void ProcessHop()
         {
             int shift = _hopSize;
-            int tail = _analysisSize - shift;
-
-            Array.Copy(_analysisBufferRaw, shift, _analysisBufferRaw, 0, tail);
-            Array.Copy(_analysisBufferProcessed, shift, _analysisBufferProcessed, 0, tail);
-
-            float waveformMin = float.MaxValue;
-            float waveformMax = float.MinValue;
-
-            for (int i = 0; i < shift; i++)
-            {
-                float sample = _hopBuffer[i];
-                float dcRemoved = _dcHighPass.Process(sample);
-                float filtered = _highPassEnabled ? _rumbleHighPass.Process(dcRemoved) : dcRemoved;
-                float emphasized = _preEmphasisEnabled ? _preEmphasisFilter.Process(filtered) : filtered;
-
-                _analysisBufferRaw[tail + i] = filtered;
-                _analysisBufferProcessed[tail + i] = emphasized;
-
-                if (filtered < waveformMin) waveformMin = filtered;
-                if (filtered > waveformMax) waveformMax = filtered;
-            }
-
-            _analysisFilled = Math.Min(_analysisSize, _analysisFilled + shift);
-            if (_analysisFilled < _analysisSize)
+            if (!_analysisPipeline.ProcessHop(_hopBuffer.AsSpan(0, shift), out float waveformMin, out float waveformMax))
             {
                 return;
             }
 
-            for (int i = 0; i < _analysisSize; i++)
-            {
-                float sample = _analysisBufferProcessed[i];
-                _fftReal[i] = sample * _fftWindow[i];
-                _fftImag[i] = 0f;
-            }
+            _fftProcessor.Compute(_analysisPipeline.ProcessedBuffer, reassignEnabled: false);
+            ReadOnlySpan<float> analysisRaw = _analysisPipeline.RawBuffer.AsSpan(0, _analysisSize);
+            ReadOnlySpan<float> magnitudes = _fftProcessor.Magnitudes;
 
-            _fft.Forward(_fftReal, _fftImag);
-
-            int half = _fftSize / 2;
-            for (int i = 0; i < half; i++)
-            {
-                float re = _fftReal[i];
-                float im = _fftImag[i];
-                _fftMagnitudes[i] = MathF.Sqrt(re * re + im * im) * _fftNormalization;
-            }
-
-            AnalysisSignalMask signals = AnalysisSignalMask.PitchHz |
+            AnalysisSignalMask signals = AnalysisSignalMask.SpeechPresence |
+                                         AnalysisSignalMask.PitchHz |
                                          AnalysisSignalMask.PitchConfidence |
                                          AnalysisSignalMask.VoicingState |
                                          AnalysisSignalMask.VoicingScore |
@@ -278,15 +219,17 @@ public class SpeechMetricsIntegrationTests
             float hnr = _signalProcessor.GetLastValue(AnalysisSignalId.HnrDb);
             float flux = _signalProcessor.GetLastValue(AnalysisSignalId.SpectralFlux);
             float slope = _signalProcessor.LastSlope;
+            float speechPresence = _signalProcessor.GetLastValue(AnalysisSignalId.SpeechPresence);
             var voicing = (VoicingState)MathF.Round(_signalProcessor.GetLastValue(AnalysisSignalId.VoicingState));
 
             _lastMetrics = _metricsProcessor.Process(
                 waveformMin,
                 waveformMax,
-                _analysisBufferRaw.AsSpan(tail, shift),
-                _fftMagnitudes,
+                analysisRaw,
+                magnitudes,
                 ReadOnlySpan<float>.Empty,
                 _binResolution,
+                speechPresence,
                 pitch,
                 pitchConfidence,
                 voicing,
@@ -295,8 +238,185 @@ public class SpeechMetricsIntegrationTests
                 hnr,
                 _frameId);
 
+            _energySyllableDetector.Process(
+                _metricsProcessor.LastEnergyDb,
+                voicing,
+                _frameId,
+                _hopSize,
+                _sampleRate);
+            _energySyllableStats = _energySyllableDetector.DebugStats;
+
+            _frames++;
+            switch (voicing)
+            {
+                case VoicingState.Voiced:
+                    _voicedFrames++;
+                    break;
+                case VoicingState.Unvoiced:
+                    _unvoicedFrames++;
+                    break;
+                default:
+                    _silenceFrames++;
+                    break;
+            }
+
+            if (_metricsProcessor.LastEnergyDb < _minEnergyDb)
+            {
+                _minEnergyDb = _metricsProcessor.LastEnergyDb;
+            }
+            if (_metricsProcessor.LastEnergyDb > _maxEnergyDb)
+            {
+                _maxEnergyDb = _metricsProcessor.LastEnergyDb;
+            }
+            if (_metricsProcessor.LastSyllableEnergyDb < _minSyllableEnergyDb)
+            {
+                _minSyllableEnergyDb = _metricsProcessor.LastSyllableEnergyDb;
+            }
+            if (_metricsProcessor.LastSyllableEnergyDb > _maxSyllableEnergyDb)
+            {
+                _maxSyllableEnergyDb = _metricsProcessor.LastSyllableEnergyDb;
+            }
+            if (pitchConfidence < _minPitchConfidence)
+            {
+                _minPitchConfidence = pitchConfidence;
+            }
+            if (pitchConfidence > _maxPitchConfidence)
+            {
+                _maxPitchConfidence = pitchConfidence;
+            }
+            if (pitch < _minPitchHz)
+            {
+                _minPitchHz = pitch;
+            }
+            if (pitch > _maxPitchHz)
+            {
+                _maxPitchHz = pitch;
+            }
+            if (flux < _minFlux)
+            {
+                _minFlux = flux;
+            }
+            if (flux > _maxFlux)
+            {
+                _maxFlux = flux;
+            }
+            if (_lastMetrics.SyllableDetected)
+            {
+                _syllableDetectedCount++;
+            }
+
             _frameId++;
             _sampleTime += shift;
+        }
+
+        private SpeechMetricsOfflineResult CreateResult()
+        {
+            return new SpeechMetricsOfflineResult(
+                _lastMetrics.WordsPerMinute,
+                _lastMetrics.ArticulationWpm,
+                _frames,
+                _voicedFrames,
+                _unvoicedFrames,
+                _silenceFrames,
+                _syllableDetectedCount,
+                FixInf(_minEnergyDb),
+                FixInf(_maxEnergyDb),
+                FixInf(_minSyllableEnergyDb),
+                FixInf(_maxSyllableEnergyDb),
+                FixInf(_minPitchConfidence),
+                FixInf(_maxPitchConfidence),
+                FixInf(_minPitchHz),
+                FixInf(_maxPitchHz),
+                FixInf(_minFlux),
+                FixInf(_maxFlux),
+                _metricsProcessor.SyllableDebugStats,
+                _energySyllableStats,
+                _metricsProcessor.RateDebugStats);
+        }
+
+        private static float FixInf(float value)
+        {
+            if (float.IsPositiveInfinity(value) || float.IsNegativeInfinity(value))
+            {
+                return 0f;
+            }
+            return value;
+        }
+
+        private long _frames;
+        private long _voicedFrames;
+        private long _unvoicedFrames;
+        private long _silenceFrames;
+        private long _syllableDetectedCount;
+        private float _minEnergyDb = float.PositiveInfinity;
+        private float _maxEnergyDb = float.NegativeInfinity;
+        private float _minSyllableEnergyDb = float.PositiveInfinity;
+        private float _maxSyllableEnergyDb = float.NegativeInfinity;
+        private float _minPitchConfidence = float.PositiveInfinity;
+        private float _maxPitchConfidence = float.NegativeInfinity;
+        private float _minPitchHz = float.PositiveInfinity;
+        private float _maxPitchHz = float.NegativeInfinity;
+        private float _minFlux = float.PositiveInfinity;
+        private float _maxFlux = float.NegativeInfinity;
+    }
+
+    private readonly record struct SpeechMetricsOfflineResult(
+        float WordsPerMinute,
+        float ArticulationWpm,
+        long Frames,
+        long VoicedFrames,
+        long UnvoicedFrames,
+        long SilenceFrames,
+        long SyllableDetected,
+        float MinEnergyDb,
+        float MaxEnergyDb,
+        float MinSyllableEnergyDb,
+        float MaxSyllableEnergyDb,
+        float MinPitchConfidence,
+        float MaxPitchConfidence,
+        float MinPitchHz,
+        float MaxPitchHz,
+        float MinSpectralFlux,
+        float MaxSpectralFlux,
+        SyllableDetectorDebugStats SyllableStats,
+        SyllableDetectorDebugStats EnergyStats,
+        SpeechRateDebugStats RateStats)
+    {
+        public string FormatDebugSummary(string label)
+        {
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "SpeechMetricsSummary {0} wpm={1:0.00} artWpm={2:0.00} frames={3} voiced={4} unvoiced={5} silence={6} syllDet={7} energyDb=[{8:0.0},{9:0.0}] syllDb=[{10:0.0},{11:0.0}] pitchConf=[{12:0.00},{13:0.00}] pitchHz=[{14:0.0},{15:0.0}] flux=[{16:0.000},{17:0.000}] peaks={18} voicedPeaks={19} det={20} rejPeak={21} rejVoiced={22} rejProm={23} rejMinInt={24} maxProm={25:0.00} energyDet={26} energyMaxProm={27:0.00} rateSyll={28} ratePauses={29}",
+                label,
+                WordsPerMinute,
+                ArticulationWpm,
+                Frames,
+                VoicedFrames,
+                UnvoicedFrames,
+                SilenceFrames,
+                SyllableDetected,
+                MinEnergyDb,
+                MaxEnergyDb,
+                MinSyllableEnergyDb,
+                MaxSyllableEnergyDb,
+                MinPitchConfidence,
+                MaxPitchConfidence,
+                MinPitchHz,
+                MaxPitchHz,
+                MinSpectralFlux,
+                MaxSpectralFlux,
+                SyllableStats.Peaks,
+                SyllableStats.VoicedPeaks,
+                SyllableStats.Detected,
+                SyllableStats.RejectNotPeak,
+                SyllableStats.RejectUnvoiced,
+                SyllableStats.RejectLowProminence,
+                SyllableStats.RejectMinInterval,
+                SyllableStats.MaxProminenceDb,
+                EnergyStats.Detected,
+                EnergyStats.MaxProminenceDb,
+                RateStats.SyllablesRecorded,
+                RateStats.PausesRecorded);
         }
     }
 }

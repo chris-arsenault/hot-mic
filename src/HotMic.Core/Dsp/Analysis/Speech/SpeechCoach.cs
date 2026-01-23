@@ -326,6 +326,16 @@ public sealed class SpeechCoach
     public SpeechMetrics CurrentMetrics => _cachedMetrics;
 
     /// <summary>
+    /// Debug counters from the syllable detector.
+    /// </summary>
+    public SyllableDetectorDebugStats SyllableDebugStats => _syllableDetector.DebugStats;
+
+    /// <summary>
+    /// Debug counters from the rate calculator.
+    /// </summary>
+    public SpeechRateDebugStats RateDebugStats => _rateCalculator.DebugStats;
+
+    /// <summary>
     /// Reset all analyzers.
     /// </summary>
     public void Reset()

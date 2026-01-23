@@ -23,8 +23,9 @@ The focus is on speaking rate, pauses, prosody, clarity, and intelligibility.
 
 ### 1) Syllable Detection
 - Based on de Jong & Wempe peak-picking.
+- Syllable energy uses a 20 ms trailing window of band-limited peak amplitude (300–2000 Hz).
 - Smoothed energy envelope (EMA, alpha=0.15).
-- Peak when center frame > previous and > current.
+- Peak when center frame > previous and > current, with comparison span ≈60 ms to reduce hop-size aliasing.
 - Prominence threshold: 3 dB above local dip.
 - Voiced-only peaks.
 - Minimum inter-syllable interval: 50 ms.

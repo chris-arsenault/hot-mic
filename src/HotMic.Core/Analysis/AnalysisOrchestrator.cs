@@ -6,8 +6,6 @@ using HotMic.Core.Dsp;
 using HotMic.Core.Dsp.Analysis;
 using HotMic.Core.Dsp.Analysis.Pitch;
 using HotMic.Core.Dsp.Analysis.Speech;
-using HotMic.Core.Dsp.Fft;
-using HotMic.Core.Dsp.Filters;
 using HotMic.Core.Dsp.Mapping;
 using HotMic.Core.Dsp.Spectrogram;
 using HotMic.Core.Dsp.Voice;
@@ -45,7 +43,8 @@ public sealed class AnalysisOrchestrator : IDisposable
     private long _analysisReadSampleTime = long.MinValue;
 
     // FFT/Transform
-    private FastFft? _fft;
+    private readonly AnalysisBufferPipeline _analysisPipeline = new();
+    private readonly FftTransformProcessor _fftProcessor = new();
     private ConstantQTransform? _cqt;
     private ZoomFft? _zoomFft;
     private float[] _analysisBufferRaw = Array.Empty<float>();
@@ -99,10 +98,6 @@ public sealed class AnalysisOrchestrator : IDisposable
     private readonly SpectrogramSmoother _smoother = new();
     private readonly SpectrogramHarmonicComb _harmonicComb = new();
 
-    // Filters (not readonly - these are mutable structs)
-    private OnePoleHighPass _dcHighPass;
-    private BiquadFilter _rumbleHighPass = new();
-    private PreEmphasisFilter _preEmphasisFilter;
     private readonly float[] _harmonicScratch = new float[AnalysisConfiguration.MaxHarmonics];
     private readonly float[] _harmonicMagScratch = new float[AnalysisConfiguration.MaxHarmonics];
 
@@ -314,6 +309,11 @@ public sealed class AnalysisOrchestrator : IDisposable
             mask |= AnalysisSignalMask.SpectralFlux | AnalysisSignalMask.HnrDb;
         }
 
+        if (caps.HasFlag(AnalysisCapabilities.SpeechMetrics))
+        {
+            mask |= AnalysisSignalMask.SpeechPresence;
+        }
+
         return AnalysisSignalDependencies.Expand(mask);
     }
 
@@ -501,6 +501,7 @@ public sealed class AnalysisOrchestrator : IDisposable
                 FillSignalValuesFromProcessor(missingSignals, _analysisSignalValues);
             }
 
+            float speechPresence = _analysisSignalValues[(int)AnalysisSignalId.SpeechPresence];
             float lastPitch = _analysisSignalValues[(int)AnalysisSignalId.PitchHz];
             float lastConfidence = _analysisSignalValues[(int)AnalysisSignalId.PitchConfidence];
             float lastHnr = _analysisSignalValues[(int)AnalysisSignalId.HnrDb];
@@ -516,6 +517,7 @@ public sealed class AnalysisOrchestrator : IDisposable
             float lastCpp = needsCpp && (processorSignals & (AnalysisSignalMask.PitchHz | AnalysisSignalMask.PitchConfidence)) != 0
                 ? _analysisSignalProcessor.LastCpp
                 : 0f;
+
 
             int harmonicCount = ComputeHarmonics(capabilities, lastPitch);
 
@@ -554,7 +556,7 @@ public sealed class AnalysisOrchestrator : IDisposable
             // Speech metrics if needed
             if (capabilities.HasFlag(AnalysisCapabilities.SpeechMetrics))
             {
-                var metrics = ProcessSpeechMetrics(waveformMin, waveformMax, lastPitch, lastConfidence,
+                var metrics = ProcessSpeechMetrics(waveformMin, waveformMax, speechPresence, lastPitch, lastConfidence,
                     voicing, flux, slope, lastHnr, frameId);
                 _resultStore.WriteSpeechMetrics(frameIndex, metrics);
             }
@@ -822,41 +824,12 @@ public sealed class AnalysisOrchestrator : IDisposable
 
     private bool ProcessHopBuffer(out float waveformMin, out float waveformMax)
     {
-        int shift = _activeHopSize;
-        int analysisSize = _activeAnalysisSize;
-        int tail = analysisSize - shift;
-
-        Array.Copy(_analysisBufferRaw, shift, _analysisBufferRaw, 0, tail);
-        Array.Copy(_analysisBufferProcessed, shift, _analysisBufferProcessed, 0, tail);
-
-        waveformMin = float.MaxValue;
-        waveformMax = float.MinValue;
-
-        bool preEmphasis = _config.PreEmphasis;
-        bool hpfEnabled = _config.HighPassEnabled;
-
-        float processedMax = 0f;
-        for (int i = 0; i < shift; i++)
-        {
-            float sample = _hopBuffer[i];
-            float dcRemoved = _dcHighPass.Process(sample);
-            float filtered = hpfEnabled ? _rumbleHighPass.Process(dcRemoved) : dcRemoved;
-            float emphasized = preEmphasis ? _preEmphasisFilter.Process(filtered) : filtered;
-
-            _analysisBufferRaw[tail + i] = filtered;
-            _analysisBufferProcessed[tail + i] = emphasized;
-            processedMax = MathF.Max(processedMax, MathF.Abs(emphasized));
-
-            if (filtered < waveformMin) waveformMin = filtered;
-            if (filtered > waveformMax) waveformMax = filtered;
-        }
-        Volatile.Write(ref _debugLastProcessedMax, processedMax);
-
-        int filled = Volatile.Read(ref _analysisFilled);
-        filled = Math.Min(analysisSize, filled + shift);
+        bool ready = _analysisPipeline.ProcessHop(_hopBuffer.AsSpan(0, _activeHopSize), out waveformMin, out waveformMax);
+        Volatile.Write(ref _debugLastProcessedMax, _analysisPipeline.LastProcessedMax);
+        int filled = _analysisPipeline.Filled;
         Volatile.Write(ref _analysisFilled, filled);
         Volatile.Write(ref _debugAnalysisFilled, filled);
-        return filled >= analysisSize;
+        return ready;
     }
 
     private int ComputeCqtTransform(bool reassignEnabled)
@@ -935,56 +908,15 @@ public sealed class AnalysisOrchestrator : IDisposable
 
     private void ComputeFftTransform(bool reassignEnabled)
     {
-        if (reassignEnabled)
+        var debug = _fftProcessor.Compute(_analysisBufferProcessed, reassignEnabled);
+        Volatile.Write(ref _debugFftNull, false);
+        if (!reassignEnabled)
         {
-            for (int i = 0; i < _activeFftSize; i++)
-            {
-                float sample = _analysisBufferProcessed[i];
-                _fftReal[i] = sample * _fftWindow[i];
-                _fftImag[i] = 0f;
-                _fftTimeReal[i] = sample * _fftWindowTime[i];
-                _fftTimeImag[i] = 0f;
-                _fftDerivReal[i] = sample * _fftWindowDerivative[i];
-                _fftDerivImag[i] = 0f;
-            }
-
-            _fft?.Forward(_fftReal, _fftImag);
-            _fft?.Forward(_fftTimeReal, _fftTimeImag);
-            _fft?.Forward(_fftDerivReal, _fftDerivImag);
+            Volatile.Write(ref _debugLastAnalysisBufMax, debug.AnalysisBufferMax);
+            Volatile.Write(ref _debugLastWindowMax, debug.WindowMax);
+            Volatile.Write(ref _debugLastFftRealMax, debug.FftRealMax);
         }
-        else
-        {
-            float analysisBufMax = 0f, windowMax = 0f, fftRealMax = 0f;
-            for (int i = 0; i < _activeFftSize; i++)
-            {
-                float sample = _analysisBufferProcessed[i];
-                float win = _fftWindow[i];
-                _fftReal[i] = sample * win;
-                _fftImag[i] = 0f;
-                analysisBufMax = MathF.Max(analysisBufMax, MathF.Abs(sample));
-                windowMax = MathF.Max(windowMax, MathF.Abs(win));
-                fftRealMax = MathF.Max(fftRealMax, MathF.Abs(_fftReal[i]));
-            }
-            Volatile.Write(ref _debugLastAnalysisBufMax, analysisBufMax);
-            Volatile.Write(ref _debugLastWindowMax, windowMax);
-            Volatile.Write(ref _debugLastFftRealMax, fftRealMax);
-            Volatile.Write(ref _debugFftNull, _fft is null);
-
-            _fft?.Forward(_fftReal, _fftImag);
-        }
-
-        float normalization = _fftNormalization;
-        int half = _activeFftSize / 2;
-        float fftMax = 0f;
-        for (int i = 0; i < half; i++)
-        {
-            float re = _fftReal[i];
-            float im = _fftImag[i];
-            float mag = MathF.Sqrt(re * re + im * im) * normalization;
-            _fftMagnitudes[i] = mag;
-            fftMax = MathF.Max(fftMax, mag);
-        }
-        Volatile.Write(ref _debugLastFftMax, fftMax);
+        Volatile.Write(ref _debugLastFftMax, debug.FftMax);
     }
 
     private ReadOnlySpan<float> NormalizeFftMagnitudes()
@@ -1400,6 +1332,7 @@ public sealed class AnalysisOrchestrator : IDisposable
 
     private SpeechMetricsFrame ProcessSpeechMetrics(
         float waveformMin, float waveformMax,
+        float speechPresence,
         float lastPitch, float lastConfidence,
         VoicingState voicing,
         float flux, float slope, float lastHnr,
@@ -1407,20 +1340,20 @@ public sealed class AnalysisOrchestrator : IDisposable
     {
         float hopEnergyDb = ComputeRmsDb(_hopBuffer.AsSpan(0, _activeHopSize));
         ReadOnlySpan<float> speechMagnitudes = GetSpeechMagnitudes(out var speechBinCenters, out var speechBinResolution);
-        ReadOnlySpan<float> hopRaw = ReadOnlySpan<float>.Empty;
-        if (_activeHopSize > 0 && _activeAnalysisSize >= _activeHopSize && _analysisBufferRaw.Length >= _activeAnalysisSize)
+        ReadOnlySpan<float> analysisRaw = ReadOnlySpan<float>.Empty;
+        if (_activeAnalysisSize > 0 && _analysisBufferRaw.Length >= _activeAnalysisSize)
         {
-            int tail = _activeAnalysisSize - _activeHopSize;
-            hopRaw = _analysisBufferRaw.AsSpan(tail, _activeHopSize);
+            analysisRaw = _analysisBufferRaw.AsSpan(0, _activeAnalysisSize);
         }
 
         var metrics = _speechMetricsProcessor.Process(
             waveformMin,
             waveformMax,
-            hopRaw,
+            analysisRaw,
             speechMagnitudes,
             speechBinCenters,
             speechBinResolution,
+            speechPresence,
             lastPitch,
             lastConfidence,
             voicing,
@@ -1475,35 +1408,26 @@ public sealed class AnalysisOrchestrator : IDisposable
             _activeAnalysisSize = fftSize;
             _analysisFilled = 0;
 
-            // Allocate FFT buffers
-            _fft = new FastFft(fftSize);
-            _analysisBufferRaw = new float[fftSize];
-            _analysisBufferProcessed = new float[fftSize];
+            // Allocate hop buffer
             _hopBuffer = new float[_activeHopSize];
-            _fftReal = new float[fftSize];
-            _fftImag = new float[fftSize];
-            _fftWindow = new float[fftSize];
-            _fftWindowTime = new float[fftSize];
-            _fftWindowDerivative = new float[fftSize];
-            _fftTimeReal = new float[fftSize];
-            _fftTimeImag = new float[fftSize];
-            _fftDerivReal = new float[fftSize];
-            _fftDerivImag = new float[fftSize];
-            _fftMagnitudes = new float[fftSize / 2];
+
             _fftDisplayMagnitudes = new float[fftSize / 2];
             _aWeighting = new float[fftSize / 2];
-            _fftNormalization = 2f / MathF.Max(1f, fftSize);
-            _binResolution = _sampleRate / (float)fftSize;
 
             UpdateAWeighting();
+        }
+
+        if (sizeChanged || force)
+        {
+            _fftProcessor.Configure(_sampleRate, fftSize, window);
+            SyncFftProcessorState();
         }
 
         if (force || window != _activeWindow || sizeChanged)
         {
             _activeWindow = window;
-            WindowFunctions.Fill(_fftWindow, window);
-            UpdateWindowNormalization();
-            UpdateReassignWindows();
+            _fftProcessor.UpdateWindow(window);
+            SyncFftProcessorState();
         }
 
         if (force || scale != _activeScale || MathF.Abs(minHz - _activeMinFrequency) > 1e-3f ||
@@ -1531,13 +1455,8 @@ public sealed class AnalysisOrchestrator : IDisposable
                 _zoomFft.Configure(_sampleRate, fftSize, minHz, maxHz, ZoomFftZoomFactor, window);
 
                 int requiredSize = _zoomFft.RequiredInputSize;
-                if (requiredSize > _analysisBufferRaw.Length)
-                {
-                    _analysisBufferRaw = new float[requiredSize];
-                    _analysisBufferProcessed = new float[requiredSize];
-                    _analysisFilled = 0;
-                }
                 _activeAnalysisSize = requiredSize;
+                _analysisFilled = 0;
 
                 int zoomBins = _zoomFft.OutputBins;
                 if (_zoomReal.Length < zoomBins)
@@ -1560,13 +1479,8 @@ public sealed class AnalysisOrchestrator : IDisposable
                 _cqt.Configure(_sampleRate, minHz, maxHz, cqtBinsPerOctave);
 
                 int requiredSize = _cqt.MaxWindowLength;
-                if (requiredSize > _analysisBufferRaw.Length)
-                {
-                    _analysisBufferRaw = new float[requiredSize];
-                    _analysisBufferProcessed = new float[requiredSize];
-                    _analysisFilled = 0;
-                }
                 _activeAnalysisSize = requiredSize;
+                _analysisFilled = 0;
 
                 if (_cqtMagnitudes.Length < _cqt.BinCount)
                 {
@@ -1587,6 +1501,19 @@ public sealed class AnalysisOrchestrator : IDisposable
             _activeAnalysisSize = fftSize;
             _analysisFilled = 0;
         }
+
+        _analysisPipeline.Configure(
+            _sampleRate,
+            _activeHopSize,
+            _activeAnalysisSize,
+            hpfEnabled,
+            hpfCutoff,
+            preEmphasis,
+            DefaultPreEmphasis,
+            DcCutoffHz);
+        _analysisBufferRaw = _analysisPipeline.RawBuffer;
+        _analysisBufferProcessed = _analysisPipeline.ProcessedBuffer;
+        _analysisFilled = _analysisPipeline.Filled;
 
         // Update analysis bins
         int desiredAnalysisBins = transformType switch
@@ -1618,18 +1545,12 @@ public sealed class AnalysisOrchestrator : IDisposable
 
         _activeTransformType = transformType;
 
-        // Filters
+        // Analysis buffer preprocessing
         if (sizeChanged || force || MathF.Abs(hpfCutoff - _activeHighPassCutoff) > 1e-3f ||
             hpfEnabled != _activeHighPassEnabled || preEmphasis != _activePreEmphasisEnabled)
         {
-            _dcHighPass.Configure(DcCutoffHz, _sampleRate);
-            _dcHighPass.Reset();
-            _rumbleHighPass.SetHighPass(_sampleRate, hpfCutoff, 0.707f);
-            _rumbleHighPass.Reset();
             _activeHighPassCutoff = hpfCutoff;
             _activeHighPassEnabled = hpfEnabled;
-            _preEmphasisFilter.Configure(DefaultPreEmphasis);
-            _preEmphasisFilter.Reset();
             _activePreEmphasisEnabled = preEmphasis;
         }
 
@@ -1693,6 +1614,7 @@ public sealed class AnalysisOrchestrator : IDisposable
         if (signalConfigChanged)
         {
             _analysisSignalProcessor.Configure(_sampleRate, _activeHopSize, signalSettings);
+            _analysisSignalProcessor.SetGeneratedSpeechPresenceGateEnabled(true);
             _activeSignalSettings = signalSettings;
             _activeSignalHopSize = _activeHopSize;
             _hasActiveSignalSettings = true;
@@ -1769,41 +1691,26 @@ public sealed class AnalysisOrchestrator : IDisposable
         }
     }
 
-    private void UpdateWindowNormalization()
+    private void SyncFftProcessorState()
     {
-        double sum = 0.0;
-        for (int i = 0; i < _fftWindow.Length; i++)
-            sum += _fftWindow[i];
-
-        float denom = sum > 1e-6 ? (float)sum : 1f;
-        _fftNormalization = 2f / denom;
-    }
-
-    private void UpdateReassignWindows()
-    {
-        if (_fftWindowTime.Length != _activeFftSize || _fftWindowDerivative.Length != _activeFftSize)
-            return;
-
-        float center = 0.5f * (_activeFftSize - 1);
-        for (int i = 0; i < _activeFftSize; i++)
-        {
-            float t = i - center;
-            _fftWindowTime[i] = _fftWindow[i] * t;
-        }
-
-        for (int i = 0; i < _activeFftSize; i++)
-        {
-            float prev = i > 0 ? _fftWindow[i - 1] : _fftWindow[i];
-            float next = i < _activeFftSize - 1 ? _fftWindow[i + 1] : _fftWindow[i];
-            _fftWindowDerivative[i] = 0.5f * (next - prev);
-        }
+        _fftReal = _fftProcessor.FftReal;
+        _fftImag = _fftProcessor.FftImag;
+        _fftTimeReal = _fftProcessor.FftTimeReal;
+        _fftTimeImag = _fftProcessor.FftTimeImag;
+        _fftDerivReal = _fftProcessor.FftDerivReal;
+        _fftDerivImag = _fftProcessor.FftDerivImag;
+        _fftWindow = _fftProcessor.Window;
+        _fftWindowTime = _fftProcessor.WindowTime;
+        _fftWindowDerivative = _fftProcessor.WindowDerivative;
+        _fftMagnitudes = _fftProcessor.Magnitudes;
+        _fftNormalization = _fftProcessor.Normalization;
+        _binResolution = _fftProcessor.BinResolution;
     }
 
     private void ResetAfterDrop()
     {
         Volatile.Write(ref _analysisFilled, 0);
-        Array.Clear(_analysisBufferRaw);
-        Array.Clear(_analysisBufferProcessed);
+        _analysisPipeline.Reset();
         Array.Clear(_hopBuffer);
         _analysisSignalProcessor.Reset();
         _speechMetricsProcessor.Reset();

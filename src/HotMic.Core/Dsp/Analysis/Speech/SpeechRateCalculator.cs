@@ -16,6 +16,8 @@ public sealed class SpeechRateCalculator
     private int _syllableCount;
     private int _pauseHead;
     private int _pauseCount;
+    private long _debugSyllablesRecorded;
+    private long _debugPausesRecorded;
 
     private float _windowSeconds = 10f;
 
@@ -36,6 +38,7 @@ public sealed class SpeechRateCalculator
         _syllableFrames[_syllableHead] = frameId;
         _syllableHead = (_syllableHead + 1) % MaxEvents;
         _syllableCount = Math.Min(_syllableCount + 1, MaxEvents);
+        _debugSyllablesRecorded++;
     }
 
     /// <summary>
@@ -48,6 +51,7 @@ public sealed class SpeechRateCalculator
         _pauseTypes[_pauseHead] = evt.Type;
         _pauseHead = (_pauseHead + 1) % MaxEvents;
         _pauseCount = Math.Min(_pauseCount + 1, MaxEvents);
+        _debugPausesRecorded++;
     }
 
     /// <summary>
@@ -174,5 +178,17 @@ public sealed class SpeechRateCalculator
         _syllableCount = 0;
         _pauseHead = 0;
         _pauseCount = 0;
+        _debugSyllablesRecorded = 0;
+        _debugPausesRecorded = 0;
     }
+
+    /// <summary>
+    /// Snapshot of debug counters for diagnostics.
+    /// </summary>
+    public SpeechRateDebugStats DebugStats => new(_debugSyllablesRecorded, _debugPausesRecorded, _windowSeconds);
 }
+
+public readonly record struct SpeechRateDebugStats(
+    long SyllablesRecorded,
+    long PausesRecorded,
+    float WindowSeconds);
