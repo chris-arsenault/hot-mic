@@ -21,7 +21,6 @@ public sealed class AnalyzerRenderer : IDisposable
     private const float AxisWidth = 50f;
     private const float ColorBarWidth = 22f;
     private const float TimeAxisHeight = 22f;
-    private const float WaveformHeight = 80f;
     private const float VoicingLaneHeight = 8f;
     private static readonly float[] PitchLowDash = [6f, 4f];
     private static readonly float[] DiscontinuityDash = [4f, 4f];
@@ -40,9 +39,6 @@ public sealed class AnalyzerRenderer : IDisposable
     private const float ClarityPanelWidth = 220f;
     private const float DisplayPanelWidth = 300f;
     // ViewOptionsPanelWidth is calculated as remaining space
-
-    // Speech Coach panel (new right sidebar)
-    private const float SpeechPanelWidth = 200f;
 
     private readonly PluginComponentTheme _theme;
     private readonly SKColor[] _spectrumFillColors;
@@ -99,7 +95,6 @@ public sealed class AnalyzerRenderer : IDisposable
         ["GuidesOverlay"] = ("Frequency Guides", "Reference lines at semitone intervals"),
 
         // View Options Panel - Views
-        ["WaveformView"] = ("Waveform", "Time-domain amplitude envelope display"),
         ["SpectrumView"] = ("Spectrum Slice", "Real-time frequency magnitude at current position"),
         ["PitchMeterView"] = ("Pitch Meter", "Current detected pitch with note name indicator"),
 
@@ -158,19 +153,12 @@ public sealed class AnalyzerRenderer : IDisposable
     private readonly SKPaint _voicedPaint;
     private readonly SKPaint _unvoicedPaint;
     private readonly SKPaint _silencePaint;
-    private readonly SKPaint _waveformPaint;
-    private readonly SKPaint _waveformFillPaint;
-    private readonly SKPaint _waveformEnvelopePaint;
-    private readonly SKPaint _waveformZeroPaint;
     private readonly SKPaint _spectrumPaint;
     private readonly SKPaint _spectrumFillPaint;
     private readonly SKPaint _spectrumPeakPaint;
     private readonly SKPaint _rangeBandPaint;
     private readonly SKPaint _guidePaint;
     private readonly SKPaint _discontinuityPaint;
-    private readonly SKPaint _syllableMarkerPaint;
-    private readonly SKPaint _silentPausePaint;
-    private readonly SKPaint _filledPausePaint;
     private readonly SkiaTextPaint _metricPaint;
     private readonly SkiaTextPaint _iconPaint;
     private readonly SKPaint _axisImagePaint;
@@ -182,8 +170,6 @@ public sealed class AnalyzerRenderer : IDisposable
 
     private KnobWidget[] _allKnobs = null!; // Initialized in constructor
 
-    private readonly SKPath _waveformEnvelopeTop = new();
-    private readonly SKPath _waveformEnvelopeBottom = new();
     private readonly SKPath _spectrumSlicePath = new();
     private readonly SKPath _spectrumFillPath = new();
     private readonly SKPath _pitchHighPath = new();
@@ -228,27 +214,17 @@ public sealed class AnalyzerRenderer : IDisposable
     private SKRect _voiceRangeRect;
     private SKRect _normalizationRect;
     private SKRect _dynamicRangeRect;
-    private SKRect _waveformToggleRect;
     private SKRect _spectrumToggleRect;
     private SKRect _pitchMeterToggleRect;
-    private SKRect _speechToggleRect;
     private SKRect _spectrogramRect;
 
     // New layout rects for reorganized UI
     private SKRect _sidebarRect;
-    private SKRect _speechPanelRect;
     private SKRect _frequencyPanelRect;
     private SKRect _analysisPanelRect;
     private SKRect _clarityPanelRect;
     private SKRect _displayPanelRect;
     private SKRect _viewOptionsPanelRect;
-
-    // Speech Coach toggle rects
-    private SKRect _speechCoachToggleRect;
-    private SKRect _speechMetricsToggleRect;
-    private SKRect _syllableMarkersToggleRect;
-    private SKRect _pauseOverlayToggleRect;
-    private SKRect _fillerMarkersToggleRect;
 
     private SKBitmap? _spectrogramBitmap;
     private int _bitmapWidth;
@@ -285,7 +261,6 @@ public sealed class AnalyzerRenderer : IDisposable
     private float _axisMaxHzCache;
     private float _axisTimeWindowCache;
     private int _axisColorMapCache = -1;
-    private bool _axisShowWaveformCache;
     private bool _axisShowSpectrumCache;
     private bool _axisShowPitchMeterCache;
 
@@ -401,33 +376,6 @@ public sealed class AnalyzerRenderer : IDisposable
         _voicedPaint = new SKPaint { Color = new SKColor(0x00, 0xD4, 0xAA, 0x50), Style = SKPaintStyle.Fill };
         _unvoicedPaint = new SKPaint { Color = new SKColor(0x80, 0x80, 0x90, 0x40), Style = SKPaintStyle.Fill };
         _silencePaint = new SKPaint { Color = new SKColor(0x00, 0x00, 0x00, 0x60), Style = SKPaintStyle.Fill };
-        _waveformPaint = new SKPaint
-        {
-            Color = _theme.WaveformLine,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 1.5f
-        };
-        _waveformFillPaint = new SKPaint
-        {
-            Color = _theme.WaveformFill,
-            IsAntialias = true,
-            Style = SKPaintStyle.Fill
-        };
-        _waveformEnvelopePaint = new SKPaint
-        {
-            Color = _theme.TextPrimary.WithAlpha(140),
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 1.2f
-        };
-        _waveformZeroPaint = new SKPaint
-        {
-            Color = _theme.TextSecondary.WithAlpha(180),
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 1f
-        };
         _spectrumPaint = new SKPaint
         {
             Color = _theme.AccentSecondary,
@@ -468,23 +416,6 @@ public sealed class AnalyzerRenderer : IDisposable
             StrokeWidth = 1.5f,
             PathEffect = SKPathEffect.CreateDash(DiscontinuityDash, 0f)
         };
-        _syllableMarkerPaint = new SKPaint
-        {
-            Color = new SKColor(0xFF, 0xFF, 0x00, 0xB0), // Yellow for syllable ticks
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 1.5f
-        };
-        _silentPausePaint = new SKPaint
-        {
-            Color = new SKColor(0x60, 0x60, 0x70, 0x50), // Gray for silent pauses
-            Style = SKPaintStyle.Fill
-        };
-        _filledPausePaint = new SKPaint
-        {
-            Color = new SKColor(0xFF, 0x80, 0x00, 0x50), // Orange for filled pauses (fillers)
-            Style = SKPaintStyle.Fill
-        };
         _metricPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal);
         _iconPaint = new SkiaTextPaint(_theme.TextPrimary, 12f, SKFontStyle.Normal, SKTextAlign.Center);
         _axisSampling = new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None);
@@ -496,7 +427,7 @@ public sealed class AnalyzerRenderer : IDisposable
         _colorBarRectCache = SKRect.Empty;
     }
 
-    public static SKSize GetPreferredSize() => new(1640, 960); // Extended for Speech Coach panel
+    public static SKSize GetPreferredSize() => new(1440, 960);
 
     public void Render(SKCanvas canvas, SKSize size, float dpiScale, SpectroState state)
     {
@@ -532,31 +463,13 @@ public sealed class AnalyzerRenderer : IDisposable
         bool profiling = state.IsProfiling;
         long spectrogramStartTicks = profiling ? Stopwatch.GetTimestamp() : 0;
 
-        // Calculate speech panel rect (far right side)
-        bool showSpeechPanel = state.SpeechCoachEnabled;
-        float speechPanelActualWidth = showSpeechPanel ? SpeechPanelWidth : 0f;
-        float speechPanelLeft = size.Width - Padding - speechPanelActualWidth;
-
-        if (showSpeechPanel)
-        {
-            _speechPanelRect = new SKRect(
-                speechPanelLeft,
-                TitleBarHeight + Padding,
-                size.Width - Padding,
-                size.Height - Padding - ControlPanelHeight - PanelSpacing);
-            DrawSpeechPanel(canvas, _speechPanelRect, state);
-        }
-
-        // Calculate sidebar rect (right side, before speech panel)
+        // Calculate sidebar rect (right side)
         bool showSidebar = state.ShowSpectrum || state.ShowPitchMeter;
-        float sidebarActualWidth = showSidebar ? SidebarWidth : 0f;
-        float mainRight = speechPanelLeft - speechPanelActualWidth * (showSpeechPanel ? 0f : 0f)
-            - (showSpeechPanel ? PanelSpacing : 0f)
-            - sidebarActualWidth - (showSidebar ? PanelSpacing : 0f);
+        float mainRight;
 
         if (showSidebar)
         {
-            float sidebarRight = showSpeechPanel ? speechPanelLeft - PanelSpacing : size.Width - Padding;
+            float sidebarRight = size.Width - Padding;
             _sidebarRect = new SKRect(
                 sidebarRight - SidebarWidth,
                 TitleBarHeight + Padding,
@@ -565,10 +478,6 @@ public sealed class AnalyzerRenderer : IDisposable
             DrawSidebar(canvas, _sidebarRect, state);
             mainRight = _sidebarRect.Left - PanelSpacing;
         }
-        else if (showSpeechPanel)
-        {
-            mainRight = speechPanelLeft - PanelSpacing;
-        }
         else
         {
             mainRight = size.Width - Padding;
@@ -576,16 +485,7 @@ public sealed class AnalyzerRenderer : IDisposable
 
         // Calculate spectrogram area
         float top = TitleBarHeight + Padding;
-        float waveformHeight = state.ShowWaveform ? WaveformHeight : 0f;
         float bottom = size.Height - Padding - ControlPanelHeight - PanelSpacing;
-
-        if (waveformHeight > 0f)
-        {
-            // Waveform at bottom of main content area
-            var waveformRect = new SKRect(Padding + AxisWidth, bottom - waveformHeight, mainRight - ColorBarWidth, bottom);
-            DrawWaveform(canvas, waveformRect, state);
-            bottom = waveformRect.Top - Padding;
-        }
 
         var spectrumRect = new SKRect(Padding + AxisWidth, top, mainRight - ColorBarWidth, bottom);
         var axisRect = new SKRect(Padding, top, Padding + AxisWidth, bottom);
@@ -996,20 +896,12 @@ public sealed class AnalyzerRenderer : IDisposable
         float row2Y = displaysHeaderY + 16f;
         tx = rect.Left + 8f;
 
-        _waveformToggleRect = new SKRect(tx, row2Y, tx + toggleWidth, row2Y + toggleHeight);
-        DrawPillButton(canvas, _waveformToggleRect, "Wave", state.ShowWaveform);
-        tx = _waveformToggleRect.Right + buttonSpacing;
-
         _spectrumToggleRect = new SKRect(tx, row2Y, tx + toggleWidth, row2Y + toggleHeight);
         DrawPillButton(canvas, _spectrumToggleRect, "Slice", state.ShowSpectrum);
         tx = _spectrumToggleRect.Right + buttonSpacing;
 
         _pitchMeterToggleRect = new SKRect(tx, row2Y, tx + toggleWidth, row2Y + toggleHeight);
         DrawPillButton(canvas, _pitchMeterToggleRect, "Meter", state.ShowPitchMeter);
-        tx = _pitchMeterToggleRect.Right + buttonSpacing;
-
-        _speechToggleRect = new SKRect(tx, row2Y, tx + toggleWidth, row2Y + toggleHeight);
-        DrawPillButton(canvas, _speechToggleRect, "Speech", state.SpeechCoachEnabled);
 
         // Sub-section: SETTINGS
         float settingsHeaderY = row2Y + toggleHeight + 8f;
@@ -1027,124 +919,6 @@ public sealed class AnalyzerRenderer : IDisposable
 
         _pauseRect = new SKRect(tx, row3Y, tx + 60f, row3Y + buttonHeight);
         DrawPillButton(canvas, _pauseRect, state.IsPaused ? "PAUSE" : "RUN", state.IsPaused);
-    }
-
-    private void DrawSpeechPanel(SKCanvas canvas, SKRect rect, SpectroState state)
-    {
-        // Draw panel background
-        canvas.DrawRoundRect(new SKRoundRect(rect, PanelCornerRadius), _panelPaint);
-        canvas.DrawText("SPEECH", rect.Left + 10f, rect.Top + 16f, _panelHeaderPaint);
-
-        float y = rect.Top + PanelHeaderHeight + 8f;
-        float toggleWidth = 50f;
-        float toggleHeight = 20f;
-        float buttonSpacing = 4f;
-        float metricHeight = 28f;
-        float barHeight = 8f;
-
-        // Toggle buttons
-        float tx = rect.Left + 8f;
-
-        _speechCoachToggleRect = new SKRect(tx, y, tx + 60f, y + toggleHeight);
-        DrawPillButton(canvas, _speechCoachToggleRect, "Coach", state.SpeechCoachEnabled);
-
-        y += toggleHeight + buttonSpacing;
-        tx = rect.Left + 8f;
-
-        _speechMetricsToggleRect = new SKRect(tx, y, tx + toggleWidth, y + toggleHeight);
-        DrawPillButton(canvas, _speechMetricsToggleRect, "Stats", state.ShowSpeechMetrics);
-        tx += toggleWidth + buttonSpacing;
-
-        _syllableMarkersToggleRect = new SKRect(tx, y, tx + toggleWidth, y + toggleHeight);
-        DrawPillButton(canvas, _syllableMarkersToggleRect, "Syl", state.ShowSyllableMarkers);
-
-        y += toggleHeight + buttonSpacing;
-        tx = rect.Left + 8f;
-
-        _pauseOverlayToggleRect = new SKRect(tx, y, tx + toggleWidth, y + toggleHeight);
-        DrawPillButton(canvas, _pauseOverlayToggleRect, "Pause", state.ShowPauseOverlay);
-        tx += toggleWidth + buttonSpacing;
-
-        _fillerMarkersToggleRect = new SKRect(tx, y, tx + toggleWidth, y + toggleHeight);
-        DrawPillButton(canvas, _fillerMarkersToggleRect, "Filler", state.ShowFillerMarkers);
-
-        // Metrics display (only if enabled and showing)
-        if (state.SpeechCoachEnabled && state.ShowSpeechMetrics)
-        {
-            y += toggleHeight + 12f;
-
-            // Rate metric
-            DrawSpeechMetric(canvas, rect.Left + 8f, y, rect.Width - 16f, metricHeight, barHeight,
-                "WPM", $"{state.WordsPerMinute:F0}", state.WordsPerMinute, 110f, 190f);
-            y += metricHeight + 4f;
-
-            // Articulation rate
-            DrawSpeechMetric(canvas, rect.Left + 8f, y, rect.Width - 16f, metricHeight, barHeight,
-                "Artic", $"{state.ArticulationWpm:F0}", state.ArticulationWpm, 120f, 210f);
-            y += metricHeight + 4f;
-
-            // Pause ratio
-            DrawSpeechMetric(canvas, rect.Left + 8f, y, rect.Width - 16f, metricHeight, barHeight,
-                "Pause", $"{state.PauseRatio * 100f:F0}%", state.PauseRatio * 100f, 0f, 40f);
-            y += metricHeight + 4f;
-
-            // Monotone score (inverted - lower is better)
-            float monoDisplay = (1f - state.MonotoneScore) * 100f;
-            DrawSpeechMetric(canvas, rect.Left + 8f, y, rect.Width - 16f, metricHeight, barHeight,
-                "Pitch Var", $"{monoDisplay:F0}", monoDisplay, 0f, 100f);
-            y += metricHeight + 4f;
-
-            // Clarity score
-            DrawSpeechMetric(canvas, rect.Left + 8f, y, rect.Width - 16f, metricHeight, barHeight,
-                "Clarity", $"{state.ClarityScore:F0}", state.ClarityScore, 0f, 100f);
-            y += metricHeight + 4f;
-
-            // Intelligibility score
-            DrawSpeechMetric(canvas, rect.Left + 8f, y, rect.Width - 16f, metricHeight, barHeight,
-                "Intel", $"{state.IntelligibilityScore:F0}", state.IntelligibilityScore, 0f, 100f);
-        }
-    }
-
-    private void DrawSpeechMetric(SKCanvas canvas, float x, float y, float width, float height, float barHeight,
-        string label, string valueText, float value, float minValue, float maxValue)
-    {
-        // Label
-        canvas.DrawText(label, x, y + 12f, _mutedTextPaint);
-
-        // Value text
-        float valueX = x + width - 40f;
-        canvas.DrawText(valueText, valueX, y + 12f, _textPaint);
-
-        // Progress bar
-        float barY = y + height - barHeight - 2f;
-        float barWidth = width - 8f;
-        float fillRatio = MathF.Max(0f, MathF.Min(1f, (value - minValue) / (maxValue - minValue)));
-
-        // Background bar
-        using var bgPaint = new SKPaint { Color = _theme.PanelBackground, IsAntialias = true };
-        canvas.DrawRoundRect(new SKRoundRect(new SKRect(x, barY, x + barWidth, barY + barHeight), 2f), bgPaint);
-
-        // Fill bar - green if in good range, yellow if approaching limits
-        SKColor barColor;
-        if (value >= minValue && value <= maxValue * 0.85f)
-        {
-            barColor = new SKColor(0x40, 0xC0, 0x40); // Green
-        }
-        else if (value > maxValue * 0.85f)
-        {
-            barColor = new SKColor(0xC0, 0xC0, 0x40); // Yellow
-        }
-        else
-        {
-            barColor = new SKColor(0x80, 0x80, 0x80); // Gray
-        }
-
-        using var fillPaint = new SKPaint { Color = barColor, IsAntialias = true };
-        float fillWidth = barWidth * fillRatio;
-        if (fillWidth > 2f)
-        {
-            canvas.DrawRoundRect(new SKRoundRect(new SKRect(x, barY, x + fillWidth, barY + barHeight), 2f), fillPaint);
-        }
     }
 
     public SpectroHitTest HitTest(float x, float y)
@@ -1197,17 +971,8 @@ public sealed class AnalyzerRenderer : IDisposable
         if (_voiceRangeRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.VoiceRangeButton, -1);
         if (_normalizationRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.NormalizationButton, -1);
         if (_dynamicRangeRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.DynamicRangeButton, -1);
-        if (_waveformToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.WaveformToggle, -1);
         if (_spectrumToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.SpectrumToggle, -1);
         if (_pitchMeterToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.PitchMeterToggle, -1);
-        if (_speechToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.SpeechToggle, -1);
-
-        // Speech Coach toggles
-        if (_speechCoachToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.SpeechCoachToggle, -1);
-        if (_speechMetricsToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.SpeechMetricsToggle, -1);
-        if (_syllableMarkersToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.SyllableMarkersToggle, -1);
-        if (_pauseOverlayToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.PauseOverlayToggle, -1);
-        if (_fillerMarkersToggleRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.FillerMarkersToggle, -1);
 
         if (_spectrogramRect.Contains(x, y)) return new SpectroHitTest(SpectroHitArea.Spectrogram, -1);
 
@@ -1251,7 +1016,6 @@ public sealed class AnalyzerRenderer : IDisposable
         if (_voiceRangeRect.Contains(x, y)) return "VoiceRange";
         if (_normalizationRect.Contains(x, y)) return "Normalization";
         if (_dynamicRangeRect.Contains(x, y)) return "DynamicRange";
-        if (_waveformToggleRect.Contains(x, y)) return "WaveformView";
         if (_spectrumToggleRect.Contains(x, y)) return "SpectrumView";
         if (_pitchMeterToggleRect.Contains(x, y)) return "PitchMeterView";
 
@@ -1340,8 +1104,7 @@ public sealed class AnalyzerRenderer : IDisposable
         int pixelHeight = (int)MathF.Ceiling(size.Height * dpiScale);
         bool sizeChanged = _axisInfo.Width != pixelWidth || _axisInfo.Height != pixelHeight;
         bool dpiChanged = MathF.Abs(_axisDpiScale - dpiScale) > 1e-3f;
-        bool layoutChanged = state.ShowWaveform != _axisShowWaveformCache
-            || state.ShowSpectrum != _axisShowSpectrumCache
+        bool layoutChanged = state.ShowSpectrum != _axisShowSpectrumCache
             || state.ShowPitchMeter != _axisShowPitchMeterCache;
         bool axisChanged = state.AxisMode != _axisModeCache
             || state.Scale != _axisScaleCache
@@ -1381,7 +1144,6 @@ public sealed class AnalyzerRenderer : IDisposable
         _axisMaxHzCache = state.MaxFrequency;
         _axisTimeWindowCache = state.TimeWindowSeconds;
         _axisColorMapCache = state.ColorMap;
-        _axisShowWaveformCache = state.ShowWaveform;
         _axisShowSpectrumCache = state.ShowSpectrum;
         _axisShowPitchMeterCache = state.ShowPitchMeter;
     }
@@ -1402,75 +1164,6 @@ public sealed class AnalyzerRenderer : IDisposable
         _axisImage = null;
         _axisSurface?.Dispose();
         _axisSurface = null;
-    }
-
-    private void DrawWaveform(SKCanvas canvas, SKRect rect, SpectroState state)
-    {
-        canvas.DrawRoundRect(new SKRoundRect(rect, 6f), _panelPaint);
-        canvas.DrawLine(rect.Left, rect.MidY, rect.Right, rect.MidY, _guidePaint);
-        canvas.DrawText("Waveform", rect.Left + 6f, rect.Top + 12f, _mutedTextPaint);
-
-        if (state.WaveformMin is null || state.WaveformMax is null || state.WaveformMin.Length == 0)
-        {
-            return;
-        }
-
-        int frames = Math.Min(state.FrameCount, state.WaveformMin.Length);
-        if (frames <= 1 || _frameAvailable <= 0)
-        {
-            return;
-        }
-
-        int startFrame = _framePadFrames;
-        int endFrame = Math.Min(frames, _framePadFrames + _frameAvailable);
-        int step = GetOverlayStep(rect, frames);
-        float xStep = rect.Width / Math.Max(1, state.FrameCount - 1);
-        float center = rect.MidY;
-        float half = rect.Height * 0.45f;
-        _waveformEnvelopeTop.Reset();
-        _waveformEnvelopeBottom.Reset();
-        bool envelopeStarted = false;
-
-        for (int frame = startFrame; frame < endFrame; frame += step)
-        {
-            if (!TryGetRingIndex(frame, out int ringIndex))
-            {
-                continue;
-            }
-
-            float min = state.WaveformMin[ringIndex];
-            float max = state.WaveformMax[ringIndex];
-            float x = rect.Left + xStep * frame;
-            float y1 = center - max * half;
-            float y2 = center - min * half;
-            canvas.DrawLine(x, y1, x, y2, _waveformPaint);
-
-            float envelope = MathF.Max(MathF.Abs(min), MathF.Abs(max));
-            float yEnvTop = center - envelope * half;
-            float yEnvBottom = center + envelope * half;
-            if (!envelopeStarted)
-            {
-                _waveformEnvelopeTop.MoveTo(x, yEnvTop);
-                _waveformEnvelopeBottom.MoveTo(x, yEnvBottom);
-                envelopeStarted = true;
-            }
-            else
-            {
-                _waveformEnvelopeTop.LineTo(x, yEnvTop);
-                _waveformEnvelopeBottom.LineTo(x, yEnvBottom);
-            }
-
-            if (min < 0f && max > 0f)
-            {
-                canvas.DrawLine(x, center - 3f, x, center + 3f, _waveformZeroPaint);
-            }
-        }
-
-        if (envelopeStarted)
-        {
-            canvas.DrawPath(_waveformEnvelopeTop, _waveformEnvelopePaint);
-            canvas.DrawPath(_waveformEnvelopeBottom, _waveformEnvelopePaint);
-        }
     }
 
     private void DrawVocalRangeBand(SKCanvas canvas, SKRect rect, SpectroState state)
@@ -2311,115 +2004,6 @@ public sealed class AnalyzerRenderer : IDisposable
                 canvas.DrawRect(new SKRect(x, laneTop, x + width, rect.Bottom), paint);
             }
         }
-
-        // Speech Coach overlays
-        if (state.SpeechCoachEnabled)
-        {
-            DrawSpeechOverlays(canvas, rect, state);
-        }
-    }
-
-    private void DrawSpeechOverlays(SKCanvas canvas, SKRect rect, SpectroState state)
-    {
-        int frames = state.FrameCount;
-        int startFrame = _framePadFrames;
-        int endFrame = Math.Min(frames, _framePadFrames + _frameAvailable);
-        float frameWidth = rect.Width / Math.Max(1, frames - 1);
-
-        // Draw pause overlay shading (behind syllable markers)
-        if (state.ShowPauseOverlay && state.SpeakingStateTrack is { Length: > 0 })
-        {
-            int pauseStartFrame = -1;
-            byte currentPauseType = 0;
-
-            for (int frame = startFrame; frame <= endFrame; frame++)
-            {
-                byte pauseState = 0;
-                if (frame < endFrame && TryGetRingIndex(frame, out int ringIndex) && ringIndex < state.SpeakingStateTrack.Length)
-                {
-                    pauseState = state.SpeakingStateTrack[ringIndex];
-                }
-
-                // State change - draw completed region
-                if (pauseState != currentPauseType || frame == endFrame)
-                {
-                    if (currentPauseType > 0 && pauseStartFrame >= 0)
-                    {
-                        float x1 = rect.Left + frameWidth * pauseStartFrame;
-                        float x2 = rect.Left + frameWidth * frame;
-                        var paint = currentPauseType == 2 ? _filledPausePaint : _silentPausePaint;
-                        canvas.DrawRect(new SKRect(x1, rect.Top, x2, rect.Bottom), paint);
-                    }
-
-                    pauseStartFrame = frame;
-                    currentPauseType = pauseState;
-                }
-            }
-        }
-
-        // Draw syllable markers (vertical tick marks at syllable onsets)
-        if (state.ShowSyllableMarkers && state.SyllableMarkers is { Length: > 0 })
-        {
-            const float tickHeight = 12f;
-            float tickTop = rect.Bottom - VoicingLaneHeight - tickHeight;
-            float tickBottom = rect.Bottom - VoicingLaneHeight;
-
-            for (int frame = startFrame; frame < endFrame; frame++)
-            {
-                if (!TryGetRingIndex(frame, out int ringIndex) || ringIndex >= state.SyllableMarkers.Length)
-                {
-                    continue;
-                }
-
-                if (state.SyllableMarkers[ringIndex] != 0)
-                {
-                    float x = rect.Left + frameWidth * frame;
-                    canvas.DrawLine(x, tickTop, x, tickBottom, _syllableMarkerPaint);
-                }
-            }
-        }
-
-        // Draw filler markers (prominent markers for filled pauses / fillers)
-        if (state.ShowFillerMarkers && state.SpeakingStateTrack is { Length: > 0 })
-        {
-            const float markerRadius = 4f;
-            float markerY = rect.Top + 20f;
-            int step = GetOverlayStep(rect, frames);
-            bool inFiller = false;
-            int fillerStart = -1;
-
-            for (int frame = startFrame; frame <= endFrame; frame += step)
-            {
-                bool isFiller = false;
-                if (frame < endFrame && TryGetRingIndex(frame, out int ringIndex) && ringIndex < state.SpeakingStateTrack.Length)
-                {
-                    isFiller = state.SpeakingStateTrack[ringIndex] == 2; // FilledPause
-                }
-
-                // Emit marker at center of filled pause region
-                if (inFiller && !isFiller && fillerStart >= 0)
-                {
-                    float centerFrame = (fillerStart + frame) * 0.5f;
-                    float x = rect.Left + frameWidth * centerFrame;
-                    canvas.DrawCircle(x, markerY, markerRadius, _filledPausePaint);
-                    // Draw outline
-                    using var outlinePaint = new SKPaint
-                    {
-                        Color = new SKColor(0xFF, 0x60, 0x00, 0xFF),
-                        Style = SKPaintStyle.Stroke,
-                        StrokeWidth = 1.5f,
-                        IsAntialias = true
-                    };
-                    canvas.DrawCircle(x, markerY, markerRadius, outlinePaint);
-                }
-
-                if (isFiller && !inFiller)
-                {
-                    fillerStart = frame;
-                }
-                inFiller = isFiller;
-            }
-        }
     }
 
     private void DrawReferenceLine(SKCanvas canvas, SKRect rect, SpectroState state)
@@ -2724,26 +2308,17 @@ public sealed class AnalyzerRenderer : IDisposable
         _voicedPaint.Dispose();
         _unvoicedPaint.Dispose();
         _silencePaint.Dispose();
-        _waveformPaint.Dispose();
-        _waveformFillPaint.Dispose();
-        _waveformEnvelopePaint.Dispose();
-        _waveformZeroPaint.Dispose();
         _spectrumPaint.Dispose();
         _spectrumFillPaint.Dispose();
         _spectrumPeakPaint.Dispose();
         _rangeBandPaint.Dispose();
         _guidePaint.Dispose();
         _discontinuityPaint.Dispose();
-        _syllableMarkerPaint.Dispose();
-        _silentPausePaint.Dispose();
-        _filledPausePaint.Dispose();
         _metricPaint.Dispose();
         _iconPaint.Dispose();
         _axisImagePaint.Dispose();
         _colorBarPaint.Dispose();
         _colorBarShader?.Dispose();
-        _waveformEnvelopeTop.Dispose();
-        _waveformEnvelopeBottom.Dispose();
         _spectrumSlicePath.Dispose();
         _spectrumFillPath.Dispose();
         _pitchHighPath.Dispose();
@@ -2784,15 +2359,8 @@ public enum SpectroHitArea
     VoiceRangeButton,
     NormalizationButton,
     DynamicRangeButton,
-    WaveformToggle,
     SpectrumToggle,
     PitchMeterToggle,
-    SpeechToggle,
-    SpeechCoachToggle,
-    SpeechMetricsToggle,
-    SyllableMarkersToggle,
-    PauseOverlayToggle,
-    FillerMarkersToggle,
     Spectrogram,
     Knob
 }

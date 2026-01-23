@@ -82,34 +82,34 @@ public sealed class SpeechCoachRenderer : IDisposable
 
     public SKRect CloseButtonRect { get; private set; }
 
-    public SpeechCoachRenderer(PluginComponentTheme theme)
+    public SpeechCoachRenderer(PluginComponentTheme? theme = null)
     {
-        _theme = theme;
+        _theme = theme ?? PluginComponentTheme.Default;
 
         _backgroundPaint = new SKPaint
         {
-            Color = theme.PanelBackground,
+            Color = _theme.PanelBackground,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
         _titleBarPaint = new SKPaint
         {
-            Color = theme.PanelBackgroundLight,
+            Color = _theme.PanelBackgroundLight,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
         _cardPaint = new SKPaint
         {
-            Color = theme.PanelBackgroundLight,
+            Color = _theme.PanelBackgroundLight,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
         _borderPaint = new SKPaint
         {
-            Color = theme.PanelBorder,
+            Color = _theme.PanelBorder,
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f
@@ -117,7 +117,7 @@ public sealed class SpeechCoachRenderer : IDisposable
 
         _meterBackgroundPaint = new SKPaint
         {
-            Color = theme.MeterBackground,
+            Color = _theme.MeterBackground,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
@@ -138,14 +138,14 @@ public sealed class SpeechCoachRenderer : IDisposable
 
         _speakingPaint = new SKPaint
         {
-            Color = theme.WaveformGateOpen,
+            Color = _theme.WaveformGateOpen,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
         _silentPausePaint = new SKPaint
         {
-            Color = theme.WaveformGateClosed,
+            Color = _theme.WaveformGateClosed,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
@@ -159,7 +159,7 @@ public sealed class SpeechCoachRenderer : IDisposable
 
         _syllableMarkerPaint = new SKPaint
         {
-            Color = theme.AccentSecondary,
+            Color = _theme.AccentSecondary,
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 2f
@@ -167,7 +167,7 @@ public sealed class SpeechCoachRenderer : IDisposable
 
         _emphasisMarkerPaint = new SKPaint
         {
-            Color = theme.ThresholdLine,
+            Color = _theme.ThresholdLine,
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 2f
@@ -175,7 +175,7 @@ public sealed class SpeechCoachRenderer : IDisposable
 
         _pitchLinePaint = new SKPaint
         {
-            Color = theme.AccentSecondary,
+            Color = _theme.AccentSecondary,
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 2f
@@ -183,7 +183,7 @@ public sealed class SpeechCoachRenderer : IDisposable
 
         _pitchGridPaint = new SKPaint
         {
-            Color = theme.EnvelopeGrid,
+            Color = _theme.EnvelopeGrid,
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f
@@ -191,14 +191,14 @@ public sealed class SpeechCoachRenderer : IDisposable
 
         _energyFillPaint = new SKPaint
         {
-            Color = theme.WaveformFill,
+            Color = _theme.WaveformFill,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
         _energyLinePaint = new SKPaint
         {
-            Color = theme.WaveformLine,
+            Color = _theme.WaveformLine,
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1.5f
@@ -206,7 +206,7 @@ public sealed class SpeechCoachRenderer : IDisposable
 
         _wpmLinePaint = new SKPaint
         {
-            Color = theme.ThresholdLine,
+            Color = _theme.ThresholdLine,
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1.5f
@@ -214,39 +214,39 @@ public sealed class SpeechCoachRenderer : IDisposable
 
         _spectralLowPaint = new SKPaint
         {
-            Color = theme.KnobArc,
+            Color = _theme.KnobArc,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
         _spectralMidPaint = new SKPaint
         {
-            Color = theme.AccentSecondary,
+            Color = _theme.AccentSecondary,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
         _spectralPresencePaint = new SKPaint
         {
-            Color = theme.WaveformLine,
+            Color = _theme.WaveformLine,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
         _spectralHighPaint = new SKPaint
         {
-            Color = theme.TextMuted,
+            Color = _theme.TextMuted,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
-        _titlePaint = new SkiaTextPaint(theme.TextPrimary, 14f, SKFontStyle.Bold, SKTextAlign.Left);
-        _closeButtonPaint = new SkiaTextPaint(theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
-        _cardLabelPaint = new SkiaTextPaint(theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Left);
-        _cardValuePaint = new SkiaTextPaint(theme.TextPrimary, 22f, SKFontStyle.Bold, SKTextAlign.Left);
-        _cardUnitPaint = new SkiaTextPaint(theme.TextMuted, 10f, SKFontStyle.Normal, SKTextAlign.Left);
-        _smallLabelPaint = new SkiaTextPaint(theme.TextSecondary, 9f, SKFontStyle.Normal, SKTextAlign.Left);
-        _smallValuePaint = new SkiaTextPaint(theme.TextPrimary, 11f, SKFontStyle.Bold, SKTextAlign.Left);
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold, SKTextAlign.Left);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
+        _cardLabelPaint = new SkiaTextPaint(_theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Left);
+        _cardValuePaint = new SkiaTextPaint(_theme.TextPrimary, 22f, SKFontStyle.Bold, SKTextAlign.Left);
+        _cardUnitPaint = new SkiaTextPaint(_theme.TextMuted, 10f, SKFontStyle.Normal, SKTextAlign.Left);
+        _smallLabelPaint = new SkiaTextPaint(_theme.TextSecondary, 9f, SKFontStyle.Normal, SKTextAlign.Left);
+        _smallValuePaint = new SkiaTextPaint(_theme.TextPrimary, 11f, SKFontStyle.Bold, SKTextAlign.Left);
     }
 
     public void Render(SKCanvas canvas, int width, int height, in SpeechCoachState state)

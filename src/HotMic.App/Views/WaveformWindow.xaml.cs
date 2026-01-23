@@ -8,7 +8,7 @@ namespace HotMic.App.Views;
 
 public partial class WaveformWindow : AnalysisWindowBase
 {
-    private readonly WaveformWindowRenderer _renderer = new(PluginComponentTheme.BlueOnBlack);
+    private readonly WaveformWindowRenderer _renderer = new();
 
     // Data buffers
     private float[] _waveformMin = Array.Empty<float>();

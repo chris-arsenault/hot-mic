@@ -106,17 +106,11 @@ public sealed class AnalysisOrchestrator : IDisposable
     private readonly float[] _harmonicScratch = new float[AnalysisConfiguration.MaxHarmonics];
     private readonly float[] _harmonicMagScratch = new float[AnalysisConfiguration.MaxHarmonics];
 
-    // Speech coach
-    private readonly SpeechCoach _speechCoach = new();
-    private const float BandSmoothingAlpha = 0.3f;
+    // Speech metrics
+    private readonly SpeechMetricsProcessor _speechMetricsProcessor = new();
     private const string SpeechDebugEnvVar = "HOTMIC_SPEECH_DEBUG";
     private static readonly bool SpeechDebugEnabled = GetSpeechDebugEnabled();
     private static readonly long SpeechDebugIntervalTicks = Stopwatch.Frequency; // ~1s
-    private float _bandLowSmooth;
-    private float _bandMidSmooth;
-    private float _bandPresenceSmooth;
-    private float _bandHighSmooth;
-    private bool _bandSmoothInitialized;
 
     // Active configuration
     private int _activeFftSize;
@@ -352,13 +346,12 @@ public sealed class AnalysisOrchestrator : IDisposable
         _resultStore.Clear();
         _syncHub.Reset();
         _analysisSignalProcessor.Reset();
-        _speechCoach.Reset();
+        _speechMetricsProcessor.Reset();
         Array.Clear(_analysisSignalValues, 0, _analysisSignalValues.Length);
         Volatile.Write(ref _analysisFilled, 0);
         Volatile.Write(ref _frameCounter, 0);
         Volatile.Write(ref _lastDroppedHops, 0);
         Volatile.Write(ref _analysisReadSampleTime, long.MinValue);
-        ResetSpeechBandSmoothing();
     }
 
     private void StartAnalysisThread()
@@ -1412,84 +1405,37 @@ public sealed class AnalysisOrchestrator : IDisposable
         float flux, float slope, float lastHnr,
         long frameId)
     {
-        // Speech metrics expect frame energy from the waveform peak (SPEECH.md).
-        float energyDb = ComputePeakDb(waveformMin, waveformMax);
         float hopEnergyDb = ComputeRmsDb(_hopBuffer.AsSpan(0, _activeHopSize));
-        float f1Hz = 0f;
-        float f2Hz = 0f;
         ReadOnlySpan<float> speechMagnitudes = GetSpeechMagnitudes(out var speechBinCenters, out var speechBinResolution);
-        float spectralFlatness = ComputeSpectralFlatness(speechMagnitudes);
-        float bandLowRatio = 0f;
-        float bandMidRatio = 0f;
-        float bandPresenceRatio = 0f;
-        float bandHighRatio = 0f;
-        float clarityRatio = 0f;
-        float syllableEnergyRatio = 0f;
-        float syllableEnergyDb = energyDb;
-
-        if (!speechMagnitudes.IsEmpty && (speechBinCenters.Length > 0 || speechBinResolution > 0f))
+        ReadOnlySpan<float> hopRaw = ReadOnlySpan<float>.Empty;
+        if (_activeHopSize > 0 && _activeAnalysisSize >= _activeHopSize && _analysisBufferRaw.Length >= _activeAnalysisSize)
         {
-            ComputeSpeechBandMetrics(
-                speechMagnitudes,
-                speechBinCenters,
-                speechBinResolution,
-                out bandLowRatio,
-                out bandMidRatio,
-                out bandPresenceRatio,
-                out bandHighRatio,
-                out clarityRatio,
-                out syllableEnergyRatio,
-                out syllableEnergyDb);
+            int tail = _activeAnalysisSize - _activeHopSize;
+            hopRaw = _analysisBufferRaw.AsSpan(tail, _activeHopSize);
         }
 
-        var metrics = _speechCoach.Process(
-            energyDb,
-            syllableEnergyDb,
+        var metrics = _speechMetricsProcessor.Process(
+            waveformMin,
+            waveformMax,
+            hopRaw,
+            speechMagnitudes,
+            speechBinCenters,
+            speechBinResolution,
             lastPitch,
             lastConfidence,
             voicing,
-            spectralFlatness,
             flux,
             slope,
             lastHnr,
-            f1Hz,
-            f2Hz,
-            bandLowRatio,
-            bandMidRatio,
-            bandPresenceRatio,
-            bandHighRatio,
-            clarityRatio,
             frameId);
 
+        float energyDb = _speechMetricsProcessor.LastEnergyDb;
+        float syllableEnergyDb = _speechMetricsProcessor.LastSyllableEnergyDb;
+        float syllableEnergyRatio = _speechMetricsProcessor.LastSyllableEnergyRatio;
         MaybeLogSpeechDebug(frameId, energyDb, hopEnergyDb, syllableEnergyDb, syllableEnergyRatio,
-            bandLowRatio, bandMidRatio, bandPresenceRatio, bandHighRatio, clarityRatio);
+            metrics.BandLowRatio, metrics.BandMidRatio, metrics.BandPresenceRatio, metrics.BandHighRatio, metrics.ClarityRatio);
 
-        return new SpeechMetricsFrame
-        {
-            SyllableRate = metrics.SyllableRate,
-            ArticulationRate = metrics.ArticulationRate,
-            WordsPerMinute = metrics.WordsPerMinute,
-            ArticulationWpm = metrics.ArticulationWpm,
-            PauseRatio = metrics.PauseRatio,
-            MeanPauseDurationMs = metrics.MeanPauseDurationMs,
-            PausesPerMinute = metrics.PausesPerMinute,
-            FilledPauseRatio = metrics.FilledPauseRatio,
-            PauseMicroCount = metrics.PauseMicroCount,
-            PauseShortCount = metrics.PauseShortCount,
-            PauseMediumCount = metrics.PauseMediumCount,
-            PauseLongCount = metrics.PauseLongCount,
-            MonotoneScore = metrics.MonotoneScore,
-            ClarityScore = metrics.OverallClarity,
-            IntelligibilityScore = metrics.IntelligibilityScore,
-            BandLowRatio = metrics.BandLowRatio,
-            BandMidRatio = metrics.BandMidRatio,
-            BandPresenceRatio = metrics.BandPresenceRatio,
-            BandHighRatio = metrics.BandHighRatio,
-            ClarityRatio = metrics.ClarityRatio,
-            SpeakingState = (byte)metrics.CurrentState,
-            SyllableDetected = metrics.SyllableDetected,
-            EmphasisDetected = metrics.EmphasisDetected
-        };
+        return metrics;
     }
 
     private void ConfigureAnalysis(bool force)
@@ -1550,7 +1496,6 @@ public sealed class AnalysisOrchestrator : IDisposable
             _binResolution = _sampleRate / (float)fftSize;
 
             UpdateAWeighting();
-            ResetSpeechBandSmoothing();
         }
 
         if (force || window != _activeWindow || sizeChanged)
@@ -1691,7 +1636,7 @@ public sealed class AnalysisOrchestrator : IDisposable
         // Speech coach
         if (sizeChanged || force)
         {
-            _speechCoach.Configure(_activeHopSize, _sampleRate);
+            _speechMetricsProcessor.Configure(_activeHopSize, _sampleRate);
         }
 
         // Update result store - only reconfigure when display dimensions change
@@ -1861,10 +1806,9 @@ public sealed class AnalysisOrchestrator : IDisposable
         Array.Clear(_analysisBufferProcessed);
         Array.Clear(_hopBuffer);
         _analysisSignalProcessor.Reset();
-        _speechCoach.Reset();
+        _speechMetricsProcessor.Reset();
         Array.Clear(_analysisSignalValues, 0, _analysisSignalValues.Length);
         Volatile.Write(ref _analysisReadSampleTime, long.MinValue);
-        ResetSpeechBandSmoothing();
     }
 
     private static int SelectDiscrete(int value, int[] options)
@@ -1881,26 +1825,6 @@ public sealed class AnalysisOrchestrator : IDisposable
             }
         }
         return best;
-    }
-
-    private static float ComputeSpectralFlatness(ReadOnlySpan<float> magnitudes)
-    {
-        if (magnitudes.IsEmpty)
-            return 1f;
-
-        float logSum = 0f;
-        float linSum = 0f;
-        int count = magnitudes.Length;
-        for (int i = 0; i < count; i++)
-        {
-            float mag = MathF.Max(magnitudes[i], 1e-12f);
-            logSum += MathF.Log(mag);
-            linSum += mag;
-        }
-
-        float geometric = MathF.Exp(logSum / count);
-        float arithmetic = linSum / count;
-        return arithmetic > 1e-12f ? geometric / arithmetic : 1f;
     }
 
     private static float ComputeRmsDb(ReadOnlySpan<float> samples)
@@ -1920,21 +1844,6 @@ public sealed class AnalysisOrchestrator : IDisposable
         double mean = sum / samples.Length;
         float rms = mean > 0.0 ? MathF.Sqrt((float)mean) : 0f;
         return rms > 1e-8f ? 20f * MathF.Log10(rms) : -80f;
-    }
-
-    private static float ComputePeakDb(float waveformMin, float waveformMax)
-    {
-        float peak = MathF.Max(MathF.Abs(waveformMin), MathF.Abs(waveformMax));
-        return peak > 1e-8f ? 20f * MathF.Log10(peak) : -80f;
-    }
-
-    private void ResetSpeechBandSmoothing()
-    {
-        _bandLowSmooth = 0f;
-        _bandMidSmooth = 0f;
-        _bandPresenceSmooth = 0f;
-        _bandHighSmooth = 0f;
-        _bandSmoothInitialized = false;
     }
 
     private ReadOnlySpan<float> GetSpeechMagnitudes(out ReadOnlySpan<float> binCentersHz, out float binResolutionHz)
@@ -1970,114 +1879,6 @@ public sealed class AnalysisOrchestrator : IDisposable
         }
 
         return magnitudes;
-    }
-
-    private void ComputeSpeechBandMetrics(
-        ReadOnlySpan<float> magnitudes,
-        ReadOnlySpan<float> binCentersHz,
-        float binResolutionHz,
-        out float bandLowRatio,
-        out float bandMidRatio,
-        out float bandPresenceRatio,
-        out float bandHighRatio,
-        out float clarityRatio,
-        out float syllableEnergyRatio,
-        out float syllableEnergyDb)
-    {
-        // Band ranges and smoothing per SPEECH.md 9.2-9.3.
-        float lowPower = 0f;
-        float midPower = 0f;
-        float presencePower = 0f;
-        float highPower = 0f;
-        float syllablePower = 0f;
-
-        bool useCenters = !binCentersHz.IsEmpty && binCentersHz.Length >= magnitudes.Length;
-        bool useResolution = binResolutionHz > 0f;
-        if (!useCenters && !useResolution)
-        {
-            bandLowRatio = 0f;
-            bandMidRatio = 0f;
-            bandPresenceRatio = 0f;
-            bandHighRatio = 0f;
-            clarityRatio = 0f;
-            syllableEnergyRatio = 0f;
-            syllableEnergyDb = -80f;
-            return;
-        }
-
-        int count = magnitudes.Length;
-        if (useCenters && binCentersHz.Length < count)
-        {
-            count = binCentersHz.Length;
-        }
-
-        for (int i = 0; i < count; i++)
-        {
-            float freq = useCenters ? binCentersHz[i] : i * binResolutionHz;
-            float mag = magnitudes[i];
-            float power = mag * mag;
-
-            if (freq >= 80f && freq < 300f)
-            {
-                lowPower += power;
-            }
-            else if (freq >= 300f && freq < 1000f)
-            {
-                midPower += power;
-            }
-            else if (freq >= 1000f && freq < 4000f)
-            {
-                presencePower += power;
-            }
-            else if (freq >= 4000f && freq < 8000f)
-            {
-                highPower += power;
-            }
-
-            if (freq >= 300f && freq <= 2000f)
-            {
-                syllablePower += power;
-            }
-        }
-
-        float totalPower = lowPower + midPower + presencePower + highPower;
-        float invTotal = totalPower > 1e-12f ? 1f / totalPower : 0f;
-
-        float lowRatio = lowPower * invTotal;
-        float midRatio = midPower * invTotal;
-        float presenceRatio = presencePower * invTotal;
-        float highRatio = highPower * invTotal;
-
-        if (!_bandSmoothInitialized)
-        {
-            _bandLowSmooth = lowRatio;
-            _bandMidSmooth = midRatio;
-            _bandPresenceSmooth = presenceRatio;
-            _bandHighSmooth = highRatio;
-            _bandSmoothInitialized = true;
-        }
-        else
-        {
-            _bandLowSmooth = BandSmoothingAlpha * lowRatio + (1f - BandSmoothingAlpha) * _bandLowSmooth;
-            _bandMidSmooth = BandSmoothingAlpha * midRatio + (1f - BandSmoothingAlpha) * _bandMidSmooth;
-            _bandPresenceSmooth = BandSmoothingAlpha * presenceRatio + (1f - BandSmoothingAlpha) * _bandPresenceSmooth;
-            _bandHighSmooth = BandSmoothingAlpha * highRatio + (1f - BandSmoothingAlpha) * _bandHighSmooth;
-        }
-
-        bandLowRatio = _bandLowSmooth;
-        bandMidRatio = _bandMidSmooth;
-        bandPresenceRatio = _bandPresenceSmooth;
-        bandHighRatio = _bandHighSmooth;
-
-        float clarityDenom = bandLowRatio + bandMidRatio;
-        clarityRatio = clarityDenom > 1e-6f ? bandPresenceRatio / clarityDenom : 0f;
-
-        syllableEnergyRatio = totalPower > 1e-12f ? syllablePower / totalPower : 0f;
-        syllableEnergyDb = syllablePower > 1e-12f ? 10f * MathF.Log10(syllablePower) : -80f;
-        if (syllableEnergyDb < -80f)
-        {
-            syllableEnergyDb = -80f;
-        }
     }
 
     private static bool GetSpeechDebugEnabled()

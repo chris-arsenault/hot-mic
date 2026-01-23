@@ -12,7 +12,7 @@ namespace HotMic.App.Views;
 
 public partial class AnalysisSettingsWindow : AnalysisWindowBase
 {
-    private readonly AnalysisSettingsRenderer _renderer = new(PluginComponentTheme.BlueOnBlack);
+    private readonly AnalysisSettingsRenderer _renderer = new();
 
     public AnalysisSettingsWindow(AnalysisOrchestrator orchestrator)
         : base(orchestrator)

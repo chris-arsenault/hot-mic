@@ -9,7 +9,7 @@ namespace HotMic.App.Views;
 
 public partial class SpeechCoachWindow : AnalysisWindowBase
 {
-    private readonly SpeechCoachRenderer _renderer = new(PluginComponentTheme.BlueOnBlack);
+    private readonly SpeechCoachRenderer _renderer = new();
 
     // Data buffers
     private byte[] _speakingStateTrack = Array.Empty<byte>();

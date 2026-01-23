@@ -85,27 +85,27 @@ public sealed class AnalysisSettingsRenderer : IDisposable
     private static readonly string[] NormalizationLabels = ["Off", "Peak", "RMS", "A-Wt"];
     private static readonly string[] PitchAlgorithmLabels = ["YIN", "PYIN", "Auto", "Cep", "SWIPE"];
 
-    public AnalysisSettingsRenderer(PluginComponentTheme theme)
+    public AnalysisSettingsRenderer(PluginComponentTheme? theme = null)
     {
-        _theme = theme;
+        _theme = theme ?? PluginComponentTheme.Default;
 
         _backgroundPaint = new SKPaint
         {
-            Color = theme.PanelBackground,
+            Color = _theme.PanelBackground,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
         _panelPaint = new SKPaint
         {
-            Color = theme.PanelBackgroundLight,
+            Color = _theme.PanelBackgroundLight,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
         _borderPaint = new SKPaint
         {
-            Color = theme.PanelBorder,
+            Color = _theme.PanelBorder,
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f
@@ -113,77 +113,77 @@ public sealed class AnalysisSettingsRenderer : IDisposable
 
         _buttonPaint = new SKPaint
         {
-            Color = theme.KnobBackground,
+            Color = _theme.KnobBackground,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
         _buttonActivePaint = new SKPaint
         {
-            Color = theme.KnobArc,
+            Color = _theme.KnobArc,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
-        _titlePaint = new SkiaTextPaint(theme.TextPrimary, 14f, SKFontStyle.Bold, SKTextAlign.Left);
-        _closeButtonPaint = new SkiaTextPaint(theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
-        _panelHeaderPaint = new SkiaTextPaint(theme.TextSecondary, 11f, SKFontStyle.Bold, SKTextAlign.Left);
-        _buttonTextPaint = new SkiaTextPaint(theme.TextPrimary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
-        _labelPaint = new SkiaTextPaint(theme.TextMuted, 10f, SKFontStyle.Normal, SKTextAlign.Left);
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold, SKTextAlign.Left);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
+        _panelHeaderPaint = new SkiaTextPaint(_theme.TextSecondary, 11f, SKFontStyle.Bold, SKTextAlign.Left);
+        _buttonTextPaint = new SkiaTextPaint(_theme.TextPrimary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _labelPaint = new SkiaTextPaint(_theme.TextMuted, 10f, SKFontStyle.Normal, SKTextAlign.Left);
 
         // Create knobs
-        MinFreqKnob = new KnobWidget(KnobRadius, 20f, 2000f, "Min", "Hz", theme: theme)
+        MinFreqKnob = new KnobWidget(KnobRadius, 20f, 2000f, "Min", "Hz", theme: _theme)
         {
             Value = 80f,
             IsLogarithmic = true,
             ValueFormat = "0"
         };
 
-        MaxFreqKnob = new KnobWidget(KnobRadius, 2000f, 20000f, "Max", "Hz", theme: theme)
+        MaxFreqKnob = new KnobWidget(KnobRadius, 2000f, 20000f, "Max", "Hz", theme: _theme)
         {
             Value = 8000f,
             IsLogarithmic = true,
             ValueFormat = "0"
         };
 
-        TimeKnob = new KnobWidget(KnobRadius, 1f, 60f, "Time", "s", theme: theme)
+        TimeKnob = new KnobWidget(KnobRadius, 1f, 60f, "Time", "s", theme: _theme)
         {
             Value = 5f,
             IsLogarithmic = true,
             ValueFormat = "0.0"
         };
 
-        HpfKnob = new KnobWidget(KnobRadius, 20f, 120f, "HPF", "Hz", theme: theme)
+        HpfKnob = new KnobWidget(KnobRadius, 20f, 120f, "HPF", "Hz", theme: _theme)
         {
             Value = 60f,
             ValueFormat = "0"
         };
 
-        ReassignThresholdKnob = new KnobWidget(KnobRadius, -100f, 0f, "Thresh", "dB", theme: theme)
+        ReassignThresholdKnob = new KnobWidget(KnobRadius, -100f, 0f, "Thresh", "dB", theme: _theme)
         {
             Value = -60f,
             ValueFormat = "0"
         };
 
-        ReassignSpreadKnob = new KnobWidget(KnobRadius, 0f, 100f, "Spread", "%", theme: theme)
+        ReassignSpreadKnob = new KnobWidget(KnobRadius, 0f, 100f, "Spread", "%", theme: _theme)
         {
             Value = 100f,
             ValueFormat = "0"
         };
 
-        ClarityNoiseKnob = new KnobWidget(KnobRadius, 0f, 100f, "Noise", "%", theme: theme)
+        ClarityNoiseKnob = new KnobWidget(KnobRadius, 0f, 100f, "Noise", "%", theme: _theme)
         {
             Value = 100f,
             ValueFormat = "0"
         };
 
-        ClarityHarmonicKnob = new KnobWidget(KnobRadius, 0f, 100f, "Harm", "%", theme: theme)
+        ClarityHarmonicKnob = new KnobWidget(KnobRadius, 0f, 100f, "Harm", "%", theme: _theme)
         {
             Value = 100f,
             ValueFormat = "0"
         };
 
-        ClaritySmoothingKnob = new KnobWidget(KnobRadius, 0f, 100f, "Smooth", "%", theme: theme)
+        ClaritySmoothingKnob = new KnobWidget(KnobRadius, 0f, 100f, "Smooth", "%", theme: _theme)
         {
             Value = 30f,
             ValueFormat = "0"

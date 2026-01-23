@@ -395,6 +395,7 @@ HotMic/
 
 This project should not rely on long-term unit or integration tests to control behavior.
 Temporary, isolated verification tests are allowed (for example, DSP math or FFT correctness), but should be clearly scoped and may be removed once validated.
+Do not run tests unless the user explicitly directs you to do so.
 
 Still document complex DSP or UI behavior with concise inline comments near the relevant code so intent and assumptions are captured in context.
 

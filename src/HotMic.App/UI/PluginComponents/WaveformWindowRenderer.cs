@@ -38,27 +38,27 @@ public sealed class WaveformWindowRenderer : IDisposable
 
     public SKRect CloseButtonRect { get; private set; }
 
-    public WaveformWindowRenderer(PluginComponentTheme theme)
+    public WaveformWindowRenderer(PluginComponentTheme? theme = null)
     {
-        _theme = theme;
+        _theme = theme ?? PluginComponentTheme.Default;
 
         _backgroundPaint = new SKPaint
         {
-            Color = theme.PanelBackground,
+            Color = _theme.PanelBackground,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
         _waveformAreaPaint = new SKPaint
         {
-            Color = theme.WaveformBackground,
+            Color = _theme.WaveformBackground,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
         _gridPaint = new SKPaint
         {
-            Color = theme.EnvelopeGrid,
+            Color = _theme.EnvelopeGrid,
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f
@@ -66,7 +66,7 @@ public sealed class WaveformWindowRenderer : IDisposable
 
         _waveformPaint = new SKPaint
         {
-            Color = theme.WaveformLine,
+            Color = _theme.WaveformLine,
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 2f,
@@ -76,37 +76,37 @@ public sealed class WaveformWindowRenderer : IDisposable
 
         _waveformFillPaint = new SKPaint
         {
-            Color = theme.WaveformFill,
+            Color = _theme.WaveformFill,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
 
         _borderPaint = new SKPaint
         {
-            Color = theme.PanelBorder,
+            Color = _theme.PanelBorder,
             IsAntialias = true,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f
         };
 
-        _titlePaint = new SkiaTextPaint(theme.TextPrimary, 14f, SKFontStyle.Bold, SKTextAlign.Left);
-        _closeButtonPaint = new SkiaTextPaint(theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
-        _dbLabelPaint = new SkiaTextPaint(theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
+        _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold, SKTextAlign.Left);
+        _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
+        _dbLabelPaint = new SkiaTextPaint(_theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
 
         // Create knobs
-        MinDbKnob = new KnobWidget(KnobRadius, -80f, -20f, "Floor", "dB", theme: theme)
+        MinDbKnob = new KnobWidget(KnobRadius, -80f, -20f, "Floor", "dB", theme: _theme)
         {
             Value = -60f,
             ValueFormat = "0"
         };
 
-        MaxDbKnob = new KnobWidget(KnobRadius, -20f, 6f, "Ceiling", "dB", theme: theme)
+        MaxDbKnob = new KnobWidget(KnobRadius, -20f, 6f, "Ceiling", "dB", theme: _theme)
         {
             Value = 0f,
             ValueFormat = "0"
         };
 
-        TimeKnob = new KnobWidget(KnobRadius, 1f, 60f, "Time", "s", theme: theme)
+        TimeKnob = new KnobWidget(KnobRadius, 1f, 60f, "Time", "s", theme: _theme)
         {
             Value = 5f,
             IsLogarithmic = true,
