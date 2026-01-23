@@ -46,7 +46,7 @@ public readonly record struct SpeechCoachState(
 public sealed class SpeechCoachRenderer : IDisposable
 {
     private const float Padding = 12f;
-    private const float TitleBarHeight = 36f;
+    private const float TitleBarHeight = 40f;
     private const float MetricCardHeight = 64f;
     private const float MetricCardSpacing = 8f;
 
@@ -73,6 +73,7 @@ public sealed class SpeechCoachRenderer : IDisposable
     private readonly SKPaint _spectralPresencePaint;
     private readonly SKPaint _spectralHighPaint;
     private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SkiaTextPaint _cardLabelPaint;
     private readonly SkiaTextPaint _cardValuePaint;
     private readonly SkiaTextPaint _cardUnitPaint;
@@ -240,6 +241,7 @@ public sealed class SpeechCoachRenderer : IDisposable
         };
 
         _titlePaint = new SkiaTextPaint(theme.TextPrimary, 14f, SKFontStyle.Bold, SKTextAlign.Left);
+        _closeButtonPaint = new SkiaTextPaint(theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
         _cardLabelPaint = new SkiaTextPaint(theme.TextSecondary, 10f, SKFontStyle.Normal, SKTextAlign.Left);
         _cardValuePaint = new SkiaTextPaint(theme.TextPrimary, 22f, SKFontStyle.Bold, SKTextAlign.Left);
         _cardUnitPaint = new SkiaTextPaint(theme.TextMuted, 10f, SKFontStyle.Normal, SKTextAlign.Left);
@@ -281,25 +283,11 @@ public sealed class SpeechCoachRenderer : IDisposable
         canvas.DrawRect(0, 0, width, TitleBarHeight, _titleBarPaint);
         _titlePaint.DrawText(canvas, "Speech Coach", Padding, TitleBarHeight / 2 + 5);
 
-        float btnSize = 22f;
+        float btnSize = 24f;
         float btnX = width - Padding - btnSize;
         float btnY = (TitleBarHeight - btnSize) / 2f;
         CloseButtonRect = new SKRect(btnX, btnY, btnX + btnSize, btnY + btnSize);
-
-        using var closePaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 2f,
-            StrokeCap = SKStrokeCap.Round
-        };
-
-        float cx = CloseButtonRect.MidX;
-        float cy = CloseButtonRect.MidY;
-        float s = 5f;
-        canvas.DrawLine(cx - s, cy - s, cx + s, cy + s, closePaint);
-        canvas.DrawLine(cx + s, cy - s, cx - s, cy + s, closePaint);
+        canvas.DrawText("\u00D7", CloseButtonRect.MidX, CloseButtonRect.MidY + 6, _closeButtonPaint);
     }
 
     private void DrawMetricCard(
@@ -678,6 +666,7 @@ public sealed class SpeechCoachRenderer : IDisposable
         _spectralPresencePaint.Dispose();
         _spectralHighPaint.Dispose();
         _titlePaint.Dispose();
+        _closeButtonPaint.Dispose();
         _cardLabelPaint.Dispose();
         _cardValuePaint.Dispose();
         _cardUnitPaint.Dispose();

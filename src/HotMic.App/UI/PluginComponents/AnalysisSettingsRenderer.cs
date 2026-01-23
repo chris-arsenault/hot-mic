@@ -10,7 +10,7 @@ namespace HotMic.App.UI.PluginComponents;
 public sealed class AnalysisSettingsRenderer : IDisposable
 {
     private const float Padding = 12f;
-    private const float TitleBarHeight = 36f;
+    private const float TitleBarHeight = 40f;
     private const float PanelSpacing = 10f;
     private const float PanelPadding = 10f;
     private const float PanelHeaderHeight = 22f;
@@ -27,6 +27,7 @@ public sealed class AnalysisSettingsRenderer : IDisposable
     private readonly SKPaint _buttonPaint;
     private readonly SKPaint _buttonActivePaint;
     private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SkiaTextPaint _panelHeaderPaint;
     private readonly SkiaTextPaint _buttonTextPaint;
     private readonly SkiaTextPaint _labelPaint;
@@ -125,6 +126,7 @@ public sealed class AnalysisSettingsRenderer : IDisposable
         };
 
         _titlePaint = new SkiaTextPaint(theme.TextPrimary, 14f, SKFontStyle.Bold, SKTextAlign.Left);
+        _closeButtonPaint = new SkiaTextPaint(theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
         _panelHeaderPaint = new SkiaTextPaint(theme.TextSecondary, 11f, SKFontStyle.Bold, SKTextAlign.Left);
         _buttonTextPaint = new SkiaTextPaint(theme.TextPrimary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
         _labelPaint = new SkiaTextPaint(theme.TextMuted, 10f, SKFontStyle.Normal, SKTextAlign.Left);
@@ -228,21 +230,7 @@ public sealed class AnalysisSettingsRenderer : IDisposable
         float btnX = width - Padding - btnSize;
         float btnY = (TitleBarHeight - btnSize) / 2;
         CloseButtonRect = new SKRect(btnX, btnY, btnX + btnSize, btnY + btnSize);
-
-        using var closePaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 2f,
-            StrokeCap = SKStrokeCap.Round
-        };
-
-        float cx = CloseButtonRect.MidX;
-        float cy = CloseButtonRect.MidY;
-        float s = 6f;
-        canvas.DrawLine(cx - s, cy - s, cx + s, cy + s, closePaint);
-        canvas.DrawLine(cx + s, cy - s, cx - s, cy + s, closePaint);
+        canvas.DrawText("\u00D7", CloseButtonRect.MidX, CloseButtonRect.MidY + 6, _closeButtonPaint);
     }
 
     private float DrawFrequencyPanel(SKCanvas canvas, float x, float y, float width)
@@ -439,6 +427,7 @@ public sealed class AnalysisSettingsRenderer : IDisposable
         _buttonPaint.Dispose();
         _buttonActivePaint.Dispose();
         _titlePaint.Dispose();
+        _closeButtonPaint.Dispose();
         _panelHeaderPaint.Dispose();
         _buttonTextPaint.Dispose();
         _labelPaint.Dispose();

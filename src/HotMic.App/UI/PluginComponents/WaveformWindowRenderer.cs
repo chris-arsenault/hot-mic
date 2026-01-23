@@ -10,7 +10,7 @@ namespace HotMic.App.UI.PluginComponents;
 public sealed class WaveformWindowRenderer : IDisposable
 {
     private const float Padding = 12f;
-    private const float TitleBarHeight = 36f;
+    private const float TitleBarHeight = 40f;
     private const float ControlPanelHeight = 60f;
     private const float KnobRadius = 16f;
     private const float AxisWidth = 40f;
@@ -23,6 +23,7 @@ public sealed class WaveformWindowRenderer : IDisposable
     private readonly SKPaint _waveformFillPaint;
     private readonly SKPaint _borderPaint;
     private readonly SkiaTextPaint _titlePaint;
+    private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SkiaTextPaint _dbLabelPaint;
 
     private readonly SKPath _waveformPath = new();
@@ -89,6 +90,7 @@ public sealed class WaveformWindowRenderer : IDisposable
         };
 
         _titlePaint = new SkiaTextPaint(theme.TextPrimary, 14f, SKFontStyle.Bold, SKTextAlign.Left);
+        _closeButtonPaint = new SkiaTextPaint(theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
         _dbLabelPaint = new SkiaTextPaint(theme.TextMuted, 9f, SKFontStyle.Normal, SKTextAlign.Right);
 
         // Create knobs
@@ -167,25 +169,11 @@ public sealed class WaveformWindowRenderer : IDisposable
         _titlePaint.DrawText(canvas, "Waveform", Padding, TitleBarHeight / 2 + 5);
 
         // Close button
-        float btnSize = 22f;
+        float btnSize = 24f;
         float btnX = width - Padding - btnSize;
         float btnY = (TitleBarHeight - btnSize) / 2;
         CloseButtonRect = new SKRect(btnX, btnY, btnX + btnSize, btnY + btnSize);
-
-        using var closePaint = new SKPaint
-        {
-            Color = _theme.TextMuted,
-            IsAntialias = true,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 2f,
-            StrokeCap = SKStrokeCap.Round
-        };
-
-        float cx = CloseButtonRect.MidX;
-        float cy = CloseButtonRect.MidY;
-        float s = 5f;
-        canvas.DrawLine(cx - s, cy - s, cx + s, cy + s, closePaint);
-        canvas.DrawLine(cx + s, cy - s, cx - s, cy + s, closePaint);
+        canvas.DrawText("\u00D7", CloseButtonRect.MidX, CloseButtonRect.MidY + 6, _closeButtonPaint);
     }
 
     private void DrawControlPanel(SKCanvas canvas, int width, float y)
@@ -300,6 +288,7 @@ public sealed class WaveformWindowRenderer : IDisposable
         _waveformFillPaint.Dispose();
         _borderPaint.Dispose();
         _titlePaint.Dispose();
+        _closeButtonPaint.Dispose();
         _dbLabelPaint.Dispose();
         _waveformPath.Dispose();
         _fillPath.Dispose();

@@ -1,3 +1,6 @@
+using System;
+using System.Diagnostics;
+using System.Globalization;
 using System.Threading;
 using HotMic.Core.Dsp;
 using HotMic.Core.Dsp.Analysis;
@@ -106,6 +109,9 @@ public sealed class AnalysisOrchestrator : IDisposable
     // Speech coach
     private readonly SpeechCoach _speechCoach = new();
     private const float BandSmoothingAlpha = 0.3f;
+    private const string SpeechDebugEnvVar = "HOTMIC_SPEECH_DEBUG";
+    private static readonly bool SpeechDebugEnabled = GetSpeechDebugEnabled();
+    private static readonly long SpeechDebugIntervalTicks = Stopwatch.Frequency; // ~1s
     private float _bandLowSmooth;
     private float _bandMidSmooth;
     private float _bandPresenceSmooth;
@@ -160,6 +166,8 @@ public sealed class AnalysisOrchestrator : IDisposable
     private int _debugTransformPath; // 0=FFT, 1=CQT, 2=ZoomFFT
     private float _debugLastProcessedMax;
     private int _debugAnalysisFilled;
+    private long _lastSpeechDebugTicks;
+    private int _lastCaptureSourceDebug = -1;
 
     public long DebugEnqueueCalls => Interlocked.Read(ref _debugEnqueueCalls);
     public long DebugEnqueueSkippedChannel => Interlocked.Read(ref _debugEnqueueSkippedChannel);
@@ -405,6 +413,10 @@ public sealed class AnalysisOrchestrator : IDisposable
             }
 
             var captureLink = Volatile.Read(ref _captureLink);
+            if (SpeechDebugEnabled)
+            {
+                _lastCaptureSourceDebug = captureLink is null ? -1 : (int)captureLink.LastCaptureSource;
+            }
             int availableRead = _captureBuffer.AvailableRead;
             if (availableRead < _activeHopSize)
             {
@@ -1400,18 +1412,20 @@ public sealed class AnalysisOrchestrator : IDisposable
         float flux, float slope, float lastHnr,
         long frameId)
     {
-        float energyDb = ComputeRmsDb(_analysisBufferRaw);
+        // Speech metrics expect frame energy from the waveform peak (SPEECH.md).
+        float energyDb = ComputePeakDb(waveformMin, waveformMax);
+        float hopEnergyDb = ComputeRmsDb(_hopBuffer.AsSpan(0, _activeHopSize));
         float f1Hz = 0f;
         float f2Hz = 0f;
         ReadOnlySpan<float> speechMagnitudes = GetSpeechMagnitudes(out var speechBinCenters, out var speechBinResolution);
         float spectralFlatness = ComputeSpectralFlatness(speechMagnitudes);
-        float syllableEnergyDb = energyDb;
         float bandLowRatio = 0f;
         float bandMidRatio = 0f;
         float bandPresenceRatio = 0f;
         float bandHighRatio = 0f;
         float clarityRatio = 0f;
         float syllableEnergyRatio = 0f;
+        float syllableEnergyDb = energyDb;
 
         if (!speechMagnitudes.IsEmpty && (speechBinCenters.Length > 0 || speechBinResolution > 0f))
         {
@@ -1424,13 +1438,8 @@ public sealed class AnalysisOrchestrator : IDisposable
                 out bandPresenceRatio,
                 out bandHighRatio,
                 out clarityRatio,
-                out syllableEnergyRatio);
-
-            if (syllableEnergyRatio > 0f)
-            {
-                // Band-limited energy estimate based on 300-2000 Hz ratio.
-                syllableEnergyDb = energyDb + 10f * MathF.Log10(MathF.Max(syllableEnergyRatio, 1e-3f));
-            }
+                out syllableEnergyRatio,
+                out syllableEnergyDb);
         }
 
         var metrics = _speechCoach.Process(
@@ -1451,6 +1460,9 @@ public sealed class AnalysisOrchestrator : IDisposable
             bandHighRatio,
             clarityRatio,
             frameId);
+
+        MaybeLogSpeechDebug(frameId, energyDb, hopEnergyDb, syllableEnergyDb, syllableEnergyRatio,
+            bandLowRatio, bandMidRatio, bandPresenceRatio, bandHighRatio, clarityRatio);
 
         return new SpeechMetricsFrame
         {
@@ -1910,6 +1922,12 @@ public sealed class AnalysisOrchestrator : IDisposable
         return rms > 1e-8f ? 20f * MathF.Log10(rms) : -80f;
     }
 
+    private static float ComputePeakDb(float waveformMin, float waveformMax)
+    {
+        float peak = MathF.Max(MathF.Abs(waveformMin), MathF.Abs(waveformMax));
+        return peak > 1e-8f ? 20f * MathF.Log10(peak) : -80f;
+    }
+
     private void ResetSpeechBandSmoothing()
     {
         _bandLowSmooth = 0f;
@@ -1963,7 +1981,8 @@ public sealed class AnalysisOrchestrator : IDisposable
         out float bandPresenceRatio,
         out float bandHighRatio,
         out float clarityRatio,
-        out float syllableEnergyRatio)
+        out float syllableEnergyRatio,
+        out float syllableEnergyDb)
     {
         // Band ranges and smoothing per SPEECH.md 9.2-9.3.
         float lowPower = 0f;
@@ -1982,6 +2001,7 @@ public sealed class AnalysisOrchestrator : IDisposable
             bandHighRatio = 0f;
             clarityRatio = 0f;
             syllableEnergyRatio = 0f;
+            syllableEnergyDb = -80f;
             return;
         }
 
@@ -2053,6 +2073,57 @@ public sealed class AnalysisOrchestrator : IDisposable
         clarityRatio = clarityDenom > 1e-6f ? bandPresenceRatio / clarityDenom : 0f;
 
         syllableEnergyRatio = totalPower > 1e-12f ? syllablePower / totalPower : 0f;
+        syllableEnergyDb = syllablePower > 1e-12f ? 10f * MathF.Log10(syllablePower) : -80f;
+        if (syllableEnergyDb < -80f)
+        {
+            syllableEnergyDb = -80f;
+        }
+    }
+
+    private static bool GetSpeechDebugEnabled()
+    {
+        string? value = Environment.GetEnvironmentVariable(SpeechDebugEnvVar);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return Debugger.IsAttached;
+        }
+
+        return value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void MaybeLogSpeechDebug(long frameId, float energyDb, float hopEnergyDb, float syllableEnergyDb,
+        float syllableRatio, float lowRatio, float midRatio, float presenceRatio, float highRatio, float clarityRatio)
+    {
+        if (!SpeechDebugEnabled)
+        {
+            return;
+        }
+
+        long now = Stopwatch.GetTimestamp();
+        if (now - _lastSpeechDebugTicks < SpeechDebugIntervalTicks)
+        {
+            return;
+        }
+
+        _lastSpeechDebugTicks = now;
+        int source = _lastCaptureSourceDebug;
+        string message = string.Format(
+            CultureInfo.InvariantCulture,
+            "SpeechDebug2 frame={0} src={1} energyDb={2:0.0} hopDb={3:0.0} syllDb={4:0.0} syllRatio={5:0.000} bandL={6:0.000} bandM={7:0.000} bandP={8:0.000} bandH={9:0.000} clarity={10:0.000}",
+            frameId,
+            source,
+            energyDb,
+            hopEnergyDb,
+            syllableEnergyDb,
+            syllableRatio,
+            lowRatio,
+            midRatio,
+            presenceRatio,
+            highRatio,
+            clarityRatio);
+
+        Console.WriteLine(message);
+        Debug.WriteLine(message);
     }
 
     public void Dispose()
