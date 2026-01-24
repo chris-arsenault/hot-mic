@@ -58,6 +58,14 @@ public sealed class PauseDetector
     private int _silenceFrameCount;
     private int _filledPauseFrameCount;
     private int _speakingFrameCount;
+    private long _statsFrames;
+    private long _statsSilenceFrames;
+    private long _statsFilledCandidateFrames;
+    private long _statsSpeakingFrames;
+    private long _statsSilentPauseEvents;
+    private long _statsFilledPauseEvents;
+    private long _statsSilentPauseFrames;
+    private long _statsFilledPauseFrames;
 
     /// <summary>
     /// Minimum duration in ms for a silence to count as a pause.
@@ -83,6 +91,19 @@ public sealed class PauseDetector
     /// Current speaking/pause state.
     /// </summary>
     public SpeakingState CurrentState => _currentState;
+
+    /// <summary>
+    /// Snapshot of pause detector debug counters.
+    /// </summary>
+    public PauseDetectorDebugStats DebugStats => new(
+        _statsFrames,
+        _statsSilenceFrames,
+        _statsFilledCandidateFrames,
+        _statsSpeakingFrames,
+        _statsSilentPauseEvents,
+        _statsFilledPauseEvents,
+        _statsSilentPauseFrames,
+        _statsFilledPauseFrames);
 
     /// <summary>
     /// Process a frame and detect pause transitions.
@@ -113,6 +134,20 @@ public sealed class PauseDetector
             && pitchConfidence < PitchConfidenceThreshold
             && spectralFlatness > SpectralFlatnessThreshold;
         bool isSpeaking = !isSilence && !isFilledPauseCandidate;
+
+        _statsFrames++;
+        if (isSilence)
+        {
+            _statsSilenceFrames++;
+        }
+        else if (isFilledPauseCandidate)
+        {
+            _statsFilledCandidateFrames++;
+        }
+        else
+        {
+            _statsSpeakingFrames++;
+        }
 
         switch (_currentState)
         {
@@ -161,6 +196,7 @@ public sealed class PauseDetector
                     _silenceFrameCount = 0;
                     _filledPauseFrameCount = isFilledPauseCandidate ? 1 : 0;
                     _speakingFrameCount = isSpeaking ? 1 : 0;
+                    _statsSilentPauseEvents++;
                     return true;
                 }
                 break;
@@ -180,8 +216,19 @@ public sealed class PauseDetector
                     _filledPauseFrameCount = 0;
                     _silenceFrameCount = isSilence ? 1 : 0;
                     _speakingFrameCount = isSpeaking ? 1 : 0;
+                    _statsFilledPauseEvents++;
                     return true;
                 }
+                break;
+        }
+
+        switch (_currentState)
+        {
+            case SpeakingState.SilentPause:
+                _statsSilentPauseFrames++;
+                break;
+            case SpeakingState.FilledPause:
+                _statsFilledPauseFrames++;
                 break;
         }
 
@@ -212,5 +259,23 @@ public sealed class PauseDetector
         _silenceFrameCount = 0;
         _filledPauseFrameCount = 0;
         _speakingFrameCount = 0;
+        _statsFrames = 0;
+        _statsSilenceFrames = 0;
+        _statsFilledCandidateFrames = 0;
+        _statsSpeakingFrames = 0;
+        _statsSilentPauseEvents = 0;
+        _statsFilledPauseEvents = 0;
+        _statsSilentPauseFrames = 0;
+        _statsFilledPauseFrames = 0;
     }
 }
+
+public readonly record struct PauseDetectorDebugStats(
+    long Frames,
+    long SilenceFrames,
+    long FilledCandidateFrames,
+    long SpeakingFrames,
+    long SilentPauseEvents,
+    long FilledPauseEvents,
+    long SilentPauseFrames,
+    long FilledPauseFrames);

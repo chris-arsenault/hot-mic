@@ -13,19 +13,24 @@ public sealed class SyllableDetector
 {
     private const int MaxHistoryFrames = 512;
     private const float DefaultProminenceDb = 3f;
+    private const float DefaultUnvoicedProminencePenaltyDb = 1.5f;
     private const float DefaultMinIntervalMs = 50f;
     private const float DefaultPeakSpanMs = 60f;
+    private const float DefaultMicroDipClampDb = 3f;
+    private const float DefaultEnergyFloorDb = -60f;
     private const string DebugEnvVar = "HOTMIC_SPEECH_DEBUG";
     private static readonly bool DebugLoggingEnabled = GetDebugLoggingEnabled();
     private static readonly long DebugIntervalTicks = Stopwatch.Frequency; // ~1s
 
     private readonly float[] _energyHistory = new float[MaxHistoryFrames];
-    private readonly bool[] _voicedHistory = new bool[MaxHistoryFrames];
+    private readonly VoicingState[] _voicingHistory = new VoicingState[MaxHistoryFrames];
     private int _historyIndex;
     private int _historyCount;
     private long _lastSyllableFrame = -1000;
     private float _smoothedEnergyDb;
+    private float _baselineEnergyDb;
     private bool _initialized;
+    private bool _baselineInitialized;
     private long _lastDebugTicks;
     private int _debugPeakCount;
     private int _debugVoicedPeakCount;
@@ -38,13 +43,26 @@ public sealed class SyllableDetector
     private long _statsPeaks;
     private long _statsVoicedPeaks;
     private long _statsDetected;
+    private long _statsDetectedVoiced;
+    private long _statsDetectedUnvoiced;
     private long _statsRejectNotPeak;
     private long _statsRejectUnvoiced;
     private long _statsRejectLowProminence;
+    private long _statsRejectLowProminenceInstant;
+    private long _statsRejectLowProminenceMean;
     private long _statsRejectMinInterval;
+    private long _statsClampApplied;
+    private long _statsMeanPenaltyApplied;
+    private long _statsBaselineUpdates;
+    private long _statsBaselineSkips;
     private float _statsMinEnergyDb = float.PositiveInfinity;
     private float _statsMaxEnergyDb = float.NegativeInfinity;
+    private float _statsMinBaselineDb = float.PositiveInfinity;
+    private float _statsMaxBaselineDb = float.NegativeInfinity;
+    private float _statsMaxProminenceClampDb;
     private float _statsMaxProminenceDb;
+    private float _statsMaxProminenceInstantDb;
+    private float _statsMaxProminenceMeanDb;
     private long _statsLastDetectedFrame = -1;
 
     /// <summary>
@@ -56,19 +74,37 @@ public sealed class SyllableDetector
         _statsPeaks,
         _statsVoicedPeaks,
         _statsDetected,
+        _statsDetectedVoiced,
+        _statsDetectedUnvoiced,
         _statsRejectNotPeak,
         _statsRejectUnvoiced,
         _statsRejectLowProminence,
+        _statsRejectLowProminenceInstant,
+        _statsRejectLowProminenceMean,
         _statsRejectMinInterval,
+        _statsClampApplied,
+        _statsMeanPenaltyApplied,
+        _statsBaselineUpdates,
+        _statsBaselineSkips,
         float.IsPositiveInfinity(_statsMinEnergyDb) ? 0f : _statsMinEnergyDb,
         float.IsNegativeInfinity(_statsMaxEnergyDb) ? 0f : _statsMaxEnergyDb,
+        float.IsPositiveInfinity(_statsMinBaselineDb) ? 0f : _statsMinBaselineDb,
+        float.IsNegativeInfinity(_statsMaxBaselineDb) ? 0f : _statsMaxBaselineDb,
+        _statsMaxProminenceClampDb,
         _statsMaxProminenceDb,
+        _statsMaxProminenceInstantDb,
+        _statsMaxProminenceMeanDb,
         _statsLastDetectedFrame);
 
     /// <summary>
     /// Minimum prominence in dB for a peak to be considered a syllable nucleus.
     /// </summary>
     public float ProminenceThresholdDb { get; set; } = DefaultProminenceDb;
+
+    /// <summary>
+    /// Additional prominence required for unvoiced syllable candidates.
+    /// </summary>
+    public float UnvoicedProminencePenaltyDb { get; set; } = DefaultUnvoicedProminencePenaltyDb;
 
     /// <summary>
     /// Minimum interval between syllables in milliseconds.
@@ -86,6 +122,21 @@ public sealed class SyllableDetector
     public float PeakSpanMs { get; set; } = DefaultPeakSpanMs;
 
     /// <summary>
+    /// Clamp depth for short-lived dips relative to local mean (dB).
+    /// </summary>
+    public float MicroDipClampDb { get; set; } = DefaultMicroDipClampDb;
+
+    /// <summary>
+    /// Slow baseline smoothing for energy normalization (0-1).
+    /// </summary>
+    public float BaselineAlpha { get; set; } = 0.01f;
+
+    /// <summary>
+    /// Minimum energy floor (dB) to reduce extreme dips from noise reduction.
+    /// </summary>
+    public float EnergyFloorDb { get; set; } = DefaultEnergyFloorDb;
+
+    /// <summary>
     /// Process a frame and detect if it contains a syllable nucleus.
     /// </summary>
     /// <param name="energyDb">Frame energy in dB.</param>
@@ -100,15 +151,45 @@ public sealed class SyllableDetector
 
         float frameDurationMs = sampleRate > 0 ? 1000f * hopSize / sampleRate : 0f;
 
+        energyDb = MathF.Max(energyDb, EnergyFloorDb);
+
+        bool updateBaseline = voicing != VoicingState.Silence;
+        if (!_baselineInitialized)
+        {
+            _baselineEnergyDb = energyDb;
+            _baselineInitialized = true;
+            _statsBaselineUpdates++;
+        }
+        else if (updateBaseline)
+        {
+            _baselineEnergyDb = BaselineAlpha * energyDb + (1f - BaselineAlpha) * _baselineEnergyDb;
+            _statsBaselineUpdates++;
+        }
+        else
+        {
+            _statsBaselineSkips++;
+        }
+
+        if (_baselineEnergyDb < _statsMinBaselineDb)
+        {
+            _statsMinBaselineDb = _baselineEnergyDb;
+        }
+        if (_baselineEnergyDb > _statsMaxBaselineDb)
+        {
+            _statsMaxBaselineDb = _baselineEnergyDb;
+        }
+
+        float normalizedEnergyDb = energyDb - _baselineEnergyDb;
+
         // Update smoothed energy
         if (!_initialized)
         {
-            _smoothedEnergyDb = energyDb;
+            _smoothedEnergyDb = normalizedEnergyDb;
             _initialized = true;
         }
         else
         {
-            _smoothedEnergyDb = SmoothingAlpha * energyDb + (1f - SmoothingAlpha) * _smoothedEnergyDb;
+            _smoothedEnergyDb = SmoothingAlpha * normalizedEnergyDb + (1f - SmoothingAlpha) * _smoothedEnergyDb;
         }
 
         if (_smoothedEnergyDb < _debugMinEnergy)
@@ -131,7 +212,7 @@ public sealed class SyllableDetector
         // Store in history buffer
         int prevIndex = _historyIndex;
         _energyHistory[_historyIndex] = _smoothedEnergyDb;
-        _voicedHistory[_historyIndex] = voicing == VoicingState.Voiced;
+        _voicingHistory[_historyIndex] = voicing;
         _historyIndex = (_historyIndex + 1) % MaxHistoryFrames;
         _historyCount = Math.Min(_historyCount + 1, MaxHistoryFrames);
 
@@ -145,8 +226,9 @@ public sealed class SyllableDetector
         if (_historyCount < requiredHistory)
         {
             _statsWarmupFrames++;
-            MaybeLogDebug(frameId, hopSize, sampleRate, isPeak: false, prominence: 0f, voicedCenter: false,
-                centerEnergy: 0f, prevEnergy: 0f, currentEnergy: 0f, detected: false);
+            MaybeLogDebug(frameId, hopSize, sampleRate, isPeak: false, prominence: 0f, prominenceInstant: 0f, prominenceMean: 0f,
+                voicedCenter: false, centerEnergy: 0f, prevEnergy: 0f, currentEnergy: 0f,
+                leftMean: 0f, rightMean: 0f, leftMin: 0f, rightMin: 0f, detected: false);
             return false;
         }
 
@@ -163,8 +245,9 @@ public sealed class SyllableDetector
         if (!isPeak)
         {
             _statsRejectNotPeak++;
-            MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence: 0f, voicedCenter: _voicedHistory[centerIdx],
-                centerEnergy, prevEnergy, currentEnergy, detected: false);
+            MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence: 0f, prominenceInstant: 0f, prominenceMean: 0f,
+                voicedCenter: _voicingHistory[centerIdx] == VoicingState.Voiced, centerEnergy, prevEnergy, currentEnergy,
+                leftMean: 0f, rightMean: 0f, leftMin: 0f, rightMin: 0f, detected: false);
             return false;
         }
 
@@ -172,12 +255,15 @@ public sealed class SyllableDetector
         _debugPeakCount++;
 
         // Check voicing at center frame
-        bool voicedCenter = _voicedHistory[centerIdx];
-        if (!voicedCenter)
+        VoicingState centerVoicing = _voicingHistory[centerIdx];
+        bool speechCenter = centerVoicing != VoicingState.Silence;
+        bool voicedCenter = centerVoicing == VoicingState.Voiced;
+        if (!speechCenter)
         {
             _statsRejectUnvoiced++;
-            MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence: 0f, voicedCenter,
-                centerEnergy, prevEnergy, currentEnergy, detected: false);
+            MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence: 0f, prominenceInstant: 0f, prominenceMean: 0f, voicedCenter,
+                centerEnergy, prevEnergy, currentEnergy, leftMean: 0f, rightMean: 0f, leftMin: 0f, rightMin: 0f,
+                detected: false);
             return false;
         }
 
@@ -185,21 +271,84 @@ public sealed class SyllableDetector
         _debugVoicedPeakCount++;
 
         // Check prominence (dip before and after)
-        float minDip = MathF.Min(prevEnergy, currentEnergy);
-        float prominence = centerEnergy - minDip;
+        float leftSum = 0f;
+        float rightSum = 0f;
+        float leftMin = float.PositiveInfinity;
+        float rightMin = float.PositiveInfinity;
+        for (int offset = 1; offset <= peakSpanFrames; offset++)
+        {
+            int leftIdx = (centerIdx - offset + MaxHistoryFrames) % MaxHistoryFrames;
+            float leftValue = _energyHistory[leftIdx];
+            leftSum += leftValue;
+            if (leftValue < leftMin)
+            {
+                leftMin = leftValue;
+            }
+
+            int rightIdx = (centerIdx + offset) % MaxHistoryFrames;
+            float rightValue = _energyHistory[rightIdx];
+            rightSum += rightValue;
+            if (rightValue < rightMin)
+            {
+                rightMin = rightValue;
+            }
+        }
+
+        float leftMean = leftSum / peakSpanFrames;
+        float rightMean = rightSum / peakSpanFrames;
+
+        float meanBaseline = MathF.Min(leftMean, rightMean);
+        float minDipInstant = MathF.Min(prevEnergy, currentEnergy);
+        float minDip = MathF.Max(minDipInstant, meanBaseline - MicroDipClampDb);
+        float prominenceClamp = centerEnergy - minDip;
+        float prominenceMean = centerEnergy - MathF.Max(leftMean, rightMean);
+        bool clampActive = minDip > minDipInstant;
+        bool meanPenalty = prominenceMean < prominenceClamp;
+        float prominence = meanPenalty ? prominenceMean : prominenceClamp;
+        float prominenceInstant = centerEnergy - minDipInstant;
+        if (clampActive)
+        {
+            _statsClampApplied++;
+        }
+        if (meanPenalty)
+        {
+            _statsMeanPenaltyApplied++;
+        }
         if (prominence > _debugMaxProminence)
         {
             _debugMaxProminence = prominence;
+        }
+        if (prominenceClamp > _statsMaxProminenceClampDb)
+        {
+            _statsMaxProminenceClampDb = prominenceClamp;
         }
         if (prominence > _statsMaxProminenceDb)
         {
             _statsMaxProminenceDb = prominence;
         }
-        if (prominence < ProminenceThresholdDb)
+        if (prominenceInstant > _statsMaxProminenceInstantDb)
+        {
+            _statsMaxProminenceInstantDb = prominenceInstant;
+        }
+        if (prominenceMean > _statsMaxProminenceMeanDb)
+        {
+            _statsMaxProminenceMeanDb = prominenceMean;
+        }
+        // Treat voicing as confidence: allow unvoiced peaks but require extra prominence to avoid noise sensitivity.
+        float requiredProminence = ProminenceThresholdDb + (voicedCenter ? 0f : UnvoicedProminencePenaltyDb);
+        if (prominence < requiredProminence)
         {
             _statsRejectLowProminence++;
-            MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence, voicedCenter,
-                centerEnergy, prevEnergy, currentEnergy, detected: false);
+            if (prominenceInstant >= requiredProminence)
+            {
+                _statsRejectLowProminenceInstant++;
+            }
+            if (prominenceMean < requiredProminence)
+            {
+                _statsRejectLowProminenceMean++;
+            }
+            MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence, prominenceInstant, prominenceMean, voicedCenter,
+                centerEnergy, prevEnergy, currentEnergy, leftMean, rightMean, leftMin, rightMin, detected: false);
             return false;
         }
 
@@ -210,8 +359,8 @@ public sealed class SyllableDetector
         if (centerFrame - _lastSyllableFrame < minIntervalFrames)
         {
             _statsRejectMinInterval++;
-            MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence, voicedCenter,
-                centerEnergy, prevEnergy, currentEnergy, detected: false);
+            MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence, prominenceInstant, prominenceMean, voicedCenter,
+                centerEnergy, prevEnergy, currentEnergy, leftMean, rightMean, leftMin, rightMin, detected: false);
             return false;
         }
 
@@ -219,9 +368,17 @@ public sealed class SyllableDetector
         _lastSyllableFrame = centerFrame;
         _debugLastDetectedFrame = centerFrame;
         _statsDetected++;
+        if (voicedCenter)
+        {
+            _statsDetectedVoiced++;
+        }
+        else
+        {
+            _statsDetectedUnvoiced++;
+        }
         _statsLastDetectedFrame = centerFrame;
-        MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence, voicedCenter,
-            centerEnergy, prevEnergy, currentEnergy, detected: true);
+        MaybeLogDebug(frameId, hopSize, sampleRate, isPeak, prominence, prominenceInstant, prominenceMean, voicedCenter,
+            centerEnergy, prevEnergy, currentEnergy, leftMean, rightMean, leftMin, rightMin, detected: true);
         return true;
     }
 
@@ -231,12 +388,14 @@ public sealed class SyllableDetector
     public void Reset()
     {
         Array.Clear(_energyHistory, 0, _energyHistory.Length);
-        Array.Clear(_voicedHistory, 0, _voicedHistory.Length);
+        Array.Clear(_voicingHistory, 0, _voicingHistory.Length);
         _historyIndex = 0;
         _historyCount = 0;
         _lastSyllableFrame = -1000;
         _smoothedEnergyDb = 0f;
+        _baselineEnergyDb = 0f;
         _initialized = false;
+        _baselineInitialized = false;
         _lastDebugTicks = 0;
         _debugPeakCount = 0;
         _debugVoicedPeakCount = 0;
@@ -249,13 +408,26 @@ public sealed class SyllableDetector
         _statsPeaks = 0;
         _statsVoicedPeaks = 0;
         _statsDetected = 0;
+        _statsDetectedVoiced = 0;
+        _statsDetectedUnvoiced = 0;
         _statsRejectNotPeak = 0;
         _statsRejectUnvoiced = 0;
         _statsRejectLowProminence = 0;
+        _statsRejectLowProminenceInstant = 0;
+        _statsRejectLowProminenceMean = 0;
         _statsRejectMinInterval = 0;
+        _statsClampApplied = 0;
+        _statsMeanPenaltyApplied = 0;
+        _statsBaselineUpdates = 0;
+        _statsBaselineSkips = 0;
         _statsMinEnergyDb = float.PositiveInfinity;
         _statsMaxEnergyDb = float.NegativeInfinity;
+        _statsMinBaselineDb = float.PositiveInfinity;
+        _statsMaxBaselineDb = float.NegativeInfinity;
+        _statsMaxProminenceClampDb = 0f;
         _statsMaxProminenceDb = 0f;
+        _statsMaxProminenceInstantDb = 0f;
+        _statsMaxProminenceMeanDb = 0f;
         _statsLastDetectedFrame = -1;
     }
 
@@ -270,8 +442,10 @@ public sealed class SyllableDetector
         return value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase);
     }
 
-    private void MaybeLogDebug(long frameId, int hopSize, int sampleRate, bool isPeak, float prominence, bool voicedCenter,
-        float centerEnergy, float prevEnergy, float currentEnergy, bool detected)
+    private void MaybeLogDebug(long frameId, int hopSize, int sampleRate, bool isPeak, float prominence, float prominenceInstant,
+        float prominenceMean,
+        bool voicedCenter, float centerEnergy, float prevEnergy, float currentEnergy, float leftMean, float rightMean,
+        float leftMin, float rightMin, bool detected)
     {
         if (!DebugLoggingEnabled)
         {
@@ -292,7 +466,7 @@ public sealed class SyllableDetector
 
         string message = string.Format(
             CultureInfo.InvariantCulture,
-            "SyllableDebug frame={0} smoothDb={1:0.00} center={2:0.00} prev={3:0.00} curr={4:0.00} isPeak={5} voiced={6} prom={7:0.00} minIntFrames={8:0.0} sinceLast={9} detected={10} peaks={11} voicedPeaks={12} maxProm={13:0.00} minDb={14:0.00} maxDb={15:0.00} lastDet={16}",
+            "SyllableDebug frame={0} smoothDb={1:0.00} center={2:0.00} prev={3:0.00} curr={4:0.00} isPeak={5} voiced={6} prom={7:0.00} promInst={8:0.00} promMean={9:0.00} leftMean={10:0.00} rightMean={11:0.00} leftMin={12:0.00} rightMin={13:0.00} minIntFrames={14:0.0} sinceLast={15} detected={16} peaks={17} voicedPeaks={18} maxProm={19:0.00} minDb={20:0.00} maxDb={21:0.00} lastDet={22}",
             frameId,
             _smoothedEnergyDb,
             centerEnergy,
@@ -301,6 +475,12 @@ public sealed class SyllableDetector
             isPeak ? 1 : 0,
             voicedCenter ? 1 : 0,
             prominence,
+            prominenceInstant,
+            prominenceMean,
+            leftMean,
+            rightMean,
+            leftMin,
+            rightMin,
             minIntervalFrames,
             framesSinceLast,
             detected ? 1 : 0,
@@ -328,11 +508,24 @@ public readonly record struct SyllableDetectorDebugStats(
     long Peaks,
     long VoicedPeaks,
     long Detected,
+    long DetectedVoiced,
+    long DetectedUnvoiced,
     long RejectNotPeak,
     long RejectUnvoiced,
     long RejectLowProminence,
+    long RejectLowProminenceInstant,
+    long RejectLowProminenceMean,
     long RejectMinInterval,
+    long ClampApplied,
+    long MeanPenaltyApplied,
+    long BaselineUpdates,
+    long BaselineSkips,
     float MinEnergyDb,
     float MaxEnergyDb,
+    float MinBaselineDb,
+    float MaxBaselineDb,
+    float MaxProminenceClampDb,
     float MaxProminenceDb,
+    float MaxProminenceInstantDb,
+    float MaxProminenceMeanDb,
     long LastDetectedFrame);

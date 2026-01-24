@@ -23,12 +23,20 @@ The focus is on speaking rate, pauses, prosody, clarity, and intelligibility.
 
 ### 1) Syllable Detection
 - Based on de Jong & Wempe peak-picking.
-- Syllable energy uses a 20 ms trailing window of band-limited peak amplitude (300–2000 Hz).
-- Smoothed energy envelope (EMA, alpha=0.15).
+- Syllable energy uses a 20 ms trailing window of band-limited RMS amplitude (300–2000 Hz).
+- Energy is normalized by a slow EMA baseline (alpha=0.01), updated on non-silence frames, then smoothed (EMA, alpha=0.15).
+- Energy is clamped to a floor of -60 dB before peak analysis.
 - Peak when center frame > previous and > current, with comparison span ≈60 ms to reduce hop-size aliasing.
 - Prominence threshold: 3 dB above local dip.
-- Voiced-only peaks.
+- Prominence uses the lower of mean-based prominence (center - max(leftMean, rightMean))
+  and clamped-dip prominence to suppress micro-dip boosts.
+- Peaks require non-silence; unvoiced peaks must clear an additional +1.5 dB prominence penalty.
 - Minimum inter-syllable interval: 50 ms.
+- Speech presence gate uses a normalized presence (subtract slow baseline, scale to 0-1),
+  then smoothed (EMA alpha=0.1) with ±0.02 hysteresis around the 0.05 threshold.
+- A secondary energy gate opens when band-limited syllable energy rises >= 3 dB above a slow baseline.
+- The combined gate has a short hangover (8 frames) before forcing voicing to Silence.
+- When speech presence is active, Silence frames from the voicing detector are treated as Unvoiced to avoid false pauses.
 
 ### 2) Pause Detection
 - **Silent pause:** voicing == Silence for >=150 ms.

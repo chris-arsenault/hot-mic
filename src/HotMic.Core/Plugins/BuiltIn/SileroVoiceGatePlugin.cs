@@ -32,6 +32,20 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
     private AutoResetEvent? _frameSignal;
     private int _running;
     private SileroVadInference? _inference;
+    private float[] _delayBuffer = Array.Empty<float>();
+    private int _delayMask;
+    private int _delayWriteIndex;
+    private int _analysisLatencySamples;
+    private long _inputSampleIndex;
+    private long _inputReadSampleIndex;
+    private long _lastDroppedSamples;
+    private long[] _vadSampleTimes = Array.Empty<long>();
+    private float[] _vadValues = Array.Empty<float>();
+    private int _vadMask;
+    private int _vadWriteIndex;
+    private int _vadReadIndex;
+    private float _vadLastValue;
+    private long _vadLastSampleTime = long.MinValue;
 
     private float _threshold = 0.5f;
     private float _attackMs = 6f;
@@ -45,7 +59,8 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
     private int _sampleRate;
     private int _silenceFrames;
 
-    private int _vadBits;
+    private int _vadRawBits;
+    private int _vadAlignedBits;
     private int _inputLevelBits;
     private int _outputLevelBits;
     private bool _forcedBypass;
@@ -70,7 +85,7 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
 
     public bool IsBypassed { get; set; }
 
-    public int LatencySamples => 0;
+    public int LatencySamples => _forcedBypass ? 0 : _analysisLatencySamples;
 
     public IReadOnlyList<PluginParameter> Parameters { get; }
 
@@ -80,7 +95,9 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
         ? AnalysisSignalMask.None
         : AnalysisSignalMask.SpeechPresence;
 
-    public float VadProbability => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _vadBits, 0, 0));
+    public float VadProbability => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _vadAlignedBits, 0, 0));
+
+    public float RawVadProbability => BitConverter.Int32BitsToSingle(Interlocked.CompareExchange(ref _vadRawBits, 0, 0));
 
     public float GetAndResetInputLevel()
     {
@@ -235,6 +252,8 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
         int ringCapacity = Math.Max(_frameSamples48k * 6, blockSize * 8);
         _inputBuffer = new LockFreeRingBuffer(ringCapacity);
         _decimatorFilter.Configure(LowPassCutoffHz, RequiredSampleRate);
+        ConfigureLatency();
+        ConfigureVadQueue();
         ResetState();
     }
 
@@ -255,7 +274,10 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
         _inputBuffer.Write(buffer);
         _frameSignal?.Set();
 
-        float vad = VadProbability;
+        long blockSampleTime = _inputSampleIndex;
+        _inputSampleIndex += buffer.Length;
+        long outputSampleTime = blockSampleTime - _analysisLatencySamples + buffer.Length - 1;
+        float vad = GetAlignedVad(outputSampleTime);
         if (!float.IsFinite(vad))
         {
             vad = 0f;
@@ -266,10 +288,22 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
         float gate = _gate;
         float peakIn = 0f;
         float peakOut = 0f;
+        bool useDelay = _analysisLatencySamples > 0 && _delayBuffer.Length > 0;
+        int delay = _analysisLatencySamples;
+        int mask = _delayMask;
+        int writeIndex = _delayWriteIndex;
 
         for (int i = 0; i < buffer.Length; i++)
         {
             float input = buffer[i];
+            float delayed = input;
+            if (useDelay)
+            {
+                int readIndex = (writeIndex - delay) & mask;
+                delayed = _delayBuffer[readIndex];
+                _delayBuffer[writeIndex] = input;
+                writeIndex = (writeIndex + 1) & mask;
+            }
             float absIn = MathF.Abs(input);
             if (absIn > peakIn)
             {
@@ -284,7 +318,7 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
             float target = (detected || holdLeft > 0) ? 1f : 0f;
             float coeff = target > gate ? _attackCoeff : _releaseCoeff;
             gate += coeff * (target - gate);
-            float output = input * gate;
+            float output = delayed * gate;
             buffer[i] = output;
 
             float absOut = MathF.Abs(output);
@@ -296,6 +330,10 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
 
         _gate = gate;
         _holdSamplesLeft = holdLeft;
+        if (useDelay)
+        {
+            _delayWriteIndex = writeIndex;
+        }
 
         Interlocked.Exchange(ref _inputLevelBits, BitConverter.SingleToInt32Bits(peakIn));
         Interlocked.Exchange(ref _outputLevelBits, BitConverter.SingleToInt32Bits(peakOut));
@@ -318,9 +356,30 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
         _gate = 0f;
         _decimatorFilter.Reset();
         _inference?.ResetState();
-        Interlocked.Exchange(ref _vadBits, 0);
+        Interlocked.Exchange(ref _vadRawBits, 0);
+        Interlocked.Exchange(ref _vadAlignedBits, 0);
         Interlocked.Exchange(ref _inputLevelBits, 0);
         Interlocked.Exchange(ref _outputLevelBits, 0);
+        _inputSampleIndex = 0;
+        _inputReadSampleIndex = 0;
+        _lastDroppedSamples = 0;
+        _vadLastSampleTime = long.MinValue;
+        _vadLastValue = 0f;
+        _vadWriteIndex = 0;
+        _vadReadIndex = 0;
+        if (_delayBuffer.Length > 0)
+        {
+            Array.Clear(_delayBuffer, 0, _delayBuffer.Length);
+            _delayWriteIndex = 0;
+        }
+        if (_vadSampleTimes.Length > 0)
+        {
+            Array.Clear(_vadSampleTimes, 0, _vadSampleTimes.Length);
+        }
+        if (_vadValues.Length > 0)
+        {
+            Array.Clear(_vadValues, 0, _vadValues.Length);
+        }
     }
 
     private void UpdateCoefficients()
@@ -333,6 +392,117 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
         _attackCoeff = DspUtils.TimeToCoefficient(_attackMs, _sampleRate);
         _releaseCoeff = DspUtils.TimeToCoefficient(_releaseMs, _sampleRate);
         _holdSamples = (int)(_holdMs * 0.001f * _sampleRate);
+    }
+
+    private void ConfigureLatency()
+    {
+        _analysisLatencySamples = _frameSamples48k * 2;
+        if (_analysisLatencySamples <= 0)
+        {
+            _delayBuffer = Array.Empty<float>();
+            _delayMask = 0;
+            _delayWriteIndex = 0;
+            return;
+        }
+
+        int size = 1;
+        int target = _analysisLatencySamples + 1;
+        while (size < target)
+        {
+            size <<= 1;
+        }
+
+        if (_delayBuffer.Length != size)
+        {
+            _delayBuffer = new float[size];
+        }
+        else
+        {
+            Array.Clear(_delayBuffer, 0, _delayBuffer.Length);
+        }
+
+        _delayMask = size - 1;
+        _delayWriteIndex = 0;
+    }
+
+    private void ConfigureVadQueue()
+    {
+        int capacity = 128;
+        int size = 1;
+        while (size < capacity)
+        {
+            size <<= 1;
+        }
+
+        if (_vadSampleTimes.Length != size)
+        {
+            _vadSampleTimes = new long[size];
+            _vadValues = new float[size];
+        }
+        else
+        {
+            Array.Clear(_vadSampleTimes, 0, _vadSampleTimes.Length);
+            Array.Clear(_vadValues, 0, _vadValues.Length);
+        }
+
+        _vadMask = size - 1;
+        _vadWriteIndex = 0;
+        _vadReadIndex = 0;
+    }
+
+    private void EnqueueVadResult(long sampleTime, float probability)
+    {
+        if (_vadSampleTimes.Length == 0)
+        {
+            return;
+        }
+
+        int write = _vadWriteIndex;
+        int next = (write + 1) & _vadMask;
+        int read = Volatile.Read(ref _vadReadIndex);
+        if (next == read)
+        {
+            read = (read + 1) & _vadMask;
+            Volatile.Write(ref _vadReadIndex, read);
+        }
+
+        _vadSampleTimes[write] = sampleTime;
+        _vadValues[write] = probability;
+        Volatile.Write(ref _vadWriteIndex, next);
+    }
+
+    private float GetAlignedVad(long sampleTime)
+    {
+        if (sampleTime < 0 || _vadSampleTimes.Length == 0)
+        {
+            float fallback = _vadLastValue;
+            Interlocked.Exchange(ref _vadAlignedBits, BitConverter.SingleToInt32Bits(fallback));
+            return fallback;
+        }
+
+        int read = _vadReadIndex;
+        int write = Volatile.Read(ref _vadWriteIndex);
+        while (read != write)
+        {
+            long time = _vadSampleTimes[read];
+            if (time > sampleTime)
+            {
+                break;
+            }
+
+            _vadLastSampleTime = time;
+            _vadLastValue = _vadValues[read];
+            read = (read + 1) & _vadMask;
+        }
+
+        Volatile.Write(ref _vadReadIndex, read);
+        float value = _vadLastValue;
+        if (!float.IsFinite(value))
+        {
+            value = 0f;
+        }
+        Interlocked.Exchange(ref _vadAlignedBits, BitConverter.SingleToInt32Bits(value));
+        return value;
     }
 
     private void StartWorker()
@@ -393,11 +563,23 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
 
             while (_inputBuffer.AvailableRead >= _frameSamples48k)
             {
+                long dropped = _inputBuffer.DroppedSamples;
+                long droppedDelta = dropped - _lastDroppedSamples;
+                if (droppedDelta > 0)
+                {
+                    _inputReadSampleIndex += droppedDelta;
+                    _lastDroppedSamples = dropped;
+                    _inference.ResetState();
+                }
+
                 int read = _inputBuffer.Read(_frame48);
                 if (read < _frameSamples48k)
                 {
                     break;
                 }
+
+                long frameStartSample = _inputReadSampleIndex;
+                _inputReadSampleIndex += _frameSamples48k;
 
                 float energy = 0f;
                 float maxAbs = 0f;
@@ -420,7 +602,8 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
                     {
                         _inference.ResetState();
                     }
-                    Interlocked.Exchange(ref _vadBits, 0);
+                    Interlocked.Exchange(ref _vadRawBits, 0);
+                    EnqueueVadResult(frameStartSample + _frameSamples48k - 1, 0f);
                     continue;
                 }
 
@@ -441,7 +624,8 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
                 }
 
                 float prob = _inference.Process(_frame16, out _);
-                Interlocked.Exchange(ref _vadBits, BitConverter.SingleToInt32Bits(prob));
+                Interlocked.Exchange(ref _vadRawBits, BitConverter.SingleToInt32Bits(prob));
+                EnqueueVadResult(frameStartSample + _frameSamples48k - 1, prob);
             }
         }
     }

@@ -336,6 +336,11 @@ public sealed class SpeechCoach
     public SpeechRateDebugStats RateDebugStats => _rateCalculator.DebugStats;
 
     /// <summary>
+    /// Debug counters from the pause detector.
+    /// </summary>
+    public PauseDetectorDebugStats PauseDebugStats => _pauseDetector.DebugStats;
+
+    /// <summary>
     /// Reset all analyzers.
     /// </summary>
     public void Reset()

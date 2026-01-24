@@ -13,6 +13,14 @@ public sealed class SpeechMetricsProcessor
     private const float SyllableBandHighHz = 2000f;
     private const float SyllableBandQ = 0.707f;
     private const float SyllableEnergyWindowMs = 20f;
+    private const float SpeechPresenceSmoothingAlpha = 0.1f;
+    private const float SpeechPresenceHysteresis = 0.02f;
+    private const float SpeechPresenceBaselineAlpha = 0.01f;
+    private const float SpeechPresenceBaselineGuard = 0.05f;
+    private const int SpeechPresenceHangoverFrames = 8;
+    private const float SpeechEnergyBaselineAlpha = 0.01f;
+    private const float SpeechEnergyBaselineRiseDb = 3f;
+    private const float SpeechEnergyGateThresholdDb = 3f;
 
     private readonly SpeechCoach _speechCoach = new();
     private readonly BiquadFilter _syllableHighPass = new();
@@ -23,6 +31,14 @@ public sealed class SpeechMetricsProcessor
     private float _bandPresenceSmooth;
     private float _bandHighSmooth;
     private bool _bandSmoothInitialized;
+    private float _speechPresenceSmooth;
+    private bool _speechPresenceInitialized;
+    private float _speechPresenceBaseline;
+    private bool _speechPresenceBaselineInitialized;
+    private bool _speechPresenceGateOpen;
+    private int _speechPresenceHangoverRemaining;
+    private float _speechEnergyBaselineDb;
+    private bool _speechEnergyBaselineInitialized;
     private int _syllableWindowSamples;
 
     public float LastEnergyDb { get; private set; }
@@ -30,6 +46,7 @@ public sealed class SpeechMetricsProcessor
     public float LastSyllableEnergyRatio { get; private set; }
     public SyllableDetectorDebugStats SyllableDebugStats => _speechCoach.SyllableDebugStats;
     public SpeechRateDebugStats RateDebugStats => _speechCoach.RateDebugStats;
+    public PauseDetectorDebugStats PauseDebugStats => _speechCoach.PauseDebugStats;
 
     public void Configure(int hopSize, int sampleRate)
     {
@@ -50,6 +67,14 @@ public sealed class SpeechMetricsProcessor
         LastEnergyDb = 0f;
         LastSyllableEnergyDb = 0f;
         LastSyllableEnergyRatio = 0f;
+        _speechPresenceSmooth = 0f;
+        _speechPresenceInitialized = false;
+        _speechPresenceBaseline = 0f;
+        _speechPresenceBaselineInitialized = false;
+        _speechPresenceGateOpen = false;
+        _speechPresenceHangoverRemaining = 0;
+        _speechEnergyBaselineDb = 0f;
+        _speechEnergyBaselineInitialized = false;
     }
 
     public SpeechMetricsFrame Process(
@@ -68,22 +93,96 @@ public sealed class SpeechMetricsProcessor
         float hnr,
         long frameId)
     {
+        float energyDb = ComputePeakDb(waveformMin, waveformMax);
+        float syllableEnergyDb = ComputeSyllableEnergyDb(analysisRaw);
+        float spectralFlatness = ComputeSpectralFlatness(speechMagnitudes);
+
         if (!float.IsFinite(speechPresence))
         {
             speechPresence = 0f;
         }
 
-        bool hasSpeech = speechPresence > AnalysisSignalProcessor.SpeechPresenceGateThreshold;
+        float presenceValue = Math.Clamp(speechPresence, 0f, 1f);
+        if (!_speechPresenceBaselineInitialized)
+        {
+            _speechPresenceBaseline = presenceValue;
+            _speechPresenceBaselineInitialized = true;
+        }
+        else if (presenceValue <= _speechPresenceBaseline + SpeechPresenceBaselineGuard)
+        {
+            _speechPresenceBaseline = SpeechPresenceBaselineAlpha * presenceValue
+                + (1f - SpeechPresenceBaselineAlpha) * _speechPresenceBaseline;
+        }
+
+        float normalizedPresence = (presenceValue - _speechPresenceBaseline)
+            / MathF.Max(1e-4f, 1f - _speechPresenceBaseline);
+        normalizedPresence = Math.Clamp(normalizedPresence, 0f, 1f);
+
+        if (!_speechPresenceInitialized)
+        {
+            _speechPresenceSmooth = normalizedPresence;
+            _speechPresenceInitialized = true;
+        }
+        else
+        {
+            _speechPresenceSmooth = SpeechPresenceSmoothingAlpha * normalizedPresence
+                + (1f - SpeechPresenceSmoothingAlpha) * _speechPresenceSmooth;
+        }
+
+        float gateThreshold = AnalysisSignalProcessor.SpeechPresenceGateThreshold;
+        float onThreshold = MathF.Min(1f, gateThreshold + SpeechPresenceHysteresis);
+        float offThreshold = MathF.Max(0f, gateThreshold - SpeechPresenceHysteresis);
+
+        if (_speechPresenceGateOpen)
+        {
+            if (_speechPresenceSmooth < offThreshold)
+            {
+                _speechPresenceGateOpen = false;
+            }
+        }
+        else if (_speechPresenceSmooth > onThreshold)
+        {
+            _speechPresenceGateOpen = true;
+        }
+
+        if (!_speechEnergyBaselineInitialized)
+        {
+            _speechEnergyBaselineDb = syllableEnergyDb;
+            _speechEnergyBaselineInitialized = true;
+        }
+        else if (syllableEnergyDb < _speechEnergyBaselineDb)
+        {
+            _speechEnergyBaselineDb = syllableEnergyDb;
+        }
+        else if (syllableEnergyDb <= _speechEnergyBaselineDb + SpeechEnergyBaselineRiseDb)
+        {
+            _speechEnergyBaselineDb = SpeechEnergyBaselineAlpha * syllableEnergyDb
+                + (1f - SpeechEnergyBaselineAlpha) * _speechEnergyBaselineDb;
+        }
+
+        bool energyGateOpen = (syllableEnergyDb - _speechEnergyBaselineDb) >= SpeechEnergyGateThresholdDb;
+        bool combinedGateOpen = _speechPresenceGateOpen || energyGateOpen;
+
+        if (combinedGateOpen)
+        {
+            _speechPresenceHangoverRemaining = SpeechPresenceHangoverFrames;
+        }
+        else if (_speechPresenceHangoverRemaining > 0)
+        {
+            _speechPresenceHangoverRemaining--;
+        }
+
+        bool hasSpeech = combinedGateOpen || _speechPresenceHangoverRemaining > 0;
         if (!hasSpeech)
         {
             pitchHz = 0f;
             pitchConfidence = 0f;
             voicing = VoicingState.Silence;
         }
-
-        float energyDb = ComputePeakDb(waveformMin, waveformMax);
-        float syllableEnergyDb = ComputeSyllableEnergyDb(analysisRaw);
-        float spectralFlatness = ComputeSpectralFlatness(speechMagnitudes);
+        else if (voicing == VoicingState.Silence)
+        {
+            voicing = VoicingState.Unvoiced;
+        }
 
         float bandLowRatio = 0f;
         float bandMidRatio = 0f;
@@ -292,18 +391,20 @@ public sealed class SpeechMetricsProcessor
             hopRaw = hopRaw.Slice(hopRaw.Length - _syllableWindowSamples, _syllableWindowSamples);
         }
 
-        float peak = 0f;
+        float sumSquares = 0f;
         for (int i = 0; i < hopRaw.Length; i++)
         {
             float filtered = _syllableLowPass.Process(_syllableHighPass.Process(hopRaw[i]));
-            float abs = MathF.Abs(filtered);
-            if (abs > peak)
-            {
-                peak = abs;
-            }
+            sumSquares += filtered * filtered;
         }
 
-        return peak > 1e-8f ? 20f * MathF.Log10(peak) : -80f;
+        if (sumSquares <= 1e-12f)
+        {
+            return -80f;
+        }
+
+        float rms = MathF.Sqrt(sumSquares / hopRaw.Length);
+        return rms > 1e-8f ? 20f * MathF.Log10(rms) : -80f;
     }
 
     private void ConfigureSyllableFilters(int sampleRate)
