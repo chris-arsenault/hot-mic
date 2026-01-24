@@ -44,6 +44,7 @@ public sealed class AnalysisConfiguration
     private float _reassignSpread = 1f;
     private SpectrogramNormalizationMode _normalizationMode = SpectrogramNormalizationMode.None;
     private VoicingDetectorSettings _voicingSettings = new();
+    private AnalysisCaptureSource _visualizerSource = AnalysisCaptureSource.Plugin;
 
     public int FftSize
     {
@@ -185,6 +186,12 @@ public sealed class AnalysisConfiguration
         set => _voicingSettings = value;
     }
 
+    public AnalysisCaptureSource VisualizerSource
+    {
+        get => _visualizerSource;
+        set => _visualizerSource = value;
+    }
+
     public int ComputeHopSize() => Math.Max(1, (int)(_fftSize * (1f - Overlap)));
 
     public int ComputeFrameCapacity(int sampleRate)
@@ -220,6 +227,7 @@ public sealed class AnalysisConfiguration
             _reassignSpread = _reassignSpread,
             _normalizationMode = _normalizationMode,
             _voicingSettings = _voicingSettings,
+            _visualizerSource = _visualizerSource,
         };
     }
 

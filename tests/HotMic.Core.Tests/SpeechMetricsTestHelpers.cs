@@ -2,11 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
+using System.Text.Json;
 using HotMic.Core.Analysis;
 using HotMic.Core.Dsp;
 using HotMic.Core.Dsp.Analysis;
 using HotMic.Core.Dsp.Analysis.Pitch;
 using HotMic.Core.Dsp.Analysis.Speech;
+using HotMic.Core.Presets;
 using HotMic.Core.Plugins;
 using NAudio.Wave;
 
@@ -15,8 +18,18 @@ namespace HotMic.Core.Tests;
 internal static class SpeechMetricsTestHelpers
 {
     internal const string TestWavRelativePath = "tests/HotMic.Core.Tests/data/noisy_voice_4sec.wav";
+    internal const string DefaultChainRelativePath = "default.json";
     internal const float PipelineDeltaPercent = 0.10f;
     internal const float PipelineDeltaFloor = 2.0f;
+    internal const float NormalizedDeltaFloor = 0.05f;
+    internal const float NormalizedDeltaPercent = 0.15f;
+    internal const float PitchDeltaFloorHz = 10.0f;
+    internal const float PitchDeltaPercent = 0.15f;
+
+    private static readonly JsonSerializerOptions PresetJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
 
     internal static readonly SpeechPipelineCase TapOffCase = new(
         "tap-off",
@@ -62,13 +75,78 @@ internal static class SpeechMetricsTestHelpers
             analysisTapEnabled: true,
             speechPresenceMode: AnalysisTapMode.UseExisting));
 
-    internal static readonly SpeechPipelineCase[] PipelineCases = { TapOffCase, TapOnCase };
+    internal static readonly StoredChainPreset DefaultChainPreset = LoadChainPreset(DefaultChainRelativePath);
+
+    internal static readonly SpeechPipelineCase DefaultChainCase = new(
+        "default-chain",
+        SpeechPipelineConfig.FromChainPreset(DefaultChainPreset, AnalysisTapMode.Generate));
+
+    internal static readonly SpeechPipelineCase DefaultChainPresenceExistingCase = new(
+        "default-chain-presence-existing",
+        SpeechPipelineConfig.FromChainPreset(DefaultChainPreset, AnalysisTapMode.UseExisting));
+
+    internal static readonly SpeechPipelineCase DefaultChainNoVadCase = new(
+        "default-chain-novad",
+        SpeechPipelineConfig.FromChainPreset(
+            DefaultChainPreset,
+            AnalysisTapMode.Generate,
+            new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["builtin:voice-gate"] = false
+            }));
+
+    internal static readonly SpeechPipelineCase DefaultChainNoDenoiserCase = new(
+        "default-chain-nodenoiser",
+        SpeechPipelineConfig.FromChainPreset(
+            DefaultChainPreset,
+            AnalysisTapMode.Generate,
+            new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["builtin:speechdenoiser"] = false
+            }));
+
+    internal static readonly SpeechPipelineCase DefaultChainNoTapCase = new(
+        "default-chain-notap",
+        SpeechPipelineConfig.FromChainPreset(
+            DefaultChainPreset,
+            AnalysisTapMode.Generate,
+            new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["builtin:analysis-tap"] = false
+            }));
+
+    internal static readonly SpeechPipelineCase DefaultChainNoDynamicsCase = new(
+        "default-chain-nodynamics",
+        SpeechPipelineConfig.FromChainPreset(
+            DefaultChainPreset,
+            AnalysisTapMode.Generate,
+            new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["builtin:gain"] = false,
+                ["builtin:compressor"] = false,
+                ["builtin:deesser"] = false
+            }));
+
+    internal static readonly SpeechPipelineCase[] PipelineCases =
+    {
+        TapOffCase,
+        TapOnCase,
+        DefaultChainCase,
+        DefaultChainPresenceExistingCase
+    };
+
     public static readonly object[][] PipelineCaseData =
     {
         new object[] { TapOffCase },
         new object[] { TapOnCase },
         new object[] { TapOnNoVadDenoiserCase },
-        new object[] { TapOnVadNoDenoiserCase }
+        new object[] { TapOnVadNoDenoiserCase },
+        new object[] { DefaultChainCase },
+        new object[] { DefaultChainPresenceExistingCase },
+        new object[] { DefaultChainNoVadCase },
+        new object[] { DefaultChainNoDenoiserCase },
+        new object[] { DefaultChainNoTapCase },
+        new object[] { DefaultChainNoDynamicsCase }
     };
 
     internal static SpeechMetricsOfflineResult AnalyzeOffline(float[] samples, int sampleRate)
@@ -76,6 +154,12 @@ internal static class SpeechMetricsTestHelpers
 
     internal static float AllowedPipelineDelta(float baseline)
         => MathF.Max(PipelineDeltaFloor, MathF.Abs(baseline) * PipelineDeltaPercent);
+
+    internal static float AllowedNormalizedDelta(float baseline)
+        => MathF.Max(NormalizedDeltaFloor, MathF.Abs(baseline) * NormalizedDeltaPercent);
+
+    internal static float AllowedPitchDelta(float baseline)
+        => MathF.Max(PitchDeltaFloorHz, MathF.Abs(baseline) * PitchDeltaPercent);
 
     internal static float[] LoadMonoSamples(string path, out int sampleRate)
     {
@@ -158,6 +242,19 @@ internal static class SpeechMetricsTestHelpers
         }
 
         throw new FileNotFoundException($"Test data not found: {relativePath}");
+    }
+
+    internal static StoredChainPreset LoadChainPreset(string relativePath)
+    {
+        string path = FindRepoFile(relativePath);
+        string json = File.ReadAllText(path);
+        var preset = JsonSerializer.Deserialize<StoredChainPreset>(json, PresetJsonOptions);
+        if (preset == null || string.IsNullOrWhiteSpace(preset.Name))
+        {
+            throw new InvalidDataException($"Invalid chain preset: {relativePath}");
+        }
+
+        return preset;
     }
 }
 
@@ -289,6 +386,17 @@ internal sealed class SpeechMetricsOfflineAnalyzer
             _sampleRate);
         _energySyllableStats = _energySyllableDetector.DebugStats;
 
+        _metricFrames++;
+        _sumMonotoneScore += _lastMetrics.MonotoneScore;
+        _sumClarityScore += _lastMetrics.ClarityScore;
+        _sumIntelligibilityScore += _lastMetrics.IntelligibilityScore;
+        if (pitchConfidence > 0f)
+        {
+            _sumPitchHz += pitch;
+            _sumPitchConfidence += pitchConfidence;
+            _pitchFrames++;
+        }
+
         _frames++;
         switch (voicing)
         {
@@ -354,6 +462,12 @@ internal sealed class SpeechMetricsOfflineAnalyzer
 
     private SpeechMetricsOfflineResult CreateResult()
     {
+        float meanMonotone = _metricFrames > 0 ? (float)(_sumMonotoneScore / _metricFrames) : 0f;
+        float meanClarity = _metricFrames > 0 ? (float)(_sumClarityScore / _metricFrames) : 0f;
+        float meanIntelligibility = _metricFrames > 0 ? (float)(_sumIntelligibilityScore / _metricFrames) : 0f;
+        float meanPitchHz = _pitchFrames > 0 ? (float)(_sumPitchHz / _pitchFrames) : 0f;
+        float meanPitchConfidence = _pitchFrames > 0 ? (float)(_sumPitchConfidence / _pitchFrames) : 0f;
+
         return new SpeechMetricsOfflineResult(
             _lastMetrics.WordsPerMinute,
             _lastMetrics.ArticulationWpm,
@@ -380,6 +494,11 @@ internal sealed class SpeechMetricsOfflineAnalyzer
             FixInf(_maxPitchHz),
             FixInf(_minFlux),
             FixInf(_maxFlux),
+            meanMonotone,
+            meanClarity,
+            meanIntelligibility,
+            meanPitchHz,
+            meanPitchConfidence,
             _metricsProcessor.SyllableDebugStats,
             _energySyllableStats,
             _metricsProcessor.RateDebugStats,
@@ -396,6 +515,8 @@ internal sealed class SpeechMetricsOfflineAnalyzer
     }
 
     private long _frames;
+    private long _metricFrames;
+    private long _pitchFrames;
     private long _voicedFrames;
     private long _unvoicedFrames;
     private long _silenceFrames;
@@ -410,6 +531,11 @@ internal sealed class SpeechMetricsOfflineAnalyzer
     private float _maxPitchHz = float.NegativeInfinity;
     private float _minFlux = float.PositiveInfinity;
     private float _maxFlux = float.NegativeInfinity;
+    private double _sumMonotoneScore;
+    private double _sumClarityScore;
+    private double _sumIntelligibilityScore;
+    private double _sumPitchHz;
+    private double _sumPitchConfidence;
 }
 
 internal readonly record struct SpeechMetricsOfflineResult(
@@ -438,6 +564,11 @@ internal readonly record struct SpeechMetricsOfflineResult(
     float MaxPitchHz,
     float MinSpectralFlux,
     float MaxSpectralFlux,
+    float MeanMonotoneScore,
+    float MeanClarityScore,
+    float MeanIntelligibilityScore,
+    float MeanPitchHz,
+    float MeanPitchConfidence,
     SyllableDetectorDebugStats SyllableStats,
     SyllableDetectorDebugStats EnergyStats,
     SpeechRateDebugStats RateStats,
@@ -447,7 +578,7 @@ internal readonly record struct SpeechMetricsOfflineResult(
     {
         return string.Format(
             CultureInfo.InvariantCulture,
-            "SpeechMetricsSummary {0} wpm={1:0.00} artWpm={2:0.00} pauseRatio={3:0.00} meanPauseMs={4:0.0} ppm={5:0.0} filledRatio={6:0.00} pauseBins=m{7} s{8} md{9} l{10} frames={11} voiced={12} unvoiced={13} silence={14} syllDet={15} energyDb=[{16:0.0},{17:0.0}] syllDb=[{18:0.0},{19:0.0}] pitchConf=[{20:0.00},{21:0.00}] pitchHz=[{22:0.0},{23:0.0}] flux=[{24:0.000},{25:0.000}] peaks={26} voicedPeaks={27} det={28} detV={29} detU={30} rejPeak={31} rejVoiced={32} rejProm={33} rejPromInst={34} rejPromMean={35} rejMinInt={36} clamp={37} meanPenalty={38} maxPromClamp={39:0.00} maxProm={40:0.00} maxPromInst={41:0.00} maxPromMean={42:0.00} baseDb=[{43:0.0},{44:0.0}] baseUpd={45} baseSkip={46} energyDet={47} energyMaxProm={48:0.00} rateSyll={49} ratePauses={50} pauseFrames={51} pauseSilence={52} pauseFilledCand={53} pauseSpeaking={54} pauseEvS={55} pauseEvF={56} pauseFramesS={57} pauseFramesF={58}",
+            "SpeechMetricsSummary {0} wpm={1:0.00} artWpm={2:0.00} pauseRatio={3:0.00} meanPauseMs={4:0.0} ppm={5:0.0} filledRatio={6:0.00} pauseBins=m{7} s{8} md{9} l{10} frames={11} voiced={12} unvoiced={13} silence={14} syllDet={15} energyDb=[{16:0.0},{17:0.0}] syllDb=[{18:0.0},{19:0.0}] pitchConf=[{20:0.00},{21:0.00}] pitchHz=[{22:0.0},{23:0.0}] flux=[{24:0.000},{25:0.000}] peaks={26} voicedPeaks={27} det={28} detV={29} detU={30} rejPeak={31} rejVoiced={32} rejProm={33} rejPromInst={34} rejPromMean={35} rejMinInt={36} clamp={37} meanPenalty={38} maxPromClamp={39:0.00} maxProm={40:0.00} maxPromInst={41:0.00} maxPromMean={42:0.00} baseDb=[{43:0.0},{44:0.0}] baseUpd={45} baseSkip={46} energyDet={47} energyMaxProm={48:0.00} rateSyll={49} ratePauses={50} pauseFrames={51} pauseSilence={52} pauseFilledCand={53} pauseSpeaking={54} pauseEvS={55} pauseEvF={56} pauseFramesS={57} pauseFramesF={58} monoMean={59:0.000} clarityMean={60:0.000} intelMean={61:0.000} pitchMean={62:0.0} pitchConfMean={63:0.00}",
             label,
             WordsPerMinute,
             ArticulationWpm,
@@ -506,7 +637,12 @@ internal readonly record struct SpeechMetricsOfflineResult(
             PauseStats.SilentPauseEvents,
             PauseStats.FilledPauseEvents,
             PauseStats.SilentPauseFrames,
-            PauseStats.FilledPauseFrames);
+            PauseStats.FilledPauseFrames,
+            MeanMonotoneScore,
+            MeanClarityScore,
+            MeanIntelligibilityScore,
+            MeanPitchHz,
+            MeanPitchConfidence);
     }
 }
 
@@ -517,7 +653,9 @@ public sealed record SpeechPipelineConfig(
     bool CompressorEnabled,
     bool DeEsserEnabled,
     bool AnalysisTapEnabled,
-    AnalysisTapMode SpeechPresenceMode)
+    AnalysisTapMode SpeechPresenceMode,
+    StoredChainPreset? ChainPreset,
+    IReadOnlyDictionary<string, bool>? PluginOverrides)
 {
     public static SpeechPipelineConfig Build(
         bool vadEnabled,
@@ -535,11 +673,53 @@ public sealed record SpeechPipelineConfig(
             compressorEnabled,
             deEsserEnabled,
             analysisTapEnabled,
-            speechPresenceMode);
+            speechPresenceMode,
+            ChainPreset: null,
+            PluginOverrides: null);
+    }
+
+    public static SpeechPipelineConfig FromChainPreset(
+        StoredChainPreset preset,
+        AnalysisTapMode speechPresenceMode,
+        IReadOnlyDictionary<string, bool>? pluginOverrides = null)
+    {
+        if (preset is null)
+        {
+            throw new ArgumentNullException(nameof(preset));
+        }
+
+        return new SpeechPipelineConfig(
+            VadEnabled: false,
+            DenoiserEnabled: false,
+            GainEnabled: false,
+            CompressorEnabled: false,
+            DeEsserEnabled: false,
+            AnalysisTapEnabled: false,
+            SpeechPresenceMode: speechPresenceMode,
+            ChainPreset: preset,
+            PluginOverrides: pluginOverrides);
     }
 
     public string Describe()
     {
+        if (ChainPreset is not null)
+        {
+            string overrides = string.Empty;
+            if (PluginOverrides is not null && PluginOverrides.Count > 0)
+            {
+                overrides = string.Join(", ",
+                    PluginOverrides.Select(kvp => $"{kvp.Key}={(kvp.Value ? "on" : "off")}"));
+                overrides = $" overrides=[{overrides}]";
+            }
+
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "chain={0} tapMode={1}{2}",
+                ChainPreset.Name,
+                SpeechPresenceMode,
+                overrides);
+        }
+
         return string.Format(
             CultureInfo.InvariantCulture,
             "vad={0} denoiser={1} gain={2} compressor={3} deesser={4} tap={5} tapMode={6}",

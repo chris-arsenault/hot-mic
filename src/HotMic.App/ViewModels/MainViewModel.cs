@@ -245,6 +245,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string analysisTapGateLine = "Gate: n/a";
 
     [ObservableProperty]
+    private string analysisTapCaptureLine = "Cap: n/a";
+
+    [ObservableProperty]
+    private string analysisOrchestratorLine = "Orch: n/a";
+
+    [ObservableProperty]
     private string vitalizerLine = "Vitalizer: n/a";
 
     [ObservableProperty]

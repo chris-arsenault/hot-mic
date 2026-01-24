@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <None Include="data\noisy_voice_4sec.wav" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\default.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\src\HotMic.App\Assets\Models\silero-vad\silero_vad.onnx">
       <Link>Assets\Models\silero-vad\silero_vad.onnx</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

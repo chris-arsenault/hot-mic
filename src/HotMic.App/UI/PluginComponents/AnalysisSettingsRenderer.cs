@@ -26,10 +26,12 @@ public sealed class AnalysisSettingsRenderer : IDisposable
     private readonly SKPaint _borderPaint;
     private readonly SKPaint _buttonPaint;
     private readonly SKPaint _buttonActivePaint;
+    private readonly SKPaint _buttonDisabledPaint;
     private readonly SkiaTextPaint _titlePaint;
     private readonly SkiaTextPaint _closeButtonPaint;
     private readonly SkiaTextPaint _panelHeaderPaint;
     private readonly SkiaTextPaint _buttonTextPaint;
+    private readonly SkiaTextPaint _buttonTextDisabledPaint;
     private readonly SkiaTextPaint _labelPaint;
 
     // Knobs
@@ -55,6 +57,7 @@ public sealed class AnalysisSettingsRenderer : IDisposable
     public SKRect[] ClarityButtonRects { get; } = new SKRect[3];
     public SKRect[] SmoothingButtonRects { get; } = new SKRect[3];
     public SKRect[] NormalizationButtonRects { get; } = new SKRect[4];
+    public SKRect[] VisualizerSourceButtonRects { get; } = new SKRect[2];
     public SKRect[] PitchAlgorithmButtonRects { get; } = new SKRect[5];
     public SKRect PreEmphasisButtonRect { get; private set; }
     public SKRect HighPassButtonRect { get; private set; }
@@ -71,6 +74,8 @@ public sealed class AnalysisSettingsRenderer : IDisposable
     public int SmoothingIndex { get; set; } = 1;
     public int NormalizationIndex { get; set; }
     public int PitchAlgorithmIndex { get; set; }
+    public int VisualizerSourceIndex { get; set; }
+    public bool VisualizerMidEnabled { get; set; } = true;
     public bool PreEmphasisEnabled { get; set; } = true;
     public bool HighPassEnabled { get; set; } = true;
 
@@ -84,6 +89,7 @@ public sealed class AnalysisSettingsRenderer : IDisposable
     private static readonly string[] SmoothingLabels = ["Off", "EMA", "Bilat"];
     private static readonly string[] NormalizationLabels = ["Off", "Peak", "RMS", "A-Wt"];
     private static readonly string[] PitchAlgorithmLabels = ["YIN", "PYIN", "Auto", "Cep", "SWIPE"];
+    private static readonly string[] VisualizerSourceLabels = ["Mid", "End"];
 
     public AnalysisSettingsRenderer(PluginComponentTheme? theme = null)
     {
@@ -125,10 +131,18 @@ public sealed class AnalysisSettingsRenderer : IDisposable
             Style = SKPaintStyle.Fill
         };
 
+        _buttonDisabledPaint = new SKPaint
+        {
+            Color = _theme.KnobBackground.WithAlpha(110),
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
         _titlePaint = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold, SKTextAlign.Left);
         _closeButtonPaint = new SkiaTextPaint(_theme.TextSecondary, 18f, SKFontStyle.Normal, SKTextAlign.Center);
         _panelHeaderPaint = new SkiaTextPaint(_theme.TextSecondary, 11f, SKFontStyle.Bold, SKTextAlign.Left);
         _buttonTextPaint = new SkiaTextPaint(_theme.TextPrimary, 10f, SKFontStyle.Normal, SKTextAlign.Center);
+        _buttonTextDisabledPaint = new SkiaTextPaint(_theme.TextMuted, 10f, SKFontStyle.Normal, SKTextAlign.Center);
         _labelPaint = new SkiaTextPaint(_theme.TextMuted, 10f, SKFontStyle.Normal, SKTextAlign.Left);
 
         // Create knobs
@@ -338,7 +352,7 @@ public sealed class AnalysisSettingsRenderer : IDisposable
     private float DrawClarityPanel(SKCanvas canvas, float x, float y, float width)
     {
         float panelHeight = PanelHeaderHeight + PanelPadding * 2 +
-            (LabelHeight + ButtonHeight + RowSpacing) * 3 +
+            (LabelHeight + ButtonHeight + RowSpacing) * 4 +
             KnobRadius * 2 + 30;
 
         DrawPanelBackground(canvas, x, y, width, panelHeight, "Processing");
@@ -379,6 +393,13 @@ public sealed class AnalysisSettingsRenderer : IDisposable
         _labelPaint.DrawText(canvas, "Normalization", contentX, contentY + 10);
         contentY += LabelHeight;
         DrawButtonRow(canvas, contentX, contentY, contentWidth, NormalizationLabels, NormalizationButtonRects, NormalizationIndex);
+        contentY += ButtonHeight + RowSpacing;
+
+        // Visualizer source
+        _labelPaint.DrawText(canvas, "Visualizer Tap", contentX, contentY + 10);
+        contentY += LabelHeight;
+        bool[] visualizerEnabled = { VisualizerMidEnabled, true };
+        DrawButtonRow(canvas, contentX, contentY, contentWidth, VisualizerSourceLabels, VisualizerSourceButtonRects, VisualizerSourceIndex, visualizerEnabled);
 
         return y + panelHeight;
     }
@@ -396,19 +417,32 @@ public sealed class AnalysisSettingsRenderer : IDisposable
 
     private void DrawButtonRow(SKCanvas canvas, float x, float y, float width, string[] labels, SKRect[] rects, int activeIndex)
     {
+        DrawButtonRow(canvas, x, y, width, labels, rects, activeIndex, null);
+    }
+
+    private void DrawButtonRow(SKCanvas canvas, float x, float y, float width, string[] labels, SKRect[] rects, int activeIndex, bool[]? enabled)
+    {
         int count = labels.Length;
         float btnWidth = (width - (count - 1) * ButtonSpacing) / count;
 
         for (int i = 0; i < count; i++)
         {
+            bool isEnabled = enabled is null || (i < enabled.Length && enabled[i]);
             float btnX = x + i * (btnWidth + ButtonSpacing);
             var rect = new SKRect(btnX, y, btnX + btnWidth, y + ButtonHeight);
             rects[i] = rect;
 
             var roundRect = new SKRoundRect(rect, 4f);
-            canvas.DrawRoundRect(roundRect, i == activeIndex ? _buttonActivePaint : _buttonPaint);
+            if (!isEnabled)
+            {
+                canvas.DrawRoundRect(roundRect, _buttonDisabledPaint);
+            }
+            else
+            {
+                canvas.DrawRoundRect(roundRect, i == activeIndex ? _buttonActivePaint : _buttonPaint);
+            }
 
-            _buttonTextPaint.DrawText(canvas, labels[i], rect.MidX, rect.MidY + 4);
+            (isEnabled ? _buttonTextPaint : _buttonTextDisabledPaint).DrawText(canvas, labels[i], rect.MidX, rect.MidY + 4);
         }
     }
 
@@ -426,10 +460,12 @@ public sealed class AnalysisSettingsRenderer : IDisposable
         _borderPaint.Dispose();
         _buttonPaint.Dispose();
         _buttonActivePaint.Dispose();
+        _buttonDisabledPaint.Dispose();
         _titlePaint.Dispose();
         _closeButtonPaint.Dispose();
         _panelHeaderPaint.Dispose();
         _buttonTextPaint.Dispose();
+        _buttonTextDisabledPaint.Dispose();
         _labelPaint.Dispose();
 
         foreach (var knob in AllKnobs)

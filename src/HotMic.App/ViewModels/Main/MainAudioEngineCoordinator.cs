@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using HotMic.Common.Configuration;
@@ -802,6 +803,8 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         _nextDebugUpdateTicks = nowTicks + DebugUpdateIntervalTicks;
         var diagnostics = AudioEngine.GetDiagnosticsSnapshot();
 
+        UpdateAnalysisTapAvailability();
+
         string outputAge = FormatAgeMs(nowTicks, diagnostics.LastOutputCallbackTicks);
         string uiAge = _lastMeterUpdateTicks == 0
             ? "n/a"
@@ -841,6 +844,8 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         _viewModel.AnalysisTapProfilingLine = BuildAnalysisTapProfilingLine();
         _viewModel.AnalysisTapPitchProfilingLine = BuildAnalysisTapPitchProfilingLine();
         _viewModel.AnalysisTapGateLine = BuildAnalysisTapGateLine();
+        _viewModel.AnalysisTapCaptureLine = BuildAnalysisTapCaptureLine();
+        _viewModel.AnalysisOrchestratorLine = BuildAnalysisOrchestratorLine();
         _viewModel.VitalizerLine = BuildVitalizerLine();
 
         _viewModel.DebugLines =
@@ -854,6 +859,31 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
             $"UI {uiAge}ms",
             _viewModel.VitalizerLine
         ];
+    }
+
+    private void UpdateAnalysisTapAvailability()
+    {
+        bool hasTap = false;
+        var channels = AudioEngine.Channels;
+        if (channels.Count > 0)
+        {
+            var slots = channels[0].PluginChain.GetSnapshot();
+            for (int i = 0; i < slots.Length; i++)
+            {
+                var slot = slots[i];
+                if (slot?.Plugin is AnalysisTapPlugin tap && !tap.IsBypassed)
+                {
+                    hasTap = true;
+                    break;
+                }
+            }
+        }
+
+        _analysisOrchestrator.SetHasAnalysisTap(hasTap);
+        if (!hasTap && _analysisOrchestrator.Config.VisualizerSource == AnalysisCaptureSource.Plugin)
+        {
+            _analysisOrchestrator.Config.VisualizerSource = AnalysisCaptureSource.Output;
+        }
     }
 
     private string BuildProfilingLine(AudioEngineDiagnosticsSnapshot diagnostics)
@@ -1055,6 +1085,75 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
             : "n/a";
 
         return $"Gate: {channelLabel}speech {modeLabel} src {sourceLabel} gate {gateLabel} val {valueLabel} {stateLabel}";
+    }
+
+    private string BuildAnalysisTapCaptureLine()
+    {
+        var capture = AudioEngine.AnalysisCaptureLink;
+        if (capture is null)
+        {
+            return "Cap: n/a";
+        }
+
+        var visualSource = _analysisOrchestrator.VisualizerSource;
+        string visLabel = visualSource == AnalysisCaptureSource.Plugin ? "Mid" : "End";
+
+        long callsPlugin = capture.DebugCaptureCallCountPlugin;
+        long callsOutput = capture.DebugCaptureCallCountOutput;
+        long forwardedPlugin = capture.DebugForwardedCountPlugin;
+        long forwardedOutput = capture.DebugForwardedCountOutput;
+        long skipOrch = capture.DebugSkippedNoOrchestrator;
+        long skipCons = capture.DebugSkippedNoConsumers;
+        long skipChan = capture.DebugSkippedChannel;
+        long lastLen = capture.DebugLastBufferLength;
+        string lastSrcLabel = capture.LastCaptureSource == AnalysisCaptureSource.Plugin ? "P" : "O";
+
+        long lastClkPlugin = capture.GetLastCaptureSampleClock(AnalysisCaptureSource.Plugin);
+        long lastClkOutput = capture.GetLastCaptureSampleClock(AnalysisCaptureSource.Output);
+        long writePlugin = capture.GetWriteSampleTime(AnalysisCaptureSource.Plugin);
+        long writeOutput = capture.GetWriteSampleTime(AnalysisCaptureSource.Output);
+
+        string lastPluginLabel = lastClkPlugin == long.MinValue ? "n/a" : lastClkPlugin.ToString(CultureInfo.InvariantCulture);
+        string lastOutputLabel = lastClkOutput == long.MinValue ? "n/a" : lastClkOutput.ToString(CultureInfo.InvariantCulture);
+
+        return FormattableString.Invariant(
+            $"Cap: vis {visLabel} calls P/O {callsPlugin}/{callsOutput} fwd P/O {forwardedPlugin}/{forwardedOutput} skip orch {skipOrch} cons {skipCons} ch {skipChan} last {lastSrcLabel} len {lastLen} lastClk P/O {lastPluginLabel}/{lastOutputLabel} write P/O {writePlugin}/{writeOutput}");
+    }
+
+    private string BuildAnalysisOrchestratorLine()
+    {
+        var orchestrator = _analysisOrchestrator;
+        if (orchestrator is null)
+        {
+            return "Orch: n/a";
+        }
+
+        string visLabel = orchestrator.VisualizerSource == AnalysisCaptureSource.Plugin ? "Mid" : "End";
+        string effLabel = orchestrator.LastEffectiveSource == AnalysisCaptureSource.Plugin ? "Mid" : "End";
+
+        long enqCalls = orchestrator.DebugEnqueueCalls;
+        long enqWritten = orchestrator.DebugEnqueueWritten;
+        long enqSkippedCh = orchestrator.DebugEnqueueSkippedChannel;
+        long enqSkippedEmpty = orchestrator.DebugEnqueueSkippedEmpty;
+        long loopNoConsumers = orchestrator.DebugLoopNoConsumers;
+        long loopNotEnough = orchestrator.DebugLoopNotEnoughData;
+        long framesWritten = orchestrator.DebugLoopFramesWritten;
+        long framesProcessed = orchestrator.DebugLoopFramesProcessed;
+
+        int availPlugin = orchestrator.DebugAvailablePlugin;
+        int availOutput = orchestrator.DebugAvailableOutput;
+        long readPlugin = orchestrator.DebugReadSampleTimePlugin;
+        long readOutput = orchestrator.DebugReadSampleTimeOutput;
+        long dropPlugin = orchestrator.DebugLastDroppedHopsPlugin;
+        long dropOutput = orchestrator.DebugLastDroppedHopsOutput;
+        int hopSize = orchestrator.DebugActiveHopSize;
+        int fftSize = orchestrator.DebugActiveFftSize;
+
+        string readPluginLabel = readPlugin == long.MinValue ? "n/a" : readPlugin.ToString(CultureInfo.InvariantCulture);
+        string readOutputLabel = readOutput == long.MinValue ? "n/a" : readOutput.ToString(CultureInfo.InvariantCulture);
+
+        return FormattableString.Invariant(
+            $"Orch: vis {visLabel} eff {effLabel} hop {hopSize} fft {fftSize} avail P/O {availPlugin}/{availOutput} read P/O {readPluginLabel}/{readOutputLabel} dropHop P/O {dropPlugin}/{dropOutput} enq {enqWritten}/{enqCalls} skip ch {enqSkippedCh} emp {enqSkippedEmpty} loop noCons {loopNoConsumers} noData {loopNotEnough} frames {framesProcessed}/{framesWritten}");
     }
 
     private string BuildVitalizerLine()

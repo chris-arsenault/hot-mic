@@ -75,6 +75,8 @@ public partial class AnalysisSettingsWindow : AnalysisWindowBase
         _renderer.SmoothingIndex = (int)config.SmoothingMode;
         _renderer.NormalizationIndex = (int)config.NormalizationMode;
         _renderer.PitchAlgorithmIndex = (int)config.PitchAlgorithm;
+        _renderer.VisualizerSourceIndex = config.VisualizerSource == AnalysisCaptureSource.Plugin ? 0 : 1;
+        _renderer.VisualizerMidEnabled = Orchestrator.HasAnalysisTap;
         _renderer.PreEmphasisEnabled = config.PreEmphasis;
         _renderer.HighPassEnabled = config.HighPassEnabled;
     }
@@ -84,6 +86,8 @@ public partial class AnalysisSettingsWindow : AnalysisWindowBase
         var config = Orchestrator.Config;
         _renderer.PreEmphasisEnabled = config.PreEmphasis;
         _renderer.HighPassEnabled = config.HighPassEnabled;
+        _renderer.VisualizerSourceIndex = config.VisualizerSource == AnalysisCaptureSource.Plugin ? 0 : 1;
+        _renderer.VisualizerMidEnabled = Orchestrator.HasAnalysisTap;
     }
 
     #region WPF Mouse Handlers (CPU mode)
@@ -327,6 +331,21 @@ public partial class AnalysisSettingsWindow : AnalysisWindowBase
             {
                 config.NormalizationMode = (SpectrogramNormalizationMode)i;
                 _renderer.NormalizationIndex = i;
+                return;
+            }
+        }
+
+        // Visualizer tap buttons
+        for (int i = 0; i < _renderer.VisualizerSourceButtonRects.Length; i++)
+        {
+            if (_renderer.VisualizerSourceButtonRects[i].Contains(x, y))
+            {
+                if (i == 0 && !_renderer.VisualizerMidEnabled)
+                {
+                    return;
+                }
+                config.VisualizerSource = i == 0 ? AnalysisCaptureSource.Plugin : AnalysisCaptureSource.Output;
+                _renderer.VisualizerSourceIndex = i;
                 return;
             }
         }

@@ -1370,6 +1370,8 @@ public partial class MainWindow : Window, IDisposable
         builder.AppendLine(viewModel.AnalysisTapProfilingLine);
         builder.AppendLine(viewModel.AnalysisTapPitchProfilingLine);
         builder.AppendLine(viewModel.AnalysisTapGateLine);
+        builder.AppendLine(viewModel.AnalysisTapCaptureLine);
+        builder.AppendLine(viewModel.AnalysisOrchestratorLine);
         builder.AppendLine(viewModel.VitalizerLine);
         builder.AppendLine(CultureInfo.InvariantCulture, $"Graph: {viewModel.RoutingGraphOrder}");
         builder.AppendLine(CultureInfo.InvariantCulture, $"Output: {diagnostics.OutputCallbackCount} ({diagnostics.LastOutputFrames} frames) under {diagnostics.OutputUnderflowSamples}");

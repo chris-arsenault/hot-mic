@@ -29,7 +29,8 @@ public sealed class AnalysisOrchestrator : IDisposable
 
     private readonly AnalysisResultStore _resultStore = new();
     private readonly VisualizerSyncHub _syncHub = new();
-    private readonly LockFreeRingBuffer _captureBuffer = new(CaptureBufferSize);
+    private readonly LockFreeRingBuffer _captureBufferPlugin = new(CaptureBufferSize);
+    private readonly LockFreeRingBuffer _captureBufferOutput = new(CaptureBufferSize);
     private readonly object _consumerLock = new();
     private readonly List<AnalysisConsumer> _consumers = new();
     private readonly AnalysisConfiguration _config = new();
@@ -40,7 +41,13 @@ public sealed class AnalysisOrchestrator : IDisposable
     private int _consumerCount;
     private AnalysisCaptureLink? _captureLink;
     private int _requestedSignalsRaw;
-    private long _analysisReadSampleTime = long.MinValue;
+    private long _analysisReadSampleTimePlugin = long.MinValue;
+    private long _analysisReadSampleTimeOutput = long.MinValue;
+    private long _lastDroppedHopsPlugin;
+    private long _lastDroppedHopsOutput;
+    private int _visualizerSourceRaw = (int)AnalysisCaptureSource.Plugin;
+    private int _hasAnalysisTap;
+    private int _lastEffectiveSourceRaw = (int)AnalysisCaptureSource.Plugin;
 
     // FFT/Transform
     private readonly AnalysisBufferPipeline _analysisPipeline = new();
@@ -132,7 +139,6 @@ public sealed class AnalysisOrchestrator : IDisposable
     private int _reassignLatencyFrames;
     private SpectrogramAnalysisDescriptor? _analysisDescriptor;
     private long _frameCounter;
-    private long _lastDroppedHops;
 
     // Debug counters
     private long _debugEnqueueCalls;
@@ -168,7 +174,7 @@ public sealed class AnalysisOrchestrator : IDisposable
     public long DebugLoopNotEnoughData => Interlocked.Read(ref _debugLoopNotEnoughData);
     public long DebugLoopFramesProcessed => Interlocked.Read(ref _debugLoopFramesProcessed);
     public long DebugLoopFramesWritten => Interlocked.Read(ref _debugLoopFramesWritten);
-    public int DebugCaptureBufferAvailable => _captureBuffer.AvailableRead;
+    public int DebugCaptureBufferAvailable => GetCaptureBuffer(GetVisualizerSource()).AvailableRead;
     public int DebugActiveHopSize => Volatile.Read(ref _activeHopSize);
     public int DebugActiveFrameCapacity => Volatile.Read(ref _activeFrameCapacity);
     public int DebugActiveDisplayBins => Volatile.Read(ref _activeDisplayBins);
@@ -184,6 +190,14 @@ public sealed class AnalysisOrchestrator : IDisposable
     public int DebugTransformPath => Volatile.Read(ref _debugTransformPath);
     public float DebugLastProcessedMax => Volatile.Read(ref _debugLastProcessedMax);
     public int DebugAnalysisFilled => Volatile.Read(ref _debugAnalysisFilled);
+    public AnalysisCaptureSource LastEffectiveSource => GetLastEffectiveSource();
+    public int DebugActiveFftSize => _activeFftSize;
+    public int DebugAvailablePlugin => _captureBufferPlugin.AvailableRead;
+    public int DebugAvailableOutput => _captureBufferOutput.AvailableRead;
+    public long DebugReadSampleTimePlugin => Volatile.Read(ref _analysisReadSampleTimePlugin);
+    public long DebugReadSampleTimeOutput => Volatile.Read(ref _analysisReadSampleTimeOutput);
+    public long DebugLastDroppedHopsPlugin => Volatile.Read(ref _lastDroppedHopsPlugin);
+    public long DebugLastDroppedHopsOutput => Volatile.Read(ref _lastDroppedHopsOutput);
 
     public IAnalysisResultStore Results => _resultStore;
     public VisualizerSyncHub SyncHub => _syncHub;
@@ -200,6 +214,9 @@ public sealed class AnalysisOrchestrator : IDisposable
         set => Volatile.Write(ref _captureLink, value);
     }
 
+    public AnalysisCaptureSource VisualizerSource => GetVisualizerSource();
+    public bool HasAnalysisTap => Volatile.Read(ref _hasAnalysisTap) != 0;
+
     public AnalysisSignalMask RequestedSignals => (AnalysisSignalMask)Volatile.Read(ref _requestedSignalsRaw);
 
     public event Action<AnalysisSignalMask>? RequestedSignalsChanged;
@@ -211,6 +228,11 @@ public sealed class AnalysisOrchestrator : IDisposable
     }
 
     public void EnqueueAudio(ReadOnlySpan<float> buffer, int channelIndex)
+    {
+        EnqueueAudio(buffer, channelIndex, AnalysisCaptureSource.Plugin);
+    }
+
+    public void EnqueueAudio(ReadOnlySpan<float> buffer, int channelIndex, AnalysisCaptureSource source)
     {
         Interlocked.Increment(ref _debugEnqueueCalls);
 
@@ -229,7 +251,7 @@ public sealed class AnalysisOrchestrator : IDisposable
 
         Interlocked.Increment(ref _debugEnqueueWritten);
         Interlocked.Add(ref _debugEnqueueSamplesWritten, buffer.Length);
-        _captureBuffer.Write(buffer);
+        GetCaptureBuffer(source).Write(buffer);
     }
 
     public IDisposable Subscribe(AnalysisCapabilities required)
@@ -283,6 +305,88 @@ public sealed class AnalysisOrchestrator : IDisposable
                 caps |= consumer.RequiredCapabilities;
         }
         return caps;
+    }
+
+    private AnalysisCaptureSource GetVisualizerSource()
+    {
+        int raw = Volatile.Read(ref _visualizerSourceRaw);
+        if ((uint)raw > (uint)AnalysisCaptureSource.Plugin)
+        {
+            return AnalysisCaptureSource.Plugin;
+        }
+
+        return (AnalysisCaptureSource)raw;
+    }
+
+    private AnalysisCaptureSource GetLastEffectiveSource()
+    {
+        int raw = Volatile.Read(ref _lastEffectiveSourceRaw);
+        if ((uint)raw > (uint)AnalysisCaptureSource.Plugin)
+        {
+            return AnalysisCaptureSource.Plugin;
+        }
+
+        return (AnalysisCaptureSource)raw;
+    }
+
+    private AnalysisCaptureSource ResolveVisualizerSource()
+    {
+        return GetVisualizerSource();
+    }
+
+    private void UpdateEffectiveSource(AnalysisCaptureSource source)
+    {
+        var last = GetLastEffectiveSource();
+        if (source == last)
+        {
+            return;
+        }
+
+        Volatile.Write(ref _lastEffectiveSourceRaw, (int)source);
+        ResetAfterDrop(source);
+    }
+
+    private LockFreeRingBuffer GetCaptureBuffer(AnalysisCaptureSource source)
+    {
+        return source == AnalysisCaptureSource.Output ? _captureBufferOutput : _captureBufferPlugin;
+    }
+
+    private long GetAnalysisReadSampleTime(AnalysisCaptureSource source)
+    {
+        return source == AnalysisCaptureSource.Output
+            ? Volatile.Read(ref _analysisReadSampleTimeOutput)
+            : Volatile.Read(ref _analysisReadSampleTimePlugin);
+    }
+
+    private void SetAnalysisReadSampleTime(AnalysisCaptureSource source, long value)
+    {
+        if (source == AnalysisCaptureSource.Output)
+        {
+            Volatile.Write(ref _analysisReadSampleTimeOutput, value);
+        }
+        else
+        {
+            Volatile.Write(ref _analysisReadSampleTimePlugin, value);
+        }
+    }
+
+    private long GetLastDroppedHops(AnalysisCaptureSource source)
+    {
+        return source == AnalysisCaptureSource.Output
+            ? Volatile.Read(ref _lastDroppedHopsOutput)
+            : Volatile.Read(ref _lastDroppedHopsPlugin);
+    }
+
+    private void SetLastDroppedHops(AnalysisCaptureSource source, long value)
+    {
+        if (source == AnalysisCaptureSource.Output)
+        {
+            Volatile.Write(ref _lastDroppedHopsOutput, value);
+        }
+        else
+        {
+            Volatile.Write(ref _lastDroppedHopsPlugin, value);
+        }
     }
 
     private static AnalysisSignalMask ComputeRequestedSignals(AnalysisCapabilities caps)
@@ -342,7 +446,8 @@ public sealed class AnalysisOrchestrator : IDisposable
 
     public void Reset()
     {
-        _captureBuffer.Clear();
+        _captureBufferPlugin.Clear();
+        _captureBufferOutput.Clear();
         _resultStore.Clear();
         _syncHub.Reset();
         _analysisSignalProcessor.Reset();
@@ -350,8 +455,15 @@ public sealed class AnalysisOrchestrator : IDisposable
         Array.Clear(_analysisSignalValues, 0, _analysisSignalValues.Length);
         Volatile.Write(ref _analysisFilled, 0);
         Volatile.Write(ref _frameCounter, 0);
-        Volatile.Write(ref _lastDroppedHops, 0);
-        Volatile.Write(ref _analysisReadSampleTime, long.MinValue);
+        Volatile.Write(ref _lastDroppedHopsPlugin, 0);
+        Volatile.Write(ref _lastDroppedHopsOutput, 0);
+        Volatile.Write(ref _analysisReadSampleTimePlugin, long.MinValue);
+        Volatile.Write(ref _analysisReadSampleTimeOutput, long.MinValue);
+    }
+
+    public void SetHasAnalysisTap(bool hasTap)
+    {
+        Volatile.Write(ref _hasAnalysisTap, hasTap ? 1 : 0);
     }
 
     private void StartAnalysisThread()
@@ -395,22 +507,26 @@ public sealed class AnalysisOrchestrator : IDisposable
 
             ConfigureAnalysis(force: false);
 
-            long droppedSamples = _captureBuffer.DroppedSamples;
+            var captureLink = Volatile.Read(ref _captureLink);
+            var effectiveSource = ResolveVisualizerSource();
+            UpdateEffectiveSource(effectiveSource);
+            var captureBuffer = GetCaptureBuffer(effectiveSource);
+
+            long droppedSamples = captureBuffer.DroppedSamples;
             long droppedHops = _activeHopSize > 0 ? droppedSamples / _activeHopSize : droppedSamples;
-            if (droppedHops != _lastDroppedHops)
+            if (droppedHops != GetLastDroppedHops(effectiveSource))
             {
-                _lastDroppedHops = droppedHops;
-                ResetAfterDrop();
+                SetLastDroppedHops(effectiveSource, droppedHops);
+                ResetAfterDrop(effectiveSource);
                 Thread.Sleep(1);
                 continue;
             }
 
-            var captureLink = Volatile.Read(ref _captureLink);
             if (SpeechDebugEnabled)
             {
                 _lastCaptureSourceDebug = captureLink is null ? -1 : (int)captureLink.LastCaptureSource;
             }
-            int availableRead = _captureBuffer.AvailableRead;
+            int availableRead = captureBuffer.AvailableRead;
             if (availableRead < _activeHopSize)
             {
                 Interlocked.Increment(ref _debugLoopNotEnoughData);
@@ -418,15 +534,15 @@ public sealed class AnalysisOrchestrator : IDisposable
                 continue;
             }
 
-            long hopSampleTime = GetReadSampleTime(captureLink, availableRead);
-            int read = _captureBuffer.Read(_hopBuffer);
+            long hopSampleTime = GetReadSampleTime(captureLink, effectiveSource, availableRead);
+            int read = captureBuffer.Read(_hopBuffer);
             if (read < _activeHopSize)
             {
                 Interlocked.Increment(ref _debugLoopNotEnoughData);
                 Thread.Sleep(1);
                 continue;
             }
-            Volatile.Write(ref _analysisReadSampleTime, hopSampleTime + read);
+            SetAnalysisReadSampleTime(effectiveSource, hopSampleTime + read);
 
             // Track max hop buffer value for debugging
             float hopMax = 0f;
@@ -471,7 +587,13 @@ public sealed class AnalysisOrchestrator : IDisposable
             AnalysisSignalMask requestedSignals = ComputeRequestedSignals(capabilities);
             Array.Clear(_analysisSignalValues, 0, _analysisSignalValues.Length);
 
-            AnalysisSignalMask availableSignals = ReadSignalsFromBus(captureLink, hopSampleTime, read, requestedSignals, _analysisSignalValues);
+            AnalysisSignalMask availableSignals = ReadSignalsFromBus(
+                captureLink,
+                effectiveSource,
+                hopSampleTime,
+                read,
+                requestedSignals,
+                _analysisSignalValues);
             AnalysisSignalMask missingSignals = requestedSignals & ~availableSignals;
 
             bool needsSpectralFeatures = capabilities.HasFlag(AnalysisCapabilities.SpectralFeatures) ||
@@ -577,9 +699,9 @@ public sealed class AnalysisOrchestrator : IDisposable
         }
     }
 
-    private long GetReadSampleTime(AnalysisCaptureLink? captureLink, int availableRead)
+    private long GetReadSampleTime(AnalysisCaptureLink? captureLink, AnalysisCaptureSource source, int availableRead)
     {
-        long readTime = Volatile.Read(ref _analysisReadSampleTime);
+        long readTime = GetAnalysisReadSampleTime(source);
         if (readTime != long.MinValue)
         {
             return readTime;
@@ -588,7 +710,7 @@ public sealed class AnalysisOrchestrator : IDisposable
         long baseTime = 0;
         if (captureLink is not null)
         {
-            long writeTime = captureLink.WriteSampleTime;
+            long writeTime = captureLink.GetWriteSampleTime(source);
             baseTime = writeTime - availableRead;
             if (baseTime < 0)
             {
@@ -596,11 +718,11 @@ public sealed class AnalysisOrchestrator : IDisposable
             }
         }
 
-        Volatile.Write(ref _analysisReadSampleTime, baseTime);
+        SetAnalysisReadSampleTime(source, baseTime);
         return baseTime;
     }
 
-    private AnalysisSignalMask ReadSignalsFromBus(AnalysisCaptureLink? captureLink, long sampleTime, int count,
+    private AnalysisSignalMask ReadSignalsFromBus(AnalysisCaptureLink? captureLink, AnalysisCaptureSource source, long sampleTime, int count,
         AnalysisSignalMask requestedSignals, float[] values)
     {
         if (captureLink is null || requestedSignals == AnalysisSignalMask.None || sampleTime < 0 || count <= 0)
@@ -608,8 +730,8 @@ public sealed class AnalysisOrchestrator : IDisposable
             return AnalysisSignalMask.None;
         }
 
-        var bus = captureLink.SignalBus;
-        var producers = captureLink.SignalProducers;
+        var bus = captureLink.GetSignalBus(source);
+        var producers = captureLink.GetSignalProducers(source);
         if (bus is null || producers.Length < values.Length)
         {
             return AnalysisSignalMask.None;
@@ -1388,6 +1510,14 @@ public sealed class AnalysisOrchestrator : IDisposable
         bool hpfEnabled = _config.HighPassEnabled;
         bool preEmphasis = _config.PreEmphasis;
         int cqtBinsPerOctave = _config.CqtBinsPerOctave;
+        var visualizerSource = _config.VisualizerSource;
+
+        var currentSource = GetVisualizerSource();
+        if (force || visualizerSource != currentSource)
+        {
+            Volatile.Write(ref _visualizerSourceRaw, (int)visualizerSource);
+            ResetAfterDrop(visualizerSource);
+        }
 
         bool sizeChanged = force || fftSize != _activeFftSize || overlapIndex != _activeOverlapIndex ||
                            MathF.Abs(timeWindow - _activeTimeWindow) > 1e-3f;
@@ -1707,7 +1837,7 @@ public sealed class AnalysisOrchestrator : IDisposable
         _binResolution = _fftProcessor.BinResolution;
     }
 
-    private void ResetAfterDrop()
+    private void ResetAfterDrop(AnalysisCaptureSource source)
     {
         Volatile.Write(ref _analysisFilled, 0);
         _analysisPipeline.Reset();
@@ -1715,7 +1845,7 @@ public sealed class AnalysisOrchestrator : IDisposable
         _analysisSignalProcessor.Reset();
         _speechMetricsProcessor.Reset();
         Array.Clear(_analysisSignalValues, 0, _analysisSignalValues.Length);
-        Volatile.Write(ref _analysisReadSampleTime, long.MinValue);
+        SetAnalysisReadSampleTime(source, long.MinValue);
     }
 
     private static int SelectDiscrete(int value, int[] options)
