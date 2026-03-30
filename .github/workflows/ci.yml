@@ -77,6 +77,18 @@ jobs:
         id: package
         shell: pwsh
         run: |
+          function Get-FileVersion([string]$version) {
+            $parts = $version.Split('.')
+            if ($parts.Length -eq 3) {
+              return "$version.0"
+            }
+            if ($parts.Length -eq 4) {
+              return $version
+            }
+
+            throw "Version '$version' must have 3 or 4 numeric components for NSIS."
+          }
+
           if ("${{ github.ref }}" -like "refs/tags/v*") {
             $version = "${{ github.ref_name }}"
             if ($version.StartsWith("v")) {
@@ -84,12 +96,14 @@ jobs:
             }
 
             "version=$version" >> $env:GITHUB_OUTPUT
+            "file_version=$(Get-FileVersion $version)" >> $env:GITHUB_OUTPUT
             "portable=publish/HotMic-$version-win-x64-portable.zip" >> $env:GITHUB_OUTPUT
             "installer=publish/HotMic-$version-Setup.exe" >> $env:GITHUB_OUTPUT
           }
           else {
             $shortSha = "${{ github.sha }}".Substring(0, 7)
             "version=0.0.0-ci" >> $env:GITHUB_OUTPUT
+            "file_version=0.0.0.0" >> $env:GITHUB_OUTPUT
             "portable=publish/HotMic-main-$shortSha-win-x64-portable.zip" >> $env:GITHUB_OUTPUT
             "installer=publish/HotMic-main-$shortSha-Setup.exe" >> $env:GITHUB_OUTPUT
           }
@@ -144,6 +158,7 @@ jobs:
 
           & $makensis /V3 `
             /DAPP_VERSION=${{ steps.package.outputs.version }} `
+            /DAPP_FILE_VERSION=${{ steps.package.outputs.file_version }} `
             /DAPP_EXE=${{ steps.appinfo.outputs.app_exe }} `
             /DOUTPUT_NAME=$outputName `
             /DPUBLISH_DIR=$publishDir `

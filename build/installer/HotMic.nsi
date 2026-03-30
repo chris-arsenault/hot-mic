@@ -16,6 +16,10 @@
   !define APP_VERSION "0.0.0"
 !endif
 
+!ifndef APP_FILE_VERSION
+  !define APP_FILE_VERSION "0.0.0.0"
+!endif
+
 !ifndef APP_EXE
   !define APP_EXE "HotMic.App.exe"
 !endif
@@ -33,11 +37,11 @@ OutFile "${OUTPUT_NAME}"
 InstallDir "$LOCALAPPDATA\HotMic"
 RequestExecutionLevel user
 
-VIProductVersion "${APP_VERSION}.0"
+VIProductVersion "${APP_FILE_VERSION}"
 VIAddVersionKey "ProductName" "${PRODUCT_NAME}"
 VIAddVersionKey "Publisher" "${PUBLISHER}"
 VIAddVersionKey "FileDescription" "HotMic Windows Installer"
-VIAddVersionKey "FileVersion" "${APP_VERSION}"
+VIAddVersionKey "FileVersion" "${APP_FILE_VERSION}"
 VIAddVersionKey "ProductVersion" "${APP_VERSION}"
 
 !insertmacro MUI_PAGE_DIRECTORY
