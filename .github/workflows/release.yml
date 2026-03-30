@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without the leading v"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      app_exe: ${{ steps.appinfo.outputs.app_exe }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+
+      - name: Resolve Release Version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "push") {
+            $version = "${{ github.ref_name }}"
+            if ($version.StartsWith("v")) {
+              $version = $version.Substring(1)
+            }
+          }
+          else {
+            $version = "${{ inputs.version }}"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "Unable to resolve release version."
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Publish Desktop App
+        run: >
+          dotnet publish src/HotMic.App/HotMic.App.csproj
+          -c Release
+          -r win-x64
+          --self-contained false
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:ContinuousIntegrationBuild=true
+          -o publish/app
+
+      - name: Detect Published App Host
+        id: appinfo
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem publish/app -Filter *.exe |
+            Where-Object { $_.Name -notlike "createdump.exe" } |
+            Select-Object -First 1
+
+          if (-not $exe) {
+            throw "No published application executable found."
+          }
+
+          "app_exe=$($exe.Name)" >> $env:GITHUB_OUTPUT
+
+      - name: Build Portable Zip
+        shell: pwsh
+        run: |
+          $zipPath = "publish/HotMic-${{ steps.version.outputs.version }}-win-x64-portable.zip"
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+          Compress-Archive -Path publish/app/* -DestinationPath $zipPath
+
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Build Installer
+        shell: pwsh
+        run: |
+          $makensis = Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) {
+            throw "makensis.exe not found after NSIS installation."
+          }
+
+          & $makensis /V3 `
+            /DAPP_VERSION=${{ steps.version.outputs.version }} `
+            /DAPP_EXE=${{ steps.appinfo.outputs.app_exe }} `
+            /DOUTPUT_NAME=publish\\HotMic-${{ steps.version.outputs.version }}-Setup.exe `
+            /DPUBLISH_DIR=publish\\app `
+            build/installer/HotMic.nsi
+
+      - name: Upload Portable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HotMic-Portable
+          path: publish/HotMic-${{ steps.version.outputs.version }}-win-x64-portable.zip
+
+      - name: Upload Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HotMic-Installer
+          path: publish/HotMic-${{ steps.version.outputs.version }}-Setup.exe
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: HotMic v${{ steps.version.outputs.version }}
+          body: |
+            ## Downloads
+            - `HotMic-${{ steps.version.outputs.version }}-win-x64-portable.zip` - portable framework-dependent build
+            - `HotMic-${{ steps.version.outputs.version }}-Setup.exe` - NSIS installer
+          files: |
+            publish/HotMic-${{ steps.version.outputs.version }}-win-x64-portable.zip
+            publish/HotMic-${{ steps.version.outputs.version }}-Setup.exe
+
+  report:
+    if: always()
+    needs: [package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.OIDC_ROLE }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+          aws-region: us-east-1
+
+      - uses: chris-arsenault/platform/.github/actions/report-build@main
+        with:
+          status: ${{ needs.package.result }}

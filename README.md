@@ -103,7 +103,7 @@ Always-on-top mode keeps controls within reach during calls or streams.
 
 ## Building From Source
 
-Requires the .NET 8 SDK on Windows.
+Requires the .NET 10 SDK on Windows for the full desktop app. Core builds/tests also run in WSL for non-WPF verification.
 
 ```bash
 git clone https://github.com/chris-arsenault/hot-mic
@@ -114,7 +114,7 @@ dotnet run --project src/HotMic.App
 
 ## Tech Stack
 
-- .NET 8 / WPF
+- .NET 10 / WPF
 - SkiaSharp for UI rendering
 - NAudio for WASAPI capture
 - CommunityToolkit.Mvvm
