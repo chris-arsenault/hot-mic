@@ -68,6 +68,80 @@ jobs:
       - name: Build Desktop App
         run: dotnet build src/HotMic.App/HotMic.App.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
 
+      - name: Resolve Artifact Names
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: artifacts
+        shell: pwsh
+        run: |
+          $shortSha = "${{ github.sha }}".Substring(0, 7)
+          "portable=publish/HotMic-main-$shortSha-win-x64-portable.zip" >> $env:GITHUB_OUTPUT
+          "installer=publish/HotMic-main-$shortSha-Setup.exe" >> $env:GITHUB_OUTPUT
+
+      - name: Publish Desktop App
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: >
+          dotnet publish src/HotMic.App/HotMic.App.csproj
+          -c Release
+          -r win-x64
+          --no-restore
+          --self-contained false
+          -p:ContinuousIntegrationBuild=true
+          -o publish/app
+
+      - name: Detect Published App Host
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: appinfo
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem publish/app -Filter *.exe |
+            Where-Object { $_.Name -notlike "createdump.exe" } |
+            Select-Object -First 1
+
+          if (-not $exe) {
+            throw "No published application executable found."
+          }
+
+          "app_exe=$($exe.Name)" >> $env:GITHUB_OUTPUT
+
+      - name: Build Portable Zip
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: Compress-Archive -Path publish/app/* -DestinationPath "${{ steps.artifacts.outputs.portable }}"
+
+      - name: Install NSIS
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: choco install nsis -y
+
+      - name: Build Installer
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          $makensis = Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) {
+            throw "makensis.exe not found after NSIS installation."
+          }
+
+          & $makensis /V3 `
+            /DAPP_VERSION=1.0.0 `
+            /DAPP_EXE=${{ steps.appinfo.outputs.app_exe }} `
+            /DOUTPUT_NAME=${{ steps.artifacts.outputs.installer }} `
+            /DPUBLISH_DIR=publish\\app `
+            build/installer/HotMic.nsi
+
+      - name: Upload Portable Artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: HotMic-Portable
+          path: ${{ steps.artifacts.outputs.portable }}
+
+      - name: Upload Installer Artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: HotMic-Installer
+          path: ${{ steps.artifacts.outputs.installer }}
+
   report:
     if: always()
     needs: [core, desktop]
