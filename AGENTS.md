@@ -547,18 +547,17 @@ A feature is complete when:
 
 **RECOMMENDED WORKFLOW:**
 
-1. **Capture follow-ups** - Create issues or `bd` tasks for real remaining work (skip trivial notes)
+1. **Capture follow-ups** - Create issues or record real remaining work in the repo/docs when needed (skip trivial notes)
 2. **Run quality gates** - Run relevant tests/builds when changes are user-facing or about to be pushed
 3. **Update issue status** - Close finished work, update in-progress items
 4. **Push when ready** - Only push when changes are coherent and pass relevant checks
    - If pushing:
      ```bash
      git pull --rebase
-     bd sync
      git push
      git status  # should show "up to date with origin"
      ```
-   - If not pushing, record the reason and current branch/status in `bd`
+   - If not pushing, record the reason and current branch/status in your handoff
 5. **Clean up (optional)** - Clear stashes/prune branches when leaving the session
 6. **Verify state** - Ensure changes are either pushed or clearly documented for resume
 7. **Hand off** - Provide context for next session
@@ -566,4 +565,3 @@ A feature is complete when:
 **Hygiene rules:**
 - Avoid noisy debug commits; consolidate into logical commits before pushing
 - Do not push broken builds to shared branches (main)
-- Use `bd` for task tracking when available
