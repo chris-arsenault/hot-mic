@@ -19,9 +19,9 @@ public sealed class AnalysisBufferPipeline
 
     private float[] _rawBuffer = Array.Empty<float>();
     private float[] _processedBuffer = Array.Empty<float>();
-    private OnePoleHighPass _dcHighPass = new();
+    private OnePoleHighPass _dcHighPass;
     private BiquadFilter _rumbleHighPass = new();
-    private PreEmphasisFilter _preEmphasisFilter = new();
+    private PreEmphasisFilter _preEmphasisFilter;
 
     public int HopSize => _hopSize;
     public int AnalysisSize => _analysisSize;

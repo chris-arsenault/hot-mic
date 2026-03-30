@@ -683,10 +683,7 @@ public sealed record SpeechPipelineConfig(
         AnalysisTapMode speechPresenceMode,
         IReadOnlyDictionary<string, bool>? pluginOverrides = null)
     {
-        if (preset is null)
-        {
-            throw new ArgumentNullException(nameof(preset));
-        }
+        ArgumentNullException.ThrowIfNull(preset);
 
         return new SpeechPipelineConfig(
             VadEnabled: false,

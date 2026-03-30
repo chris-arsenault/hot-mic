@@ -4,6 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <UseRidGraph>true</UseRidGraph>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <JacobiVstVersion>2.0.0-alpha</JacobiVstVersion>
     <NuGetPackageRoot Condition="'$(NuGetPackageRoot)' == ''">$(UserProfile)\.nuget\packages\</NuGetPackageRoot>

@@ -33,7 +33,6 @@ public sealed class AnalysisCaptureLink
     private long _skippedNoOrchestrator;
     private long _skippedNoConsumers;
     private long _skippedChannel;
-    private long _skippedOutputOverride;
     private long _forwardedToOrchestrator;
     private long _forwardedToOrchestratorPlugin;
     private long _forwardedToOrchestratorOutput;
@@ -78,7 +77,7 @@ public sealed class AnalysisCaptureLink
     public long DebugSkippedNoOrchestrator => Interlocked.Read(ref _skippedNoOrchestrator);
     public long DebugSkippedNoConsumers => Interlocked.Read(ref _skippedNoConsumers);
     public long DebugSkippedChannel => Interlocked.Read(ref _skippedChannel);
-    public long DebugSkippedOutputOverride => Interlocked.Read(ref _skippedOutputOverride);
+    public long DebugSkippedOutputOverride => 0;
     public long DebugForwardedCount => Interlocked.Read(ref _forwardedToOrchestrator);
     public long DebugForwardedCountPlugin => Interlocked.Read(ref _forwardedToOrchestratorPlugin);
     public long DebugForwardedCountOutput => Interlocked.Read(ref _forwardedToOrchestratorOutput);
