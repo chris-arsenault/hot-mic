@@ -25,9 +25,13 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            src/**/packages.lock.json
+            tests/**/packages.lock.json
 
       - name: Restore Core Tests
-        run: dotnet restore tests/HotMic.Core.Tests/HotMic.Core.Tests.csproj
+        run: dotnet restore tests/HotMic.Core.Tests/HotMic.Core.Tests.csproj --locked-mode
 
       - name: Build Common
         run: dotnet build src/HotMic.Common/HotMic.Common.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
@@ -50,9 +54,13 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            src/**/packages.lock.json
+            tests/**/packages.lock.json
 
       - name: Restore Desktop Projects
-        run: dotnet restore src/HotMic.App/HotMic.App.csproj
+        run: dotnet restore src/HotMic.App/HotMic.App.csproj --locked-mode
 
       - name: Build VST Host
         run: dotnet build src/HotMic.Vst3/HotMic.Vst3.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true

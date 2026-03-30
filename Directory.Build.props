@@ -30,5 +30,6 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <AnalysisMode>Recommended</AnalysisMode>
     <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 </Project>

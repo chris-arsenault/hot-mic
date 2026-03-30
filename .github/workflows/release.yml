@@ -32,6 +32,13 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            src/**/packages.lock.json
+            tests/**/packages.lock.json
+
+      - name: Restore Desktop App
+        run: dotnet restore src/HotMic.App/HotMic.App.csproj --locked-mode
 
       - name: Resolve Release Version
         id: version
@@ -58,6 +65,7 @@ jobs:
           dotnet publish src/HotMic.App/HotMic.App.csproj
           -c Release
           -r win-x64
+          --no-restore
           --self-contained false
           -p:Version=${{ steps.version.outputs.version }}
           -p:ContinuousIntegrationBuild=true
