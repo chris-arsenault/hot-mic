@@ -60,7 +60,7 @@ jobs:
             tests/**/packages.lock.json
 
       - name: Restore Desktop Projects
-        run: dotnet restore src/HotMic.App/HotMic.App.csproj --locked-mode
+        run: dotnet restore src/HotMic.App/HotMic.App.csproj --locked-mode -r win-x64
 
       - name: Build VST Host
         run: dotnet build src/HotMic.Vst3/HotMic.Vst3.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true

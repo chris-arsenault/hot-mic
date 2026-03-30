@@ -38,7 +38,7 @@ jobs:
             tests/**/packages.lock.json
 
       - name: Restore Desktop App
-        run: dotnet restore src/HotMic.App/HotMic.App.csproj --locked-mode
+        run: dotnet restore src/HotMic.App/HotMic.App.csproj --locked-mode -r win-x64
 
       - name: Resolve Release Version
         id: version

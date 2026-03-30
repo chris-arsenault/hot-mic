@@ -69,6 +69,17 @@
       "hotmic.common": {
         "type": "Project"
       }
+    },
+    "net10.0/win-x64": {
+      "Microsoft.ML.OnnxRuntime": {
+        "type": "Direct",
+        "requested": "[1.18.0, )",
+        "resolved": "1.18.0",
+        "contentHash": "K379Dh/KZAm0RwrieOueiNFsES5/0qr5f9aHYA7ZU04AJa0U5BxvAKc26DTwjVpJ6q46JXTK9TzVYOeQuVZyTg==",
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.18.0"
+        }
+      }
     }
   }
 }
