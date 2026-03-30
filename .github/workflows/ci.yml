@@ -31,7 +31,7 @@ jobs:
             tests/**/packages.lock.json
 
       - name: Restore Core Tests
-        run: dotnet restore tests/HotMic.Core.Tests/HotMic.Core.Tests.csproj --locked-mode
+        run: dotnet restore tests/HotMic.Core.Tests/HotMic.Core.Tests.csproj
 
       - name: Build Common
         run: dotnet build src/HotMic.Common/HotMic.Common.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
