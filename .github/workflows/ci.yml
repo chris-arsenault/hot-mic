@@ -5,6 +5,8 @@ on:
     branches: [main]
   push:
     branches: [main]
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
@@ -70,28 +72,42 @@ jobs:
       - name: Build Desktop App
         run: dotnet build src/HotMic.App/HotMic.App.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
 
-      - name: Resolve Artifact Names
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        id: artifacts
+      - name: Resolve Package Metadata
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        id: package
         shell: pwsh
         run: |
-          $shortSha = "${{ github.sha }}".Substring(0, 7)
-          "portable=publish/HotMic-main-$shortSha-win-x64-portable.zip" >> $env:GITHUB_OUTPUT
-          "installer=publish/HotMic-main-$shortSha-Setup.exe" >> $env:GITHUB_OUTPUT
+          if ("${{ github.ref }}" -like "refs/tags/v*") {
+            $version = "${{ github.ref_name }}"
+            if ($version.StartsWith("v")) {
+              $version = $version.Substring(1)
+            }
+
+            "version=$version" >> $env:GITHUB_OUTPUT
+            "portable=publish/HotMic-$version-win-x64-portable.zip" >> $env:GITHUB_OUTPUT
+            "installer=publish/HotMic-$version-Setup.exe" >> $env:GITHUB_OUTPUT
+          }
+          else {
+            $shortSha = "${{ github.sha }}".Substring(0, 7)
+            "version=0.0.0-ci" >> $env:GITHUB_OUTPUT
+            "portable=publish/HotMic-main-$shortSha-win-x64-portable.zip" >> $env:GITHUB_OUTPUT
+            "installer=publish/HotMic-main-$shortSha-Setup.exe" >> $env:GITHUB_OUTPUT
+          }
 
       - name: Publish Desktop App
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         run: >
           dotnet publish src/HotMic.App/HotMic.App.csproj
           -c Release
           -r win-x64
           --no-restore
           --self-contained false
+          -p:Version=${{ steps.package.outputs.version }}
           -p:ContinuousIntegrationBuild=true
           -o publish/app
 
       - name: Detect Published App Host
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         id: appinfo
         shell: pwsh
         run: |
@@ -106,16 +122,16 @@ jobs:
           "app_exe=$($exe.Name)" >> $env:GITHUB_OUTPUT
 
       - name: Build Portable Zip
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         shell: pwsh
-        run: Compress-Archive -Path publish/app/* -DestinationPath "${{ steps.artifacts.outputs.portable }}"
+        run: Compress-Archive -Path publish/app/* -DestinationPath "${{ steps.package.outputs.portable }}"
 
       - name: Install NSIS
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         run: choco install nsis -y
 
       - name: Build Installer
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         shell: pwsh
         run: |
           $makensis = Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"
@@ -124,28 +140,28 @@ jobs:
           }
 
           $publishDir = (Resolve-Path "publish/app").Path
-          $outputName = Join-Path (Resolve-Path "publish").Path (Split-Path "${{ steps.artifacts.outputs.installer }}" -Leaf)
+          $outputName = Join-Path (Resolve-Path "publish").Path (Split-Path "${{ steps.package.outputs.installer }}" -Leaf)
 
           & $makensis /V3 `
-            /DAPP_VERSION=1.0.0 `
+            /DAPP_VERSION=${{ steps.package.outputs.version }} `
             /DAPP_EXE=${{ steps.appinfo.outputs.app_exe }} `
             /DOUTPUT_NAME=$outputName `
             /DPUBLISH_DIR=$publishDir `
             build/installer/HotMic.nsi
 
       - name: Upload Portable Artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         uses: actions/upload-artifact@v4
         with:
           name: HotMic-Portable
-          path: ${{ steps.artifacts.outputs.portable }}
+          path: ${{ steps.package.outputs.portable }}
 
       - name: Upload Installer Artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         uses: actions/upload-artifact@v4
         with:
           name: HotMic-Installer
-          path: ${{ steps.artifacts.outputs.installer }}
+          path: ${{ steps.package.outputs.installer }}
 
       - name: Update Rolling Release Tag
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -170,11 +186,25 @@ jobs:
             Commit: `${{ github.sha }}`
 
             Downloads:
-            - `${{ steps.artifacts.outputs.portable }}` - portable framework-dependent build
-            - `${{ steps.artifacts.outputs.installer }}` - NSIS installer
+            - `${{ steps.package.outputs.portable }}` - portable framework-dependent build
+            - `${{ steps.package.outputs.installer }}` - NSIS installer
           files: |
-            ${{ steps.artifacts.outputs.portable }}
-            ${{ steps.artifacts.outputs.installer }}
+            ${{ steps.package.outputs.portable }}
+            ${{ steps.package.outputs.installer }}
+
+      - name: Publish Tagged GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: HotMic v${{ steps.package.outputs.version }}
+          body: |
+            ## Downloads
+            - `${{ steps.package.outputs.portable }}` - portable framework-dependent build
+            - `${{ steps.package.outputs.installer }}` - NSIS installer
+          files: |
+            ${{ steps.package.outputs.portable }}
+            ${{ steps.package.outputs.installer }}
 
   report:
     if: always()
