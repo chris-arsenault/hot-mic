@@ -47,6 +47,8 @@ jobs:
 
   desktop:
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -144,6 +146,35 @@ jobs:
         with:
           name: HotMic-Installer
           path: ${{ steps.artifacts.outputs.installer }}
+
+      - name: Update Rolling Release Tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f main-latest ${{ github.sha }}
+          git push origin refs/tags/main-latest --force
+
+      - name: Publish Rolling GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: main-latest
+          name: HotMic Main (Rolling)
+          prerelease: true
+          make_latest: false
+          body: |
+            Rolling prerelease from `main`.
+
+            Commit: `${{ github.sha }}`
+
+            Downloads:
+            - `${{ steps.artifacts.outputs.portable }}` - portable framework-dependent build
+            - `${{ steps.artifacts.outputs.installer }}` - NSIS installer
+          files: |
+            ${{ steps.artifacts.outputs.portable }}
+            ${{ steps.artifacts.outputs.installer }}
 
   report:
     if: always()
