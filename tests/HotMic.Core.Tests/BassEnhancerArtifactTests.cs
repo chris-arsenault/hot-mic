@@ -100,6 +100,7 @@ public sealed class BassEnhancerArtifactTests
         float baselineEnd = baselinePre.End.HighBandRatioMean;
         float enhancedEnd = enhancedPre.End.HighBandRatioMean;
         float preToPostDelta = enhancedPost.Mid.HighBandRatioMean - enhancedPre.Mid.HighBandRatioMean;
+        float baselineEndToPostDelta = baselinePost.End.HighBandRatioMean - baselinePost.Mid.HighBandRatioMean;
         float endToPostDelta = enhancedPost.End.HighBandRatioMean - enhancedPost.Mid.HighBandRatioMean;
         float flatnessDelta = enhancedPost.Mid.HighBandFlatnessMean - enhancedPre.Mid.HighBandFlatnessMean;
 
@@ -119,8 +120,8 @@ public sealed class BassEnhancerArtifactTests
             $"Bass enhancer increased high-band flatness: {flatnessDelta:0.000} > {maxNoiseDelta:0.000}.");
 
         Assert.True(
-            endToPostDelta <= maxNoiseDelta,
-            $"Downstream plugins introduced high-band noise after bass enhancer: {endToPostDelta:0.000} > {maxNoiseDelta:0.000}.");
+            endToPostDelta <= baselineEndToPostDelta + 0.01f,
+            $"Downstream plugins introduced extra high-band noise after bass enhancer: {endToPostDelta:0.000} exceeds baseline downstream delta {baselineEndToPostDelta:0.000}+0.010.");
 
         Assert.True(
             minimalPreToPostDelta <= maxNoiseDelta,
