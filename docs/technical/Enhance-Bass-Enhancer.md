@@ -15,7 +15,8 @@ Signal flow (per-sample):
    - shaped = tanh((low + bias) * driveGain) - tanh(bias * driveGain) - low
    - This is an NLD residual; the bias term introduces even-order harmonics.
 3) High-pass the residual at ~1.8 * CenterHz to keep only harmonics.
-4) Gate by VoicingScore (analysis) to avoid adding harmonics on unvoiced noise.
+4) Gate by `VoicingScore` from the analysis bus to avoid adding harmonics on
+   unvoiced noise. The sidechain must stay time-aligned to the audio path.
 5) Mix: output = input * (1 - Mix) + (input + wet) * Mix, where
    wet = harmonic * Amount * Scale * Gate.
 

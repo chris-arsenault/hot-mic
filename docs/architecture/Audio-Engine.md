@@ -45,6 +45,9 @@ Each audio callback pulls interleaved stereo output in blocks:
 - Each plugin reports `LatencySamples`; the chain accumulates a per-slot latency.
 - `sampleTime = sampleClock - cumulativeLatency` is passed to plugins for
   time-aligned analysis signals and routing.
+- A plugin that mixes an internal dry path with a latency-bearing wet path must
+  delay its own dry path by `LatencySamples`; chain latency compensation only
+  aligns downstream plugins and routing, not the mix happening inside that slot.
 
 ## Preset Load Behavior
 `BeginPresetLoad()` / `EndPresetLoad()` is a hard pause/resume of live processing:

@@ -145,7 +145,7 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
                 float overDb = _thresholdDb - envDb;
                 float reductionDb = MathF.Min(_maxRangeDb, overDb * (1f - 1f / _gateRatio));
                 targetGain = DspUtils.DbToLinear(-reductionDb);
-                targetGain = MathF.Min(targetGain, _closedGateFloorLinear);
+                targetGain = MathF.Max(targetGain, _closedGateFloorLinear);
             }
 
             float gainCoeff = targetGain > _gain ? _gainAttackCoeff : _gainReleaseCoeff;

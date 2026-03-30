@@ -485,6 +485,10 @@ public sealed class PluginChain
             slot.Meter.Reset();
             slot.Delta.Reset();
             slot.ResetProfiling();
+            if (slot.Plugin is IResettablePlugin resettable)
+            {
+                resettable.ResetState();
+            }
         }
     }
 

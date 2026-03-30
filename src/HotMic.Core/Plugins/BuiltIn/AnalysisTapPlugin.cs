@@ -4,7 +4,7 @@ using HotMic.Core.Analysis;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnalysisSignalBlocker
+public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnalysisSignalBlocker, IResettablePlugin
 {
     private static readonly AnalysisTapSignalInfo[] SignalInfos =
     [
@@ -48,6 +48,9 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
     private int _speechPresenceHasSource;
     private int _speechPresenceModeRaw;
     private int _nonFiniteSignalMask;
+    private int _pendingReset;
+    private int _lastBypassState;
+    private long _lastSampleTime = long.MinValue;
 
     public AnalysisTapPlugin()
     {
@@ -119,6 +122,9 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
             _sources[i] = AnalysisSignalSource.Empty;
         }
         Interlocked.Exchange(ref _nonFiniteSignalMask, 0);
+        Interlocked.Exchange(ref _pendingReset, 0);
+        Interlocked.Exchange(ref _lastBypassState, 0);
+        _lastSampleTime = long.MinValue;
         ResetProfiling();
     }
 
@@ -128,6 +134,8 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
         {
             return;
         }
+
+        ApplyPendingReset();
 
         UpdateProcessorSettings(context.AnalysisCapture);
         UpdatePitchAlgorithm(context.AnalysisCapture);
@@ -143,10 +151,30 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
             Volatile.Write(ref _hasSource[i], hasSource ? 1 : 0);
         }
 
-        int lastIndex = buffer.Length - 1;
         long sampleTime = context.SampleTime;
+        if (sampleTime < _lastSampleTime)
+        {
+            ResetInternalState();
+        }
 
-        if (IsBypassed)
+        _lastSampleTime = sampleTime;
+
+        bool isBypassed = IsBypassed;
+        int bypassState = isBypassed ? 1 : 0;
+        int priorBypass = Interlocked.Exchange(ref _lastBypassState, bypassState);
+        if (priorBypass != bypassState)
+        {
+            RequestReset();
+            ApplyPendingReset();
+            if (isBypassed)
+            {
+                ClearMeterValues();
+            }
+        }
+
+        int lastIndex = buffer.Length - 1;
+
+        if (isBypassed)
         {
             return;
         }
@@ -182,6 +210,7 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
         }
         else
         {
+            _analysisHopFill = 0;
             UpdateSpeechPresenceGate(sampleTime, lastIndex);
         }
 
@@ -194,7 +223,8 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
         for (int i = 0; i < count; i++)
         {
             var signal = (AnalysisSignalId)i;
-            float generated = _processor.GetLastValue(signal);
+            bool generatedThisBlock = (computeMask & (AnalysisSignalMask)(1 << i)) != 0;
+            float generated = generatedThisBlock ? _processor.GetLastValue(signal) : 0f;
             float value = ResolveMeterValue(_modes[i], HasSource(signal), _sources[i], generated, sampleTime, lastIndex);
             if (!float.IsFinite(value))
             {
@@ -240,6 +270,17 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
     public void Process(Span<float> buffer)
     {
         // Tap does not modify audio; this path is kept for interface parity.
+    }
+
+    public void ResetState()
+    {
+        ClearMeterValues();
+        Array.Clear(_hasSource, 0, _hasSource.Length);
+        Volatile.Write(ref _speechPresenceGateValue, 0f);
+        Volatile.Write(ref _speechPresenceGateEnabled, 0);
+        Volatile.Write(ref _speechPresenceHasSource, 0);
+        Interlocked.Exchange(ref _nonFiniteSignalMask, 0);
+        RequestReset();
     }
 
     public void SetParameter(int index, float value)
@@ -457,6 +498,36 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
         Interlocked.Exchange(ref _maxResolveTicks, 0);
         Interlocked.Exchange(ref _lastCaptureTicks, 0);
         Interlocked.Exchange(ref _maxCaptureTicks, 0);
+    }
+
+    private void RequestReset()
+    {
+        Interlocked.Exchange(ref _pendingReset, 1);
+    }
+
+    private void ApplyPendingReset()
+    {
+        if (Interlocked.Exchange(ref _pendingReset, 0) == 0)
+        {
+            return;
+        }
+
+        ResetInternalState();
+    }
+
+    private void ResetInternalState()
+    {
+        _analysisHopFill = 0;
+        _analysisHopStartSampleTime = 0;
+        ClearMeterValues();
+        _processor.Reset();
+        ResetProfiling();
+        _lastSampleTime = long.MinValue;
+    }
+
+    private void ClearMeterValues()
+    {
+        Array.Clear(_meterValues, 0, _meterValues.Length);
     }
 
     private static void RecordProfiling(ref long lastTicks, ref long maxTicks, long elapsedTicks)
