@@ -121,11 +121,14 @@ jobs:
             throw "makensis.exe not found after NSIS installation."
           }
 
+          $publishDir = (Resolve-Path "publish/app").Path
+          $outputName = Join-Path (Resolve-Path "publish").Path (Split-Path "${{ steps.artifacts.outputs.installer }}" -Leaf)
+
           & $makensis /V3 `
             /DAPP_VERSION=1.0.0 `
             /DAPP_EXE=${{ steps.appinfo.outputs.app_exe }} `
-            /DOUTPUT_NAME=${{ steps.artifacts.outputs.installer }} `
-            /DPUBLISH_DIR=publish\\app `
+            /DOUTPUT_NAME=$outputName `
+            /DPUBLISH_DIR=$publishDir `
             build/installer/HotMic.nsi
 
       - name: Upload Portable Artifact
