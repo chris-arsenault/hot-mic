@@ -1,0 +1,277 @@
+{
+  "Name": "default",
+  "Plugins": [
+    {
+      "PluginId": "builtin:input",
+      "Parameters": {}
+    },
+    {
+      "PluginId": "builtin:signal-generator",
+      "Parameters": {
+        "Slot 1 Type": 10,
+        "Slot 1 Frequency": 440,
+        "Slot 1 Gain": -0.6079941,
+        "Slot 1 Mute": 0,
+        "Slot 1 Solo": 0,
+        "Slot 1 Sweep": 1,
+        "Slot 1 Sweep Start": 80,
+        "Slot 1 Sweep End": 8000,
+        "Slot 1 Sweep Duration": 10262.4,
+        "Slot 1 Sweep Dir": 0,
+        "Slot 1 Sweep Curve": 1,
+        "Slot 1 Pulse Width": 0.5,
+        "Slot 1 Impulse Interval": 100,
+        "Slot 1 Chirp Duration": 200,
+        "Slot 1 Loop Mode": 0,
+        "Slot 1 Speed": 1,
+        "Slot 1 Trim Start": 0,
+        "Slot 1 Trim End": 1,
+        "Slot 2 Type": 0,
+        "Slot 2 Frequency": 440,
+        "Slot 2 Gain": 2.4000015,
+        "Slot 2 Mute": 1,
+        "Slot 2 Solo": 0,
+        "Slot 2 Sweep": 1,
+        "Slot 2 Sweep Start": 80,
+        "Slot 2 Sweep End": 8000,
+        "Slot 2 Sweep Duration": 5000,
+        "Slot 2 Sweep Dir": 0,
+        "Slot 2 Sweep Curve": 1,
+        "Slot 2 Pulse Width": 0.5,
+        "Slot 2 Impulse Interval": 100,
+        "Slot 2 Chirp Duration": 200,
+        "Slot 2 Loop Mode": 0,
+        "Slot 2 Speed": 1.0039998,
+        "Slot 2 Trim Start": 0,
+        "Slot 2 Trim End": 0.99999994,
+        "Slot 3 Type": 0,
+        "Slot 3 Frequency": 440,
+        "Slot 3 Gain": -38.880005,
+        "Slot 3 Mute": 1,
+        "Slot 3 Solo": 0,
+        "Slot 3 Sweep": 1,
+        "Slot 3 Sweep Start": 80,
+        "Slot 3 Sweep End": 8000,
+        "Slot 3 Sweep Duration": 5000,
+        "Slot 3 Sweep Dir": 0,
+        "Slot 3 Sweep Curve": 1,
+        "Slot 3 Pulse Width": 0.5,
+        "Slot 3 Impulse Interval": 100,
+        "Slot 3 Chirp Duration": 200,
+        "Slot 3 Loop Mode": 0,
+        "Slot 3 Speed": 1,
+        "Slot 3 Trim Start": 0,
+        "Slot 3 Trim End": 1,
+        "Master Gain": 0,
+        "Master Mute": 0,
+        "Headroom": 1,
+        "Output Preset": 0,
+        "Mix Mode": 0
+      }
+    },
+    {
+      "PluginId": "builtin:hpf",
+      "Parameters": {
+        "Cutoff": 64.999985,
+        "Slope": 12
+      }
+    },
+    {
+      "PluginId": "builtin:voice-gate",
+      "Parameters": {
+        "Threshold": 0.0095,
+        "Attack": 10,
+        "Release": 240,
+        "Hold": 160
+      }
+    },
+    {
+      "PluginId": "builtin:speechdenoiser",
+      "Parameters": {
+        "Dry/Wet": 100,
+        "Attenuation Limit": 100,
+        "Attenuation Enable": 0
+      }
+    },
+    {
+      "PluginId": "builtin:gain",
+      "Parameters": {
+        "Gain": -3.8146973E-06,
+        "Phase": 0
+      }
+    },
+    {
+      "PluginId": "builtin:compressor",
+      "Parameters": {
+        "Threshold": -30.479998,
+        "Ratio": 3,
+        "Attack": 25,
+        "Release": 180,
+        "Makeup": 6.3999996,
+        "Knee": 6,
+        "Detector": 1,
+        "Sidechain HPF": 1
+      }
+    },
+    {
+      "PluginId": "builtin:deesser",
+      "Parameters": {
+        "Center Freq": 5900,
+        "Bandwidth": 2400,
+        "Threshold": -27,
+        "Reduction": 5,
+        "Max Range": 9
+      }
+    },
+    {
+      "PluginId": "builtin:saturation",
+      "Parameters": {
+        "Warmth": 25.733334,
+        "Blend": 28.533333
+      }
+    },
+    {
+      "PluginId": "builtin:analysis-tap",
+      "Parameters": {
+        "Speech Presence": 1,
+        "Voicing Score": 1,
+        "Voicing State": 1,
+        "Fricative Activity": 1,
+        "Sibilance Energy": 1,
+        "Onset Flux High": 1,
+        "Pitch (Hz)": 0,
+        "Pitch Confidence": 0,
+        "Formant F1 (Hz)": 1,
+        "Formant F2 (Hz)": 1,
+        "Formant F3 (Hz)": 1,
+        "Formant Confidence": 1,
+        "Spectral Flux": 0,
+        "HNR (dB)": 0
+      }
+    },
+    {
+      "PluginId": "builtin:bass-enhancer",
+      "Parameters": {
+        "Amount": 0.40266675,
+        "Drive": 0.43200004,
+        "Mix": 0.36533338,
+        "Center": 1,
+        "Scale": 2
+      }
+    },
+    {
+      "PluginId": "builtin:upward-expander",
+      "Parameters": {
+        "Amount": 35.46668,
+        "Threshold": 218.23996,
+        "Low Split": 2241.6665,
+        "High Split": 15.935999,
+        "Attack": 22.463999,
+        "Release": 0.5893334,
+        "Gate Strength": 0,
+        "Scale": -47.333336
+      }
+    },
+    {
+      "PluginId": "builtin:spectral-contrast",
+      "Parameters": {
+        "Strength": 30,
+        "Scale": 100,
+        "Mix": 0.3253333,
+        "Gate Strength": 1
+      }
+    },
+    {
+      "PluginId": "builtin:consonant-transient",
+      "Parameters": {
+        "Amount": 0.38933337,
+        "Threshold": 0.9279996,
+        "High Cut": 0,
+        "Scale": 1.1679989
+      }
+    },
+    {
+      "PluginId": "builtin:dynamic-eq",
+      "Parameters": {
+        "Low Boost": 1.8080006,
+        "High Boost": 1.0080001,
+        "Smoothing": 160.16
+      }
+    },
+    {
+      "PluginId": "builtin:air-exciter",
+      "Parameters": {
+        "Drive": 0.3306666,
+        "Mix": 0.3226666,
+        "Cutoff": 5539.1206,
+        "Scale": 0.36266667
+      }
+    },
+    {
+      "PluginId": "builtin:vitalizer-mk2t",
+      "Parameters": {
+        "Drive": -5.8933334,
+        "Bass": -0.15999997,
+        "Bass Comp": 1.4319998,
+        "Bass LC": 0,
+        "Mid-Hi Tune": 6000,
+        "Process": 0.5580001,
+        "High Freq": 7215.1025,
+        "Intensity": 0.094666556,
+        "High Comp": 3.1360004,
+        "High LC": 0,
+        "Tube": 0,
+        "Output": -0.13866615,
+        "Limit": 0
+      }
+    },
+    {
+      "PluginId": "builtin:reverb",
+      "Parameters": {
+        "Dry/Wet": 0.19466668,
+        "Decay": 0.44266677,
+        "Pre-Delay": 12.8,
+        "IR Preset": 1
+      }
+    },
+    {
+      "PluginId": "builtin:output-send",
+      "Parameters": {
+        "Send Mode": 2
+      }
+    }
+  ],
+  "Containers": [
+    {
+      "Name": "Noise Removal",
+      "IsBypassed": false,
+      "PluginIndices": [
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "Name": "Compression / Cleaning",
+      "IsBypassed": false,
+      "PluginIndices": [
+        5,
+        6,
+        7,
+        8
+      ]
+    },
+    {
+      "Name": "Vocal Enhancment",
+      "IsBypassed": false,
+      "PluginIndices": [
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ]
+    }
+  ]
+}

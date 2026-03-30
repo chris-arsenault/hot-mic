@@ -75,12 +75,34 @@ public partial class AnalyzerWindow : Window, IDisposable
     // Speech Coach buffers
     private byte[] _speakingStateTrack = Array.Empty<byte>();
     private byte[] _syllableMarkers = Array.Empty<byte>();
-    private float _lastSyllableRate;
-    private float _lastArticulationRate;
+    private byte[] _emphasisMarkers = Array.Empty<byte>();
+    private float[] _syllableRateTrack = Array.Empty<float>();
+    private float[] _articulationRateTrack = Array.Empty<float>();
+    private float[] _wordsPerMinuteTrack = Array.Empty<float>();
+    private float[] _articulationWpmTrack = Array.Empty<float>();
+    private float[] _pauseRatioTrack = Array.Empty<float>();
+    private float[] _meanPauseDurationTrack = Array.Empty<float>();
+    private float[] _pausesPerMinuteTrack = Array.Empty<float>();
+    private float[] _filledPauseRatioTrack = Array.Empty<float>();
+    private float[] _pauseMicroCountTrack = Array.Empty<float>();
+    private float[] _pauseShortCountTrack = Array.Empty<float>();
+    private float[] _pauseMediumCountTrack = Array.Empty<float>();
+    private float[] _pauseLongCountTrack = Array.Empty<float>();
+    private float[] _monotoneScoreTrack = Array.Empty<float>();
+    private float[] _clarityScoreTrack = Array.Empty<float>();
+    private float[] _intelligibilityTrack = Array.Empty<float>();
+    private float[] _bandLowRatioTrack = Array.Empty<float>();
+    private float[] _bandMidRatioTrack = Array.Empty<float>();
+    private float[] _bandPresenceRatioTrack = Array.Empty<float>();
+    private float[] _bandHighRatioTrack = Array.Empty<float>();
+    private float[] _clarityRatioTrack = Array.Empty<float>();
+    private float _lastWordsPerMinute;
+    private float _lastArticulationWpm;
     private float _lastPauseRatio;
     private float _lastMonotoneScore;
     private float _lastClarityScore;
     private float _lastIntelligibilityScore;
+    private long _lastSpeechCopiedFrameId = -1;
 
     private int _bufferFrameCount;
     private int _bufferBins;
@@ -134,29 +156,10 @@ public partial class AnalyzerWindow : Window, IDisposable
     private const ModifierKeys ProfilerHotkeyModifiers = ModifierKeys.Control | ModifierKeys.Shift | ModifierKeys.Alt;
     private const Key ProfilerHotkeyKey = Key.P;
 
-    private static readonly int[] FftSizes = { 1024, 2048, 4096, 8192 };
-    private static readonly WindowFunction[] WindowFunctions =
-    {
-        WindowFunction.Hann,
-        WindowFunction.Hamming,
-        WindowFunction.BlackmanHarris,
-        WindowFunction.Gaussian,
-        WindowFunction.Kaiser
-    };
-    private static readonly FrequencyScale[] Scales =
-    {
-        FrequencyScale.Linear,
-        FrequencyScale.Logarithmic,
-        FrequencyScale.Mel,
-        FrequencyScale.Erb,
-        FrequencyScale.Bark
-    };
     private static readonly string[] NoteNames =
     {
         "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
     };
-
-    private static readonly float[] OverlapOptions = { 0.5f, 0.75f, 0.875f, 0.9375f, 0.96875f };
 
     private const int ParamFftSize = 0;
     private const int ParamWindowFunction = 1;
@@ -212,7 +215,7 @@ public partial class AnalyzerWindow : Window, IDisposable
         _orchestrator = orchestrator;
         _store = orchestrator.Results;
         _presetHelper = new PluginPresetHelper(
-            "builtin:vocal-spectrograph",
+            "analysis:visualizer",
             PluginPresetManager.Default,
             ApplyPreset,
             GetCurrentParameters);
@@ -252,17 +255,9 @@ public partial class AnalyzerWindow : Window, IDisposable
 
     private void WireKnobHandlers()
     {
-        _renderer.MinFreqKnob.ValueChanged += value => OnKnobValueChanged(ParamMinFrequency, value);
-        _renderer.MaxFreqKnob.ValueChanged += value => OnKnobValueChanged(ParamMaxFrequency, value);
+        // Display knobs only - processing knobs are in AnalysisSettingsWindow
         _renderer.MinDbKnob.ValueChanged += value => OnKnobValueChanged(ParamMinDb, value);
         _renderer.MaxDbKnob.ValueChanged += value => OnKnobValueChanged(ParamMaxDb, value);
-        _renderer.TimeKnob.ValueChanged += value => OnKnobValueChanged(ParamTimeWindow, value);
-        _renderer.HpfKnob.ValueChanged += value => OnKnobValueChanged(ParamHighPassCutoff, value);
-        _renderer.ReassignThresholdKnob.ValueChanged += value => OnKnobValueChanged(ParamReassignThreshold, value);
-        _renderer.ReassignSpreadKnob.ValueChanged += value => OnKnobValueChanged(ParamReassignSpread, value / 100f);
-        _renderer.ClarityNoiseKnob.ValueChanged += value => OnKnobValueChanged(ParamClarityNoise, value / 100f);
-        _renderer.ClarityHarmonicKnob.ValueChanged += value => OnKnobValueChanged(ParamClarityHarmonic, value / 100f);
-        _renderer.ClaritySmoothingKnob.ValueChanged += value => OnKnobValueChanged(ParamClaritySmoothing, value / 100f);
         _renderer.BrightnessKnob.ValueChanged += value => OnKnobValueChanged(ParamBrightness, value);
         _renderer.GammaKnob.ValueChanged += value => OnKnobValueChanged(ParamGamma, value);
         _renderer.ContrastKnob.ValueChanged += value => OnKnobValueChanged(ParamContrast, value);
@@ -700,9 +695,52 @@ public partial class AnalyzerWindow : Window, IDisposable
             // Copy speech metrics if enabled
             if (_speechCoachEnabled)
             {
-                // Speech metrics from store - use TryGetSpeechMetrics if available
-                // For now, speech metrics are tracked per-frame in the store
-                // but we don't have a single-value getter, so leave at defaults
+                bool speechCopied = _store.TryGetSpeechMetrics(
+                    _lastSpeechCopiedFrameId,
+                    _syllableRateTrack,
+                    _articulationRateTrack,
+                    _wordsPerMinuteTrack,
+                    _articulationWpmTrack,
+                    _pauseRatioTrack,
+                    _meanPauseDurationTrack,
+                    _pausesPerMinuteTrack,
+                    _filledPauseRatioTrack,
+                    _pauseMicroCountTrack,
+                    _pauseShortCountTrack,
+                    _pauseMediumCountTrack,
+                    _pauseLongCountTrack,
+                    _monotoneScoreTrack,
+                    _clarityScoreTrack,
+                    _intelligibilityTrack,
+                    _bandLowRatioTrack,
+                    _bandMidRatioTrack,
+                    _bandPresenceRatioTrack,
+                    _bandHighRatioTrack,
+                    _clarityRatioTrack,
+                    _speakingStateTrack,
+                    _syllableMarkers,
+                    _emphasisMarkers,
+                    out long speechLatestFrameId,
+                    out int speechAvailableFrames,
+                    out _);
+
+                if (speechCopied && speechAvailableFrames > 0 && _bufferFrameCount > 0)
+                {
+                    _lastSpeechCopiedFrameId = speechLatestFrameId;
+
+                    int latestIndex = (int)(speechLatestFrameId % _bufferFrameCount);
+                    if (latestIndex < 0)
+                    {
+                        latestIndex += _bufferFrameCount;
+                    }
+
+                    _lastWordsPerMinute = _wordsPerMinuteTrack[latestIndex];
+                    _lastArticulationWpm = _articulationWpmTrack[latestIndex];
+                    _lastPauseRatio = _pauseRatioTrack[latestIndex];
+                    _lastMonotoneScore = _monotoneScoreTrack[latestIndex];
+                    _lastClarityScore = _clarityScoreTrack[latestIndex];
+                    _lastIntelligibilityScore = _intelligibilityTrack[latestIndex];
+                }
             }
         }
 
@@ -1015,6 +1053,27 @@ public partial class AnalyzerWindow : Window, IDisposable
         {
             _speakingStateTrack = new byte[frames];
             _syllableMarkers = new byte[frames];
+            _emphasisMarkers = new byte[frames];
+            _syllableRateTrack = new float[frames];
+            _articulationRateTrack = new float[frames];
+            _wordsPerMinuteTrack = new float[frames];
+            _articulationWpmTrack = new float[frames];
+            _pauseRatioTrack = new float[frames];
+            _meanPauseDurationTrack = new float[frames];
+            _pausesPerMinuteTrack = new float[frames];
+            _filledPauseRatioTrack = new float[frames];
+            _pauseMicroCountTrack = new float[frames];
+            _pauseShortCountTrack = new float[frames];
+            _pauseMediumCountTrack = new float[frames];
+            _pauseLongCountTrack = new float[frames];
+            _monotoneScoreTrack = new float[frames];
+            _clarityScoreTrack = new float[frames];
+            _intelligibilityTrack = new float[frames];
+            _bandLowRatioTrack = new float[frames];
+            _bandMidRatioTrack = new float[frames];
+            _bandPresenceRatioTrack = new float[frames];
+            _bandHighRatioTrack = new float[frames];
+            _clarityRatioTrack = new float[frames];
             _lastDataVersion = -1;
             resized = true;
         }
@@ -1202,8 +1261,8 @@ public partial class AnalyzerWindow : Window, IDisposable
             ShowSyllableMarkers: _showSyllableMarkers,
             ShowPauseOverlay: _showPauseOverlay,
             ShowFillerMarkers: _showFillerMarkers,
-            SyllableRate: _lastSyllableRate,
-            ArticulationRate: _lastArticulationRate,
+            WordsPerMinute: _lastWordsPerMinute,
+            ArticulationWpm: _lastArticulationWpm,
             PauseRatio: _lastPauseRatio,
             MonotoneScore: _lastMonotoneScore,
             ClarityScore: _lastClarityScore,
@@ -1354,38 +1413,11 @@ public partial class AnalyzerWindow : Window, IDisposable
             case SpectroHitArea.BypassButton:
                 _isBypassed = !_isBypassed; // Local display bypass only
                 return true;
-            case SpectroHitArea.FftButton:
-                CycleFftSize();
-                return true;
-            case SpectroHitArea.TransformButton:
-                CycleTransformType();
-                return true;
-            case SpectroHitArea.WindowButton:
-                CycleWindow();
-                return true;
-            case SpectroHitArea.OverlapButton:
-                CycleOverlap();
-                return true;
-            case SpectroHitArea.ScaleButton:
-                CycleScale();
-                return true;
             case SpectroHitArea.ColorButton:
                 CycleColorMap();
                 return true;
-            case SpectroHitArea.ReassignButton:
-                CycleReassignMode();
-                return true;
-            case SpectroHitArea.ClarityButton:
-                CycleClarityMode();
-                return true;
-            case SpectroHitArea.PitchAlgorithmButton:
-                CyclePitchAlgorithm();
-                return true;
             case SpectroHitArea.AxisModeButton:
                 CycleAxisMode();
-                return true;
-            case SpectroHitArea.SmoothingModeButton:
-                CycleSmoothingMode();
                 return true;
             case SpectroHitArea.PauseButton:
                 TogglePause();
@@ -1414,12 +1446,6 @@ public partial class AnalyzerWindow : Window, IDisposable
             case SpectroHitArea.VoicingToggle:
                 ToggleParameter(ParamShowVoicing, _showVoicing);
                 return true;
-            case SpectroHitArea.PreEmphasisToggle:
-                ToggleParameter(ParamPreEmphasis, _orchestrator.Config.PreEmphasis);
-                return true;
-            case SpectroHitArea.HpfToggle:
-                ToggleParameter(ParamHighPassEnabled, _orchestrator.Config.HighPassEnabled);
-                return true;
             case SpectroHitArea.RangeToggle:
                 ToggleParameter(ParamShowRange, _showRange);
                 return true;
@@ -1429,39 +1455,14 @@ public partial class AnalyzerWindow : Window, IDisposable
             case SpectroHitArea.VoiceRangeButton:
                 CycleVoiceRange();
                 return true;
-            case SpectroHitArea.NormalizationButton:
-                CycleNormalizationMode();
-                return true;
             case SpectroHitArea.DynamicRangeButton:
                 CycleDynamicRangeMode();
-                return true;
-            case SpectroHitArea.WaveformToggle:
-                ToggleParameter(ParamShowWaveform, _showWaveform);
                 return true;
             case SpectroHitArea.SpectrumToggle:
                 ToggleParameter(ParamShowSpectrum, _showSpectrum);
                 return true;
             case SpectroHitArea.PitchMeterToggle:
                 ToggleParameter(ParamShowPitchMeter, _showPitchMeter);
-                return true;
-            case SpectroHitArea.SpeechToggle:
-                ToggleParameter(ParamSpeechCoachEnabled, _speechCoachEnabled);
-                return true;
-            // Speech Coach toggles
-            case SpectroHitArea.SpeechCoachToggle:
-                ToggleParameter(ParamSpeechCoachEnabled, _speechCoachEnabled);
-                return true;
-            case SpectroHitArea.SpeechMetricsToggle:
-                ToggleParameter(ParamShowSpeechMetrics, _showSpeechMetrics);
-                return true;
-            case SpectroHitArea.SyllableMarkersToggle:
-                ToggleParameter(ParamShowSyllableMarkers, _showSyllableMarkers);
-                return true;
-            case SpectroHitArea.PauseOverlayToggle:
-                ToggleParameter(ParamShowPauseOverlay, _showPauseOverlay);
-                return true;
-            case SpectroHitArea.FillerMarkersToggle:
-                ToggleParameter(ParamShowFillerMarkers, _showFillerMarkers);
                 return true;
             case SpectroHitArea.Spectrogram:
                 return TrySetReferenceLine(x);
@@ -1580,109 +1581,12 @@ public partial class AnalyzerWindow : Window, IDisposable
         // Preset tracking removed - using shared orchestrator config
     }
 
-    private void CycleFftSize()
-    {
-        int current = _orchestrator.Config.FftSize;
-        int index = Array.IndexOf(FftSizes, current);
-        int next = FftSizes[(index + 1) % FftSizes.Length];
-        SetParameter(ParamFftSize, next);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleTransformType()
-    {
-        SpectrogramTransformType next = _orchestrator.Config.TransformType switch
-        {
-            SpectrogramTransformType.Fft => SpectrogramTransformType.ZoomFft,
-            SpectrogramTransformType.ZoomFft => SpectrogramTransformType.Cqt,
-            _ => SpectrogramTransformType.Fft
-        };
-        SetParameter(ParamTransformType, (float)next);
-        if (next == SpectrogramTransformType.Cqt && _orchestrator.Config.PitchAlgorithm == PitchDetectorType.Swipe)
-        {
-            SetParameter(ParamPitchAlgorithm, (float)PitchDetectorType.Yin);
-        }
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleWindow()
-    {
-        var current = _orchestrator.Config.WindowFunction;
-        int index = Array.IndexOf(WindowFunctions, current);
-        int nextIndex = (index + 1) % WindowFunctions.Length;
-        SetParameter(ParamWindowFunction, (float)WindowFunctions[nextIndex]);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleOverlap()
-    {
-        float current = _orchestrator.Config.Overlap;
-        int index = Array.IndexOf(OverlapOptions, current);
-        int nextIndex = (index + 1) % OverlapOptions.Length;
-        SetParameter(ParamOverlap, OverlapOptions[nextIndex]);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleScale()
-    {
-        var current = _orchestrator.Config.FrequencyScale;
-        int index = Array.IndexOf(Scales, current);
-        int nextIndex = (index + 1) % Scales.Length;
-        SetParameter(ParamScale, (float)Scales[nextIndex]);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
     private void CycleColorMap()
     {
         int current = _colorMap;
         int count = Enum.GetValues<SpectrogramColorMap>().Length;
         int next = (current + 1) % count;
         SetParameter(ParamColorMap, next);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleReassignMode()
-    {
-        SpectrogramReassignMode next = _orchestrator.Config.ReassignMode switch
-        {
-            SpectrogramReassignMode.Off => SpectrogramReassignMode.Frequency,
-            SpectrogramReassignMode.Frequency => SpectrogramReassignMode.Time,
-            SpectrogramReassignMode.Time => SpectrogramReassignMode.TimeFrequency,
-            _ => SpectrogramReassignMode.Off
-        };
-        SetParameter(ParamReassignMode, (float)next);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleClarityMode()
-    {
-        ClarityProcessingMode next = _orchestrator.Config.ClarityMode switch
-        {
-            ClarityProcessingMode.None => ClarityProcessingMode.Noise,
-            ClarityProcessingMode.Noise => ClarityProcessingMode.Harmonic,
-            ClarityProcessingMode.Harmonic => ClarityProcessingMode.Full,
-            _ => ClarityProcessingMode.None
-        };
-        SetParameter(ParamClarityMode, (float)next);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CyclePitchAlgorithm()
-    {
-        bool allowSwipe = _orchestrator.Config.TransformType != SpectrogramTransformType.Cqt;
-        PitchDetectorType next = _orchestrator.Config.PitchAlgorithm switch
-        {
-            PitchDetectorType.Yin => PitchDetectorType.Pyin,
-            PitchDetectorType.Pyin => PitchDetectorType.Autocorrelation,
-            PitchDetectorType.Autocorrelation => PitchDetectorType.Cepstral,
-            PitchDetectorType.Cepstral => allowSwipe ? PitchDetectorType.Swipe : PitchDetectorType.Yin,
-            _ => PitchDetectorType.Yin
-        };
-        if (!allowSwipe && next == PitchDetectorType.Swipe)
-        {
-            next = PitchDetectorType.Yin;
-        }
-        SetParameter(ParamPitchAlgorithm, (float)next);
         // Preset tracking removed - using shared orchestrator config
     }
 
@@ -1710,31 +1614,6 @@ public partial class AnalyzerWindow : Window, IDisposable
             _ => VocalRangeType.Bass
         };
         SetParameter(ParamVoiceRange, (float)next);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleSmoothingMode()
-    {
-        SpectrogramSmoothingMode next = _orchestrator.Config.SmoothingMode switch
-        {
-            SpectrogramSmoothingMode.Off => SpectrogramSmoothingMode.Ema,
-            SpectrogramSmoothingMode.Ema => SpectrogramSmoothingMode.Bilateral,
-            _ => SpectrogramSmoothingMode.Off
-        };
-        SetParameter(ParamSmoothingMode, (float)next);
-        // Preset tracking removed - using shared orchestrator config
-    }
-
-    private void CycleNormalizationMode()
-    {
-        SpectrogramNormalizationMode next = _orchestrator.Config.NormalizationMode switch
-        {
-            SpectrogramNormalizationMode.None => SpectrogramNormalizationMode.Peak,
-            SpectrogramNormalizationMode.Peak => SpectrogramNormalizationMode.Rms,
-            SpectrogramNormalizationMode.Rms => SpectrogramNormalizationMode.AWeighted,
-            _ => SpectrogramNormalizationMode.None
-        };
-        SetParameter(ParamNormalizationMode, (float)next);
         // Preset tracking removed - using shared orchestrator config
     }
 
@@ -1785,12 +1664,34 @@ public partial class AnalyzerWindow : Window, IDisposable
         // Speech Coach buffers
         Array.Clear(_speakingStateTrack, 0, _speakingStateTrack.Length);
         Array.Clear(_syllableMarkers, 0, _syllableMarkers.Length);
-        _lastSyllableRate = 0f;
-        _lastArticulationRate = 0f;
+        Array.Clear(_emphasisMarkers, 0, _emphasisMarkers.Length);
+        Array.Clear(_syllableRateTrack, 0, _syllableRateTrack.Length);
+        Array.Clear(_articulationRateTrack, 0, _articulationRateTrack.Length);
+        Array.Clear(_wordsPerMinuteTrack, 0, _wordsPerMinuteTrack.Length);
+        Array.Clear(_articulationWpmTrack, 0, _articulationWpmTrack.Length);
+        Array.Clear(_pauseRatioTrack, 0, _pauseRatioTrack.Length);
+        Array.Clear(_meanPauseDurationTrack, 0, _meanPauseDurationTrack.Length);
+        Array.Clear(_pausesPerMinuteTrack, 0, _pausesPerMinuteTrack.Length);
+        Array.Clear(_filledPauseRatioTrack, 0, _filledPauseRatioTrack.Length);
+        Array.Clear(_pauseMicroCountTrack, 0, _pauseMicroCountTrack.Length);
+        Array.Clear(_pauseShortCountTrack, 0, _pauseShortCountTrack.Length);
+        Array.Clear(_pauseMediumCountTrack, 0, _pauseMediumCountTrack.Length);
+        Array.Clear(_pauseLongCountTrack, 0, _pauseLongCountTrack.Length);
+        Array.Clear(_monotoneScoreTrack, 0, _monotoneScoreTrack.Length);
+        Array.Clear(_clarityScoreTrack, 0, _clarityScoreTrack.Length);
+        Array.Clear(_intelligibilityTrack, 0, _intelligibilityTrack.Length);
+        Array.Clear(_bandLowRatioTrack, 0, _bandLowRatioTrack.Length);
+        Array.Clear(_bandMidRatioTrack, 0, _bandMidRatioTrack.Length);
+        Array.Clear(_bandPresenceRatioTrack, 0, _bandPresenceRatioTrack.Length);
+        Array.Clear(_bandHighRatioTrack, 0, _bandHighRatioTrack.Length);
+        Array.Clear(_clarityRatioTrack, 0, _clarityRatioTrack.Length);
+        _lastWordsPerMinute = 0f;
+        _lastArticulationWpm = 0f;
         _lastPauseRatio = 0f;
         _lastMonotoneScore = 0f;
         _lastClarityScore = 0f;
         _lastIntelligibilityScore = 0f;
+        _lastSpeechCopiedFrameId = -1;
         _lastDataVersion = -1;
         _lastCopiedFrameId = -1;
         _lastMappedFrameId = -1;

@@ -395,6 +395,7 @@ HotMic/
 
 This project should not rely on long-term unit or integration tests to control behavior.
 Temporary, isolated verification tests are allowed (for example, DSP math or FFT correctness), but should be clearly scoped and may be removed once validated.
+Do not run tests unless the user explicitly directs you to do so.
 
 Still document complex DSP or UI behavior with concise inline comments near the relevant code so intent and assumptions are captured in context.
 
@@ -520,11 +521,11 @@ This repo uses a WSL source tree with build outputs redirected to a Windows NTFS
 
 ## Build & Run Commands
 
-**Agent policy (WSL limitation):**
-- This agent runs in WSL and cannot build, run, or publish the Windows app here.
-- Do not execute build/test/run steps in WSL; ask the user to run them on Windows and share the results.
-- Never claim build/test success unless the user ran the commands and reported the output.
-- If the user cannot run them, mark the change as unverified and proceed with caution.
+**Agent policy (current environment):**
+- `dotnet` builds and tests are allowed in WSL for non-WPF projects and should be used when they help verify changes.
+- WPF app launch/publish remains Windows-only; do not claim `HotMic.App` run/publish success from WSL unless it was actually run on Windows.
+- When a verification step is WSL-compatible, agents should run it directly and report the actual result.
+- When a step is Windows-only, mark it clearly as unverified from WSL.
 
 ---
 

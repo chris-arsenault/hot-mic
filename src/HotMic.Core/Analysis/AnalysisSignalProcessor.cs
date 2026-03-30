@@ -56,6 +56,8 @@ internal readonly record struct AnalysisSignalProfilingSnapshot(
 
 public sealed class AnalysisSignalProcessor
 {
+    private static readonly int[] FftCacheSizes = { 64, 128, 256, 512, 1024, 2048, 4096, 8192 };
+
     private const float SpeechThresholdDb = -50f;
     private const float SpeechRangeDb = 30f;
     private const float FricativeHighHz = 2500f;
@@ -85,6 +87,8 @@ public sealed class AnalysisSignalProcessor
     private bool _highFluxInitialized;
 
     private FastFft? _fft;
+    private readonly FastFft?[] _fftCache = new FastFft?[FftCacheSizes.Length];
+    private bool _fftCacheInitialized;
     private readonly SpectralFeatureExtractor _featureExtractor = new();
     private readonly VoicingDetector _voicingDetector = new();
 
@@ -273,13 +277,14 @@ public sealed class AnalysisSignalProcessor
         EnsureBuffer(ref _binFrequencies, _analysisBins);
         _highFluxInitialized = false;
 
-        _fft ??= new FastFft(_analysisSize);
-        if (_fft.Size != _analysisSize)
+        EnsureFftCache();
+        _fft = GetCachedFft(_analysisSize);
+        if (_fft is null)
         {
             _fft = new FastFft(_analysisSize);
         }
 
-        WindowFunctions.Fill(_analysisWindow, settings.WindowFunction);
+        WindowFunctions.Fill(_analysisWindow.AsSpan(0, _analysisSize), settings.WindowFunction);
 
         for (int i = 0; i < _analysisBins; i++)
         {
@@ -287,7 +292,7 @@ public sealed class AnalysisSignalProcessor
         }
 
         _featureExtractor.EnsureCapacity(_analysisBins);
-        _featureExtractor.UpdateFrequencies(_binFrequencies);
+        _featureExtractor.UpdateFrequencies(_binFrequencies.AsSpan(0, _analysisBins));
 
         EnsureSignalBuffers(_hopSize);
 
@@ -295,6 +300,25 @@ public sealed class AnalysisSignalProcessor
         ConfigurePitchDetectors(settings.MinFrequency, settings.MaxFrequency);
         _voicingDetector.Configure(_sampleRate, _hopSize, _binResolution, settings.VoicingSettings);
         _pitchFrameIndex = 0;
+    }
+
+    internal void Preallocate(int maxAnalysisSize, int maxHopSize)
+    {
+        int analysisSize = NextPowerOfTwo(Math.Max(64, maxAnalysisSize));
+        int analysisBins = analysisSize / 2;
+        int hopSize = Math.Max(1, maxHopSize);
+
+        EnsureFftCache();
+        EnsureBuffer(ref _analysisBufferRaw, analysisSize);
+        EnsureBuffer(ref _analysisBufferProcessed, analysisSize);
+        EnsureBuffer(ref _analysisWindow, analysisSize);
+        EnsureBuffer(ref _fftReal, analysisSize);
+        EnsureBuffer(ref _fftImag, analysisSize);
+        EnsureBuffer(ref _fftMagnitudes, analysisBins);
+        EnsureBuffer(ref _highFluxPrevious, analysisBins);
+        EnsureBuffer(ref _binFrequencies, analysisBins);
+        EnsureSignalBuffers(hopSize);
+        _featureExtractor.EnsureCapacity(analysisBins);
     }
 
     public void Reset()
@@ -480,7 +504,10 @@ public sealed class AnalysisSignalProcessor
                 fftTicks = Stopwatch.GetTimestamp() - fftStart;
             }
 
-            ProcessFrameCore(_analysisBufferRaw, _analysisBufferProcessed, _fftMagnitudes, computeSignals, profilingEnabled);
+            var rawFrame = _analysisBufferRaw.AsSpan(0, _analysisSize);
+            var processedFrame = _analysisBufferProcessed.AsSpan(0, _analysisSize);
+            var magnitudes = _fftMagnitudes.AsSpan(0, _analysisBins);
+            ProcessFrameCore(rawFrame, processedFrame, magnitudes, computeSignals, profilingEnabled);
         }
 
         if (profilingEnabled)
@@ -877,7 +904,7 @@ public sealed class AnalysisSignalProcessor
     private void EnsureFftMagnitudes()
     {
         int size = _analysisSize;
-        if (_fftReal.Length != size || _fftImag.Length != size)
+        if (_fftReal.Length < size || _fftImag.Length < size)
         {
             return;
         }
@@ -1091,10 +1118,38 @@ public sealed class AnalysisSignalProcessor
 
     private static void EnsureBuffer(ref float[] buffer, int length)
     {
-        if (buffer.Length != length)
+        if (buffer.Length < length)
         {
             buffer = new float[length];
         }
+    }
+
+    private void EnsureFftCache()
+    {
+        if (_fftCacheInitialized)
+        {
+            return;
+        }
+
+        for (int i = 0; i < FftCacheSizes.Length; i++)
+        {
+            _fftCache[i] = new FastFft(FftCacheSizes[i]);
+        }
+
+        _fftCacheInitialized = true;
+    }
+
+    private FastFft? GetCachedFft(int size)
+    {
+        for (int i = 0; i < FftCacheSizes.Length; i++)
+        {
+            if (FftCacheSizes[i] == size)
+            {
+                return _fftCache[i];
+            }
+        }
+
+        return null;
     }
 
     private void EnsureSignalBuffers(int length)

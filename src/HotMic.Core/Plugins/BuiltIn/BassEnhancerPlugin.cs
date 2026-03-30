@@ -1,4 +1,5 @@
 using System.Threading;
+using HotMic.Core.Dsp.Filters;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
@@ -20,9 +21,11 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
     private string _statusMessage = string.Empty;
 
     private const string MissingSidechainMessage = "Missing analysis data.";
-
+    private const float GateAttackMs = 4f;
+    private const float GateReleaseMs = 40f;
     private readonly BiquadFilter _bandPass = new();
     private readonly BiquadFilter _highPass = new();
+    private ControlSignalTransform _gateTransform;
 
     // Metering
     private float _meterVoicedGate;
@@ -80,6 +83,7 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
     {
         _sampleRate = sampleRate;
         UpdateFilters();
+        ConfigureControlSmoothing();
     }
 
     public void Process(Span<float> buffer, in PluginProcessContext context)
@@ -107,8 +111,7 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
             // Asymmetric waveshaping (bias) introduces even harmonics for stronger LF perception.
             float shaped = MathF.Tanh((low + bias) * driveGain) - biasTanh - low;
             float harmonic = _highPass.Process(shaped);
-
-            float gate = voicedSource.ReadSample(baseTime + i);
+            float gate = Math.Clamp(_gateTransform.Process(voicedSource.ReadSample(baseTime + i)), 0f, 1f);
 
             float wet = harmonic * amount * gate;
             buffer[i] = input * (1f - _mix) + (input + wet) * _mix;
@@ -149,6 +152,8 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
             float harmonic = _highPass.Process(shaped);
             float wet = harmonic * amount;
             buffer[i] = input * (1f - _mix) + (input + wet) * _mix;
+            _meterBassEnergy = MathF.Abs(low);
+            _meterHarmonicAmount = MathF.Abs(harmonic);
         }
     }
 
@@ -226,4 +231,15 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
         _highPass.SetHighPass(_sampleRate, _centerHz * 1.8f, 0.707f);
     }
 
+    private void ConfigureControlSmoothing()
+    {
+        if (_sampleRate <= 0)
+        {
+            return;
+        }
+
+        _gateTransform.Configure(
+            _sampleRate,
+            ControlSignalTransformSettings.AttackRelease(GateAttackMs, GateReleaseMs));
+    }
 }

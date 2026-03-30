@@ -148,9 +148,9 @@ public struct SamplePlayer
         _startPending = true;
     }
 
-    public float Next(SampleBuffer buffer, out SamplePlaybackFlags flags)
+    public float Next(SampleBuffer buffer, out SamplePlaybackEvent flags)
     {
-        flags = SamplePlaybackFlags.None;
+        flags = SamplePlaybackEvent.None;
         if (!_playing || !buffer.IsLoaded) return 0f;
 
         int length = buffer.Length;
@@ -162,7 +162,7 @@ public struct SamplePlayer
 
         if (_startPending)
         {
-            flags |= SamplePlaybackFlags.Started;
+            flags |= SamplePlaybackEvent.Started;
             _startPending = false;
         }
 
@@ -214,12 +214,12 @@ public struct SamplePlayer
 
         if (looped)
         {
-            flags |= SamplePlaybackFlags.LoopRestart;
+            flags |= SamplePlaybackEvent.LoopRestart;
         }
 
         if (stopped)
         {
-            flags |= SamplePlaybackFlags.Stopped;
+            flags |= SamplePlaybackEvent.Stopped;
         }
 
         return sample;
@@ -227,7 +227,7 @@ public struct SamplePlayer
 }
 
 [Flags]
-public enum SamplePlaybackFlags : byte
+public enum SamplePlaybackEvent : byte
 {
     None = 0,
     Started = 1,

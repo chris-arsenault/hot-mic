@@ -1,4 +1,6 @@
 using System.Threading;
+using HotMic.Core.Dsp;
+using HotMic.Core.Dsp.Filters;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
@@ -20,6 +22,10 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
     private const float LfoRateHz = 0.35f;
     private const float LfoDepth = 0.08f;
     private const float LfoSlewMs = 500f;
+    private const float VoicingAttackMs = 4f;
+    private const float VoicingReleaseMs = 40f;
+    private const float SibilanceAttackMs = 2f;
+    private const float SibilanceReleaseMs = 25f;
 
     private readonly BiquadFilter _highPass = new();
 
@@ -34,6 +40,8 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
     private int _lfoCountdown;
     private int _lfoPeriodSamples;
     private float _lfoCoeff;
+    private ControlSignalTransform _voicingTransform;
+    private ControlSignalTransform _sibilanceTransform;
 
     public AirExciterPlugin()
     {
@@ -87,6 +95,7 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
         _sampleRate = sampleRate;
         UpdateFilter();
         UpdateLfo();
+        ConfigureControlSmoothing();
     }
 
     public void Process(Span<float> buffer, in PluginProcessContext context)
@@ -110,8 +119,8 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
             float high = _highPass.Process(input);
             float lfo = UpdateLfoValue();
 
-            float voiced = voicedSource.ReadSample(baseTime + i);
-            float sib = sibilanceSource.ReadSample(baseTime + i);
+            float voiced = Math.Clamp(_voicingTransform.Process(voicedSource.ReadSample(baseTime + i)), 0f, 1f);
+            float sib = Math.Clamp(_sibilanceTransform.Process(sibilanceSource.ReadSample(baseTime + i)), 0f, 1f);
             float gate = Math.Clamp(voiced * (1f - sib), 0f, 1f);
             float mod = lfo * LfoDepth * (1f - sib);
             float scale = EnhanceAmountScale.FromIndex(_amountScaleIndex);
@@ -233,6 +242,21 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
         _lfoCoeff = DspUtils.TimeToCoefficient(LfoSlewMs, _sampleRate);
         _lfoTarget = NextLfoTarget();
         _lfoValue = 0f;
+    }
+
+    private void ConfigureControlSmoothing()
+    {
+        if (_sampleRate <= 0)
+        {
+            return;
+        }
+
+        _voicingTransform.Configure(
+            _sampleRate,
+            ControlSignalTransformSettings.AttackRelease(VoicingAttackMs, VoicingReleaseMs));
+        _sibilanceTransform.Configure(
+            _sampleRate,
+            ControlSignalTransformSettings.AttackRelease(SibilanceAttackMs, SibilanceReleaseMs));
     }
 
     private float UpdateLfoValue()

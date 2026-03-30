@@ -132,6 +132,12 @@ internal sealed class MainDebugOverlayRenderer
         canvas.DrawText(viewModel.AnalysisTapGateLine, col1X, textY, procPaint);
         textY += lineHeight;
 
+        canvas.DrawText(viewModel.AnalysisTapCaptureLine, col1X, textY, procPaint);
+        textY += lineHeight;
+
+        canvas.DrawText(viewModel.AnalysisOrchestratorLine, col1X, textY, procPaint);
+        textY += lineHeight;
+
         canvas.DrawText(viewModel.VitalizerLine, col1X, textY, _paints.SmallTextPaint);
         textY += lineHeight;
 

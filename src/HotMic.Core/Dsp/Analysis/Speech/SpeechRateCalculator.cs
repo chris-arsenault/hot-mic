@@ -16,6 +16,8 @@ public sealed class SpeechRateCalculator
     private int _syllableCount;
     private int _pauseHead;
     private int _pauseCount;
+    private long _debugSyllablesRecorded;
+    private long _debugPausesRecorded;
 
     private float _windowSeconds = 10f;
 
@@ -36,6 +38,7 @@ public sealed class SpeechRateCalculator
         _syllableFrames[_syllableHead] = frameId;
         _syllableHead = (_syllableHead + 1) % MaxEvents;
         _syllableCount = Math.Min(_syllableCount + 1, MaxEvents);
+        _debugSyllablesRecorded++;
     }
 
     /// <summary>
@@ -48,6 +51,7 @@ public sealed class SpeechRateCalculator
         _pauseTypes[_pauseHead] = evt.Type;
         _pauseHead = (_pauseHead + 1) % MaxEvents;
         _pauseCount = Math.Min(_pauseCount + 1, MaxEvents);
+        _debugPausesRecorded++;
     }
 
     /// <summary>
@@ -62,6 +66,10 @@ public sealed class SpeechRateCalculator
     /// <param name="meanPauseDurationMs">Output: average pause duration in ms.</param>
     /// <param name="pausesPerMinute">Output: number of pauses per minute.</param>
     /// <param name="filledPauseRatio">Output: ratio of filled pauses to total pauses (0-1).</param>
+    /// <param name="pauseMicroCount">Output: number of micro pauses (150-300ms).</param>
+    /// <param name="pauseShortCount">Output: number of short pauses (300-700ms).</param>
+    /// <param name="pauseMediumCount">Output: number of medium pauses (700-1500ms).</param>
+    /// <param name="pauseLongCount">Output: number of long pauses (>1500ms).</param>
     public void Compute(
         long currentFrameId,
         int hopSize,
@@ -71,7 +79,11 @@ public sealed class SpeechRateCalculator
         out float pauseRatio,
         out float meanPauseDurationMs,
         out float pausesPerMinute,
-        out float filledPauseRatio)
+        out float filledPauseRatio,
+        out int pauseMicroCount,
+        out int pauseShortCount,
+        out int pauseMediumCount,
+        out int pauseLongCount)
     {
         float frameDurationMs = 1000f * hopSize / sampleRate;
         float windowMs = _windowSeconds * 1000f;
@@ -96,6 +108,10 @@ public sealed class SpeechRateCalculator
         float totalFilledPauseDurationMs = 0f;
         int pausesInWindow = 0;
         int filledPausesInWindow = 0;
+        pauseMicroCount = 0;
+        pauseShortCount = 0;
+        pauseMediumCount = 0;
+        pauseLongCount = 0;
 
         for (int i = 0; i < _pauseCount; i++)
         {
@@ -114,6 +130,24 @@ public sealed class SpeechRateCalculator
             {
                 totalFilledPauseDurationMs += duration;
                 filledPausesInWindow++;
+            }
+
+            // Pause categories per SPEECH.md 7.2
+            if (duration >= 150f && duration < 300f)
+            {
+                pauseMicroCount++;
+            }
+            else if (duration < 700f)
+            {
+                pauseShortCount++;
+            }
+            else if (duration < 1500f)
+            {
+                pauseMediumCount++;
+            }
+            else
+            {
+                pauseLongCount++;
             }
         }
 
@@ -144,5 +178,17 @@ public sealed class SpeechRateCalculator
         _syllableCount = 0;
         _pauseHead = 0;
         _pauseCount = 0;
+        _debugSyllablesRecorded = 0;
+        _debugPausesRecorded = 0;
     }
+
+    /// <summary>
+    /// Snapshot of debug counters for diagnostics.
+    /// </summary>
+    public SpeechRateDebugStats DebugStats => new(_debugSyllablesRecorded, _debugPausesRecorded, _windowSeconds);
 }
+
+public readonly record struct SpeechRateDebugStats(
+    long SyllablesRecorded,
+    long PausesRecorded,
+    float WindowSeconds);

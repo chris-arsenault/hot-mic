@@ -6,7 +6,7 @@ using NAudio.Wave;
 namespace HotMic.Core.Plugins.BuiltIn;
 
 /// <summary>
-/// Convolution reverb plugin using FFT-based overlap-add convolution.
+/// Convolution reverb plugin using uniform partitioned convolution.
 /// Supports loading custom impulse response files or using built-in presets.
 /// </summary>
 public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugin, IPluginStatusProvider
@@ -16,36 +16,39 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
     public const int PreDelayIndex = 2;
     public const int IrPresetIndex = 3;
 
-    // FFT parameters
     private int _fftSize = 2048;
     private int _fftHalfSize = 1024;
     private int _overlapSize = 1024;
 
-    // Pre-allocated buffers (no allocations in audio thread)
     private float[] _inputBuffer = Array.Empty<float>();
     private float[] _outputBuffer = Array.Empty<float>();
     private float[] _overlapBuffer = Array.Empty<float>();
     private FastFft? _fft;
     private float[] _fftReal = Array.Empty<float>();
     private float[] _fftImag = Array.Empty<float>();
-    private float[] _irFftReal = Array.Empty<float>();
-    private float[] _irFftImag = Array.Empty<float>();
     private float[] _convReal = Array.Empty<float>();
     private float[] _convImag = Array.Empty<float>();
     private float[] _irSamples = Array.Empty<float>();
 
-    // Pre-delay buffer
+    // Partitioned convolution state. Each IR partition stores an FFT of fftHalfSize samples.
+    private float[][] _irPartitionReal = Array.Empty<float[]>();
+    private float[][] _irPartitionImag = Array.Empty<float[]>();
+    private float[][] _inputHistoryReal = Array.Empty<float[]>();
+    private float[][] _inputHistoryImag = Array.Empty<float[]>();
+    private int _historyIndex;
+
     private float[] _preDelayBuffer = Array.Empty<float>();
     private int _preDelayWritePos;
     private int _preDelayReadPos;
     private int _preDelaySamples;
 
-    // Buffer positions
+    private DelayLine? _dryDelayLine;
+    private float[] _dryAlignedBuffer = Array.Empty<float>();
+
     private int _inputPos;
     private int _outputPos;
     private int _outputAvailable;
 
-    // Parameters
     private float _dryWet = 0.3f;
     private float _decay = 1.0f;
     private float _preDelayMs;
@@ -57,11 +60,9 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
     private string _statusMessage = "No IR loaded";
     private string? _loadedIrPath;
 
-    // Level metering
     private int _inputLevelBits;
     private int _outputLevelBits;
 
-    // Built-in IR presets
     private static readonly string[] IrPresetNames =
     [
         "None",
@@ -90,7 +91,6 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
     public IReadOnlyList<PluginParameter> Parameters { get; }
     public string StatusMessage => _statusMessage;
 
-    // UI properties
     public float DryWet => _dryWet;
     public float Decay => _decay;
     public float PreDelayMs => _preDelayMs;
@@ -104,35 +104,25 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
         _sampleRate = sampleRate;
         _blockSize = blockSize;
 
-        // Choose FFT size based on sample rate for reasonable latency
         _fftSize = sampleRate >= 88200 ? 4096 : 2048;
         _fftHalfSize = _fftSize / 2;
         _overlapSize = _fftHalfSize;
 
-        // Pre-allocate all buffers
-        _inputBuffer = new float[_fftSize];
-        _outputBuffer = new float[_fftSize];
+        _inputBuffer = new float[_fftHalfSize];
+        _outputBuffer = new float[_fftHalfSize];
         _overlapBuffer = new float[_overlapSize];
         _fft = new FastFft(_fftSize);
         _fftReal = new float[_fftSize];
         _fftImag = new float[_fftSize];
         _convReal = new float[_fftSize];
         _convImag = new float[_fftSize];
-        _irFftReal = new float[_fftSize];
-        _irFftImag = new float[_fftSize];
 
-        // Pre-delay buffer (max 100ms)
-        int maxPreDelaySamples = (int)(0.1f * sampleRate);
+        int maxPreDelaySamples = Math.Max(1, (int)(0.1f * sampleRate));
         _preDelayBuffer = new float[maxPreDelaySamples];
-        UpdatePreDelay();
+        _dryAlignedBuffer = new float[Math.Max(blockSize, 1)];
+        _dryDelayLine = new DelayLine(_fftHalfSize + maxPreDelaySamples + 1);
 
-        // Reset positions
-        _inputPos = 0;
-        _outputPos = 0;
-        _outputAvailable = 0;
-        _preDelayWritePos = 0;
-
-        // Load IR based on preset
+        ResetProcessingState();
         ApplyIrPreset(_irPreset);
     }
 
@@ -143,9 +133,19 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
 
     public void Process(Span<float> buffer)
     {
-        if (IsBypassed || !_irLoaded)
+        if (IsBypassed || !_irLoaded || buffer.IsEmpty)
         {
             return;
+        }
+
+        var dryAligned = _dryAlignedBuffer.AsSpan(0, buffer.Length);
+        if (_dryDelayLine is not null && LatencySamples > 0)
+        {
+            _dryDelayLine.Process(buffer, dryAligned, LatencySamples);
+        }
+        else
+        {
+            buffer.CopyTo(dryAligned);
         }
 
         float peakIn = 0f;
@@ -156,10 +156,8 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
         for (int i = 0; i < buffer.Length; i++)
         {
             float input = buffer[i];
-            float absIn = MathF.Abs(input);
-            if (absIn > peakIn) peakIn = absIn;
+            peakIn = MathF.Max(peakIn, MathF.Abs(input));
 
-            // Apply pre-delay
             float delayedInput = input;
             if (_preDelaySamples > 0)
             {
@@ -169,34 +167,27 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
                 _preDelayReadPos = (_preDelayReadPos + 1) % _preDelayBuffer.Length;
             }
 
-            // Add input to FFT buffer
             _inputBuffer[_inputPos++] = delayedInput;
-
-            // When we have enough samples, process FFT
             if (_inputPos >= _fftHalfSize)
             {
                 ProcessFftBlock();
                 _inputPos = 0;
             }
 
-            // Get wet output
             float wetSample = 0f;
             if (_outputAvailable > 0)
             {
                 wetSample = _outputBuffer[_outputPos++];
                 _outputAvailable--;
-                if (_outputPos >= _fftSize)
+                if (_outputPos >= _outputBuffer.Length)
                 {
                     _outputPos = 0;
                 }
             }
 
-            // Mix dry and wet
-            float output = input * dry + wetSample * wet;
+            float output = dryAligned[i] * dry + wetSample * wet;
             buffer[i] = output;
-
-            float absOut = MathF.Abs(output);
-            if (absOut > peakOut) peakOut = absOut;
+            peakOut = MathF.Max(peakOut, MathF.Abs(output));
         }
 
         Interlocked.Exchange(ref _inputLevelBits, BitConverter.SingleToInt32Bits(peakIn));
@@ -205,49 +196,64 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
 
     private void ProcessFftBlock()
     {
-        // Zero-pad second half
-        Array.Clear(_inputBuffer, _fftHalfSize, _fftHalfSize);
-
-        if (_fft is null)
+        if (_fft is null || _irPartitionReal.Length == 0)
         {
             return;
         }
 
-        // Forward FFT
-        Array.Copy(_inputBuffer, _fftReal, _fftSize);
+        Array.Clear(_fftReal, 0, _fftReal.Length);
         Array.Clear(_fftImag, 0, _fftImag.Length);
+        _inputBuffer.AsSpan().CopyTo(_fftReal);
         _fft.Forward(_fftReal, _fftImag);
 
-        // Multiply with IR in frequency domain
-        for (int i = 0; i < _fftSize; i++)
+        int currentHistory = _historyIndex;
+        _fftReal.CopyTo(_inputHistoryReal[currentHistory], 0);
+        _fftImag.CopyTo(_inputHistoryImag[currentHistory], 0);
+
+        Array.Clear(_convReal, 0, _convReal.Length);
+        Array.Clear(_convImag, 0, _convImag.Length);
+
+        int partitionCount = _irPartitionReal.Length;
+        for (int partition = 0; partition < partitionCount; partition++)
         {
-            float aRe = _fftReal[i];
-            float aIm = _fftImag[i];
-            float bRe = _irFftReal[i];
-            float bIm = _irFftImag[i];
-            _convReal[i] = aRe * bRe - aIm * bIm;
-            _convImag[i] = aRe * bIm + aIm * bRe;
+            int historySlot = currentHistory - partition;
+            if (historySlot < 0)
+            {
+                historySlot += partitionCount;
+            }
+
+            var inputReal = _inputHistoryReal[historySlot];
+            var inputImag = _inputHistoryImag[historySlot];
+            var irReal = _irPartitionReal[partition];
+            var irImag = _irPartitionImag[partition];
+
+            for (int i = 0; i < _fftSize; i++)
+            {
+                float aRe = inputReal[i];
+                float aIm = inputImag[i];
+                float bRe = irReal[i];
+                float bIm = irImag[i];
+                _convReal[i] += aRe * bRe - aIm * bIm;
+                _convImag[i] += aRe * bIm + aIm * bRe;
+            }
         }
 
-        // Inverse FFT
         _fft.Inverse(_convReal, _convImag);
 
-        // Overlap-add
-        for (int i = 0; i < _fftSize; i++)
+        for (int i = 0; i < _fftHalfSize; i++)
         {
-            float sample = _convReal[i] * _decay;
-            if (i < _overlapSize)
-            {
-                sample += _overlapBuffer[i];
-            }
-            _outputBuffer[i] = sample;
+            _outputBuffer[i] = _convReal[i] * _decay + _overlapBuffer[i];
+            _overlapBuffer[i] = _convReal[i + _fftHalfSize] * _decay;
         }
-
-        // Save overlap for next block
-        Array.Copy(_outputBuffer, _fftHalfSize, _overlapBuffer, 0, _overlapSize);
 
         _outputAvailable = _fftHalfSize;
         _outputPos = 0;
+
+        _historyIndex++;
+        if (_historyIndex >= partitionCount)
+        {
+            _historyIndex = 0;
+        }
     }
 
     public void SetParameter(int index, float value)
@@ -275,18 +281,14 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
         }
     }
 
-    /// <summary>
-    /// Load a custom impulse response from a WAV file.
-    /// </summary>
     public bool LoadImpulseResponse(string path)
     {
         try
         {
             using var reader = new AudioFileReader(path);
 
-            // Convert to mono at current sample rate
             int irLength = (int)(reader.TotalTime.TotalSeconds * _sampleRate);
-            if (irLength > _sampleRate * 10) // Max 10 seconds
+            if (irLength > _sampleRate * 10)
             {
                 irLength = _sampleRate * 10;
             }
@@ -297,7 +299,6 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
 
             while ((samplesRead = reader.Read(readBuffer, 0, readBuffer.Length)) > 0)
             {
-                // Convert to mono if stereo
                 if (reader.WaveFormat.Channels == 2)
                 {
                     for (int i = 0; i < samplesRead; i += 2)
@@ -319,7 +320,6 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
                 }
             }
 
-            // Resample if needed
             if (reader.WaveFormat.SampleRate != _sampleRate)
             {
                 tempSamples = ResampleIr(tempSamples, reader.WaveFormat.SampleRate, _sampleRate);
@@ -328,7 +328,7 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
             SetIrSamples(tempSamples.ToArray());
             _loadedIrPath = path;
             _statusMessage = $"Loaded: {Path.GetFileName(path)}";
-            _irPreset = 5; // Custom
+            _irPreset = 5;
             return true;
         }
         catch (Exception ex)
@@ -340,29 +340,48 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
 
     private void SetIrSamples(float[] samples)
     {
-        if (samples.Length == 0)
+        if (samples.Length == 0 || _fft is null)
         {
+            _irSamples = Array.Empty<float>();
+            _irPartitionReal = Array.Empty<float[]>();
+            _irPartitionImag = Array.Empty<float[]>();
+            _inputHistoryReal = Array.Empty<float[]>();
+            _inputHistoryImag = Array.Empty<float[]>();
             _irLoaded = false;
+            ResetProcessingState();
             return;
         }
 
-        // Ensure IR fits in FFT buffer (pad or truncate)
-        _irSamples = new float[_fftSize];
-        int copyLength = Math.Min(samples.Length, _fftSize);
-        Array.Copy(samples, _irSamples, copyLength);
+        _irSamples = new float[samples.Length];
+        Array.Copy(samples, _irSamples, samples.Length);
 
-        if (_fft is null)
+        int partitionCount = Math.Max(1, (_irSamples.Length + _fftHalfSize - 1) / _fftHalfSize);
+        _irPartitionReal = new float[partitionCount][];
+        _irPartitionImag = new float[partitionCount][];
+        _inputHistoryReal = new float[partitionCount][];
+        _inputHistoryImag = new float[partitionCount][];
+
+        for (int partition = 0; partition < partitionCount; partition++)
         {
-            _irLoaded = false;
-            return;
-        }
+            var partReal = new float[_fftSize];
+            var partImag = new float[_fftSize];
 
-        // Pre-compute IR FFT
-        Array.Copy(_irSamples, _irFftReal, _fftSize);
-        Array.Clear(_irFftImag, 0, _irFftImag.Length);
-        _fft.Forward(_irFftReal, _irFftImag);
+            int sourceOffset = partition * _fftHalfSize;
+            int copyLength = Math.Min(_fftHalfSize, _irSamples.Length - sourceOffset);
+            if (copyLength > 0)
+            {
+                Array.Copy(_irSamples, sourceOffset, partReal, 0, copyLength);
+            }
+
+            _fft.Forward(partReal, partImag);
+            _irPartitionReal[partition] = partReal;
+            _irPartitionImag[partition] = partImag;
+            _inputHistoryReal[partition] = new float[_fftSize];
+            _inputHistoryImag[partition] = new float[_fftSize];
+        }
 
         _irLoaded = true;
+        ResetProcessingState();
     }
 
     private void ApplyIrPreset(int preset)
@@ -371,31 +390,33 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
 
         switch (preset)
         {
-            case 0: // None
+            case 0:
                 _irLoaded = false;
                 _statusMessage = "No IR loaded";
+                ResetProcessingState();
                 break;
-            case 1: // Small Room
+            case 1:
                 GenerateRoomIr(0.3f, 0.4f);
                 _statusMessage = "Small Room";
                 break;
-            case 2: // Medium Hall
+            case 2:
                 GenerateRoomIr(1.0f, 0.6f);
                 _statusMessage = "Medium Hall";
                 break;
-            case 3: // Large Hall
+            case 3:
                 GenerateRoomIr(2.0f, 0.7f);
                 _statusMessage = "Large Hall";
                 break;
-            case 4: // Plate
+            case 4:
                 GeneratePlateIr(1.5f, 0.5f);
                 _statusMessage = "Plate";
                 break;
-            case 5: // Custom (do nothing, wait for file load)
+            case 5:
                 if (_loadedIrPath == null)
                 {
                     _irLoaded = false;
                     _statusMessage = "Select IR file...";
+                    ResetProcessingState();
                 }
                 break;
         }
@@ -403,16 +424,12 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
 
     private void GenerateRoomIr(float durationSec, float density)
     {
-        int irLength = Math.Min((int)(durationSec * _sampleRate), _fftSize);
-        var ir = new float[_fftSize];
+        int irLength = Math.Max(1, (int)(durationSec * _sampleRate));
+        var ir = new float[irLength];
+        var random = new Random(42);
 
-        // Simple algorithmic reverb impulse response
-        // Early reflections + exponential decay tail
-        var random = new Random(42); // Fixed seed for determinism
-
-        // Early reflections (first 50ms)
-        int earlyCount = (int)(0.05f * _sampleRate);
-        for (int i = 0; i < Math.Min(earlyCount, irLength); i++)
+        int earlyCount = Math.Min((int)(0.05f * _sampleRate), irLength);
+        for (int i = 0; i < earlyCount; i++)
         {
             if (random.NextSingle() < density * 0.1f)
             {
@@ -421,7 +438,6 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
             }
         }
 
-        // Diffuse tail
         float decayRate = 3f / (_sampleRate * durationSec);
         for (int i = earlyCount; i < irLength; i++)
         {
@@ -429,77 +445,98 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
             ir[i] = (random.NextSingle() * 2f - 1f) * amp;
         }
 
-        // Normalize
-        float maxAbs = 0f;
-        for (int i = 0; i < irLength; i++)
-        {
-            float abs = MathF.Abs(ir[i]);
-            if (abs > maxAbs) maxAbs = abs;
-        }
-        if (maxAbs > 0)
-        {
-            float scale = 0.5f / maxAbs;
-            for (int i = 0; i < irLength; i++)
-            {
-                ir[i] *= scale;
-            }
-        }
-
+        NormalizeImpulse(ir, targetPeak: 0.5f);
         SetIrSamples(ir);
     }
 
     private void GeneratePlateIr(float durationSec, float density)
     {
-        int irLength = Math.Min((int)(durationSec * _sampleRate), _fftSize);
-        var ir = new float[_fftSize];
+        int irLength = Math.Max(1, (int)(durationSec * _sampleRate));
+        var ir = new float[irLength];
         var random = new Random(123);
 
-        // Plate reverb: dense, smooth decay with high diffusion
         float decayRate = 4f / (_sampleRate * durationSec);
-
         for (int i = 0; i < irLength; i++)
         {
             float t = (float)i / _sampleRate;
             float amp = MathF.Exp(-i * decayRate);
-
-            // High-frequency rolloff simulation
             float hfRolloff = MathF.Exp(-t * 8f);
-
-            // Dense noise with slight modulation
             float noise = random.NextSingle() * 2f - 1f;
             ir[i] = noise * amp * density * (0.3f + 0.7f * hfRolloff);
         }
 
-        // Normalize
-        float maxAbs = 0f;
-        for (int i = 0; i < irLength; i++)
-        {
-            float abs = MathF.Abs(ir[i]);
-            if (abs > maxAbs) maxAbs = abs;
-        }
-        if (maxAbs > 0)
-        {
-            float scale = 0.4f / maxAbs;
-            for (int i = 0; i < irLength; i++)
-            {
-                ir[i] *= scale;
-            }
-        }
-
+        NormalizeImpulse(ir, targetPeak: 0.4f);
         SetIrSamples(ir);
     }
 
     private void UpdatePreDelay()
     {
-        if (_sampleRate == 0) return;
-        _preDelaySamples = (int)(_preDelayMs * 0.001f * _sampleRate);
+        if (_sampleRate <= 0 || _preDelayBuffer.Length == 0)
+        {
+            return;
+        }
+
+        _preDelaySamples = Math.Clamp((int)(_preDelayMs * 0.001f * _sampleRate), 0, _preDelayBuffer.Length - 1);
         _preDelayReadPos = (_preDelayWritePos - _preDelaySamples + _preDelayBuffer.Length) % _preDelayBuffer.Length;
-        if (_preDelayReadPos < 0) _preDelayReadPos += _preDelayBuffer.Length;
+    }
+
+    private void ResetProcessingState()
+    {
+        Array.Clear(_inputBuffer, 0, _inputBuffer.Length);
+        Array.Clear(_outputBuffer, 0, _outputBuffer.Length);
+        Array.Clear(_overlapBuffer, 0, _overlapBuffer.Length);
+        Array.Clear(_fftReal, 0, _fftReal.Length);
+        Array.Clear(_fftImag, 0, _fftImag.Length);
+        Array.Clear(_convReal, 0, _convReal.Length);
+        Array.Clear(_convImag, 0, _convImag.Length);
+        Array.Clear(_preDelayBuffer, 0, _preDelayBuffer.Length);
+        Array.Clear(_dryAlignedBuffer, 0, _dryAlignedBuffer.Length);
+
+        for (int i = 0; i < _inputHistoryReal.Length; i++)
+        {
+            Array.Clear(_inputHistoryReal[i], 0, _inputHistoryReal[i].Length);
+            Array.Clear(_inputHistoryImag[i], 0, _inputHistoryImag[i].Length);
+        }
+
+        _inputPos = 0;
+        _outputPos = 0;
+        _outputAvailable = 0;
+        _historyIndex = 0;
+        _preDelayWritePos = 0;
+        UpdatePreDelay();
+
+        if (_fftHalfSize > 0 || _preDelayBuffer.Length > 0)
+        {
+            _dryDelayLine = new DelayLine(Math.Max(1, _fftHalfSize + _preDelayBuffer.Length + 1));
+        }
+    }
+
+    private static void NormalizeImpulse(float[] samples, float targetPeak)
+    {
+        float maxAbs = 0f;
+        for (int i = 0; i < samples.Length; i++)
+        {
+            maxAbs = MathF.Max(maxAbs, MathF.Abs(samples[i]));
+        }
+
+        if (maxAbs <= 0f)
+        {
+            return;
+        }
+
+        float scale = targetPeak / maxAbs;
+        for (int i = 0; i < samples.Length; i++)
+        {
+            samples[i] *= scale;
+        }
     }
 
     private static List<float> ResampleIr(List<float> samples, int fromRate, int toRate)
     {
-        if (fromRate == toRate) return samples;
+        if (fromRate == toRate)
+        {
+            return samples;
+        }
 
         double ratio = (double)toRate / fromRate;
         int newLength = (int)(samples.Count * ratio);
@@ -550,7 +587,10 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
 
     public void SetState(byte[] state)
     {
-        if (state.Length == 0) return;
+        if (state.Length == 0)
+        {
+            return;
+        }
 
         try
         {
@@ -576,17 +616,14 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
         }
         catch
         {
-            // Ignore corrupt state
         }
     }
 
     public void ApplyQuality(AudioQualityProfile profile)
     {
-        // Could adjust FFT size based on quality mode if needed
     }
 
     public void Dispose()
     {
-        // No unmanaged resources
     }
 }

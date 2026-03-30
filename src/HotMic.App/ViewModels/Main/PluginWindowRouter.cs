@@ -43,8 +43,6 @@ internal sealed class PluginWindowRouter
             new() { Id = "builtin:fft-noise", Name = "FFT Noise Removal", IsVst3 = false, Category = PluginCategory.NoiseReduction, Description = "Learns and removes background noise" },
 
             // Analysis
-            new() { Id = "builtin:freq-analyzer", Name = "Frequency Analyzer", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Real-time spectrum view with tunable bins" },
-            new() { Id = "builtin:vocal-spectrograph", Name = "Vocal Spectrograph", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Vocal-focused spectrogram with overlays" },
             new() { Id = "builtin:signal-generator", Name = "Signal Generator", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Test tones, noise, and sample playback" },
             new() { Id = "builtin:analysis-tap", Name = "Analysis Tap", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Analysis signal tap with use/gen/off per signal" },
 
@@ -142,18 +140,6 @@ internal sealed class PluginWindowRouter
         if (plugin is FFTNoiseRemovalPlugin fftNoise)
         {
             ShowFFTNoiseWindow(channelIndex, pluginInstanceId, fftNoise, request);
-            return;
-        }
-
-        if (plugin is FrequencyAnalyzerPlugin analyzer)
-        {
-            ShowFrequencyAnalyzerWindow(channelIndex, pluginInstanceId, analyzer, request);
-            return;
-        }
-
-        if (plugin is VocalSpectrographPlugin spectrograph)
-        {
-            ShowVocalSpectrographWindow(channelIndex, pluginInstanceId, spectrograph, request);
             return;
         }
 
@@ -444,36 +430,6 @@ internal sealed class PluginWindowRouter
             },
             bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed),
             () => request.RequestNoiseLearn(channelIndex, pluginInstanceId))
-        {
-            Owner = System.Windows.Application.Current?.MainWindow
-        };
-        window.Show();
-    }
-
-    private void ShowFrequencyAnalyzerWindow(int channelIndex, int pluginInstanceId, FrequencyAnalyzerPlugin plugin, PluginWindowRequest request)
-    {
-        var window = new FrequencyAnalyzerWindow(plugin,
-            (paramIndex, value) =>
-            {
-                string paramName = GetParameterName(plugin, paramIndex);
-                request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
-            },
-            bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
-        {
-            Owner = System.Windows.Application.Current?.MainWindow
-        };
-        window.Show();
-    }
-
-    private void ShowVocalSpectrographWindow(int channelIndex, int pluginInstanceId, VocalSpectrographPlugin plugin, PluginWindowRequest request)
-    {
-        var window = new VocalSpectrographWindow(plugin,
-            (paramIndex, value) =>
-            {
-                string paramName = GetParameterName(plugin, paramIndex);
-                request.ApplyPluginParameter(channelIndex, pluginInstanceId, paramIndex, paramName, value);
-            },
-            bypassed => request.SetPluginBypass(channelIndex, pluginInstanceId, bypassed))
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };

@@ -33,6 +33,7 @@ Define the threading model, buffering, and synchronization used for analysis out
 - Audio callback only writes to the ring buffer; no allocations or locks.
 - Analysis thread sleeps when insufficient data is available to avoid busy spinning.
 
-Implementation refs: (src/HotMic.Core/Plugins/BuiltIn/VocalSpectrographPlugin.Analysis.cs,
- src/HotMic.Core/Plugins/BuiltIn/VocalSpectrographPlugin.Buffers.cs,
+Implementation refs: (src/HotMic.Core/Analysis/AnalysisOrchestrator.cs,
+ src/HotMic.Core/Analysis/AnalysisSignalProcessor.cs,
+ src/HotMic.Core/Analysis/AnalysisResultStore.cs,
  src/HotMic.Core/Threading/LockFreeRingBuffer.cs)

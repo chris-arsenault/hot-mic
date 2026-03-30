@@ -9,6 +9,7 @@ public sealed class SpectralFeatureExtractor
     private float[] _fluxPrevious = Array.Empty<float>();
     private double _freqSum;
     private double _freqSumSq;
+    private int _frequencyCount;
 
     /// <summary>
     /// Ensure internal buffers are sized for the provided bin count.
@@ -20,9 +21,14 @@ public sealed class SpectralFeatureExtractor
             return;
         }
 
-        if (_fluxPrevious.Length != bins)
+        if (_fluxPrevious.Length < bins)
         {
             _fluxPrevious = new float[bins];
+        }
+
+        if (_frequencies.Length < bins)
+        {
+            _frequencies = new float[bins];
         }
     }
 
@@ -32,6 +38,9 @@ public sealed class SpectralFeatureExtractor
     public void Reset()
     {
         Array.Clear(_fluxPrevious, 0, _fluxPrevious.Length);
+        _frequencyCount = 0;
+        _freqSum = 0.0;
+        _freqSumSq = 0.0;
     }
 
     /// <summary>
@@ -39,14 +48,12 @@ public sealed class SpectralFeatureExtractor
     /// </summary>
     public void UpdateFrequencies(ReadOnlySpan<float> frequencies)
     {
-        if (_frequencies.Length != frequencies.Length)
-        {
-            _frequencies = new float[frequencies.Length];
-        }
+        EnsureCapacity(frequencies.Length);
 
         double sum = 0.0;
         double sumSq = 0.0;
-        for (int i = 0; i < frequencies.Length; i++)
+        int count = frequencies.Length;
+        for (int i = 0; i < count; i++)
         {
             float freq = frequencies[i];
             _frequencies[i] = freq;
@@ -54,6 +61,7 @@ public sealed class SpectralFeatureExtractor
             sumSq += freq * freq;
         }
 
+        _frequencyCount = count;
         _freqSum = sum;
         _freqSumSq = sumSq;
     }
@@ -63,7 +71,7 @@ public sealed class SpectralFeatureExtractor
     /// </summary>
     public void Compute(ReadOnlySpan<float> magnitudes, out float centroid, out float slope, out float flux)
     {
-        Compute(magnitudes, Math.Min(magnitudes.Length, _frequencies.Length), out centroid, out slope, out flux);
+        Compute(magnitudes, Math.Min(magnitudes.Length, _frequencyCount), out centroid, out slope, out flux);
     }
 
     /// <summary>
@@ -71,7 +79,7 @@ public sealed class SpectralFeatureExtractor
     /// </summary>
     public void Compute(ReadOnlySpan<float> magnitudes, int bins, out float centroid, out float slope, out float flux)
     {
-        bins = Math.Min(bins, Math.Min(magnitudes.Length, _frequencies.Length));
+        bins = Math.Min(bins, Math.Min(magnitudes.Length, _frequencyCount));
         if (bins <= 0)
         {
             centroid = 0f;

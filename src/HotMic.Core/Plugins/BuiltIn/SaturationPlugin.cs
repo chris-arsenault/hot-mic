@@ -61,6 +61,8 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
     private HalfbandResampler[] _downsamplers = [];
     private float[][] _stageBuffers = [];
     private float[] _dryBuffer = Array.Empty<float>();
+    private float[] _dryAlignedBuffer = Array.Empty<float>();
+    private DelayLine? _dryDelayLine;
 
     // Reference path for null-difference analysis
     // Must have identical filter chain (OS + linear filters) but NO saturation nonlinearity
@@ -116,12 +118,23 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
         }
 
         var drySpan = _dryBuffer.AsSpan(0, buffer.Length);
+        var dryAlignedSpan = _dryAlignedBuffer.AsSpan(0, buffer.Length);
         float inputPeak = 0f;
         for (int i = 0; i < buffer.Length; i++)
         {
             float input = buffer[i];
             drySpan[i] = input;
             inputPeak = MathF.Max(inputPeak, MathF.Abs(input));
+        }
+
+        int latency = _latencySamples;
+        if (latency > 0 && _dryDelayLine is not null)
+        {
+            _dryDelayLine.Process(drySpan, dryAlignedSpan, latency);
+        }
+        else
+        {
+            drySpan.CopyTo(dryAlignedSpan);
         }
 
         ReadOnlySpan<float> stageInput = buffer;
@@ -151,6 +164,22 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
 
             // 2) Envelope follower (for dynamic behavior)
             float env = _envelope.Process(x1);
+
+            if (warmth <= 1e-4f)
+            {
+                float lowLinear = _hfLowpass.Process(x1);
+                float highLinear = x1 - lowLinear;
+                float linearOutput = _postEmphasis.Process(lowLinear + highLinear);
+                oversampled[i] = linearOutput;
+
+                if (++_diagnosticDecimator >= DiagnosticDecimation)
+                {
+                    _diagnosticDecimator = 0;
+                    _diagnostics.RecordTransferSample(x1, linearOutput, env);
+                }
+
+                continue;
+            }
 
             // 3) Asymmetric tanh warmth core with split curvature
             // Different k for positive vs negative creates even harmonics at all signal levels
@@ -262,16 +291,16 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
                 blendSmooth = _blendSmoother.IsSmoothing;
             }
 
-            float dry = drySpan[i];
+            float dry = dryAlignedSpan[i];
             float wet = buffer[i];
-            float output = dry + (wet - dry) * blend;
+            float dryFiltered = dryFilteredSpan[i];
+            float delta = wet - dryFiltered;
+            float output = dry + delta * blend;
             buffer[i] = output;
             outputPeak = MathF.Max(outputPeak, MathF.Abs(output));
 
             // Null-difference: delta = wet - reference (reference has same linear filters, no saturation)
             // At warmth=0, delta should be ~0. At warmth>0, delta shows ONLY what saturation added.
-            float dryFiltered = dryFilteredSpan[i];
-            float delta = wet - dryFiltered;
             _diagnostics.RecordScopeSample(delta);
             _diagnostics.RecordFftSample(delta);
         }
@@ -399,6 +428,7 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
         }
 
         _dryBuffer = new float[_blockSize];
+        _dryAlignedBuffer = new float[_blockSize];
         _dryFilteredBuffer = new float[_blockSize];
         _oversampledSampleRate = _sampleRate * _oversampleFactor;
 
@@ -467,5 +497,6 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
 
         latency *= 2f; // up + down
         _latencySamples = Math.Max(0, (int)MathF.Round(latency));
+        _dryDelayLine = new DelayLine(Math.Max(_blockSize, _latencySamples + 1));
     }
 }

@@ -32,7 +32,7 @@ Prepare the analysis signal for FFT and feature extraction while removing low-fr
 - Filter coefficients update only on parameter changes.
 - Per-sample processing uses struct state and avoids allocations.
 
-Implementation refs: (src/HotMic.Core/Plugins/BuiltIn/VocalSpectrographPlugin.Analysis.cs,
+Implementation refs: (src/HotMic.Core/Analysis/AnalysisSignalProcessor.cs,
  src/HotMic.Core/Dsp/Filters/OnePoleHighPass.cs,
  src/HotMic.Core/Dsp/Filters/BiquadFilter.cs,
  src/HotMic.Core/Dsp/Filters/PreEmphasisFilter.cs)

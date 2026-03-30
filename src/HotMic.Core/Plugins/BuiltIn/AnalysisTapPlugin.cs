@@ -4,7 +4,7 @@ using HotMic.Core.Analysis;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
-public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnalysisSignalBlocker
+public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnalysisSignalBlocker, IResettablePlugin
 {
     private static readonly AnalysisTapSignalInfo[] SignalInfos =
     [
@@ -29,6 +29,14 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
     private AnalysisSignalMask _blockedMask;
 
     private readonly AnalysisSignalProcessor _processor = new();
+    private AnalysisSignalProcessorSettings _cachedSettings;
+    private int _cachedHopSize;
+    private int _cachedSampleRate;
+    private bool _hasCachedSettings;
+    private int _analysisHopSize;
+    private float[] _analysisHopBuffer = Array.Empty<float>();
+    private int _analysisHopFill;
+    private long _analysisHopStartSampleTime;
     private int _profilingEnabled;
     private long _lastResolveTicks;
     private long _maxResolveTicks;
@@ -40,6 +48,9 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
     private int _speechPresenceHasSource;
     private int _speechPresenceModeRaw;
     private int _nonFiniteSignalMask;
+    private int _pendingReset;
+    private int _lastBypassState;
+    private long _lastSampleTime = long.MinValue;
 
     public AnalysisTapPlugin()
     {
@@ -90,8 +101,20 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
     public void Initialize(int sampleRate, int blockSize)
     {
         SampleRate = sampleRate;
+        int maxFft = AnalysisConfiguration.FftSizes[^1];
+        float minOverlap = AnalysisConfiguration.OverlapOptions[0];
+        int maxHop = Math.Max(1, (int)MathF.Ceiling(maxFft * (1f - minOverlap)));
+        _processor.Preallocate(maxFft, maxHop);
+        _analysisHopBuffer = new float[maxHop];
+        _analysisHopFill = 0;
+        _analysisHopStartSampleTime = 0;
+        _analysisHopSize = maxHop;
         _processor.Configure(sampleRate, blockSize, AnalysisSignalProcessorSettings.Default);
         _processor.Reset();
+        _cachedSettings = default;
+        _cachedHopSize = blockSize;
+        _cachedSampleRate = sampleRate;
+        _hasCachedSettings = false;
         Array.Clear(_meterValues, 0, _meterValues.Length);
         Array.Clear(_hasSource, 0, _hasSource.Length);
         for (int i = 0; i < _sources.Length; i++)
@@ -99,6 +122,9 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
             _sources[i] = AnalysisSignalSource.Empty;
         }
         Interlocked.Exchange(ref _nonFiniteSignalMask, 0);
+        Interlocked.Exchange(ref _pendingReset, 0);
+        Interlocked.Exchange(ref _lastBypassState, 0);
+        _lastSampleTime = long.MinValue;
         ResetProfiling();
     }
 
@@ -109,6 +135,9 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
             return;
         }
 
+        ApplyPendingReset();
+
+        UpdateProcessorSettings(context.AnalysisCapture);
         UpdatePitchAlgorithm(context.AnalysisCapture);
         UpdateProfilingEnabled(context.ProfilingEnabled);
         bool profilingEnabled = Volatile.Read(ref _profilingEnabled) != 0;
@@ -122,11 +151,30 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
             Volatile.Write(ref _hasSource[i], hasSource ? 1 : 0);
         }
 
-        int lastIndex = buffer.Length - 1;
         long sampleTime = context.SampleTime;
-        UpdateSpeechPresenceGate(sampleTime, lastIndex);
+        if (sampleTime < _lastSampleTime)
+        {
+            ResetInternalState();
+        }
 
-        if (IsBypassed)
+        _lastSampleTime = sampleTime;
+
+        bool isBypassed = IsBypassed;
+        int bypassState = isBypassed ? 1 : 0;
+        int priorBypass = Interlocked.Exchange(ref _lastBypassState, bypassState);
+        if (priorBypass != bypassState)
+        {
+            RequestReset();
+            ApplyPendingReset();
+            if (isBypassed)
+            {
+                ClearMeterValues();
+            }
+        }
+
+        int lastIndex = buffer.Length - 1;
+
+        if (isBypassed)
         {
             return;
         }
@@ -134,7 +182,36 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
         AnalysisSignalMask computeMask = _generatedMask & context.RequestedSignals;
         if (computeMask != AnalysisSignalMask.None)
         {
-            _processor.ProcessBlock(buffer, context.SampleTime, context.AnalysisSignalWriter, computeMask);
+            int hopSize = Math.Max(1, _analysisHopSize);
+            int offset = 0;
+            while (offset < buffer.Length)
+            {
+                int remaining = buffer.Length - offset;
+                int needed = hopSize - _analysisHopFill;
+                int copyCount = remaining < needed ? remaining : needed;
+
+                buffer.Slice(offset, copyCount).CopyTo(_analysisHopBuffer.AsSpan(_analysisHopFill, copyCount));
+                if (_analysisHopFill == 0)
+                {
+                    _analysisHopStartSampleTime = sampleTime + offset;
+                }
+
+                _analysisHopFill += copyCount;
+                offset += copyCount;
+
+                if (_analysisHopFill >= hopSize)
+                {
+                    UpdateSpeechPresenceGate(_analysisHopStartSampleTime, hopSize - 1);
+                    _processor.ProcessBlock(_analysisHopBuffer.AsSpan(0, hopSize), _analysisHopStartSampleTime,
+                        context.AnalysisSignalWriter, computeMask);
+                    _analysisHopFill = 0;
+                }
+            }
+        }
+        else
+        {
+            _analysisHopFill = 0;
+            UpdateSpeechPresenceGate(sampleTime, lastIndex);
         }
 
         long resolveStart = 0;
@@ -146,7 +223,8 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
         for (int i = 0; i < count; i++)
         {
             var signal = (AnalysisSignalId)i;
-            float generated = _processor.GetLastValue(signal);
+            bool generatedThisBlock = (computeMask & (AnalysisSignalMask)(1 << i)) != 0;
+            float generated = generatedThisBlock ? _processor.GetLastValue(signal) : 0f;
             float value = ResolveMeterValue(_modes[i], HasSource(signal), _sources[i], generated, sampleTime, lastIndex);
             if (!float.IsFinite(value))
             {
@@ -192,6 +270,17 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
     public void Process(Span<float> buffer)
     {
         // Tap does not modify audio; this path is kept for interface parity.
+    }
+
+    public void ResetState()
+    {
+        ClearMeterValues();
+        Array.Clear(_hasSource, 0, _hasSource.Length);
+        Volatile.Write(ref _speechPresenceGateValue, 0f);
+        Volatile.Write(ref _speechPresenceGateEnabled, 0);
+        Volatile.Write(ref _speechPresenceHasSource, 0);
+        Interlocked.Exchange(ref _nonFiniteSignalMask, 0);
+        RequestReset();
     }
 
     public void SetParameter(int index, float value)
@@ -313,6 +402,54 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
         }
     }
 
+    private void UpdateProcessorSettings(AnalysisCaptureLink? capture)
+    {
+        var orchestrator = capture?.Orchestrator;
+        if (orchestrator is null)
+        {
+            return;
+        }
+
+        var config = orchestrator.Config;
+        var algorithm = config.PitchAlgorithm;
+        if (config.TransformType == SpectrogramTransformType.Cqt && algorithm == PitchDetectorType.Swipe)
+        {
+            algorithm = PitchDetectorType.Yin;
+        }
+
+        var settings = new AnalysisSignalProcessorSettings
+        {
+            AnalysisSize = config.FftSize,
+            PitchDetector = algorithm,
+            VoicingSettings = config.VoicingSettings,
+            MinFrequency = config.MinFrequency,
+            MaxFrequency = config.MaxFrequency,
+            WindowFunction = config.WindowFunction,
+            PreEmphasisEnabled = config.PreEmphasis,
+            HighPassEnabled = config.HighPassEnabled,
+            HighPassCutoff = config.HighPassCutoff
+        };
+
+        int hopSize = Math.Max(1, config.ComputeHopSize());
+        int sampleRate = SampleRate;
+        bool changed = !_hasCachedSettings ||
+                       _cachedHopSize != hopSize ||
+                       _cachedSampleRate != sampleRate ||
+                       !_cachedSettings.Equals(settings);
+
+        if (changed)
+        {
+            _processor.Configure(sampleRate, hopSize, settings);
+            _processor.Reset();
+            _cachedSettings = settings;
+            _cachedHopSize = hopSize;
+            _cachedSampleRate = sampleRate;
+            _hasCachedSettings = true;
+            _analysisHopSize = hopSize;
+            _analysisHopFill = 0;
+        }
+    }
+
     private void UpdateSpeechPresenceGate(long sampleTime, int lastIndex)
     {
         int index = (int)AnalysisSignalId.SpeechPresence;
@@ -361,6 +498,36 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
         Interlocked.Exchange(ref _maxResolveTicks, 0);
         Interlocked.Exchange(ref _lastCaptureTicks, 0);
         Interlocked.Exchange(ref _maxCaptureTicks, 0);
+    }
+
+    private void RequestReset()
+    {
+        Interlocked.Exchange(ref _pendingReset, 1);
+    }
+
+    private void ApplyPendingReset()
+    {
+        if (Interlocked.Exchange(ref _pendingReset, 0) == 0)
+        {
+            return;
+        }
+
+        ResetInternalState();
+    }
+
+    private void ResetInternalState()
+    {
+        _analysisHopFill = 0;
+        _analysisHopStartSampleTime = 0;
+        ClearMeterValues();
+        _processor.Reset();
+        ResetProfiling();
+        _lastSampleTime = long.MinValue;
+    }
+
+    private void ClearMeterValues()
+    {
+        Array.Clear(_meterValues, 0, _meterValues.Length);
     }
 
     private static void RecordProfiling(ref long lastTicks, ref long maxTicks, long elapsedTicks)

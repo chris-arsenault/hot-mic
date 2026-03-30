@@ -245,6 +245,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private string analysisTapGateLine = "Gate: n/a";
 
     [ObservableProperty]
+    private string analysisTapCaptureLine = "Cap: n/a";
+
+    [ObservableProperty]
+    private string analysisOrchestratorLine = "Orch: n/a";
+
+    [ObservableProperty]
     private string vitalizerLine = "Vitalizer: n/a";
 
     [ObservableProperty]
@@ -340,6 +346,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void OpenAnalyzerWindow()
     {
         _windowRouter.ShowAnalyzerWindow(_audioEngineCoordinator.AnalysisOrchestrator);
+    }
+
+    public void OpenAnalysisSettingsWindow()
+    {
+        _windowRouter.ShowAnalysisSettingsWindow(_audioEngineCoordinator.AnalysisOrchestrator);
+    }
+
+    public void OpenWaveformWindow()
+    {
+        _windowRouter.ShowWaveformWindow(_audioEngineCoordinator.AnalysisOrchestrator);
+    }
+
+    public void OpenSpeechCoachWindow()
+    {
+        _windowRouter.ShowSpeechCoachWindow(_audioEngineCoordinator.AnalysisOrchestrator);
     }
 
     public void ReinitializeAudioEngine()

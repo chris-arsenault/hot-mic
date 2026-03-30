@@ -2,7 +2,7 @@ namespace HotMic.Core.Presets;
 
 internal static partial class BuiltInPresetCatalog
 {
-    private static PluginPresetBank BuildVocalSpectrographBank()
+    private static PluginPresetBank BuildAnalyzerBank()
     {
         var baseParameters = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
         {
@@ -46,7 +46,7 @@ internal static partial class BuiltInPresetCatalog
             ["Dynamic Range"] = (float)SpectrogramDynamicRangeMode.Custom
         };
 
-        PluginPreset CreateVocalPreset(string name, params (string parameter, float value)[] overrides)
+        PluginPreset CreateAnalyzerPreset(string name, params (string parameter, float value)[] overrides)
         {
             var parameters = new Dictionary<string, float>(baseParameters, StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < overrides.Length; i++)
@@ -56,22 +56,22 @@ internal static partial class BuiltInPresetCatalog
             return new PluginPreset(name, parameters);
         }
 
-        return new PluginPresetBank("builtin:vocal-spectrograph",
+        return new PluginPresetBank("analysis:visualizer",
         [
-            CreateVocalPreset("SpeechMale",
+            CreateAnalyzerPreset("SpeechMale",
                 ("Voice Range", (float)VocalRangeType.Baritone),
                 ("Min Freq", 60f),
                 ("Time Window", 6f),
                 ("Clarity Noise", 0.8f),
                 ("Clarity Harmonic", 0.8f)),
-            CreateVocalPreset("SpeechFemale",
+            CreateAnalyzerPreset("SpeechFemale",
                 ("Voice Range", (float)VocalRangeType.Alto),
                 ("Min Freq", 100f),
                 ("Max Freq", 9000f),
                 ("Time Window", 6f),
                 ("Clarity Noise", 0.8f),
                 ("Clarity Harmonic", 0.8f)),
-            CreateVocalPreset("SingingClassical",
+            CreateAnalyzerPreset("SingingClassical",
                 ("FFT Size", 4096f),
                 ("Window", (float)WindowFunction.BlackmanHarris),
                 ("Overlap", 0.875f),
@@ -86,7 +86,7 @@ internal static partial class BuiltInPresetCatalog
                 ("Brightness", 1.1f),
                 ("Gamma", 0.75f),
                 ("Contrast", 1.25f)),
-            CreateVocalPreset("SingingContemporary",
+            CreateAnalyzerPreset("SingingContemporary",
                 ("Max Freq", 12000f),
                 ("Time Window", 6f),
                 ("Color Map", 1f),
@@ -96,7 +96,7 @@ internal static partial class BuiltInPresetCatalog
                 ("Brightness", 1.15f),
                 ("Gamma", 0.78f),
                 ("Contrast", 1.3f)),
-            CreateVocalPreset("VoiceoverAnalysis",
+            CreateAnalyzerPreset("VoiceoverAnalysis",
                 ("FFT Size", 4096f),
                 ("Window", (float)WindowFunction.BlackmanHarris),
                 ("Overlap", 0.875f),
@@ -109,7 +109,7 @@ internal static partial class BuiltInPresetCatalog
                 ("Smoothing Mode", (float)SpectrogramSmoothingMode.Bilateral),
                 ("Gamma", 0.75f),
                 ("Contrast", 1.25f)),
-            CreateVocalPreset("PitchTracking",
+            CreateAnalyzerPreset("PitchTracking",
                 ("FFT Size", 1024f),
                 ("Overlap", 0.875f),
                 ("Scale", (float)FrequencyScale.Logarithmic),
@@ -120,7 +120,7 @@ internal static partial class BuiltInPresetCatalog
                 ("Clarity Harmonic", 0f),
                 ("Clarity Smoothing", 0.2f),
                 ("Smoothing Mode", (float)SpectrogramSmoothingMode.Ema)),
-            CreateVocalPreset("HarmonicDetail",
+            CreateAnalyzerPreset("HarmonicDetail",
                 ("FFT Size", 4096f),
                 ("Window", (float)WindowFunction.BlackmanHarris),
                 ("Overlap", 0.875f),
@@ -132,7 +132,7 @@ internal static partial class BuiltInPresetCatalog
                 ("Clarity Smoothing", 0.35f),
                 ("Smoothing Mode", (float)SpectrogramSmoothingMode.Bilateral),
                 ("Time Window", 6f)),
-            CreateVocalPreset("TransientCapture",
+            CreateAnalyzerPreset("TransientCapture",
                 ("FFT Size", 1024f),
                 ("Overlap", 0.5f),
                 ("Scale", (float)FrequencyScale.Linear),
@@ -147,7 +147,7 @@ internal static partial class BuiltInPresetCatalog
                 ("Clarity Harmonic", 0f),
                 ("Clarity Smoothing", 0f),
                 ("Smoothing Mode", (float)SpectrogramSmoothingMode.Off)),
-            CreateVocalPreset("Presentation",
+            CreateAnalyzerPreset("Presentation",
                 ("Time Window", 10f),
                 ("Axis Mode", (float)SpectrogramAxisMode.Both),
                 ("Brightness", 1.2f),
@@ -156,7 +156,7 @@ internal static partial class BuiltInPresetCatalog
                 ("Color Levels", 24f),
                 ("Clarity Smoothing", 0.35f),
                 ("Smoothing Mode", (float)SpectrogramSmoothingMode.Bilateral)),
-            CreateVocalPreset("Technical",
+            CreateAnalyzerPreset("Technical",
                 ("Min dB", -90f),
                 ("Axis Mode", (float)SpectrogramAxisMode.Both),
                 ("Clarity Mode", (float)ClarityProcessingMode.None),
@@ -168,7 +168,7 @@ internal static partial class BuiltInPresetCatalog
                 ("Gamma", 1f),
                 ("Contrast", 1f),
                 ("Color Levels", 64f)),
-            CreateVocalPreset("Minimal",
+            CreateAnalyzerPreset("Minimal",
                 ("Time Window", 8f),
                 ("Pitch Overlay", 0f),
                 ("Harmonics", 0f),
@@ -178,7 +178,7 @@ internal static partial class BuiltInPresetCatalog
                 ("Waveform View", 0f),
                 ("Spectrum View", 0f),
                 ("Pitch Meter", 0f)),
-            CreateVocalPreset("Maximum Clarity",
+            CreateAnalyzerPreset("Maximum Clarity",
                 ("Min dB", -65f),
                 ("Clarity Mode", (float)ClarityProcessingMode.Full),
                 ("Clarity Noise", 1f),
@@ -186,8 +186,8 @@ internal static partial class BuiltInPresetCatalog
                 ("Clarity Smoothing", 0.35f),
                 ("Smoothing Mode", (float)SpectrogramSmoothingMode.Bilateral),
                 ("Gamma", 0.75f)),
-            CreateVocalPreset("Balanced"),
-            CreateVocalPreset("Low Latency",
+            CreateAnalyzerPreset("Balanced"),
+            CreateAnalyzerPreset("Low Latency",
                 ("FFT Size", 1024f),
                 ("Overlap", 0.5f),
                 ("Min dB", -60f),
@@ -197,7 +197,7 @@ internal static partial class BuiltInPresetCatalog
                 ("Clarity Smoothing", 0.2f),
                 ("Smoothing Mode", (float)SpectrogramSmoothingMode.Ema),
                 ("Gamma", 0.85f)),
-            CreateVocalPreset("Analysis Mode",
+            CreateAnalyzerPreset("Analysis Mode",
                 ("Min dB", -80f),
                 ("Clarity Mode", (float)ClarityProcessingMode.None),
                 ("Clarity Noise", 0f),

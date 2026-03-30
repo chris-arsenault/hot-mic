@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+
+      - name: Restore Core Tests
+        run: dotnet restore tests/HotMic.Core.Tests/HotMic.Core.Tests.csproj
+
+      - name: Build Common
+        run: dotnet build src/HotMic.Common/HotMic.Common.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
+
+      - name: Build Core
+        run: dotnet build src/HotMic.Core/HotMic.Core.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
+
+      - name: Build Core Tests
+        run: dotnet build tests/HotMic.Core.Tests/HotMic.Core.Tests.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
+
+      - name: Test Core
+        run: dotnet test tests/HotMic.Core.Tests/HotMic.Core.Tests.csproj -c Release --no-build --verbosity normal
+
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+          cache: true
+
+      - name: Restore Desktop Projects
+        run: dotnet restore src/HotMic.App/HotMic.App.csproj
+
+      - name: Build VST Host
+        run: dotnet build src/HotMic.Vst3/HotMic.Vst3.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
+
+      - name: Build Desktop App
+        run: dotnet build src/HotMic.App/HotMic.App.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
+
+  report:
+    if: always()
+    needs: [core, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ secrets.OIDC_ROLE }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+          aws-region: us-east-1
+
+      - name: Summarize Workflow Result
+        id: summary
+        shell: bash
+        run: |
+          core='${{ needs.core.result }}'
+          desktop='${{ needs.desktop.result }}'
+
+          if [[ "$core" == "cancelled" || "$desktop" == "cancelled" ]]; then
+            status="cancelled"
+          elif [[ "$core" == "success" && "$desktop" == "success" ]]; then
+            status="success"
+          else
+            status="failure"
+          fi
+
+          if [[ "$core" == "success" ]]; then
+            test_passed="true"
+          else
+            test_passed="false"
+          fi
+
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "test_passed=$test_passed" >> "$GITHUB_OUTPUT"
+
+      - uses: chris-arsenault/platform/.github/actions/report-build@main
+        with:
+          status: ${{ steps.summary.outputs.status }}
+          test-passed: ${{ steps.summary.outputs.test_passed }}

@@ -1,0 +1,38 @@
+﻿SyllableDebug frame=4878 smoothDb=-71.80 center=-62.95 prev=-46.55 curr=-71.80 isPeak=0 voiced=0 prom=0.00 minIntFrames=9.4 sinceLast=82 detected=0 peaks=23 voicedPeaks=23 maxProm=5.89 minDb=-71.80 maxDb=-9.08 lastDet=4795
+SpeechDebug2 frame=4878 src=1 energyDb=-70.4 hopDb=-77.9 syllDb=-75.6 syllRatio=0.085 bandL=0.022 bandM=0.018 bandP=0.282 bandH=0.678 clarity=7.047
+SpeechDebug frame=4949 energyDb=-68.1 syllDb=-72.9 voicing=0 pitchHz=0.0 conf=0.00 flat=0.77 flux=0.00 hnr=1.2 syllDet=False syllRate=138.0 artRate=297.4 wpm=92.0 artWpm=198.3 pauseRatio=0.54 monotone=0.37
+SyllableDebug frame=5069 smoothDb=-70.03 center=-81.14 prev=-80.63 curr=-70.03 isPeak=0 voiced=0 prom=0.00 minIntFrames=9.4 sinceLast=152 detected=0 peaks=28 voicedPeaks=11 maxProm=29.73 minDb=-82.75 maxDb=-39.09 lastDet=4916
+SpeechDebug2 frame=5069 src=1 energyDb=-42.5 hopDb=-47.6 syllDb=-45.3 syllRatio=0.115 bandL=0.248 bandM=0.044 bandP=0.330 bandH=0.378 clarity=1.129
+[EnhanceDebug] SignalGenerator: sample-start slot=1 time=12:56:39.765
+[EnhanceDebugSummary] SignalGen Slot1 duration=4.17s reason=slot1 loop tags=0
+[EnhanceDebug] Collection started: SignalGen Slot1
+SpeechDebug frame=5139 energyDb=-69.4 syllDb=-77.1 voicing=0 pitchHz=0.0 conf=0.00 flat=0.77 flux=0.00 hnr=1.2 syllDet=False syllRate=126.0 artRate=271.6 wpm=84.0 artWpm=181.0 pauseRatio=0.54 monotone=0.42
+SyllableDebug frame=5258 smoothDb=-83.78 center=-82.07 prev=-83.49 curr=-83.78 isPeak=1 voiced=0 prom=0.00 minIntFrames=9.4 sinceLast=341 detected=0 peaks=54 voicedPeaks=0 maxProm=0.00 minDb=-84.94 maxDb=-61.91 lastDet=4916
+SpeechDebug2 frame=5258 src=1 energyDb=-77.1 hopDb=-87.0 syllDb=-79.2 syllRatio=0.008 bandL=0.004 bandM=0.001 bandP=0.033 bandH=0.962 clarity=6.212
+SpeechDebug frame=5329 energyDb=-58.4 syllDb=-56.3 voicing=2 pitchHz=0.0 conf=0.00 flat=0.54 flux=0.00 hnr=2.7 syllDet=False syllRate=126.0 artRate=315.4 wpm=84.0 artWpm=210.3 pauseRatio=0.60 monotone=0.46
+SyllableDebug frame=5445 smoothDb=-15.16 center=-15.25 prev=-14.89 curr=-15.16 isPeak=0 voiced=1 prom=0.00 minIntFrames=9.4 sinceLast=83 detected=0 peaks=41 voicedPeaks=39 maxProm=28.21 minDb=-86.97 maxDb=-5.52 lastDet=5361
+SpeechDebug2 frame=5445 src=1 energyDb=-12.5 hopDb=-18.4 syllDb=-13.1 syllRatio=0.593 bandL=0.277 bandM=0.515 bandP=0.201 bandH=0.007 clarity=0.255
+SpeechDebug frame=5519 energyDb=-14.3 syllDb=-22.7 voicing=2 pitchHz=101.6 conf=0.99 flat=0.38 flux=0.00 hnr=4.2 syllDet=False syllRate=138.0 artRate=289.1 wpm=92.0 artWpm=192.7 pauseRatio=0.52 monotone=0.39
+SyllableDebug frame=5632 smoothDb=-42.21 center=-35.49 prev=-35.31 curr=-42.21 isPeak=0 voiced=1 prom=0.00 minIntFrames=9.4 sinceLast=54 detected=0 peaks=24 voicedPeaks=24 maxProm=5.99 minDb=-42.21 maxDb=-9.07 lastDet=5577
+SpeechDebug2 frame=5632 src=1 energyDb=-36.7 hopDb=-45.2 syllDb=-46.2 syllRatio=0.001 bandL=0.000 bandM=0.000 bandP=0.060 bandH=0.940 clarity=1274.893
+SpeechDebug frame=5709 energyDb=-56.0 syllDb=-57.2 voicing=2 pitchHz=0.0 conf=0.00 flat=0.55 flux=0.00 hnr=2.6 syllDet=True syllRate=138.0 artRate=289.4 wpm=92.0 artWpm=193.0 pauseRatio=0.52 monotone=0.42
+SyllableDebug frame=5821 smoothDb=-80.39 center=-82.24 prev=-81.38 curr=-80.39 isPeak=0 voiced=0 prom=0.00 minIntFrames=9.4 sinceLast=122 detected=0 peaks=14 voicedPeaks=11 maxProm=30.80 minDb=-82.24 maxDb=-39.24 lastDet=5698
+SpeechDebug2 frame=5825 src=1 energyDb=-72.3 hopDb=-78.0 syllDb=-83.2 syllRatio=0.078 bandL=0.033 bandM=0.012 bandP=0.230 bandH=0.726 clarity=5.170
+[EnhanceDebug] SignalGenerator: sample-start slot=1 time=12:56:43.971
+[EnhanceDebugSummary] SignalGen Slot1 duration=4.18s reason=slot1 loop tags=0
+[EnhanceDebug] Collection started: SignalGen Slot1
+SpeechDebug frame=5899 energyDb=-75.0 syllDb=-82.3 voicing=0 pitchHz=0.0 conf=0.00 flat=0.70 flux=0.00 hnr=1.5 syllDet=False syllRate=126.0 artRate=324.5 wpm=84.0 artWpm=216.3 pauseRatio=0.61 monotone=0.43
+SyllableDebug frame=6009 smoothDb=-83.63 center=-83.20 prev=-84.44 curr=-83.63 isPeak=1 voiced=0 prom=0.00 minIntFrames=9.4 sinceLast=156 detected=0 peaks=41 voicedPeaks=3 maxProm=23.74 minDb=-84.67 maxDb=-58.05 lastDet=5852
+SpeechDebug2 frame=6013 src=1 energyDb=-78.0 hopDb=-85.4 syllDb=-83.5 syllRatio=0.019 bandL=0.008 bandM=0.003 bandP=0.070 bandH=0.919 clarity=6.395
+SpeechDebug frame=6089 energyDb=-26.4 syllDb=-36.5 voicing=2 pitchHz=0.0 conf=0.00 flat=0.57 flux=0.00 hnr=2.4 syllDet=False syllRate=120.0 artRate=236.8 wpm=80.0 artWpm=157.9 pauseRatio=0.49 monotone=0.46
+SyllableDebug frame=6194 smoothDb=-15.33 center=-8.78 prev=-7.63 curr=-15.33 isPeak=0 voiced=1 prom=0.00 minIntFrames=9.4 sinceLast=50 detected=0 peaks=47 voicedPeaks=29 maxProm=28.93 minDb=-86.47 maxDb=-5.63 lastDet=6143
+SpeechDebug2 frame=6198 src=1 energyDb=-11.8 hopDb=-17.1 syllDb=-15.4 syllRatio=0.395 bandL=0.615 bandM=0.248 bandP=0.132 bandH=0.005 clarity=0.153
+SpeechDebug frame=6279 energyDb=-15.0 syllDb=-17.8 voicing=2 pitchHz=102.8 conf=0.96 flat=0.36 flux=0.00 hnr=4.5 syllDet=False syllRate=144.0 artRate=299.7 wpm=96.0 artWpm=199.8 pauseRatio=0.52 monotone=0.47
+SyllableDebug frame=6382 smoothDb=-26.95 center=-22.00 prev=-15.80 curr=-26.95 isPeak=0 voiced=1 prom=0.00 minIntFrames=9.4 sinceLast=21 detected=0 peaks=33 voicedPeaks=33 maxProm=6.21 minDb=-26.95 maxDb=-9.04 lastDet=6360
+SpeechDebug2 frame=6382 src=1 energyDb=-24.6 hopDb=-33.5 syllDb=-32.4 syllRatio=0.003 bandL=0.705 bandM=0.015 bandP=0.060 bandH=0.219 clarity=0.084
+SpeechDebug frame=6469 energyDb=-26.5 syllDb=-30.0 voicing=1 pitchHz=0.0 conf=0.00 flat=0.47 flux=0.00 hnr=3.3 syllDet=False syllRate=138.0 artRate=294.0 wpm=92.0 artWpm=196.0 pauseRatio=0.53 monotone=0.47
+SyllableDebug frame=6568 smoothDb=-81.19 center=-80.82 prev=-80.29 curr=-81.19 isPeak=0 voiced=0 prom=0.00 minIntFrames=9.4 sinceLast=164 detected=0 peaks=12 voicedPeaks=1 maxProm=6.71 minDb=-81.56 maxDb=-28.40 lastDet=6403
+Exited Thread 57464
+SpeechDebug2 frame=6569 src=1 energyDb=-78.8 hopDb=-87.2 syllDb=-82.8 syllRatio=0.102 bandL=0.016 bandM=0.014 bandP=0.379 bandH=0.590 clarity=12.442
+[EnhanceDebug] SignalGenerator: sample-start slot=1 time=12:56:48.212
+[EnhanceDebugSummary] SignalGen Slot1 duration=4.24s reason=slot1 loop tags=0

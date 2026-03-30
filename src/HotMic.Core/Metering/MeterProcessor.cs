@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading;
 
 namespace HotMic.Core.Metering;
@@ -10,12 +11,14 @@ public sealed class MeterProcessor
     private readonly float _rmsAttackCoeff;
     private readonly float _rmsReleaseCoeff;
     private readonly int _clipHoldSamples;
+    private readonly long _clipHoldTimeoutTicks;
     private int _peakBits;
     private int _rmsBits;
     private int _clipHoldRemaining;
     private int _nonFiniteSampleCount;
     private float _peakSmoothed;
     private float _rmsSmoothed;
+    private long _lastProcessTicks;
 
     public MeterProcessor(int sampleRate, float peakHoldSeconds = 0.5f, float peakDecayPerSecond = 2f)
     {
@@ -33,6 +36,7 @@ public sealed class MeterProcessor
         _rmsReleaseCoeff = 1f - MathF.Exp(-1f / (rmsReleaseMs * 0.001f * sampleRate));
 
         _clipHoldSamples = Math.Max(1, (int)(sampleRate * ClipHoldSeconds));
+        _clipHoldTimeoutTicks = Math.Max(1, (long)(Stopwatch.Frequency * ClipHoldSeconds));
     }
 
     public void Process(Span<float> buffer, bool trackClip = true)
@@ -41,6 +45,8 @@ public sealed class MeterProcessor
         {
             return;
         }
+
+        Interlocked.Exchange(ref _lastProcessTicks, Stopwatch.GetTimestamp());
 
         if (!float.IsFinite(_rmsSmoothed))
         {
@@ -139,7 +145,20 @@ public sealed class MeterProcessor
 
     public bool GetClipHoldActive()
     {
-        return Volatile.Read(ref _clipHoldRemaining) > 0;
+        int remaining = Volatile.Read(ref _clipHoldRemaining);
+        if (remaining <= 0)
+        {
+            return false;
+        }
+
+        long lastTicks = Interlocked.Read(ref _lastProcessTicks);
+        if (lastTicks > 0 && Stopwatch.GetTimestamp() - lastTicks > _clipHoldTimeoutTicks)
+        {
+            Volatile.Write(ref _clipHoldRemaining, 0);
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>

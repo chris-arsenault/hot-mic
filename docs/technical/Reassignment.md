@@ -38,5 +38,5 @@ Latency:
 - Adds two extra FFTs per frame when enabled.
 - Uses precomputed time-weighted and derivative windows.
 
-Implementation refs: (src/HotMic.Core/Plugins/BuiltIn/VocalSpectrographPlugin.Analysis.cs,
- src/HotMic.Core/Plugins/BuiltIn/VocalSpectrographPlugin.Buffers.cs)
+Implementation refs: (src/HotMic.Core/Analysis/AnalysisSignalProcessor.cs,
+ src/HotMic.Core/Analysis/AnalysisOrchestrator.cs)
