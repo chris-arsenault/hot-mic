@@ -28,3 +28,7 @@ See `AGENTS.md` Testing Policy for full guidance. Key points:
 - **Pre-computed, not re-implemented** - Expected values must come from external tools (Python/NumPy), not from re-implementing the formula in the test
 - **Direct production outputs** - Call the production method under test and compare to constants; no roundtrips or internal consistency checks
 - **Deterministic and specific** - Use fixed inputs and assert against concrete expected values, not just presence checks
+
+## Pre-commit CI check
+
+**Run `make ci` before committing any change.** This runs the same lint, format, typecheck, and test steps as GitHub Actions. Do not commit if it fails.
