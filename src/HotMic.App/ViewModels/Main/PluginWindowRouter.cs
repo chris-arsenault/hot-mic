@@ -41,6 +41,7 @@ internal sealed class PluginWindowRouter
 
             // Noise Reduction
             new() { Id = "builtin:fft-noise", Name = "FFT Noise Removal", IsVst3 = false, Category = PluginCategory.NoiseReduction, Description = "Learns and removes background noise" },
+            new() { Id = "builtin:deverb", Name = "Dereverberation", IsVst3 = false, Category = PluginCategory.NoiseReduction, Description = "Removes room reverb via adaptive prediction (WPE)" },
 
             // Analysis
             new() { Id = "builtin:signal-generator", Name = "Signal Generator", IsVst3 = false, Category = PluginCategory.Analysis, Description = "Test tones, noise, and sample playback" },

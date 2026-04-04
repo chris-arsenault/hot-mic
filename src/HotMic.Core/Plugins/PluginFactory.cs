@@ -16,6 +16,7 @@ public static class PluginFactory
             "builtin:saturation" => new SaturationPlugin(),
             "builtin:limiter" => new LimiterPlugin(),
             "builtin:fft-noise" => new FFTNoiseRemovalPlugin(),
+            "builtin:deverb" => new DereverbPlugin(),
             "builtin:gain" => new GainPlugin(),
             "builtin:rnnoise" => new RNNoisePlugin(),
             "builtin:speechdenoiser" => new SpeechDenoiserPlugin(),

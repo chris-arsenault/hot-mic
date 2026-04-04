@@ -24,7 +24,12 @@ public sealed record AudioQualityProfile(
     float CompressorKneeDb,
     float CompressorRmsBlend,
     float CompressorReleaseShape,
-    float CompressorSidechainHpfHz);
+    float CompressorSidechainHpfHz,
+    int DereverbFftSize,
+    int DereverbHopSize,
+    int DereverbTaps,
+    int DereverbDelay,
+    float DereverbAlpha);
 
 public static class AudioQualityProfiles
 {
@@ -50,7 +55,12 @@ public static class AudioQualityProfiles
                 CompressorKneeDb: 9f,
                 CompressorRmsBlend: 0.8f,
                 CompressorReleaseShape: 0.1f,
-                CompressorSidechainHpfHz: 80f)
+                CompressorSidechainHpfHz: 80f,
+                DereverbFftSize: 2048,
+                DereverbHopSize: 512,
+                DereverbTaps: 30,
+                DereverbDelay: 3,
+                DereverbAlpha: 0.99f)
             : new AudioQualityProfile(
                 mode,
                 TargetLatencyMs: 30,
@@ -69,6 +79,11 @@ public static class AudioQualityProfiles
                 CompressorKneeDb: 6f,
                 CompressorRmsBlend: 0.7f,
                 CompressorReleaseShape: 0.15f,
-                CompressorSidechainHpfHz: 80f);
+                CompressorSidechainHpfHz: 80f,
+                DereverbFftSize: 1024,
+                DereverbHopSize: 256,
+                DereverbTaps: 15,
+                DereverbDelay: 3,
+                DereverbAlpha: 0.99f);
     }
 }

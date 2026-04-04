@@ -45,7 +45,11 @@ jobs:
         run: dotnet build tests/HotMic.Core.Tests/HotMic.Core.Tests.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
 
       - name: Test Core
-        run: dotnet test tests/HotMic.Core.Tests/HotMic.Core.Tests.csproj -c Release --no-build --verbosity normal
+        run: >
+          dotnet test tests/HotMic.Core.Tests/HotMic.Core.Tests.csproj
+          -c Release --no-build --verbosity normal
+          --collect:"XPlat Code Coverage"
+          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
 
       # SonarQube
       - uses: aws-actions/configure-aws-credentials@v5
@@ -60,6 +64,7 @@ jobs:
           project-key: hot-mic
           sources: src
           exclusions: "**/bin/**,**/obj/**"
+          extra-args: -Dsonar.cs.opencover.reportPaths=tests/HotMic.Core.Tests/TestResults/*/coverage.opencover.xml
 
   desktop:
     runs-on: windows-latest
