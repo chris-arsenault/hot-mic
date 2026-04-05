@@ -3,7 +3,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Controls;
 
-public abstract class SkiaControl : SKElement
+internal abstract class SkiaControl : SKElement
 {
     protected override void OnPaintSurface(SKPaintSurfaceEventArgs e)
     {

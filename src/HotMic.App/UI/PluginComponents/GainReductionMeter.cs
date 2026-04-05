@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Renders a horizontal gain reduction meter showing actual dB reduction.
 /// Uses PPM-style ballistics via MeterBallistics class.
 /// </summary>
-public sealed class GainReductionMeter : IDisposable
+internal sealed class GainReductionMeter : IDisposable
 {
     private const float DefaultMaxReductionDb = 40f;
 

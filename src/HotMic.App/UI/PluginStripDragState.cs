@@ -5,7 +5,7 @@ namespace HotMic.App.UI;
 /// <summary>
 /// Drag state for plugin slots, shared between main window and container windows.
 /// </summary>
-public readonly record struct PluginStripDragState(
+internal readonly record struct PluginStripDragState(
     int ChannelIndex,
     int PluginInstanceId,
     int SlotIndex,
@@ -20,7 +20,7 @@ public readonly record struct PluginStripDragState(
 /// <summary>
 /// UI state for plugin strip drag operations, used by renderers.
 /// </summary>
-public sealed class PluginStripUiState
+internal sealed class PluginStripUiState
 {
     public PluginStripDragState? PluginDrag { get; set; }
     public DropTarget? CurrentDropTarget { get; set; }

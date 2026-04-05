@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Displays dynamic transfer curve with real sample scatter plot.
 /// Shows actual (input, output) pairs colored by envelope level.
 /// </summary>
-public sealed class DynamicTransferCurveDisplay : IDisposable
+internal sealed class DynamicTransferCurveDisplay : IDisposable
 {
     private const float WarmthPivotPct = 50f;
     private const float WarmthOverdriveMax = 2f;

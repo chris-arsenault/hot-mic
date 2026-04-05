@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Room Tone plugin UI with noise spectrum visualization and speech ducking meter.
 /// </summary>
-public sealed class RoomToneRenderer : IDisposable
+internal sealed class RoomToneRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 12f;
@@ -423,7 +423,7 @@ public sealed class RoomToneRenderer : IDisposable
     }
 }
 
-public record struct RoomToneState(
+internal record struct RoomToneState(
     float LevelDb,
     float DuckStrength,
     float ToneHz,
@@ -436,7 +436,7 @@ public record struct RoomToneState(
     string StatusMessage = "",
     string PresetName = "Custom");
 
-public enum RoomToneHitArea
+internal enum RoomToneHitArea
 {
     None,
     TitleBar,
@@ -448,4 +448,4 @@ public enum RoomToneHitArea
     PresetSave
 }
 
-public record struct RoomToneHitTest(RoomToneHitArea Area, int KnobIndex);
+internal record struct RoomToneHitTest(RoomToneHitArea Area, int KnobIndex);

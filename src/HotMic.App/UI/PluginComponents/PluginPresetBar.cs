@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Reusable preset selector bar for plugin windows.
 /// Renders a dropdown for preset selection and a save button.
 /// </summary>
-public sealed class PluginPresetBar : IDisposable
+internal sealed class PluginPresetBar : IDisposable
 {
     private const float DropdownWidth = 100f;
     private const float SaveButtonWidth = 24f;
@@ -158,7 +158,7 @@ public sealed class PluginPresetBar : IDisposable
     }
 }
 
-public enum PresetBarHitArea
+internal enum PresetBarHitArea
 {
     None,
     Dropdown,

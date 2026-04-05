@@ -7,7 +7,7 @@ namespace HotMic.App.UI;
 /// <summary>
 /// Renders a plugin slot shell and owns hit testing for the slot and its knobs.
 /// </summary>
-public sealed class PluginShellRenderer
+internal sealed class PluginShellRenderer
 {
     private const float DeltaStripHeight = 18f;
     private const float PluginKnobSize = 24f;

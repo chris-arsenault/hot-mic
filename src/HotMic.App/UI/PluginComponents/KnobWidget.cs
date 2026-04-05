@@ -10,7 +10,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Self-contained knob widget that handles both rendering and user interaction.
 /// Supports drag-to-change, hover tooltip, and right-click value editing.
 /// </summary>
-public sealed class KnobWidget : IDisposable
+internal sealed class KnobWidget : IDisposable
 {
     private const float StartAngle = 135f;
     private const float SweepAngle = 270f;

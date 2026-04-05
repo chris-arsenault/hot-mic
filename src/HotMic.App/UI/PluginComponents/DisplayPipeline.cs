@@ -11,7 +11,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Owns the frequency-to-display mapping and dB normalization.
 /// This moves display concerns out of the analysis layer.
 /// </summary>
-public sealed class DisplayPipeline
+internal sealed class DisplayPipeline
 {
     private readonly SpectrogramDisplayMapper _mapper = new();
     private readonly SpectrogramDynamicRangeTracker _dynamicRangeTracker = new();

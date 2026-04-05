@@ -4,7 +4,7 @@ using SkiaSharp;
 
 namespace HotMic.App.Controls;
 
-public class KnobControl : SkiaControl, IDisposable
+internal class KnobControl : SkiaControl, IDisposable
 {
     public static readonly DependencyProperty ValueProperty =
         DependencyProperty.Register(nameof(Value), typeof(float), typeof(KnobControl),

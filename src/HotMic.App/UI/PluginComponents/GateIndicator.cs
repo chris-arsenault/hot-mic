@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Visual indicator showing gate open/closed state with glow effect.
 /// </summary>
-public sealed class GateIndicator : IDisposable
+internal sealed class GateIndicator : IDisposable
 {
     private readonly PluginComponentTheme _theme;
     private readonly SKPaint _openPaint;

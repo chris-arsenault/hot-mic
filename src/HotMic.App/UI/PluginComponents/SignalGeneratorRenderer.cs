@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Renderer for the Signal Generator plugin UI with 3 vertical slot rows.
 /// </summary>
-public sealed class SignalGeneratorRenderer : IDisposable
+internal sealed class SignalGeneratorRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float SlotRowHeight = 56f;
@@ -720,7 +720,7 @@ public sealed class SignalGeneratorRenderer : IDisposable
 /// <summary>
 /// State data for rendering the Signal Generator UI.
 /// </summary>
-public class SignalGeneratorState
+internal class SignalGeneratorState
 {
     public bool IsBypassed { get; set; }
     public string PresetName { get; set; } = "Custom";
@@ -730,7 +730,7 @@ public class SignalGeneratorState
     public SlotRenderState[] Slots { get; } = new SlotRenderState[3];
 }
 
-public struct SlotRenderState
+internal struct SlotRenderState
 {
     public GeneratorType Type { get; set; }
     public float Frequency { get; set; }
@@ -753,7 +753,7 @@ public struct SlotRenderState
     public bool HasSample { get; set; }
 }
 
-public enum SignalGeneratorHitArea
+internal enum SignalGeneratorHitArea
 {
     None,
     TitleBar,
@@ -786,4 +786,4 @@ public enum SignalGeneratorHitArea
     ReloadSampleButton
 }
 
-public record struct SignalGeneratorHitTest(SignalGeneratorHitArea Area, int SlotIndex);
+internal record struct SignalGeneratorHitTest(SignalGeneratorHitArea Area, int SlotIndex);

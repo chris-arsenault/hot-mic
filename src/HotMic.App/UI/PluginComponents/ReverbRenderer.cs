@@ -7,7 +7,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Reverb plugin UI renderer with impulse response visualization.
 /// Shows IR waveform, wet/dry mix, and convolution processing status.
 /// </summary>
-public sealed class ReverbRenderer : IDisposable
+internal sealed class ReverbRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 16f;
@@ -506,7 +506,7 @@ public sealed class ReverbRenderer : IDisposable
     }
 }
 
-public record struct ReverbState(
+internal record struct ReverbState(
     float DryWet,
     float Decay,
     float PreDelayMs,
@@ -517,7 +517,7 @@ public record struct ReverbState(
     bool IsBypassed,
     string PresetName = "Custom");
 
-public enum ReverbHitArea
+internal enum ReverbHitArea
 {
     None,
     TitleBar,
@@ -530,4 +530,4 @@ public enum ReverbHitArea
     PresetSave
 }
 
-public record struct ReverbHitTest(ReverbHitArea Area, int Index);
+internal record struct ReverbHitTest(ReverbHitArea Area, int Index);

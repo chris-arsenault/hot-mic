@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Renderer for the Input Source plugin window.
 /// Shows device dropdown, channel mode buttons, gain knob, and input meter.
 /// </summary>
-public sealed class InputSourceRenderer : IDisposable
+internal sealed class InputSourceRenderer : IDisposable
 {
     private const float TitleBarHeight = 36f;
     private const float Padding = 10f;
@@ -380,14 +380,14 @@ public sealed class InputSourceRenderer : IDisposable
 
 public record struct InputSourceDevice(string Id, string Name);
 
-public enum InputChannelModeValue
+internal enum InputChannelModeValue
 {
     Left,
     Right,
     Sum
 }
 
-public record struct InputSourceState(
+internal record struct InputSourceState(
     IReadOnlyList<InputSourceDevice> Devices,
     string SelectedDeviceId,
     InputChannelModeValue ChannelMode,
@@ -395,7 +395,7 @@ public record struct InputSourceState(
     float InputLevel,
     bool IsBypassed);
 
-public enum InputSourceHitArea
+internal enum InputSourceHitArea
 {
     None,
     TitleBar,
@@ -410,4 +410,4 @@ public enum InputSourceHitArea
     ModeSum
 }
 
-public record struct InputSourceHitTest(InputSourceHitArea Area, int DeviceIndex = -1);
+internal record struct InputSourceHitTest(InputSourceHitArea Area, int DeviceIndex = -1);

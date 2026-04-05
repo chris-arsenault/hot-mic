@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Renders a limiter plugin UI with gain reduction meter, ceiling indicator, and level meters.
 /// </summary>
-public sealed class LimiterRenderer : IDisposable
+internal sealed class LimiterRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 16f;
@@ -375,7 +375,7 @@ public sealed class LimiterRenderer : IDisposable
     }
 }
 
-public record struct LimiterState(
+internal record struct LimiterState(
     float CeilingDb,
     float ReleaseMs,
     float InputLevel,
@@ -385,7 +385,7 @@ public record struct LimiterState(
     bool IsBypassed,
     string PresetName = "Custom");
 
-public enum LimiterHitArea
+internal enum LimiterHitArea
 {
     None,
     TitleBar,
@@ -396,11 +396,11 @@ public enum LimiterHitArea
     PresetSave
 }
 
-public enum LimiterKnob
+internal enum LimiterKnob
 {
     None,
     Ceiling,
     Release
 }
 
-public record struct LimiterHitTest(LimiterHitArea Area, LimiterKnob Knob);
+internal record struct LimiterHitTest(LimiterHitArea Area, LimiterKnob Knob);

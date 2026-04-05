@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Renders a high-pass filter plugin UI with filter curve visualization and slope selector.
 /// </summary>
-public sealed class HighPassFilterRenderer : IDisposable
+internal sealed class HighPassFilterRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 16f;
@@ -474,7 +474,7 @@ public sealed class HighPassFilterRenderer : IDisposable
     }
 }
 
-public record struct HighPassFilterState(
+internal record struct HighPassFilterState(
     float CutoffHz,
     float SlopeDbOct,
     float InputLevel,
@@ -484,7 +484,7 @@ public record struct HighPassFilterState(
     float[]? Spectrum = null,
     string PresetName = "Custom");
 
-public enum HpfHitArea
+internal enum HpfHitArea
 {
     None,
     TitleBar,
@@ -496,7 +496,7 @@ public enum HpfHitArea
     PresetSave
 }
 
-public enum HpfElement
+internal enum HpfElement
 {
     None,
     CutoffKnob,
@@ -504,4 +504,4 @@ public enum HpfElement
     Slope18
 }
 
-public record struct HpfHitTest(HpfHitArea Area, HpfElement Element);
+internal record struct HpfHitTest(HpfHitArea Area, HpfElement Element);

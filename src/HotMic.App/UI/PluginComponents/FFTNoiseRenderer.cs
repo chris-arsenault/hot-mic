@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// FFT Noise Removal plugin UI with spectrum visualization and noise profile display.
 /// </summary>
-public sealed class FFTNoiseRenderer : IDisposable
+internal sealed class FFTNoiseRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 14f;
@@ -556,7 +556,7 @@ public sealed class FFTNoiseRenderer : IDisposable
     }
 }
 
-public record struct FFTNoiseState(
+internal record struct FFTNoiseState(
     float Reduction,
     bool IsLearning,
     int LearningProgress,
@@ -572,7 +572,7 @@ public record struct FFTNoiseState(
     float[]? NoiseProfile = null,
     string PresetName = "Custom");
 
-public enum FFTNoiseHitArea
+internal enum FFTNoiseHitArea
 {
     None,
     TitleBar,
@@ -584,4 +584,4 @@ public enum FFTNoiseHitArea
     PresetSave
 }
 
-public record struct FFTNoiseHitTest(FFTNoiseHitArea Area, int KnobIndex);
+internal record struct FFTNoiseHitTest(FFTNoiseHitArea Area, int KnobIndex);

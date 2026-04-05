@@ -1,6 +1,6 @@
 namespace HotMic.App.UI;
 
-public enum MainButton
+internal enum MainButton
 {
     ToggleView,
     Settings,
@@ -10,7 +10,7 @@ public enum MainButton
     SavePreset
 }
 
-public enum DevicePickerTarget
+internal enum DevicePickerTarget
 {
     None,
     Input1,
@@ -26,7 +26,7 @@ public enum DevicePickerTarget
     Preset2
 }
 
-public enum KnobType
+internal enum KnobType
 {
     InputGain,
     OutputGain,
@@ -34,7 +34,7 @@ public enum KnobType
     PluginParam1
 }
 
-public enum ToggleType
+internal enum ToggleType
 {
     Mute,
     Solo,
@@ -42,7 +42,7 @@ public enum ToggleType
     MasterMute
 }
 
-public sealed class MainUiState
+internal sealed class MainUiState
 {
     public DevicePickerTarget ActiveDevicePicker { get; set; } = DevicePickerTarget.None;
     public float DevicePickerScroll { get; set; }
@@ -52,14 +52,14 @@ public sealed class MainUiState
     public DropTarget? CurrentDropTarget { get; set; }
 }
 
-public readonly record struct PluginDragState(
+internal readonly record struct PluginDragState(
     int ChannelIndex, int PluginInstanceId, int SlotIndex,
     float StartX, float StartY, float CurrentX, float CurrentY,
     bool IsDragging,
     SkiaSharp.SKRect SourceRect,
     string DisplayName);
 
-public readonly record struct ContainerDragState(
+internal readonly record struct ContainerDragState(
     int ChannelIndex, int ContainerId, int SlotIndex,
     float StartX, float StartY, float CurrentX, float CurrentY,
     bool IsDragging,
@@ -69,11 +69,11 @@ public readonly record struct ContainerDragState(
 /// <summary>
 /// Represents a valid drop target during drag operations, used for rendering visual feedback.
 /// </summary>
-public readonly record struct DropTarget(
+internal readonly record struct DropTarget(
     bool IsValid,
     SkiaSharp.SKRect TargetRect,
     float InsertLineX,
     float InsertLineTop,
     float InsertLineBottom);
 
-public readonly record struct KnobDragState(int ChannelIndex, KnobType KnobType, float StartValue, float StartY, int PluginInstanceId = 0, float MinValue = -60f, float MaxValue = 12f);
+internal readonly record struct KnobDragState(int ChannelIndex, KnobType KnobType, float StartValue, float StartY, int PluginInstanceId = 0, float MinValue = -60f, float MaxValue = 12f);

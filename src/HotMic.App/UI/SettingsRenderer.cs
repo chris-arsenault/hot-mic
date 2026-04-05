@@ -6,7 +6,7 @@ using SkiaSharp;
 
 namespace HotMic.App.UI;
 
-public sealed class SettingsRenderer
+internal sealed class SettingsRenderer
 {
     private const float Padding = 20f;
     private const float LabelHeight = 14f;
@@ -369,7 +369,7 @@ public sealed class SettingsRenderer
     private sealed record DropdownItemRect(SettingsField Field, int Index, SKRect Rect);
 }
 
-public enum SettingsField
+internal enum SettingsField
 {
     None,
     Output, Monitor,
@@ -377,9 +377,9 @@ public enum SettingsField
     MidiDevice
 }
 
-public readonly record struct DropdownItemHit(SettingsField Field, int Index);
+internal readonly record struct DropdownItemHit(SettingsField Field, int Index);
 
-public sealed class SettingsUiState
+internal sealed class SettingsUiState
 {
     public SettingsField ActiveDropdown { get; set; }
     public float DropdownScroll { get; set; }

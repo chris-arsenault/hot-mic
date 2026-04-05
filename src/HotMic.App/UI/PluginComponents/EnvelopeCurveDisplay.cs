@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Visualizes the gate envelope shape (attack, hold, release).
 /// Shows how the gate opens and closes over time.
 /// </summary>
-public sealed class EnvelopeCurveDisplay : IDisposable
+internal sealed class EnvelopeCurveDisplay : IDisposable
 {
     private readonly PluginComponentTheme _theme;
     private readonly SKPaint _backgroundPaint;

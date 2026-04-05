@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Upward Expander plugin UI with tri-band meters showing input level and gain.
 /// </summary>
-public sealed class UpwardExpanderRenderer : IDisposable
+internal sealed class UpwardExpanderRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 12f;
@@ -483,7 +483,7 @@ public sealed class UpwardExpanderRenderer : IDisposable
     }
 }
 
-public record struct UpwardExpanderState(
+internal record struct UpwardExpanderState(
     float AmountPct,
     float ThresholdDb,
     float LowSplitHz,
@@ -504,7 +504,7 @@ public record struct UpwardExpanderState(
     string StatusMessage = "",
     string PresetName = "Custom");
 
-public enum UpwardExpanderHitArea
+internal enum UpwardExpanderHitArea
 {
     None,
     TitleBar,
@@ -516,4 +516,4 @@ public enum UpwardExpanderHitArea
     PresetSave
 }
 
-public record struct UpwardExpanderHitTest(UpwardExpanderHitArea Area, int KnobIndex);
+internal record struct UpwardExpanderHitTest(UpwardExpanderHitArea Area, int KnobIndex);

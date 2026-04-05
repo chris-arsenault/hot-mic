@@ -3,7 +3,7 @@ namespace HotMic.App.Models;
 /// <summary>
 /// Represents a plugin parameter elevated to the channel strip for quick access.
 /// </summary>
-public sealed class ElevatedParameter
+internal sealed class ElevatedParameter
 {
     public string PluginId { get; init; } = string.Empty;
     public string PluginName { get; init; } = string.Empty;

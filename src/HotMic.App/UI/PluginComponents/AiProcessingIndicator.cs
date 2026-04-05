@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Renders an animated AI processing indicator with pulse effect.
 /// Shows processing status and activity level.
 /// </summary>
-public sealed class AiProcessingIndicator : IDisposable
+internal sealed class AiProcessingIndicator : IDisposable
 {
     private readonly PluginComponentTheme _theme;
     private readonly SKPaint _backgroundPaint;

@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Renders a vertical VAD (Voice Activity Detection) probability meter.
 /// Visualizes the confidence level of voice detection with smooth animation.
 /// </summary>
-public sealed class VadMeter : IDisposable
+internal sealed class VadMeter : IDisposable
 {
     private readonly PluginComponentTheme _theme;
     private readonly SKPaint _backgroundPaint;

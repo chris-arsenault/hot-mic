@@ -12,7 +12,7 @@ namespace HotMic.App.Views;
 /// Helper class for managing plugin presets in plugin windows.
 /// Provides common functionality for preset selection and saving.
 /// </summary>
-public sealed class PluginPresetHelper
+internal sealed class PluginPresetHelper
 {
     private readonly string _pluginId;
     private readonly PluginPresetManager _presetManager;

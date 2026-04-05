@@ -7,7 +7,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// SpeechDenoiser plugin UI renderer.
 /// Focuses on streaming status and dry/wet control.
 /// </summary>
-public sealed class SpeechDenoiserRenderer : IDisposable
+internal sealed class SpeechDenoiserRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 16f;
@@ -420,7 +420,7 @@ public sealed class SpeechDenoiserRenderer : IDisposable
     }
 }
 
-public record struct SpeechDenoiserState(
+internal record struct SpeechDenoiserState(
     float MixPercent,
     float AttenLimitDb,
     bool AttenEnabled,
@@ -432,7 +432,7 @@ public record struct SpeechDenoiserState(
     string LatencyReport = "",
     bool IsLatencyLearning = false);
 
-public enum SpeechDenoiserHitArea
+internal enum SpeechDenoiserHitArea
 {
     None,
     TitleBar,
@@ -445,4 +445,4 @@ public enum SpeechDenoiserHitArea
     LearnLatency
 }
 
-public record struct SpeechDenoiserHitTest(SpeechDenoiserHitArea Area, int KnobIndex);
+internal record struct SpeechDenoiserHitTest(SpeechDenoiserHitArea Area, int KnobIndex);

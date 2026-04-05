@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Consonant Transient plugin UI with dual envelope display and transient detector visualization.
 /// </summary>
-public sealed class ConsonantTransientRenderer : IDisposable
+internal sealed class ConsonantTransientRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 12f;
@@ -449,7 +449,7 @@ public sealed class ConsonantTransientRenderer : IDisposable
     }
 }
 
-public record struct ConsonantTransientState(
+internal record struct ConsonantTransientState(
     float Amount,
     float Threshold,
     float HighCutHz,
@@ -463,7 +463,7 @@ public record struct ConsonantTransientState(
     string StatusMessage = "",
     string PresetName = "Custom");
 
-public enum ConsonantTransientHitArea
+internal enum ConsonantTransientHitArea
 {
     None,
     TitleBar,
@@ -475,4 +475,4 @@ public enum ConsonantTransientHitArea
     PresetSave
 }
 
-public record struct ConsonantTransientHitTest(ConsonantTransientHitArea Area, int KnobIndex);
+internal record struct ConsonantTransientHitTest(ConsonantTransientHitArea Area, int KnobIndex);

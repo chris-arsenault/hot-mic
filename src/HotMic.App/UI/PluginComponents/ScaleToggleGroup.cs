@@ -2,7 +2,7 @@ using SkiaSharp;
 
 namespace HotMic.App.UI.PluginComponents;
 
-public sealed class ScaleToggleGroup : IDisposable
+internal sealed class ScaleToggleGroup : IDisposable
 {
     private const float ToggleWidth = 58f;
     private const float ToggleHeight = 18f;

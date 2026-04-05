@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Vitalizer Mk2-T plugin UI with multi-stage controls and toggle switches.
 /// </summary>
-public sealed class VitalizerRenderer : IDisposable
+internal sealed class VitalizerRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 12f;
@@ -376,7 +376,7 @@ public sealed class VitalizerRenderer : IDisposable
     }
 }
 
-public readonly record struct VitalizerState(
+internal readonly record struct VitalizerState(
     float DriveDb,
     float Bass,
     float BassCompRatio,
@@ -394,9 +394,9 @@ public readonly record struct VitalizerState(
     bool IsBypassed,
     string PresetName);
 
-public readonly record struct VitalizerHitTest(VitalizerHitArea Area, int KnobIndex);
+internal readonly record struct VitalizerHitTest(VitalizerHitArea Area, int KnobIndex);
 
-public enum VitalizerHitArea
+internal enum VitalizerHitArea
 {
     None,
     TitleBar,

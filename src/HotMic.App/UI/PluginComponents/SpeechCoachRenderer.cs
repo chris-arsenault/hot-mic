@@ -4,7 +4,7 @@ using SkiaSharp;
 
 namespace HotMic.App.UI.PluginComponents;
 
-public readonly record struct SpeechCoachSummary(
+internal readonly record struct SpeechCoachSummary(
     float WordsPerMinute,
     float ArticulationWpm,
     float PauseRatio,
@@ -21,7 +21,7 @@ public readonly record struct SpeechCoachSummary(
     float PauseMediumCount,
     float PauseLongCount);
 
-public readonly record struct SpeechCoachState(
+internal readonly record struct SpeechCoachState(
     long LatestFrameId,
     int AvailableFrames,
     int FrameCapacity,
@@ -43,7 +43,7 @@ public readonly record struct SpeechCoachState(
 /// Renderer for the standalone Speech Coach window.
 /// Displays real-time speech metrics and visualization.
 /// </summary>
-public sealed class SpeechCoachRenderer : IDisposable
+internal sealed class SpeechCoachRenderer : IDisposable
 {
     private const float Padding = 12f;
     private const float TitleBarHeight = 40f;

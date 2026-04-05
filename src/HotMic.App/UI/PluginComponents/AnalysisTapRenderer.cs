@@ -9,7 +9,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Analysis Tap plugin UI - debug/monitor panel showing analysis signals.
 /// </summary>
-public sealed class AnalysisTapRenderer : IDisposable
+internal sealed class AnalysisTapRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 12f;
@@ -523,19 +523,19 @@ public sealed class AnalysisTapRenderer : IDisposable
     // Static paints for per-signal meters (not theme-sensitive).
 }
 
-public readonly record struct AnalysisTapSignalState(
+internal readonly record struct AnalysisTapSignalState(
     AnalysisSignalId Signal,
     float Value,
     AnalysisTapMode Mode,
     bool HasUpstream,
     bool UsedLater);
 
-public readonly record struct AnalysisTapState(
+internal readonly record struct AnalysisTapState(
     AnalysisTapSignalState[] Signals,
     float LatencyMs,
     bool IsBypassed);
 
-public enum AnalysisTapHitArea
+internal enum AnalysisTapHitArea
 {
     None = 0,
     TitleBar = 1,
@@ -544,4 +544,4 @@ public enum AnalysisTapHitArea
     ModeToggle = 4
 }
 
-public readonly record struct AnalysisTapHitTest(AnalysisTapHitArea Area, int SignalIndex, AnalysisTapMode Mode);
+internal readonly record struct AnalysisTapHitTest(AnalysisTapHitArea Area, int SignalIndex, AnalysisTapMode Mode);

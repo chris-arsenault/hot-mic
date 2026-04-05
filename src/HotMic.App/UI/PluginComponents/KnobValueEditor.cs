@@ -23,7 +23,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Provides a popup textbox for entering knob values via right-click.
 /// </summary>
-public sealed class KnobValueEditor : IDisposable
+internal sealed class KnobValueEditor : IDisposable
 {
     private readonly Popup _popup;
     private readonly TextBox _textBox;

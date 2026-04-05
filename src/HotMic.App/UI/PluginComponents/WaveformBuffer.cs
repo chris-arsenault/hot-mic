@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Thread-safe circular buffer for storing audio level history.
 /// Used by WaveformDisplay to show rolling waveform visualization.
 /// </summary>
-public sealed class WaveformBuffer
+internal sealed class WaveformBuffer
 {
     private readonly float[] _levels;
     private readonly bool[] _gateStates;

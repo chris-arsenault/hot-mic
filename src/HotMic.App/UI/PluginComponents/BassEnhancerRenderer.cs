@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Bass Enhancer plugin UI with harmonic visualization and bass energy meter.
 /// </summary>
-public sealed class BassEnhancerRenderer : IDisposable
+internal sealed class BassEnhancerRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 12f;
@@ -390,7 +390,7 @@ public sealed class BassEnhancerRenderer : IDisposable
     }
 }
 
-public record struct BassEnhancerState(
+internal record struct BassEnhancerState(
     float Amount,
     float Drive,
     float Mix,
@@ -404,7 +404,7 @@ public record struct BassEnhancerState(
     string StatusMessage = "",
     string PresetName = "Custom");
 
-public enum BassEnhancerHitArea
+internal enum BassEnhancerHitArea
 {
     None,
     TitleBar,
@@ -416,4 +416,4 @@ public enum BassEnhancerHitArea
     PresetSave
 }
 
-public record struct BassEnhancerHitTest(BassEnhancerHitArea Area, int KnobIndex);
+internal record struct BassEnhancerHitTest(BassEnhancerHitArea Area, int KnobIndex);

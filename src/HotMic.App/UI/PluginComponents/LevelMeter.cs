@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Orientation for level meter rendering.
 /// </summary>
-public enum MeterOrientation
+internal enum MeterOrientation
 {
     Vertical,    // Bottom-to-top (standard audio meter)
     Horizontal   // Left-to-right
@@ -15,7 +15,7 @@ public enum MeterOrientation
 /// Reusable audio level meter with PPM-style ballistics.
 /// Shows current level as filled bar and quasi-peak as line marker.
 /// </summary>
-public sealed class LevelMeter : IDisposable
+internal sealed class LevelMeter : IDisposable
 {
     private readonly MeterBallistics _ballistics;
     private readonly SKPaint _backgroundPaint;

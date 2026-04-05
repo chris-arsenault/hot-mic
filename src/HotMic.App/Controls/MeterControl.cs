@@ -8,7 +8,7 @@ namespace HotMic.App.Controls;
 /// Shows RMS level as filled bar and peak level as line marker.
 /// Ballistics (peak hold, RMS smoothing) are handled by MeterProcessor.
 /// </summary>
-public class MeterControl : SkiaControl, IDisposable
+internal class MeterControl : SkiaControl, IDisposable
 {
     public static readonly DependencyProperty PeakLevelProperty =
         DependencyProperty.Register(nameof(PeakLevel), typeof(float), typeof(MeterControl),

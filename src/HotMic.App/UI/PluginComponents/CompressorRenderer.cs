@@ -7,7 +7,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Complete compressor plugin UI renderer.
 /// Features transfer curve display, gain reduction meter, and parameter knobs.
 /// </summary>
-public sealed class CompressorRenderer : IDisposable
+internal sealed class CompressorRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 12f;
@@ -613,7 +613,7 @@ public sealed class CompressorRenderer : IDisposable
 /// <summary>
 /// State data for rendering the compressor UI.
 /// </summary>
-public record struct CompressorState(
+internal record struct CompressorState(
     float ThresholdDb,
     float Ratio,
     float AttackMs,
@@ -628,7 +628,7 @@ public record struct CompressorState(
     bool IsBypassed,
     string PresetName = "Custom");
 
-public enum CompressorHitArea
+internal enum CompressorHitArea
 {
     None,
     TitleBar,
@@ -641,4 +641,4 @@ public enum CompressorHitArea
     PresetSave
 }
 
-public record struct CompressorHitTest(CompressorHitArea Area, int KnobIndex);
+internal record struct CompressorHitTest(CompressorHitArea Area, int KnobIndex);

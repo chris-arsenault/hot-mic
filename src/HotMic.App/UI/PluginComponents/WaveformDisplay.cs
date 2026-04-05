@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Renders a rolling waveform display with threshold line overlay.
 /// Shows input level history with gate state visualization.
 /// </summary>
-public sealed class WaveformDisplay : IDisposable
+internal sealed class WaveformDisplay : IDisposable
 {
     private static readonly float[] ThresholdDash = [6f, 4f];
 

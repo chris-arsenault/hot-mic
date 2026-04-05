@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Air Exciter plugin UI with shimmer meter, sidechain gate indicator, and saturation curve display.
 /// </summary>
-public sealed class AirExciterRenderer : IDisposable
+internal sealed class AirExciterRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 12f;
@@ -432,7 +432,7 @@ public sealed class AirExciterRenderer : IDisposable
     }
 }
 
-public record struct AirExciterState(
+internal record struct AirExciterState(
     float Drive,
     float Mix,
     float CutoffHz,
@@ -445,7 +445,7 @@ public record struct AirExciterState(
     string StatusMessage = "",
     string PresetName = "Custom");
 
-public enum AirExciterHitArea
+internal enum AirExciterHitArea
 {
     None,
     TitleBar,
@@ -457,4 +457,4 @@ public enum AirExciterHitArea
     PresetSave
 }
 
-public record struct AirExciterHitTest(AirExciterHitArea Area, int KnobIndex);
+internal record struct AirExciterHitTest(AirExciterHitArea Area, int KnobIndex);

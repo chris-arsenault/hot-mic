@@ -7,7 +7,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Renderer for the standalone Waveform window.
 /// Displays rolling amplitude envelope from analysis data.
 /// </summary>
-public sealed class WaveformWindowRenderer : IDisposable
+internal sealed class WaveformWindowRenderer : IDisposable
 {
     private const float Padding = 12f;
     private const float TitleBarHeight = 40f;

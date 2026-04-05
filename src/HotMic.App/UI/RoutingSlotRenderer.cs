@@ -9,7 +9,7 @@ namespace HotMic.App.UI;
 /// Renders compact routing plugin slots (Input, BusInput, OutputSend, Copy, Merge).
 /// These have specialized layouts with inline controls and reduced widths.
 /// </summary>
-public sealed class RoutingSlotRenderer
+internal sealed class RoutingSlotRenderer
 {
     // Slot widths for different routing plugin types
     public const float InputSlotWidth = 56f;
@@ -537,13 +537,13 @@ public sealed class RoutingSlotRenderer
     private sealed record RoutingBadgeRect(int ChannelIndex, int PluginInstanceId, RoutingBadgeType BadgeType, SKRect Rect);
 }
 
-public enum RoutingKnobType
+internal enum RoutingKnobType
 {
     InputGain,
     OutputGain
 }
 
-public enum RoutingSlotRegion
+internal enum RoutingSlotRegion
 {
     None,
     Action,
@@ -551,13 +551,13 @@ public enum RoutingSlotRegion
     Bypass
 }
 
-public readonly record struct RoutingKnobHit(int ChannelIndex, int PluginInstanceId, RoutingKnobType KnobType, float MinValue, float MaxValue);
+internal readonly record struct RoutingKnobHit(int ChannelIndex, int PluginInstanceId, RoutingKnobType KnobType, float MinValue, float MaxValue);
 
-public readonly record struct RoutingSlotHit(int ChannelIndex, int PluginInstanceId, int SlotIndex, string PluginId);
+internal readonly record struct RoutingSlotHit(int ChannelIndex, int PluginInstanceId, int SlotIndex, string PluginId);
 
-public readonly record struct RoutingBadgeHit(int ChannelIndex, int PluginInstanceId, RoutingBadgeType BadgeType);
+internal readonly record struct RoutingBadgeHit(int ChannelIndex, int PluginInstanceId, RoutingBadgeType BadgeType);
 
-public enum RoutingBadgeType
+internal enum RoutingBadgeType
 {
     InputChannelMode,
     OutputSendMode

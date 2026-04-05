@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Renders a de-esser plugin UI with frequency band visualization, sibilance detection, and gain reduction.
 /// </summary>
-public sealed class DeEsserRenderer : IDisposable
+internal sealed class DeEsserRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 16f;
@@ -585,7 +585,7 @@ public sealed class DeEsserRenderer : IDisposable
     }
 }
 
-public record struct DeEsserState(
+internal record struct DeEsserState(
     float CenterHz,
     float BandwidthHz,
     float ThresholdDb,
@@ -599,7 +599,7 @@ public record struct DeEsserState(
     float[]? Spectrum = null,
     string PresetName = "Custom");
 
-public enum DeEsserHitArea
+internal enum DeEsserHitArea
 {
     None,
     TitleBar,
@@ -610,7 +610,7 @@ public enum DeEsserHitArea
     PresetSave
 }
 
-public enum DeEsserKnob
+internal enum DeEsserKnob
 {
     None,
     CenterFreq,
@@ -620,4 +620,4 @@ public enum DeEsserKnob
     MaxRange
 }
 
-public record struct DeEsserHitTest(DeEsserHitArea Area, DeEsserKnob Knob);
+internal record struct DeEsserHitTest(DeEsserHitArea Area, DeEsserKnob Knob);

@@ -7,7 +7,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Renderer for the Analysis Settings window.
 /// Displays configurable analysis parameters in a compact panel layout.
 /// </summary>
-public sealed class AnalysisSettingsRenderer : IDisposable
+internal sealed class AnalysisSettingsRenderer : IDisposable
 {
     private const float Padding = 12f;
     private const float TitleBarHeight = 40f;

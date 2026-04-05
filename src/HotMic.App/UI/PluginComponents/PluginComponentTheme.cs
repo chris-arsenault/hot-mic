@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Shared styling for plugin UI components.
 /// </summary>
-public sealed class PluginComponentTheme
+internal sealed class PluginComponentTheme
 {
     public static PluginComponentTheme Default { get; } = new();
     public static PluginComponentTheme BlueOnBlack { get; } = new()

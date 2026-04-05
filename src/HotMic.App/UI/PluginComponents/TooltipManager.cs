@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Manages hover tooltips with configurable delay for SkiaSharp-rendered UI.
 /// </summary>
-public sealed class TooltipManager : IDisposable
+internal sealed class TooltipManager : IDisposable
 {
     private const float DelayMs = 300f;
     private const float MaxWidth = 280f;

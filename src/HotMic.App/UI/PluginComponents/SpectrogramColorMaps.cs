@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Available spectrogram color palettes for vocal analysis.
 /// </summary>
-public enum SpectrogramColorMap
+internal enum SpectrogramColorMap
 {
     Vocal = 0,
     VocalWarm = 1,
@@ -20,7 +20,7 @@ public enum SpectrogramColorMap
 /// Provides cached 256-color lookup tables for spectrogram rendering.
 /// Uses OKLAB perceptual color space for smooth, uniform gradients.
 /// </summary>
-public static class SpectrogramColorMaps
+internal static class SpectrogramColorMaps
 {
     private static SKColor[]? _vocal;
     private static SKColor[]? _vocalWarm;

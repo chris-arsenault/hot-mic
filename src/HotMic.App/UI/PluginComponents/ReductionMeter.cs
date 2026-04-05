@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Renders a horizontal reduction amount meter for noise reduction plugins.
 /// Shows the wet/dry mix level with visual feedback.
 /// </summary>
-public sealed class ReductionMeter : IDisposable
+internal sealed class ReductionMeter : IDisposable
 {
     private readonly PluginComponentTheme _theme;
     private readonly SKPaint _backgroundPaint;

@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Complete noise gate plugin UI renderer.
 /// Composes waveform display, envelope curve, rotary knobs, and gate indicator.
 /// </summary>
-public sealed class NoiseGateRenderer : IDisposable
+internal sealed class NoiseGateRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 12f;
@@ -297,7 +297,7 @@ public sealed class NoiseGateRenderer : IDisposable
 /// <summary>
 /// State data for rendering the noise gate UI.
 /// </summary>
-public record struct NoiseGateState(
+internal record struct NoiseGateState(
     float ThresholdDb,
     float HysteresisDb,
     float AttackMs,
@@ -308,7 +308,7 @@ public record struct NoiseGateState(
     bool IsBypassed,
     string PresetName = "Custom");
 
-public enum NoiseGateHitArea
+internal enum NoiseGateHitArea
 {
     None,
     TitleBar,
@@ -319,4 +319,4 @@ public enum NoiseGateHitArea
     PresetSave
 }
 
-public record struct NoiseGateHitTest(NoiseGateHitArea Area, int KnobIndex);
+internal record struct NoiseGateHitTest(NoiseGateHitArea Area, int KnobIndex);

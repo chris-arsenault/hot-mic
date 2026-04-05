@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Options for customizing knob rendering style.
 /// </summary>
-public record struct KnobStyle
+internal record struct KnobStyle
 {
     /// <summary>Standard knob with shadow, inner circle, and labels.</summary>
     public static KnobStyle Standard => new() { ShowShadow = true, ShowInnerCircle = true, ShowLabels = true };
@@ -44,7 +44,7 @@ public record struct KnobStyle
 /// <summary>
 /// Renders a styled rotary knob control for plugin parameters.
 /// </summary>
-public sealed class RotaryKnob : IDisposable
+internal sealed class RotaryKnob : IDisposable
 {
     private const float StartAngle = 135f;  // Start at bottom-left
     private const float SweepAngle = 270f;  // Sweep to bottom-right

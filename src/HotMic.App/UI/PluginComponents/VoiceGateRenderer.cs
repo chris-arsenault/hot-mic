@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Complete voice gate plugin UI renderer with AI processing visualization.
 /// Shows VAD probability, waveform, and gate status.
 /// </summary>
-public sealed class VoiceGateRenderer : IDisposable
+internal sealed class VoiceGateRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 16f;
@@ -297,7 +297,7 @@ public sealed class VoiceGateRenderer : IDisposable
     }
 }
 
-public record struct VoiceGateState(
+internal record struct VoiceGateState(
     float Threshold,
     float AttackMs,
     float ReleaseMs,
@@ -308,7 +308,7 @@ public record struct VoiceGateState(
     string StatusMessage = "",
     string PresetName = "Custom");
 
-public enum VoiceGateHitArea
+internal enum VoiceGateHitArea
 {
     None,
     TitleBar,
@@ -319,4 +319,4 @@ public enum VoiceGateHitArea
     PresetSave
 }
 
-public record struct VoiceGateHitTest(VoiceGateHitArea Area, int KnobIndex);
+internal record struct VoiceGateHitTest(VoiceGateHitArea Area, int KnobIndex);

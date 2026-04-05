@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Provides quasi-peak (integrated peak) and current level tracking with proper attack/decay.
 /// Based on BBC PPM specifications: ~10ms attack, ~24dB in 2.8s decay.
 /// </summary>
-public sealed class MeterBallistics
+internal sealed class MeterBallistics
 {
     // PPM-style timing constants
     private const float DefaultPeakAttackMs = 10f;       // Integration time for quasi-peak

@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Renders a saturation plugin UI with transfer curve visualization, input/output meters,
 /// and diagnostic visualizations (dynamic transfer curve, null-difference scope, harmonic analyzer).
 /// </summary>
-public sealed class SaturationRenderer : IDisposable
+internal sealed class SaturationRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 16f;
@@ -435,7 +435,7 @@ public sealed class SaturationRenderer : IDisposable
     }
 }
 
-public record struct SaturationState(
+internal record struct SaturationState(
     float WarmthPct,
     float BlendPct,
     float InputLevel,
@@ -448,7 +448,7 @@ public record struct SaturationState(
     Func<float[], int>? GetScopeSamples = null,
     Func<float[], int>? GetFftSamples = null);
 
-public enum SaturationHitArea
+internal enum SaturationHitArea
 {
     None,
     TitleBar,
@@ -459,11 +459,11 @@ public enum SaturationHitArea
     PresetSave
 }
 
-public enum SaturationKnob
+internal enum SaturationKnob
 {
     None,
     Warmth,
     Blend
 }
 
-public record struct SaturationHitTest(SaturationHitArea Area, SaturationKnob Knob);
+internal record struct SaturationHitTest(SaturationHitArea Area, SaturationKnob Knob);

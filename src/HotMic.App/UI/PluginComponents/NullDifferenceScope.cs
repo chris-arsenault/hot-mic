@@ -8,7 +8,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// At warmth=0, delta should be ~0. At warmth>0, shows ONLY what saturation added.
 /// Asymmetry indicator (+/-) shows even-harmonic content (ratio > 1 = even harmonics).
 /// </summary>
-public sealed class NullDifferenceScope : IDisposable
+internal sealed class NullDifferenceScope : IDisposable
 {
     private const int MaxSamples = 512;
     private const float DefaultScale = 0.05f; // ±5% full scale default zoom (accounts for phase differences)

@@ -2,7 +2,7 @@ using System;
 
 namespace HotMic.App.UI;
 
-public static class MainLayoutMetrics
+internal static class MainLayoutMetrics
 {
     public const float CornerRadius = 8f;
     public const float TitleBarHeight = 36f;

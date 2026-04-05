@@ -6,7 +6,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// RNNoise plugin UI renderer with noise reduction visualization.
 /// Shows VAD probability, reduction level, and processing status.
 /// </summary>
-public sealed class RNNoiseRenderer : IDisposable
+internal sealed class RNNoiseRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 16f;
@@ -293,7 +293,7 @@ public sealed class RNNoiseRenderer : IDisposable
     }
 }
 
-public record struct RNNoiseState(
+internal record struct RNNoiseState(
     float ReductionPercent,
     float VadThreshold,
     float VadProbability,
@@ -303,7 +303,7 @@ public record struct RNNoiseState(
     string StatusMessage = "",
     string PresetName = "Custom");
 
-public enum RNNoiseHitArea
+internal enum RNNoiseHitArea
 {
     None,
     TitleBar,
@@ -314,4 +314,4 @@ public enum RNNoiseHitArea
     PresetSave
 }
 
-public record struct RNNoiseHitTest(RNNoiseHitArea Area, int KnobIndex);
+internal record struct RNNoiseHitTest(RNNoiseHitArea Area, int KnobIndex);

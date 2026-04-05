@@ -3,7 +3,7 @@ using SkiaSharp;
 
 namespace HotMic.App.UI;
 
-public sealed class MainRenderer : IDisposable
+internal sealed class MainRenderer : IDisposable
 {
     private readonly MainPaintCache _paints = new();
     private readonly MainRenderPrimitives _primitives;

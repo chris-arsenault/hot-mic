@@ -6,7 +6,7 @@ using SkiaSharp;
 
 namespace HotMic.App.UI;
 
-public sealed class PluginBrowserRenderer
+internal sealed class PluginBrowserRenderer
 {
     private const float CornerRadius = 10f;
     private const float TitleBarHeight = 40f;

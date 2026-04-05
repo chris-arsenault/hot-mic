@@ -3,7 +3,7 @@ using SkiaSharp;
 
 namespace HotMic.App.UI;
 
-public sealed class PluginContainerRenderer : IDisposable
+internal sealed class PluginContainerRenderer : IDisposable
 {
     private const float CornerRadius = 8f;
     private const float TitleBarHeight = 28f;

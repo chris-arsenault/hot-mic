@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Spectral Contrast plugin UI with spectrum display showing before/after enhancement.
 /// </summary>
-public sealed class SpectralContrastRenderer : IDisposable
+internal sealed class SpectralContrastRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 12f;
@@ -416,7 +416,7 @@ public sealed class SpectralContrastRenderer : IDisposable
     }
 }
 
-public record struct SpectralContrastState(
+internal record struct SpectralContrastState(
     float StrengthPct,
     float MixPct,
     float GateStrength,
@@ -429,7 +429,7 @@ public record struct SpectralContrastState(
     string StatusMessage = "",
     string PresetName = "Custom");
 
-public enum SpectralContrastHitArea
+internal enum SpectralContrastHitArea
 {
     None,
     TitleBar,
@@ -441,4 +441,4 @@ public enum SpectralContrastHitArea
     PresetSave
 }
 
-public record struct SpectralContrastHitTest(SpectralContrastHitArea Area, int KnobIndex);
+internal record struct SpectralContrastHitTest(SpectralContrastHitArea Area, int KnobIndex);

@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Dynamic EQ plugin UI with 3-band EQ curve visualization and voice presence meter.
 /// </summary>
-public sealed class DynamicEqRenderer : IDisposable
+internal sealed class DynamicEqRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 12f;
@@ -422,7 +422,7 @@ public sealed class DynamicEqRenderer : IDisposable
     }
 }
 
-public record struct DynamicEqState(
+internal record struct DynamicEqState(
     float LowBoostDb,
     float HighBoostDb,
     float SmoothingMs,
@@ -437,7 +437,7 @@ public record struct DynamicEqState(
     string StatusMessage = "",
     string PresetName = "Custom");
 
-public enum DynamicEqHitArea
+internal enum DynamicEqHitArea
 {
     None,
     TitleBar,
@@ -449,4 +449,4 @@ public enum DynamicEqHitArea
     PresetSave
 }
 
-public record struct DynamicEqHitTest(DynamicEqHitArea Area, int KnobIndex);
+internal record struct DynamicEqHitTest(DynamicEqHitArea Area, int KnobIndex);

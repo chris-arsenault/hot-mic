@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Simple, clean gain plugin UI with large knob and input/output meters.
 /// </summary>
-public sealed class GainRenderer : IDisposable
+internal sealed class GainRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 16f;
@@ -372,7 +372,7 @@ public sealed class GainRenderer : IDisposable
 /// <summary>
 /// State data for rendering the gain UI.
 /// </summary>
-public record struct GainState(
+internal record struct GainState(
     float GainDb,
     float InputLevel,
     float OutputLevel,
@@ -381,7 +381,7 @@ public record struct GainState(
     bool IsBypassed,
     string PresetName = "Custom");
 
-public enum GainHitArea
+internal enum GainHitArea
 {
     None,
     TitleBar,
@@ -393,4 +393,4 @@ public enum GainHitArea
     PresetSave
 }
 
-public record struct GainHitTest(GainHitArea Area);
+internal record struct GainHitTest(GainHitArea Area);

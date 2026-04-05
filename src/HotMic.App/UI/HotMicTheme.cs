@@ -2,7 +2,7 @@ using SkiaSharp;
 
 namespace HotMic.App.UI;
 
-public sealed class HotMicTheme
+internal sealed class HotMicTheme
 {
     public static HotMicTheme Default { get; } = new();
 

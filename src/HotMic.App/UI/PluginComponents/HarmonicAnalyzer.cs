@@ -8,7 +8,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// For tube-style warmth: even harmonics (2nd, 4th, 6th) should dominate over odd (3rd, 5th, 7th).
 /// Target ratio for spoken word: 1.5-3.0 (even/odd).
 /// </summary>
-public sealed class HarmonicAnalyzer : IDisposable
+internal sealed class HarmonicAnalyzer : IDisposable
 {
     private const int FftSize = 2048;
     private const int HarmonicCount = 7; // 2nd through 7th + fundamental

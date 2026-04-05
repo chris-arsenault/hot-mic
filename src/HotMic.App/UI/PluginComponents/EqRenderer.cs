@@ -5,7 +5,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// 5-Band EQ plugin UI with frequency response curve, spectrum analyzer, and per-band controls.
 /// </summary>
-public sealed class EqRenderer : IDisposable
+internal sealed class EqRenderer : IDisposable
 {
     // Layout constants - calculated for proper spacing
     private const float TitleBarHeight = 40f;
@@ -796,7 +796,7 @@ public sealed class EqRenderer : IDisposable
 /// <summary>
 /// State data for rendering the EQ UI.
 /// </summary>
-public record struct EqState(
+internal record struct EqState(
     float HpfFreq,
     float LowShelfGainDb,
     float LowShelfFreq,
@@ -817,7 +817,7 @@ public record struct EqState(
     float[]? SpectrumPeaks = null,
     string? PresetName = null);
 
-public enum EqHitArea
+internal enum EqHitArea
 {
     None,
     TitleBar,
@@ -828,4 +828,4 @@ public enum EqHitArea
     PresetSave
 }
 
-public record struct EqHitTest(EqHitArea Area, int KnobIndex);
+internal record struct EqHitTest(EqHitArea Area, int KnobIndex);

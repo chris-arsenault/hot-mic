@@ -7,7 +7,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// Renderer for the Output Send plugin window.
 /// Shows send mode buttons (L/R/Both), output device info, and output meter.
 /// </summary>
-public sealed class OutputSendRenderer : IDisposable
+internal sealed class OutputSendRenderer : IDisposable
 {
     private const float TitleBarHeight = 40f;
     private const float Padding = 12f;
@@ -267,13 +267,13 @@ public sealed class OutputSendRenderer : IDisposable
     }
 }
 
-public record struct OutputSendState(
+internal record struct OutputSendState(
     string OutputDeviceName,
     OutputSendMode SendMode,
     float OutputLevel,
     bool IsBypassed);
 
-public enum OutputSendHitArea
+internal enum OutputSendHitArea
 {
     None,
     TitleBar,
@@ -284,4 +284,4 @@ public enum OutputSendHitArea
     ModeBoth
 }
 
-public record struct OutputSendHitTest(OutputSendHitArea Area);
+internal record struct OutputSendHitTest(OutputSendHitArea Area);

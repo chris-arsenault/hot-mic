@@ -11,7 +11,7 @@ namespace HotMic.App.UI.PluginComponents;
 /// <summary>
 /// Renderer for the Analyzer window.
 /// </summary>
-public sealed class AnalyzerRenderer : IDisposable
+internal sealed class AnalyzerRenderer : IDisposable
 {
     // Layout constants - reorganized UI (1440x960)
     private const float CornerRadius = 10f;
@@ -2026,7 +2026,7 @@ public sealed class AnalyzerRenderer : IDisposable
 /// <summary>
 /// Hit areas for display controls only. Processing controls are in AnalysisSettingsWindow.
 /// </summary>
-public enum SpectroHitArea
+internal enum SpectroHitArea
 {
     None,
     TitleBar,
@@ -2054,14 +2054,14 @@ public enum SpectroHitArea
     Knob
 }
 
-public record struct SpectroHitTest(SpectroHitArea Area, int KnobIndex);
+internal record struct SpectroHitTest(SpectroHitArea Area, int KnobIndex);
 
-public readonly record struct SpectroUiTimingSnapshot(
+internal readonly record struct SpectroUiTimingSnapshot(
     int TickUs,
     int CopyUs,
     int MapUs);
 
-public record struct SpectroState(
+internal record struct SpectroState(
     int FftSize,
     SpectrogramTransformType TransformType,
     WindowFunction WindowFunction,
@@ -2147,7 +2147,7 @@ public record struct SpectroState(
     byte[]? SpeakingStateTrack,
     byte[]? SyllableMarkers);
 
-public readonly record struct SpectroTimingSnapshot(
+internal readonly record struct SpectroTimingSnapshot(
     int FrameUs,
     int PreprocessUs,
     int TransformUs,
