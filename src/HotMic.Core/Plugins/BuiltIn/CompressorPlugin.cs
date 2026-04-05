@@ -245,6 +245,8 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float) * 5)
         {
             return;
@@ -282,6 +284,8 @@ public sealed class CompressorPlugin : IPlugin, IQualityConfigurablePlugin
 
     public void ApplyQuality(AudioQualityProfile profile)
     {
+        ArgumentNullException.ThrowIfNull(profile);
+
         _kneeDb = MathF.Max(0.1f, profile.CompressorKneeDb);
         _rmsBlend = Math.Clamp(profile.CompressorRmsBlend, 0f, 1f);
         _releaseShape = MathF.Max(0f, profile.CompressorReleaseShape);

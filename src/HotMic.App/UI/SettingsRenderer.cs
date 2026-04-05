@@ -78,7 +78,7 @@ internal sealed class SettingsRenderer
 
     private void DrawBackground(SKCanvas canvas, SKSize size)
     {
-        var rect = new SKRoundRect(new SKRect(0, 0, size.Width, size.Height), CornerRadius);
+        using var rect = new SKRoundRect(new SKRect(0, 0, size.Width, size.Height), CornerRadius);
         canvas.DrawRoundRect(rect, _backgroundPaint);
         canvas.DrawRoundRect(rect, _borderPaint);
     }
@@ -88,7 +88,8 @@ internal sealed class SettingsRenderer
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
 
         using var titleBarClip = new SKPath();
-        titleBarClip.AddRoundRect(new SKRoundRect(new SKRect(0, 0, size.Width, TitleBarHeight + CornerRadius), CornerRadius));
+        using var _rr170 = new SKRoundRect(new SKRect(0, 0, size.Width, TitleBarHeight + CornerRadius), CornerRadius);
+        titleBarClip.AddRoundRect(_rr170);
         titleBarClip.AddRect(new SKRect(0, TitleBarHeight, size.Width, TitleBarHeight + CornerRadius));
         canvas.Save();
         canvas.ClipPath(titleBarClip);
@@ -141,7 +142,7 @@ internal sealed class SettingsRenderer
         const float checkboxSize = 20f;
         checkboxRect = new SKRect(x, y, x + checkboxSize, y + checkboxSize);
 
-        var roundRect = new SKRoundRect(checkboxRect, 4f);
+        using var roundRect = new SKRoundRect(checkboxRect, 4f);
         canvas.DrawRoundRect(roundRect, isChecked ? _buttonAccentPaint : _fieldPaint);
         canvas.DrawRoundRect(roundRect, _fieldBorderPaint);
 
@@ -165,7 +166,7 @@ internal sealed class SettingsRenderer
         var rect = new SKRect(x, fieldTop, x + width, fieldTop + FieldHeight);
         _fieldRects[field] = rect;
 
-        var roundRect = new SKRoundRect(rect, 6f);
+        using var roundRect = new SKRoundRect(rect, 6f);
         canvas.DrawRoundRect(roundRect, _fieldPaint);
         canvas.DrawRoundRect(roundRect, _fieldBorderPaint);
 
@@ -176,13 +177,12 @@ internal sealed class SettingsRenderer
     private void DrawButton(SKCanvas canvas, string text, float x, float y, float width, bool isAccent, out SKRect rect)
     {
         rect = new SKRect(x, y, x + width, y + ButtonHeight);
-        var roundRect = new SKRoundRect(rect, 6f);
+        using var roundRect = new SKRoundRect(rect, 6f);
         canvas.DrawRoundRect(roundRect, isAccent ? _buttonAccentPaint : _buttonPaint);
         canvas.DrawRoundRect(roundRect, _fieldBorderPaint);
 
-        var textPaint = isAccent
-            ? CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 13f, SKFontStyle.Bold)
-            : _buttonTextPaint;
+        using var _p171 = CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 13f, SKFontStyle.Bold);
+        var textPaint = isAccent ? _p171 : _buttonTextPaint;
         canvas.DrawText(text, rect.MidX, rect.MidY + 4f, textPaint);
     }
 
@@ -212,10 +212,12 @@ internal sealed class SettingsRenderer
             Color = new SKColor(0, 0, 0, 60),
             MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 8f)
         };
-        canvas.DrawRoundRect(new SKRoundRect(listRect, 8f), shadow);
+        using var _rr172 = new SKRoundRect(listRect, 8f);
+        canvas.DrawRoundRect(_rr172, shadow);
 
-        var roundRect = new SKRoundRect(listRect, 8f);
-        canvas.DrawRoundRect(roundRect, CreateFillPaint(_theme.BackgroundSecondary));
+        using var roundRect = new SKRoundRect(listRect, 8f);
+        using var _p173 = CreateFillPaint(_theme.BackgroundSecondary);
+        canvas.DrawRoundRect(roundRect, _p173);
         canvas.DrawRoundRect(roundRect, _borderPaint);
 
         canvas.Save();
@@ -233,7 +235,8 @@ internal sealed class SettingsRenderer
                 bool isSelected = i == selectedIndex;
                 if (isSelected)
                 {
-                    canvas.DrawRect(itemRect, CreateFillPaint(_theme.Surface));
+                    using var _p174 = CreateFillPaint(_theme.Surface);
+                    canvas.DrawRect(itemRect, _p174);
                 }
 
                 DrawEllipsizedText(canvas, items[i], itemRect.Left + 12f, itemRect.MidY + 4f, itemRect.Width - 24f, _textPaint);
@@ -289,7 +292,7 @@ internal sealed class SettingsRenderer
         return list;
     }
 
-    private static List<string> BuildOptionList(List<int> options, int selected, Func<int, string> format, out int selectedIndex)
+    private static List<string> BuildOptionList(IReadOnlyList<int> options, int selected, Func<int, string> format, out int selectedIndex)
     {
         selectedIndex = -1;
         var list = new List<string>(options.Count);
@@ -384,3 +387,4 @@ internal sealed class SettingsUiState
     public SettingsField ActiveDropdown { get; set; }
     public float DropdownScroll { get; set; }
 }
+

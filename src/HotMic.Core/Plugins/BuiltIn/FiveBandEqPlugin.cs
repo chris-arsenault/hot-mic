@@ -134,6 +134,9 @@ public sealed class FiveBandEqPlugin : IPlugin, IQualityConfigurablePlugin
 
     public void GetSpectrum(float[] levels, float[] peaks)
     {
+        ArgumentNullException.ThrowIfNull(levels);
+        ArgumentNullException.ThrowIfNull(peaks);
+
         UpdateSpectrum();
         if (levels.Length >= SpectrumBins && peaks.Length >= SpectrumBins)
         {
@@ -301,6 +304,8 @@ public sealed class FiveBandEqPlugin : IPlugin, IQualityConfigurablePlugin
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float) * 6)
         {
             return;
@@ -349,6 +354,8 @@ public sealed class FiveBandEqPlugin : IPlugin, IQualityConfigurablePlugin
 
     public void ApplyQuality(AudioQualityProfile profile)
     {
+        ArgumentNullException.ThrowIfNull(profile);
+
         _analysisSize = Math.Max(256, NextPowerOfTwo(profile.EqAnalysisSize));
         _parameterSmoothingMs = MathF.Max(1f, profile.EqSmoothingMs);
         _coefficientUpdateStride = Math.Max(1, profile.EqCoefficientUpdateStride);

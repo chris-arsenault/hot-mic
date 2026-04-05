@@ -74,6 +74,10 @@ public sealed class SaturationDiagnostics
     /// </summary>
     public int GetTransferCurveSamples(float[] inputs, float[] outputs, float[] envelopes)
     {
+        ArgumentNullException.ThrowIfNull(inputs);
+        ArgumentNullException.ThrowIfNull(outputs);
+        ArgumentNullException.ThrowIfNull(envelopes);
+
         int count = Math.Min(inputs.Length, TransferCurveSamples);
         int writeIdx = Volatile.Read(ref _tcWriteIndex);
 
@@ -93,6 +97,8 @@ public sealed class SaturationDiagnostics
     /// </summary>
     public int GetScopeSamples(float[] deltas)
     {
+        ArgumentNullException.ThrowIfNull(deltas);
+
         int count = Math.Min(deltas.Length, ScopeSamples);
         int writeIdx = Volatile.Read(ref _scopeWriteIndex);
 
@@ -110,6 +116,8 @@ public sealed class SaturationDiagnostics
     /// </summary>
     public int GetFftSamples(float[] buffer)
     {
+        ArgumentNullException.ThrowIfNull(buffer);
+
         int count = Math.Min(buffer.Length, FftBufferSize);
         int writeIdx = Volatile.Read(ref _fftWriteIndex);
 
@@ -141,6 +149,8 @@ public sealed class SaturationDiagnostics
     /// </summary>
     public void GetHarmonicMagnitudes(float[] magnitudes, out float evenOddRatio)
     {
+        ArgumentNullException.ThrowIfNull(magnitudes);
+
         int count = Math.Min(magnitudes.Length, HarmonicBins);
         for (int i = 0; i < count; i++)
         {

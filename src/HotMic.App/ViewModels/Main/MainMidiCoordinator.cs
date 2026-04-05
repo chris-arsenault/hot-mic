@@ -35,7 +35,7 @@ internal sealed class MainMidiCoordinator : IDisposable
             _midiManager.BindingTriggered += OnMidiBindingTriggered;
             _midiManager.Start();
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
         {
             Debug.WriteLine($"[MIDI] Failed to initialize: {ex.Message}");
         }

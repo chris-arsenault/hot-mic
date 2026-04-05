@@ -43,6 +43,8 @@ public static class HarmonicPeakDetector
         Span<float> harmonicMagnitudes,
         float tolerance = 0.03f)
     {
+        ArgumentNullException.ThrowIfNull(descriptor);
+
         if (magnitudes.IsEmpty || harmonicFrequencies.IsEmpty || fundamentalHz <= 0f || descriptor.BinCount <= 0)
         {
             return 0;

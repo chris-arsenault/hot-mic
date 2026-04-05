@@ -75,7 +75,7 @@ internal sealed class PluginPresetBar : IDisposable
     {
         // Dropdown
         _dropdownRect = new SKRect(x, y, x + DropdownWidth, y + Height);
-        var dropdownRound = new SKRoundRect(_dropdownRect, CornerRadius);
+        using var dropdownRound = new SKRoundRect(_dropdownRect, CornerRadius);
         canvas.DrawRoundRect(dropdownRound, _backgroundPaint);
         canvas.DrawRoundRect(dropdownRound, _borderPaint);
 
@@ -96,7 +96,7 @@ internal sealed class PluginPresetBar : IDisposable
         // Save button
         float saveX = x + DropdownWidth + Spacing;
         _saveButtonRect = new SKRect(saveX, y, saveX + SaveButtonWidth, y + Height);
-        var saveRound = new SKRoundRect(_saveButtonRect, CornerRadius);
+        using var saveRound = new SKRoundRect(_saveButtonRect, CornerRadius);
         canvas.DrawRoundRect(saveRound, _backgroundPaint);
         canvas.DrawRoundRect(saveRound, _borderPaint);
 

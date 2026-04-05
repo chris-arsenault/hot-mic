@@ -13,7 +13,6 @@ internal sealed class MainFullViewRenderer
     private readonly MainMasterSectionRenderer _masterRenderer;
     private readonly Dictionary<int, SKRect> _channelHeaderRects = new();
     private readonly List<CopyBridgeRect> _copyBridgeRects = new();
-    private readonly List<MergeBridgeRect> _mergeBridgeRects = new();
 
     public MainFullViewRenderer(
         MainPaintCache paints,
@@ -33,7 +32,6 @@ internal sealed class MainFullViewRenderer
     {
         _channelHeaderRects.Clear();
         _copyBridgeRects.Clear();
-        _mergeBridgeRects.Clear();
 
         float contentTop = layout.ContentRect.Top;
         float contentLeft = layout.ContentRect.Left;
@@ -47,14 +45,13 @@ internal sealed class MainFullViewRenderer
         for (int i = 0; i < viewModel.Channels.Count; i++)
         {
             _channelStripRenderer.Render(canvas, contentLeft, channelY, channelAreaWidth, MainLayoutMetrics.ChannelStripHeight,
-                viewModel.Channels[i], i, canDelete, viewModel.MeterScaleVox, _channelHeaderRects, _copyBridgeRects, _mergeBridgeRects);
+                viewModel.Channels[i], i, canDelete, viewModel.MeterScaleVox, _channelHeaderRects, _copyBridgeRects);
             channelY += MainLayoutMetrics.ChannelStripHeight + MainLayoutMetrics.ChannelSpacing;
         }
 
         DrawAddChannelButton(canvas, contentLeft, channelY + MainLayoutMetrics.AddChannelSpacing, channelAreaWidth, MainLayoutMetrics.AddChannelHeight);
 
         DrawCopyBridges(canvas);
-        DrawMergeBridges(canvas);
 
         float masterX = contentRight - masterSectionWidth;
         float masterHeight = MainLayoutMetrics.ChannelStripHeight * Math.Max(1, viewModel.Channels.Count) +
@@ -66,7 +63,7 @@ internal sealed class MainFullViewRenderer
     private void DrawAddChannelButton(SKCanvas canvas, float x, float y, float width, float height)
     {
         _hitTargets.AddChannelRect = new SKRect(x, y, x + width, y + height);
-        var roundRect = new SKRoundRect(_hitTargets.AddChannelRect, 4f);
+        using var roundRect = new SKRoundRect(_hitTargets.AddChannelRect, 4f);
         canvas.DrawRoundRect(roundRect, _paints.ButtonPaint);
         canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
 
@@ -111,38 +108,4 @@ internal sealed class MainFullViewRenderer
         }
     }
 
-    private void DrawMergeBridges(SKCanvas canvas)
-    {
-        if (_mergeBridgeRects.Count == 0)
-        {
-            return;
-        }
-
-        using var mergePaint = MainRenderPrimitives.CreateStrokePaint(_paints.Theme.Accent.WithAlpha(140), 1.5f);
-
-        for (int i = 0; i < _mergeBridgeRects.Count; i++)
-        {
-            var bridge = _mergeBridgeRects[i];
-            if (bridge.SourceChannelIndex == bridge.TargetChannelIndex)
-            {
-                continue;
-            }
-
-            if (!_channelHeaderRects.TryGetValue(bridge.SourceChannelIndex, out var sourceRect))
-            {
-                continue;
-            }
-
-            float startX = sourceRect.Right + 2f;
-            float startY = sourceRect.MidY;
-            float endX = bridge.TargetRect.Left - 2f;
-            float endY = bridge.TargetRect.MidY;
-            float controlX = (startX + endX) * 0.5f;
-
-            using var path = new SKPath();
-            path.MoveTo(startX, startY);
-            path.CubicTo(controlX, startY, controlX, endY, endX, endY);
-            canvas.DrawPath(path, mergePaint);
-        }
-    }
 }

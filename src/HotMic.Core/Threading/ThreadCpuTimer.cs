@@ -17,8 +17,10 @@ internal static class ThreadCpuTimer
     }
 
     [DllImport("kernel32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern IntPtr GetCurrentThread();
 
     [DllImport("kernel32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern bool QueryThreadCycleTime(IntPtr threadHandle, out ulong cycleTime);
 }

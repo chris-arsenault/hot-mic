@@ -13,7 +13,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class AirExciterWindow : Window, IDisposable
+internal sealed partial class AirExciterWindow : Window, IDisposable
 {
     private readonly AirExciterRenderer _renderer = new();
     private readonly AirExciterPlugin _plugin;

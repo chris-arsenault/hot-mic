@@ -197,6 +197,8 @@ public sealed class AirExciterPlugin : IPlugin, IAnalysisSignalConsumer, IPlugin
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float) * 2)
         {
             return;

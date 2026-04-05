@@ -6,7 +6,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class SkiaInputDialog : Window, IDisposable
+internal sealed partial class SkiaInputDialog : Window, IDisposable
 {
     private const float CornerRadius = 8f;
     private const float TitleBarHeight = 32f;
@@ -78,7 +78,7 @@ public partial class SkiaInputDialog : Window, IDisposable
         canvas.Clear(SKColors.Transparent);
 
         // Background with rounded corners
-        var bgRect = new SKRoundRect(new SKRect(0, 0, width, height), CornerRadius);
+        using var bgRect = new SKRoundRect(new SKRect(0, 0, width, height), CornerRadius);
         canvas.DrawRoundRect(bgRect, _backgroundPaint);
         canvas.DrawRoundRect(bgRect, _borderPaint);
 
@@ -86,7 +86,7 @@ public partial class SkiaInputDialog : Window, IDisposable
         _titleBarRect = new SKRect(0, 0, width, TitleBarHeight);
         using (var clipPath = new SKPath())
         {
-            var titleClipRect = new SKRoundRect(new SKRect(0, 0, width, TitleBarHeight + CornerRadius), CornerRadius);
+            using var titleClipRect = new SKRoundRect(new SKRect(0, 0, width, TitleBarHeight + CornerRadius), CornerRadius);
             clipPath.AddRoundRect(titleClipRect);
             canvas.Save();
             canvas.ClipPath(clipPath);
@@ -110,13 +110,15 @@ public partial class SkiaInputDialog : Window, IDisposable
         // OK button (accent)
         _okButtonRect = new SKRect(okX, buttonY, okX + ButtonWidth, buttonY + ButtonHeight);
         var okPaint = _okHovered ? _buttonAccentHoverPaint : _buttonAccentPaint;
-        canvas.DrawRoundRect(new SKRoundRect(_okButtonRect, 4f), okPaint);
+        using var _rr177 = new SKRoundRect(_okButtonRect, 4f);
+        canvas.DrawRoundRect(_rr177, okPaint);
         canvas.DrawText("OK", _okButtonRect.MidX, _okButtonRect.MidY + 4f, _buttonTextPaint);
 
         // Cancel button
         _cancelButtonRect = new SKRect(cancelX, buttonY, cancelX + ButtonWidth, buttonY + ButtonHeight);
         var cancelPaint = _cancelHovered ? _buttonHoverPaint : _buttonPaint;
-        canvas.DrawRoundRect(new SKRoundRect(_cancelButtonRect, 4f), cancelPaint);
+        using var _rr178 = new SKRoundRect(_cancelButtonRect, 4f);
+        canvas.DrawRoundRect(_rr178, cancelPaint);
         canvas.DrawText("Cancel", _cancelButtonRect.MidX, _cancelButtonRect.MidY + 4f, _buttonTextMutedPaint);
     }
 

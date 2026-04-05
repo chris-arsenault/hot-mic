@@ -160,14 +160,15 @@ internal sealed class LimiterRenderer : IDisposable
 
         // Main background
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Title bar
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr99 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr99);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -191,7 +192,7 @@ internal sealed class LimiterRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -286,7 +287,7 @@ internal sealed class LimiterRenderer : IDisposable
     private void DrawGainReductionMeter(SKCanvas canvas, SKRect rect, float grDb)
     {
         // Background
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _meterBackgroundPaint);
 
         // GR meter shows 0 to -20 dB of reduction (from top down)

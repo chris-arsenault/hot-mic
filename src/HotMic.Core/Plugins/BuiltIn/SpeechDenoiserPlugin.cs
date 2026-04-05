@@ -150,7 +150,8 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
 
         try
         {
-            _session = new InferenceSession(modelPath, BuildSessionOptions());
+            using var sessionOptions = BuildSessionOptions();
+            _session = new InferenceSession(modelPath, sessionOptions);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException or InvalidOperationException)
         {
@@ -316,6 +317,8 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float))
         {
             return;
@@ -603,7 +606,8 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
                 return;
             }
 
-            using var session = new InferenceSession(modelPath, BuildSessionOptions());
+            using var latencySessionOptions = BuildSessionOptions();
+            using var session = new InferenceSession(modelPath, latencySessionOptions);
 
             float[] probe = GenerateChirp(RequiredSampleRate, LatencyProbeStartHz, LatencyProbeEndHz, LatencyProbeDurationSeconds);
             float[] input = new float[LatencyProbeLeadInSamples + probe.Length + LatencyProbeTailSamples];
@@ -653,7 +657,7 @@ public sealed class SpeechDenoiserPlugin : IPlugin, IPluginStatusProvider
         {
             Volatile.Write(ref _latencyReport, "Latency learn failed: runtime error.");
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
         {
             Volatile.Write(ref _latencyReport, $"Latency learn failed ({ex.Message}).");
         }

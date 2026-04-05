@@ -3,7 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace HotMic.App.ViewModels;
 
-public partial class PluginContainerViewModel : ObservableObject
+internal sealed partial class PluginContainerViewModel : ObservableObject
 {
     private readonly Action? _action;
     private readonly Action? _remove;

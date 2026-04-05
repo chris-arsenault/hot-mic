@@ -32,6 +32,8 @@ public sealed class SampleBuffer
     /// </summary>
     public void Load(float[] samples, int sampleRate)
     {
+        ArgumentNullException.ThrowIfNull(samples);
+
         int count = Math.Min(samples.Length, MaxSamples);
         Array.Copy(samples, 0, _samples, 0, count);
         _length = count;
@@ -95,7 +97,7 @@ public sealed class SampleBuffer
 /// <summary>
 /// Sample player with loop modes and trim control.
 /// </summary>
-public struct SamplePlayer
+public record struct SamplePlayer
 {
     private double _position;
     private float _speed;
@@ -150,6 +152,8 @@ public struct SamplePlayer
 
     public float Next(SampleBuffer buffer, out SamplePlaybackEvent flags)
     {
+        ArgumentNullException.ThrowIfNull(buffer);
+
         flags = SamplePlaybackEvent.None;
         if (!_playing || !buffer.IsLoaded) return 0f;
 
@@ -227,7 +231,7 @@ public struct SamplePlayer
 }
 
 [Flags]
-public enum SamplePlaybackEvent : byte
+public enum SamplePlaybackEvent
 {
     None = 0,
     Started = 1,

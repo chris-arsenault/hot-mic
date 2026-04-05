@@ -33,7 +33,9 @@ internal sealed class RoutingScheduler
             return Array.Empty<int>();
         }
 
-        var edges = new bool[count, count];
+        var edges = new bool[count][];
+        for (int ei = 0; ei < count; ei++)
+            edges[ei] = new bool[count];
         var indegree = new int[count];
 
         int maxDependencies = 0;
@@ -118,7 +120,7 @@ internal sealed class RoutingScheduler
             order[index++] = node;
             for (int j = 0; j < count; j++)
             {
-                if (!edges[node, j])
+                if (!edges[node][j])
                 {
                     continue;
                 }
@@ -149,7 +151,7 @@ internal sealed class RoutingScheduler
         return order;
     }
 
-    private static void AddEdge(bool[,] edges, int[] indegree, int sourceIndex, int targetIndex)
+    private static void AddEdge(bool[][] edges, int[] indegree, int sourceIndex, int targetIndex)
     {
         int count = indegree.Length;
         if ((uint)sourceIndex >= (uint)count || (uint)targetIndex >= (uint)count || sourceIndex == targetIndex)
@@ -157,9 +159,9 @@ internal sealed class RoutingScheduler
             return;
         }
 
-        if (!edges[sourceIndex, targetIndex])
+        if (!edges[sourceIndex][targetIndex])
         {
-            edges[sourceIndex, targetIndex] = true;
+            edges[sourceIndex][targetIndex] = true;
             indegree[targetIndex]++;
         }
     }

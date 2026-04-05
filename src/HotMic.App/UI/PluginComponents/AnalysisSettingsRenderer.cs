@@ -407,7 +407,7 @@ internal sealed class AnalysisSettingsRenderer : IDisposable
     private void DrawPanelBackground(SKCanvas canvas, float x, float y, float width, float height, string header)
     {
         var rect = new SKRect(x, y, x + width, y + height);
-        var roundRect = new SKRoundRect(rect, 6f);
+        using var roundRect = new SKRoundRect(rect, 6f);
         canvas.DrawRoundRect(roundRect, _panelPaint);
         canvas.DrawRoundRect(roundRect, _borderPaint);
 
@@ -432,7 +432,7 @@ internal sealed class AnalysisSettingsRenderer : IDisposable
             var rect = new SKRect(btnX, y, btnX + btnWidth, y + ButtonHeight);
             rects[i] = rect;
 
-            var roundRect = new SKRoundRect(rect, 4f);
+            using var roundRect = new SKRoundRect(rect, 4f);
             if (!isEnabled)
             {
                 canvas.DrawRoundRect(roundRect, _buttonDisabledPaint);
@@ -448,7 +448,7 @@ internal sealed class AnalysisSettingsRenderer : IDisposable
 
     private void DrawToggleButton(SKCanvas canvas, SKRect rect, string label, bool active)
     {
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, active ? _buttonActivePaint : _buttonPaint);
         _buttonTextPaint.DrawText(canvas, label, rect.MidX, rect.MidY + 4);
     }

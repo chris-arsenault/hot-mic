@@ -3,7 +3,7 @@ namespace HotMic.Core.Dsp.Filters;
 /// <summary>
 /// Linear ramp smoother for parameters that should change without zipper noise.
 /// </summary>
-public struct LinearSmoother
+public record struct LinearSmoother
 {
     private int _rampSamples;
     private int _samplesLeft;

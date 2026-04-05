@@ -147,14 +147,15 @@ internal sealed class InputSourceRenderer : IDisposable
 
         // Main background
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Title bar
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr96 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr96);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -173,7 +174,7 @@ internal sealed class InputSourceRenderer : IDisposable
             (TitleBarHeight - 20) / 2,
             size.Width - Padding - 22 - 6,
             (TitleBarHeight + 20) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 3f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 3f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -192,7 +193,7 @@ internal sealed class InputSourceRenderer : IDisposable
         canvas.DrawText("DEVICE", Padding, contentTop + 8, _labelPaint);
         float dropdownTop = contentTop + 12;
         _deviceDropdownRect = new SKRect(Padding, dropdownTop, rightColumnX - 8, dropdownTop + DropdownHeight);
-        var dropdownRound = new SKRoundRect(_deviceDropdownRect, 4f);
+        using var dropdownRound = new SKRoundRect(_deviceDropdownRect, 4f);
         canvas.DrawRoundRect(dropdownRound, _dropdownPaint);
         canvas.DrawRoundRect(dropdownRound, _borderPaint);
 
@@ -254,8 +255,10 @@ internal sealed class InputSourceRenderer : IDisposable
             float listHeight = Math.Min(state.Devices.Count * DropdownItemHeight, maxListHeight);
             _dropdownListRect = new SKRect(_deviceDropdownRect.Left, _deviceDropdownRect.Bottom + 2, _deviceDropdownRect.Right, _deviceDropdownRect.Bottom + 2 + listHeight);
 
-            canvas.DrawRoundRect(new SKRoundRect(_dropdownListRect, 4f), _dropdownPaint);
-            canvas.DrawRoundRect(new SKRoundRect(_dropdownListRect, 4f), _borderPaint);
+            using var _rr97 = new SKRoundRect(_dropdownListRect, 4f);
+            canvas.DrawRoundRect(_rr97, _dropdownPaint);
+            using var _rr98 = new SKRoundRect(_dropdownListRect, 4f);
+            canvas.DrawRoundRect(_rr98, _borderPaint);
 
             canvas.Save();
             canvas.ClipRect(_dropdownListRect);
@@ -293,7 +296,7 @@ internal sealed class InputSourceRenderer : IDisposable
 
     private void DrawModeButton(SKCanvas canvas, SKRect rect, string label, bool isActive)
     {
-        var roundRect = new SKRoundRect(rect, 3f);
+        using var roundRect = new SKRoundRect(rect, 3f);
         canvas.DrawRoundRect(roundRect, isActive ? _modeButtonActivePaint : _modeButtonPaint);
         canvas.DrawRoundRect(roundRect, _borderPaint);
         canvas.DrawText(label, rect.MidX, rect.MidY + 4, isActive ? _modeButtonActiveTextPaint : _modeButtonTextPaint);
@@ -378,7 +381,7 @@ internal sealed class InputSourceRenderer : IDisposable
     }
 }
 
-public record struct InputSourceDevice(string Id, string Name);
+internal record struct InputSourceDevice(string Id, string Name);
 
 internal enum InputChannelModeValue
 {

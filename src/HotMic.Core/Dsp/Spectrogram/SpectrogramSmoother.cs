@@ -84,6 +84,8 @@ public sealed class SpectrogramSmoother
     /// </summary>
     public void ApplyEma(float[] input, float[] output, float amount)
     {
+        ArgumentNullException.ThrowIfNull(input);
+
         ApplyEma(input, output, amount, input.Length);
     }
 
@@ -92,6 +94,9 @@ public sealed class SpectrogramSmoother
     /// </summary>
     public void ApplyEma(float[] input, float[] output, float amount, int bins)
     {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(output);
+
         if (bins <= 0 || bins > input.Length)
         {
             return;
@@ -110,6 +115,8 @@ public sealed class SpectrogramSmoother
     /// </summary>
     public void ApplyBilateral(float[] input, float[] output, float amount)
     {
+        ArgumentNullException.ThrowIfNull(input);
+
         ApplyBilateral(input, output, amount, input.Length);
     }
 
@@ -118,6 +125,9 @@ public sealed class SpectrogramSmoother
     /// </summary>
     public void ApplyBilateral(float[] input, float[] output, float amount, int bins)
     {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(output);
+
         if (bins <= 0 || bins > input.Length)
         {
             return;

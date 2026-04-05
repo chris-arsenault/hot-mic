@@ -3,6 +3,21 @@ using System.Threading;
 namespace HotMic.Core.Analysis;
 
 /// <summary>
+/// Event arguments for view range changes.
+/// </summary>
+public sealed class ViewRangeChangedEventArgs : EventArgs
+{
+    public ViewRangeChangedEventArgs(long startFrame, long endFrame)
+    {
+        StartFrame = startFrame;
+        EndFrame = endFrame;
+    }
+
+    public long StartFrame { get; }
+    public long EndFrame { get; }
+}
+
+/// <summary>
 /// Coordinates timeline view across multiple visualizer windows.
 /// Enables synchronized scrolling and shared playhead position.
 /// </summary>
@@ -77,12 +92,12 @@ public sealed class VisualizerSyncHub
     /// <summary>
     /// Raised when the view range changes.
     /// </summary>
-    public event Action<long, long>? ViewRangeChanged;
+    public event EventHandler<ViewRangeChangedEventArgs>? ViewRangeChanged;
 
     /// <summary>
     /// Raised when visualizers should redraw.
     /// </summary>
-    public event Action? Invalidated;
+    public event EventHandler? Invalidated;
 
     /// <summary>
     /// Scroll the view by a frame delta.
@@ -102,7 +117,7 @@ public sealed class VisualizerSyncHub
         ViewStartFrame = Math.Max(0, newStart);
         ViewEndFrame = Math.Max(ViewStartFrame, newEnd);
 
-        ViewRangeChanged?.Invoke(ViewStartFrame, ViewEndFrame);
+        ViewRangeChanged?.Invoke(this, new ViewRangeChangedEventArgs(ViewStartFrame, ViewEndFrame));
         Invalidate();
     }
 
@@ -117,7 +132,7 @@ public sealed class VisualizerSyncHub
         ViewStartFrame = Math.Max(0, frameId - halfWindow);
         ViewEndFrame = frameId + halfWindow;
 
-        ViewRangeChanged?.Invoke(ViewStartFrame, ViewEndFrame);
+        ViewRangeChanged?.Invoke(this, new ViewRangeChangedEventArgs(ViewStartFrame, ViewEndFrame));
         Invalidate();
     }
 
@@ -137,7 +152,7 @@ public sealed class VisualizerSyncHub
         ViewEndFrame = latestFrameId;
         ViewStartFrame = Math.Max(0, latestFrameId - framesInWindow + 1);
 
-        ViewRangeChanged?.Invoke(ViewStartFrame, ViewEndFrame);
+        ViewRangeChanged?.Invoke(this, new ViewRangeChangedEventArgs(ViewStartFrame, ViewEndFrame));
     }
 
     /// <summary>
@@ -145,7 +160,7 @@ public sealed class VisualizerSyncHub
     /// </summary>
     public void Invalidate()
     {
-        Invalidated?.Invoke();
+        Invalidated?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>

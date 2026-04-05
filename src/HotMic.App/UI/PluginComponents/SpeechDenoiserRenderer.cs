@@ -14,8 +14,6 @@ internal sealed class SpeechDenoiserRenderer : IDisposable
     private const float KnobRadius = 26f;
     private const float KnobSpacing = 120f;
     private const float CornerRadius = 10f;
-    private const int KnobCount = 2;
-
     private readonly PluginComponentTheme _theme;
     private readonly AiProcessingIndicator _processingIndicator;
     private readonly PluginPresetBar _presetBar;
@@ -184,13 +182,14 @@ internal sealed class SpeechDenoiserRenderer : IDisposable
         size = new SKSize(size.Width / dpiScale, size.Height / dpiScale);
 
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr127 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr127);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -208,7 +207,8 @@ internal sealed class SpeechDenoiserRenderer : IDisposable
         float badgeX = presetBarX + PluginPresetBar.TotalWidth + 6f;
         var badgeRect = new SKRect(badgeX, (TitleBarHeight - 16) / 2, badgeX + 25, (TitleBarHeight + 16) / 2);
         using var badgePaint = new SKPaint { Color = new SKColor(0x40, 0x80, 0xFF), IsAntialias = true };
-        canvas.DrawRoundRect(new SKRoundRect(badgeRect, 3f), badgePaint);
+        using var _rr128 = new SKRoundRect(badgeRect, 3f);
+        canvas.DrawRoundRect(_rr128, badgePaint);
         using var badgeTextPaint = new SkiaTextPaint(SKColors.White, 8f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("AI", badgeRect.MidX, badgeRect.MidY + 3, badgeTextPaint);
 
@@ -227,7 +227,7 @@ internal sealed class SpeechDenoiserRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -262,7 +262,7 @@ internal sealed class SpeechDenoiserRenderer : IDisposable
         float learnX = (size.Width - learnWidth) / 2f;
         float learnY = y + 4f;
         _learnButtonRect = new SKRect(learnX, learnY, learnX + learnWidth, learnY + learnHeight);
-        var learnRound = new SKRoundRect(_learnButtonRect, 4f);
+        using var learnRound = new SKRoundRect(_learnButtonRect, 4f);
         canvas.DrawRoundRect(learnRound, state.IsLatencyLearning ? _learnActivePaint : _learnPaint);
         canvas.DrawRoundRect(learnRound, _borderPaint);
         string learnLabel = state.IsLatencyLearning ? "LEARNING..." : "LEARN LATENCY";
@@ -299,8 +299,10 @@ internal sealed class SpeechDenoiserRenderer : IDisposable
         SKColor barColor = state.IsBypassed ? new SKColor(0x80, 0x80, 0x80) : new SKColor(0x40, 0x80, 0xFF);
 
         using var barPaint = new SKPaint { Color = barColor.WithAlpha(100), IsAntialias = true };
-        canvas.DrawRoundRect(new SKRoundRect(statusBarRect, 4f), barPaint);
-        canvas.DrawRoundRect(new SKRoundRect(statusBarRect, 4f), _borderPaint);
+        using var _rr129 = new SKRoundRect(statusBarRect, 4f);
+        canvas.DrawRoundRect(_rr129, barPaint);
+        using var _rr130 = new SKRoundRect(statusBarRect, 4f);
+        canvas.DrawRoundRect(_rr130, _borderPaint);
 
         using var statusTextPaint = new SkiaTextPaint(_theme.TextPrimary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText(statusText, statusBarRect.MidX, statusBarRect.MidY + 4, statusTextPaint);
@@ -374,7 +376,7 @@ internal sealed class SpeechDenoiserRenderer : IDisposable
 
     private void DrawAttenToggle(SKCanvas canvas, SKRect rect, bool enabled)
     {
-        var round = new SKRoundRect(rect, 4f);
+        using var round = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(round, enabled ? _toggleActivePaint : _togglePaint);
         canvas.DrawRoundRect(round, _borderPaint);
 

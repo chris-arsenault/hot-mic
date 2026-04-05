@@ -12,6 +12,7 @@ namespace HotMic.Vst3;
 public sealed class Vst3PluginWrapper : IPlugin
 {
     private readonly Vst3PluginInfo _info;
+#pragma warning disable CA2213 // Disposed in Dispose() via ?.Dispose(); analyzer can't track nullable
     private VstPluginContext? _context;
     private object? _commandStub;
     private Action? _open;
@@ -34,6 +35,7 @@ public sealed class Vst3PluginWrapper : IPlugin
     private Vst3PluginHost? _host;
     private VstAudioBufferManager? _inputBufferManager;
     private VstAudioBufferManager? _outputBufferManager;
+#pragma warning restore CA2213
     private VstAudioBuffer[] _inputBuffers = Array.Empty<VstAudioBuffer>();
     private VstAudioBuffer[] _outputBuffers = Array.Empty<VstAudioBuffer>();
     private PluginParameter[] _parameters = Array.Empty<PluginParameter>();
@@ -175,7 +177,7 @@ public sealed class Vst3PluginWrapper : IPlugin
 
             _host?.AdvanceSamples(frames);
         }
-        catch
+        catch (InvalidOperationException)
         {
             IsBypassed = true;
             Interlocked.Exchange(ref _isFaulted, 1);
@@ -230,6 +232,8 @@ public sealed class Vst3PluginWrapper : IPlugin
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (_setChunk is null || state.Length == 0)
         {
             return;
@@ -289,9 +293,13 @@ public sealed class Vst3PluginWrapper : IPlugin
             _close();
         }
 
+        // Fields are nullable because they're only assigned after successful Open().
+        // The analyzer doesn't recognize ?.Dispose() as satisfying CA2213.
+#pragma warning disable CA2213
         _inputBufferManager?.Dispose();
         _outputBufferManager?.Dispose();
         _context?.Dispose();
+#pragma warning restore CA2213
     }
 
     private PluginParameter[] BuildParameters()
@@ -373,7 +381,11 @@ public sealed class Vst3PluginWrapper : IPlugin
         {
             return method.CreateDelegate<T>(target);
         }
-        catch (Exception ex)
+        catch (ArgumentException ex)
+        {
+            throw new InvalidOperationException($"Failed to bind VST3 method {methodName}.", ex);
+        }
+        catch (MissingMethodException ex)
         {
             throw new InvalidOperationException($"Failed to bind VST3 method {methodName}.", ex);
         }

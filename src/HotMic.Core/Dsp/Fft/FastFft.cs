@@ -33,11 +33,17 @@ public sealed class FastFft
 
     public void Forward(float[] real, float[] imag)
     {
+        ArgumentNullException.ThrowIfNull(imag);
+        ArgumentNullException.ThrowIfNull(real);
+
         Transform(real, imag, inverse: false);
     }
 
     public void Inverse(float[] real, float[] imag)
     {
+        ArgumentNullException.ThrowIfNull(imag);
+        ArgumentNullException.ThrowIfNull(real);
+
         Transform(real, imag, inverse: true);
     }
 

@@ -15,7 +15,7 @@ internal sealed class MainRenderPrimitives
 
     public void DrawBackground(SKCanvas canvas, SKSize size)
     {
-        var rect = new SKRoundRect(new SKRect(0, 0, size.Width, size.Height), MainLayoutMetrics.CornerRadius);
+        using var rect = new SKRoundRect(new SKRect(0, 0, size.Width, size.Height), MainLayoutMetrics.CornerRadius);
         canvas.DrawRoundRect(rect, _paints.BackgroundPaint);
         canvas.DrawRoundRect(rect, _paints.BorderPaint);
     }
@@ -41,13 +41,17 @@ internal sealed class MainRenderPrimitives
 
     public void DrawToggleButton(SKCanvas canvas, SKRect rect, string label, bool isActive, SKPaint activePaint)
     {
-        var roundRect = new SKRoundRect(rect, 3f);
+        using var roundRect = new SKRoundRect(rect, 3f);
         canvas.DrawRoundRect(roundRect, isActive ? activePaint : _paints.ButtonPaint);
         canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
 
-        var textPaint = isActive
-            ? CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 9f, SKFontStyle.Bold)
-            : CreateCenteredTextPaint(_paints.Theme.TextSecondary, 9f);
+        using var _p45 = CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 9f, SKFontStyle.Bold);
+
+
+        using var _p46 = CreateCenteredTextPaint(_paints.Theme.TextSecondary, 9f);
+
+
+        var textPaint = isActive ? _p45 : _p46;
         canvas.DrawText(label, rect.MidX, rect.MidY + 3f, textPaint);
     }
 
@@ -56,7 +60,8 @@ internal sealed class MainRenderPrimitives
         var center = new SKPoint(x + size / 2f, y + size / 2f - 2f);
         float radius = size / 2f - 3f;
 
-        canvas.DrawCircle(center, radius, CreateFillPaint(_paints.Theme.Surface));
+        using var _p47 = CreateFillPaint(_paints.Theme.Surface);
+        canvas.DrawCircle(center, radius, _p47);
         canvas.DrawCircle(center, radius, _paints.BorderPaint);
 
         float normalized = (value + 60f) / 72f;
@@ -66,15 +71,17 @@ internal sealed class MainRenderPrimitives
 
         using var arc = new SKPath();
         arc.AddArc(new SKRect(center.X - radius, center.Y - radius, center.X + radius, center.Y + radius), startAngle, sweepAngle);
-        canvas.DrawPath(arc, CreateStrokePaint(_paints.Theme.Accent, 2f));
+        using var _p48 = CreateStrokePaint(_paints.Theme.Accent, 2f);
+        canvas.DrawPath(arc, _p48);
 
         float angle = (startAngle + sweepAngle) * MathF.PI / 180f;
         float innerR = radius * 0.4f;
         float outerR = radius * 0.8f;
+        using var _p49 = CreateStrokePaint(_paints.Theme.TextPrimary, 1.5f);
         canvas.DrawLine(
             center.X + MathF.Cos(angle) * innerR, center.Y + MathF.Sin(angle) * innerR,
             center.X + MathF.Cos(angle) * outerR, center.Y + MathF.Sin(angle) * outerR,
-            CreateStrokePaint(_paints.Theme.TextPrimary, 1.5f));
+            _p49);
 
         string valueText = value.ToString("0", CultureInfo.InvariantCulture);
         canvas.DrawText(valueText, x + 2f, y + size - 1f, _paints.TinyTextPaint);
@@ -96,3 +103,4 @@ internal sealed class MainRenderPrimitives
     public static SkiaTextPaint CreateCenteredTextPaint(SKColor color, float size, SKFontStyle? style = null) =>
         new(color, size, style, SKTextAlign.Center);
 }
+

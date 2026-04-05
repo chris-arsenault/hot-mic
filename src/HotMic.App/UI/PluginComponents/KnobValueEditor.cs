@@ -171,7 +171,7 @@ internal sealed class KnobValueEditor : IDisposable
             else if (_unit.Equals("Hz", StringComparison.OrdinalIgnoreCase))
             {
                 // Handle "k" suffix for Hz (e.g., "1k" = 1000 Hz, "2.5k" = 2500 Hz)
-                if (text.EndsWith("k", StringComparison.OrdinalIgnoreCase) ||
+                if (text.EndsWith('k') || text.EndsWith('K') ||
                     text.EndsWith("khz", StringComparison.OrdinalIgnoreCase))
                 {
                     text = text.TrimEnd('k', 'K', 'h', 'H', 'z', 'Z').Trim();
@@ -180,7 +180,7 @@ internal sealed class KnobValueEditor : IDisposable
                         float hzValue = Math.Clamp(khzValue * 1000f, _minValue, _maxValue);
                         var callback = _onValueAccepted;
                         _popup.IsOpen = false;
-                        callback?.Invoke(hzValue);
+                        callback.Invoke(hzValue);
                         return;
                     }
                 }
@@ -193,7 +193,7 @@ internal sealed class KnobValueEditor : IDisposable
             value = Math.Clamp(value, _minValue, _maxValue);
             var callback = _onValueAccepted;
             _popup.IsOpen = false;
-            callback?.Invoke(value);
+            callback.Invoke(value);
         }
         else
         {

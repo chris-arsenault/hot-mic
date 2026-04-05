@@ -62,7 +62,7 @@ internal sealed class WinMmMidiIn : IDisposable
             {
                 WinMmMidiInterop.midiInReset(_handle);
             }
-            catch
+            catch (InvalidOperationException)
             {
                 // Swallow cleanup failures to avoid teardown crashes.
             }
@@ -71,7 +71,7 @@ internal sealed class WinMmMidiIn : IDisposable
             {
                 WinMmMidiInterop.midiInClose(_handle);
             }
-            catch
+            catch (InvalidOperationException)
             {
                 // Swallow cleanup failures to avoid teardown crashes.
             }
@@ -103,7 +103,7 @@ internal sealed class WinMmMidiIn : IDisposable
                     break;
             }
         }
-        catch
+        catch (InvalidOperationException)
         {
             // Avoid crashing the process from native callback exceptions.
         }
@@ -151,6 +151,7 @@ internal sealed class WinMmMidiIn : IDisposable
             IntPtr messageParameter2);
 
         [DllImport("winmm.dll", EntryPoint = "midiInOpen")]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern MmResult midiInOpen(
             out IntPtr hMidiIn,
             IntPtr uDeviceID,
@@ -159,21 +160,27 @@ internal sealed class WinMmMidiIn : IDisposable
             int dwFlags);
 
         [DllImport("winmm.dll")]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern MmResult midiInStart(IntPtr hMidiIn);
 
         [DllImport("winmm.dll")]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern MmResult midiInStop(IntPtr hMidiIn);
 
         [DllImport("winmm.dll")]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern MmResult midiInReset(IntPtr hMidiIn);
 
         [DllImport("winmm.dll")]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern MmResult midiInClose(IntPtr hMidiIn);
 
         [DllImport("winmm.dll", CharSet = CharSet.Auto)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern MmResult midiInGetDevCaps(IntPtr deviceId, out MidiInCapabilities capabilities, int size);
 
         [DllImport("winmm.dll")]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
         public static extern int midiInGetNumDevs();
 
         public const int CALLBACK_FUNCTION = 0x30000;

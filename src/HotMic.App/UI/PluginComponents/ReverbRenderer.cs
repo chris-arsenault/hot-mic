@@ -154,14 +154,15 @@ internal sealed class ReverbRenderer : IDisposable
 
         // Main background
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Title bar
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr106 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr106);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -185,7 +186,7 @@ internal sealed class ReverbRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -210,7 +211,7 @@ internal sealed class ReverbRenderer : IDisposable
             _presetRects[i] = new SKRect(px, y, px + presetWidth, y + 28);
             bool isSelected = state.IrPreset == i;
 
-            var presetRound = new SKRoundRect(_presetRects[i], 4f);
+            using var presetRound = new SKRoundRect(_presetRects[i], 4f);
             canvas.DrawRoundRect(presetRound, isSelected ? _presetSelectedPaint : _presetPaint);
             canvas.DrawRoundRect(presetRound, _borderPaint);
 
@@ -228,7 +229,7 @@ internal sealed class ReverbRenderer : IDisposable
         if (state.IrPreset == 5)
         {
             _loadButtonRect = new SKRect(Padding, y, Padding + 120, y + 28);
-            var loadRound = new SKRoundRect(_loadButtonRect, 4f);
+            using var loadRound = new SKRoundRect(_loadButtonRect, 4f);
             canvas.DrawRoundRect(loadRound, _loadButtonPaint);
             canvas.DrawRoundRect(loadRound, _borderPaint);
 
@@ -260,7 +261,8 @@ internal sealed class ReverbRenderer : IDisposable
         y += 14;
 
         var irDisplayRect = new SKRect(Padding, y, size.Width - Padding, y + WaveformHeight);
-        canvas.DrawRoundRect(new SKRoundRect(irDisplayRect, 4f), _irDisplayPaint);
+        using var _rr107 = new SKRoundRect(irDisplayRect, 4f);
+        canvas.DrawRoundRect(_rr107, _irDisplayPaint);
 
         if (state.IsIrLoaded)
         {
@@ -387,7 +389,8 @@ internal sealed class ReverbRenderer : IDisposable
             IsAntialias = true,
             Style = SKPaintStyle.Fill
         };
-        canvas.DrawRoundRect(new SKRoundRect(rect, 4f), bgPaint);
+        using var _rr108 = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(_rr108, bgPaint);
 
         // Dry portion (left)
         float dryWidth = rect.Width * (1f - dryWet);
@@ -401,7 +404,8 @@ internal sealed class ReverbRenderer : IDisposable
                 Style = SKPaintStyle.Fill
             };
             using var dryClip = new SKPath();
-            dryClip.AddRoundRect(new SKRoundRect(rect, 4f));
+            using var _rr109 = new SKRoundRect(rect, 4f);
+            dryClip.AddRoundRect(_rr109);
             canvas.Save();
             canvas.ClipPath(dryClip);
             canvas.DrawRect(dryRect, dryPaint);
@@ -419,7 +423,8 @@ internal sealed class ReverbRenderer : IDisposable
                 Style = SKPaintStyle.Fill
             };
             using var wetClip = new SKPath();
-            wetClip.AddRoundRect(new SKRoundRect(rect, 4f));
+            using var _rr110 = new SKRoundRect(rect, 4f);
+            wetClip.AddRoundRect(_rr110);
             canvas.Save();
             canvas.ClipPath(wetClip);
             canvas.DrawRect(wetRect, wetPaint);
@@ -438,7 +443,8 @@ internal sealed class ReverbRenderer : IDisposable
         canvas.DrawText($"{(1 - dryWet) * 100:0}% / {dryWet * 100:0}%", rect.MidX, rect.MidY + 3, labelPaint);
 
         // Border
-        canvas.DrawRoundRect(new SKRoundRect(rect, 4f), _borderPaint);
+        using var _rr111 = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(_rr111, _borderPaint);
     }
 
     public ReverbHitTest HitTest(float x, float y)

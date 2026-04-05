@@ -15,6 +15,15 @@ using HotMic.Core.Threading;
 namespace HotMic.Core.Analysis;
 
 /// <summary>
+/// Event arguments for requested signals changes.
+/// </summary>
+public sealed class RequestedSignalsChangedEventArgs : EventArgs
+{
+    public RequestedSignalsChangedEventArgs(AnalysisSignalMask signals) => Signals = signals;
+    public AnalysisSignalMask Signals { get; }
+}
+
+/// <summary>
 /// Orchestrates audio analysis for visualizers. Runs analysis based on active consumers.
 /// Single instance per audio session. Not a plugin.
 /// </summary>
@@ -219,7 +228,7 @@ public sealed class AnalysisOrchestrator : IDisposable
 
     public AnalysisSignalMask RequestedSignals => (AnalysisSignalMask)Volatile.Read(ref _requestedSignalsRaw);
 
-    public event Action<AnalysisSignalMask>? RequestedSignalsChanged;
+    public event EventHandler<RequestedSignalsChangedEventArgs>? RequestedSignalsChanged;
 
     public void Initialize(int sampleRate)
     {
@@ -430,7 +439,7 @@ public sealed class AnalysisOrchestrator : IDisposable
         }
 
         Volatile.Write(ref _requestedSignalsRaw, (int)requestedSignals);
-        RequestedSignalsChanged?.Invoke(requestedSignals);
+        RequestedSignalsChanged?.Invoke(this, new RequestedSignalsChangedEventArgs(requestedSignals));
     }
 
     private AnalysisSignalMask ComputeRequestedSignalsLocked()
@@ -562,7 +571,7 @@ public sealed class AnalysisOrchestrator : IDisposable
 
             // Compute transform
             var transformType = _activeTransformType;
-            bool reassignEnabled = _activeReassignMode != SpectrogramReassignMode.Off;
+            bool reassignEnabled = _activeReassignMode != SpectrogramReassignMode.None;
             int clarityBins = _activeAnalysisBins;
             ReadOnlySpan<float> displayMagnitudes = _fftMagnitudes;
 
@@ -1641,8 +1650,8 @@ public sealed class AnalysisOrchestrator : IDisposable
             preEmphasis,
             DefaultPreEmphasis,
             DcCutoffHz);
-        _analysisBufferRaw = _analysisPipeline.RawBuffer;
-        _analysisBufferProcessed = _analysisPipeline.ProcessedBuffer;
+        _analysisBufferRaw = _analysisPipeline.GetRawBufferArray();
+        _analysisBufferProcessed = _analysisPipeline.GetProcessedBufferArray();
         _analysisFilled = _analysisPipeline.Filled;
 
         // Update analysis bins
@@ -1753,7 +1762,7 @@ public sealed class AnalysisOrchestrator : IDisposable
 
     private void UpdateAnalysisDescriptor(SpectrogramTransformType transformType)
     {
-        SpectrogramAnalysisDescriptor? descriptor = null;
+        SpectrogramAnalysisDescriptor descriptor;
         switch (transformType)
         {
             case SpectrogramTransformType.Cqt when _cqt is not null:
@@ -1772,11 +1781,8 @@ public sealed class AnalysisOrchestrator : IDisposable
                 break;
         }
 
-        if (descriptor is not null)
-        {
-            _analysisDescriptor = descriptor;
-            _resultStore.SetAnalysisDescriptor(descriptor);
-        }
+        _analysisDescriptor = descriptor;
+        _resultStore.SetAnalysisDescriptor(descriptor);
     }
 
     private void UpdateDisplayMapper()
@@ -1823,16 +1829,16 @@ public sealed class AnalysisOrchestrator : IDisposable
 
     private void SyncFftProcessorState()
     {
-        _fftReal = _fftProcessor.FftReal;
-        _fftImag = _fftProcessor.FftImag;
-        _fftTimeReal = _fftProcessor.FftTimeReal;
-        _fftTimeImag = _fftProcessor.FftTimeImag;
-        _fftDerivReal = _fftProcessor.FftDerivReal;
-        _fftDerivImag = _fftProcessor.FftDerivImag;
-        _fftWindow = _fftProcessor.Window;
-        _fftWindowTime = _fftProcessor.WindowTime;
-        _fftWindowDerivative = _fftProcessor.WindowDerivative;
-        _fftMagnitudes = _fftProcessor.Magnitudes;
+        _fftReal = _fftProcessor.GetFftRealArray();
+        _fftImag = _fftProcessor.GetFftImagArray();
+        _fftTimeReal = _fftProcessor.GetFftTimeRealArray();
+        _fftTimeImag = _fftProcessor.GetFftTimeImagArray();
+        _fftDerivReal = _fftProcessor.GetFftDerivRealArray();
+        _fftDerivImag = _fftProcessor.GetFftDerivImagArray();
+        _fftWindow = _fftProcessor.GetWindowArray();
+        _fftWindowTime = _fftProcessor.WindowTime.ToArray();
+        _fftWindowDerivative = _fftProcessor.WindowDerivative.ToArray();
+        _fftMagnitudes = _fftProcessor.GetMagnitudesArray();
         _fftNormalization = _fftProcessor.Normalization;
         _binResolution = _fftProcessor.BinResolution;
     }

@@ -6,7 +6,7 @@ using HotMic.Common.Configuration;
 
 namespace HotMic.App.ViewModels;
 
-public partial class ChannelStripViewModel : ObservableObject
+internal sealed partial class ChannelStripViewModel : ObservableObject
 {
     private readonly Action<HotMic.Core.Engine.ParameterChange>? _parameterSink;
     private readonly Action<int, int, int, float>? _pluginParameterSink;

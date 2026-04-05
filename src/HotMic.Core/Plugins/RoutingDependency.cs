@@ -3,7 +3,7 @@ namespace HotMic.Core.Plugins;
 /// <summary>
 /// Describes a processing dependency between two channels in the routing graph.
 /// </summary>
-public readonly struct RoutingDependency
+public readonly record struct RoutingDependency
 {
     public RoutingDependency(int sourceChannelId, int targetChannelId)
     {

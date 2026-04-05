@@ -303,7 +303,7 @@ internal sealed class SpeechCoachRenderer : IDisposable
         bool higherIsBetter)
     {
         var rect = new SKRect(x, y, x + width, y + MetricCardHeight);
-        var roundRect = new SKRoundRect(rect, 6f);
+        using var roundRect = new SKRoundRect(rect, 6f);
         canvas.DrawRoundRect(roundRect, _cardPaint);
         canvas.DrawRoundRect(roundRect, _borderPaint);
 
@@ -320,7 +320,7 @@ internal sealed class SpeechCoachRenderer : IDisposable
         float meterWidth = width - 20f;
 
         var meterRect = new SKRect(x + 10f, meterY, x + 10f + meterWidth, meterY + meterHeight);
-        var meterRoundRect = new SKRoundRect(meterRect, 3f);
+        using var meterRoundRect = new SKRoundRect(meterRect, 3f);
         canvas.DrawRoundRect(meterRoundRect, _meterBackgroundPaint);
 
         bool isGood = higherIsBetter
@@ -333,7 +333,7 @@ internal sealed class SpeechCoachRenderer : IDisposable
         float fillWidth = meterWidth * normalizedValue;
 
         var fillRect = new SKRect(x + 10f, meterY, x + 10f + fillWidth, meterY + meterHeight);
-        var fillRoundRect = new SKRoundRect(fillRect, 3f);
+        using var fillRoundRect = new SKRoundRect(fillRect, 3f);
         canvas.DrawRoundRect(fillRoundRect, fillPaint);
     }
 
@@ -360,7 +360,8 @@ internal sealed class SpeechCoachRenderer : IDisposable
 
     private void DrawPitchContour(SKCanvas canvas, SKRect rect, in SpeechCoachState state)
     {
-        canvas.DrawRoundRect(new SKRoundRect(rect, 4f), _meterBackgroundPaint);
+        using var _rr118 = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(_rr118, _meterBackgroundPaint);
 
         float centerY = rect.MidY;
         canvas.DrawLine(rect.Left, centerY, rect.Right, centerY, _pitchGridPaint);
@@ -373,14 +374,16 @@ internal sealed class SpeechCoachRenderer : IDisposable
         int available = state.AvailableFrames;
         if (available <= 1 || state.PitchTrack.Length == 0 || state.FrameCapacity <= 0 || state.LatestFrameId < 0)
         {
-            canvas.DrawRoundRect(new SKRoundRect(rect, 4f), _borderPaint);
+            using var _rr119 = new SKRoundRect(rect, 4f);
+            canvas.DrawRoundRect(_rr119, _borderPaint);
             return;
         }
 
         float medianHz = state.PitchMedianHz;
         if (medianHz <= 0f)
         {
-            canvas.DrawRoundRect(new SKRoundRect(rect, 4f), _borderPaint);
+            using var _rr120 = new SKRoundRect(rect, 4f);
+            canvas.DrawRoundRect(_rr120, _borderPaint);
             return;
         }
 
@@ -439,18 +442,21 @@ internal sealed class SpeechCoachRenderer : IDisposable
             canvas.DrawPath(path, _pitchLinePaint);
         }
 
-        canvas.DrawRoundRect(new SKRoundRect(rect, 4f), _borderPaint);
+        using var _rr121 = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(_rr121, _borderPaint);
     }
 
     private void DrawEnergyAndPace(SKCanvas canvas, SKRect rect, in SpeechCoachState state)
     {
-        canvas.DrawRoundRect(new SKRoundRect(rect, 4f), _meterBackgroundPaint);
+        using var _rr122 = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(_rr122, _meterBackgroundPaint);
         _smallLabelPaint.DrawText(canvas, "Energy + Pace", rect.Left + 6f, rect.Top + 12f);
 
         int available = state.AvailableFrames;
         if (available <= 1 || state.FrameCapacity <= 0 || state.LatestFrameId < 0)
         {
-            canvas.DrawRoundRect(new SKRoundRect(rect, 4f), _borderPaint);
+            using var _rr123 = new SKRoundRect(rect, 4f);
+            canvas.DrawRoundRect(_rr123, _borderPaint);
             return;
         }
 
@@ -577,7 +583,8 @@ internal sealed class SpeechCoachRenderer : IDisposable
         _smallLabelPaint.DrawText(canvas, "Mean Pause", rect.Right - 70f, rect.Top + 26f);
         _smallValuePaint.DrawText(canvas, pauseText, rect.Right - 70f, rect.Top + 38f);
 
-        canvas.DrawRoundRect(new SKRoundRect(rect, 4f), _borderPaint);
+        using var _rr124 = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(_rr124, _borderPaint);
     }
 
     private void DrawSpectralBalance(SKCanvas canvas, float x, float y, float width, float height, in SpeechCoachSummary summary)
@@ -588,8 +595,10 @@ internal sealed class SpeechCoachRenderer : IDisposable
         }
 
         var rect = new SKRect(x, y, x + width, y + height);
-        canvas.DrawRoundRect(new SKRoundRect(rect, 6f), _cardPaint);
-        canvas.DrawRoundRect(new SKRoundRect(rect, 6f), _borderPaint);
+        using var _rr125 = new SKRoundRect(rect, 6f);
+        canvas.DrawRoundRect(_rr125, _cardPaint);
+        using var _rr126 = new SKRoundRect(rect, 6f);
+        canvas.DrawRoundRect(_rr126, _borderPaint);
 
         _cardLabelPaint.DrawText(canvas, "Spectral Balance", rect.Left + 10f, rect.Top + 16f);
 

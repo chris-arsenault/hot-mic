@@ -13,7 +13,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class RoomToneWindow : Window, IDisposable
+internal sealed partial class RoomToneWindow : Window, IDisposable
 {
     private readonly RoomToneRenderer _renderer = new();
     private readonly RoomTonePlugin _plugin;

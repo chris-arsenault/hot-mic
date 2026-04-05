@@ -11,7 +11,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class FFTNoiseWindow : Window, IDisposable
+internal sealed partial class FFTNoiseWindow : Window, IDisposable
 {
     private readonly FFTNoiseRenderer _renderer = new();
     private readonly FFTNoiseRemovalPlugin _plugin;

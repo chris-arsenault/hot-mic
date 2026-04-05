@@ -195,14 +195,15 @@ internal sealed class FFTNoiseRenderer : IDisposable
 
         // Main background
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Title bar
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr88 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr88);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -226,7 +227,7 @@ internal sealed class FFTNoiseRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -274,7 +275,7 @@ internal sealed class FFTNoiseRenderer : IDisposable
             outerRect.Bottom - bottomMargin);
 
         // Background for entire area
-        var roundRect = new SKRoundRect(outerRect, 6f);
+        using var roundRect = new SKRoundRect(outerRect, 6f);
         canvas.DrawRoundRect(roundRect, _spectrumBackgroundPaint);
 
         // dB scale: -90 to +12
@@ -431,11 +432,13 @@ internal sealed class FFTNoiseRenderer : IDisposable
             float progressX = graphRect.MidX - progressWidth / 2;
             float progressY = graphRect.MidY - progressHeight / 2;
             var progressBg = new SKRect(progressX, progressY, progressX + progressWidth, progressY + progressHeight);
-            canvas.DrawRoundRect(new SKRoundRect(progressBg, 4f), _progressBarPaint);
+            using var _rr89 = new SKRoundRect(progressBg, 4f);
+            canvas.DrawRoundRect(_rr89, _progressBarPaint);
 
             float fillWidth = progressWidth * (state.LearningProgress / (float)state.LearningTotal);
             var progressFill = new SKRect(progressX, progressY, progressX + fillWidth, progressY + progressHeight);
-            canvas.DrawRoundRect(new SKRoundRect(progressFill, 4f), _progressFillPaint);
+            using var _rr90 = new SKRoundRect(progressFill, 4f);
+            canvas.DrawRoundRect(_rr90, _progressFillPaint);
 
             // Learning text
             using var learningText = new SkiaTextPaint(_theme.TextPrimary, 14f, SKFontStyle.Bold, SKTextAlign.Center);
@@ -480,8 +483,10 @@ internal sealed class FFTNoiseRenderer : IDisposable
         _learnButtonRect = new SKRect(learnX, learnY, learnX + learnWidth, learnY + learnHeight);
 
         var learnPaint = state.IsLearning ? _learningPaint : _learnButtonPaint;
-        canvas.DrawRoundRect(new SKRoundRect(_learnButtonRect, 6f), learnPaint);
-        canvas.DrawRoundRect(new SKRoundRect(_learnButtonRect, 6f), _borderPaint);
+        using var _rr91 = new SKRoundRect(_learnButtonRect, 6f);
+        canvas.DrawRoundRect(_rr91, learnPaint);
+        using var _rr92 = new SKRoundRect(_learnButtonRect, 6f);
+        canvas.DrawRoundRect(_rr92, _borderPaint);
 
         using var learnTextPaint = new SkiaTextPaint(SKColors.White, 12f, SKFontStyle.Bold, SKTextAlign.Center);
         string learnLabel = state.IsLearning ? "STOP" : (state.HasNoiseProfile ? "RE-LEARN" : "LEARN");

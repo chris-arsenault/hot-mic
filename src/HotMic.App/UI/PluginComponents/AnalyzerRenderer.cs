@@ -20,7 +20,6 @@ internal sealed class AnalyzerRenderer : IDisposable
     private const float KnobRadius = 20f;
     private const float AxisWidth = 50f;
     private const float ColorBarWidth = 22f;
-    private const float TimeAxisHeight = 22f;
     private const float VoicingLaneHeight = 8f;
     private static readonly float[] PitchLowDash = [6f, 4f];
     private static readonly float[] DiscontinuityDash = [4f, 4f];
@@ -376,8 +375,10 @@ internal sealed class AnalyzerRenderer : IDisposable
         UpdateFrameMapping(state);
 
         var outerRect = new SKRect(0, 0, size.Width, size.Height);
-        canvas.DrawRoundRect(new SKRoundRect(outerRect, CornerRadius), _backgroundPaint);
-        canvas.DrawRoundRect(new SKRoundRect(outerRect, CornerRadius), _borderPaint);
+        using var _rr71 = new SKRoundRect(outerRect, CornerRadius);
+        canvas.DrawRoundRect(_rr71, _backgroundPaint);
+        using var _rr72 = new SKRoundRect(outerRect, CornerRadius);
+        canvas.DrawRoundRect(_rr72, _borderPaint);
 
         // New reorganized layout
         DrawTitleBar(canvas, size, state);
@@ -428,7 +429,8 @@ internal sealed class AnalyzerRenderer : IDisposable
         var colorRect = new SKRect(spectrumRect.Right + 6f, top, spectrumRect.Right + 6f + ColorBarWidth, bottom);
         _spectrogramRect = spectrumRect;
 
-        canvas.DrawRoundRect(new SKRoundRect(spectrumRect, 6f), _panelPaint);
+        using var _rr73 = new SKRoundRect(spectrumRect, 6f);
+        canvas.DrawRoundRect(_rr73, _panelPaint);
 
         if (profiling)
         {
@@ -509,7 +511,8 @@ internal sealed class AnalyzerRenderer : IDisposable
         float panelY = _spectrogramRect.Top + 8f;
         var panelRect = new SKRect(panelX, panelY, panelX + width + padding * 2f, panelY + height);
 
-        canvas.DrawRoundRect(new SKRoundRect(panelRect, 6f), _profilingPanelPaint);
+        using var _rr74 = new SKRoundRect(panelRect, 6f);
+        canvas.DrawRoundRect(_rr74, _profilingPanelPaint);
 
         float textX = panelRect.Left + padding;
         float textY = panelRect.Top + padding + headerHeight - 4f;
@@ -584,7 +587,8 @@ internal sealed class AnalyzerRenderer : IDisposable
 
     private void DrawPanelBackground(SKCanvas canvas, SKRect rect, string header)
     {
-        canvas.DrawRoundRect(new SKRoundRect(rect, PanelCornerRadius), _panelPaint);
+        using var _rr75 = new SKRoundRect(rect, PanelCornerRadius);
+        canvas.DrawRoundRect(_rr75, _panelPaint);
         canvas.DrawText(header, rect.Left + 10f, rect.Top + 16f, _panelHeaderPaint);
     }
 
@@ -881,10 +885,6 @@ internal sealed class AnalyzerRenderer : IDisposable
         InvalidateAxisCache();
         _axisInfo = new SKImageInfo(pixelWidth, pixelHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
         _axisSurface = SKSurface.Create(_axisInfo);
-        if (_axisSurface is null)
-        {
-            return;
-        }
 
         var axisCanvas = _axisSurface.Canvas;
         axisCanvas.Clear(SKColors.Transparent);
@@ -1007,7 +1007,8 @@ internal sealed class AnalyzerRenderer : IDisposable
 
     private void DrawSpectrumSlice(SKCanvas canvas, SKRect rect, SpectroState state, int frameIndex)
     {
-        canvas.DrawRoundRect(new SKRoundRect(rect, 6f), _panelPaint);
+        using var _rr76 = new SKRoundRect(rect, 6f);
+        canvas.DrawRoundRect(_rr76, _panelPaint);
         canvas.DrawText("Spectrum", rect.Left + 6f, rect.Top + 12f, _mutedTextPaint);
 
         if (state.Spectrogram is null || state.BinFrequencies is null || frameIndex < 0)
@@ -1155,7 +1156,8 @@ internal sealed class AnalyzerRenderer : IDisposable
 
     private void DrawPitchMeter(SKCanvas canvas, SKRect rect, SpectroState state, int frameIndex)
     {
-        canvas.DrawRoundRect(new SKRoundRect(rect, 6f), _panelPaint);
+        using var _rr77 = new SKRoundRect(rect, 6f);
+        canvas.DrawRoundRect(_rr77, _panelPaint);
         canvas.DrawText("Pitch", rect.Left + 6f, rect.Top + 12f, _mutedTextPaint);
 
         float pitch = GetFrameValue(state.PitchTrack, frameIndex);
@@ -1560,8 +1562,10 @@ internal sealed class AnalyzerRenderer : IDisposable
     private void DrawColorBar(SKCanvas canvas, SKRect rect, SpectroState state)
     {
         EnsureColorBarShader(rect, state.ColorMap);
-        canvas.DrawRoundRect(new SKRoundRect(rect, 4f), _colorBarPaint);
-        canvas.DrawRoundRect(new SKRoundRect(rect, 4f), _borderPaint);
+        using var _rr78 = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(_rr78, _colorBarPaint);
+        using var _rr79 = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(_rr79, _borderPaint);
     }
 
     private void EnsureColorBarShader(SKRect rect, int colorMap)
@@ -1827,8 +1831,10 @@ internal sealed class AnalyzerRenderer : IDisposable
 
     private void DrawPillButton(SKCanvas canvas, SKRect rect, string label, bool active)
     {
-        canvas.DrawRoundRect(new SKRoundRect(rect, rect.Height / 2f), active ? _buttonActivePaint : _buttonPaint);
-        canvas.DrawRoundRect(new SKRoundRect(rect, rect.Height / 2f), _borderPaint);
+        using var _rr80 = new SKRoundRect(rect, rect.Height / 2f);
+        canvas.DrawRoundRect(_rr80, active ? _buttonActivePaint : _buttonPaint);
+        using var _rr81 = new SKRoundRect(rect, rect.Height / 2f);
+        canvas.DrawRoundRect(_rr81, _borderPaint);
         canvas.DrawText(label, rect.MidX, rect.MidY + 4f, _buttonTextPaint);
     }
 

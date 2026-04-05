@@ -30,7 +30,7 @@ internal sealed class MainMinimalViewRenderer
     private void DrawMinimalChannelRow(SKCanvas canvas, float x, float y, float width, float height, ChannelStripViewModel channel)
     {
         var rect = new SKRect(x, y, x + width, y + height);
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _paints.SectionPaint);
         canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
 

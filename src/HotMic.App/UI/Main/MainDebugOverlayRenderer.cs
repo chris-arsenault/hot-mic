@@ -42,7 +42,7 @@ internal sealed class MainDebugOverlayRenderer
         float overlayWidth = layout.Size.Width - MainLayoutMetrics.Padding * 2f - MainLayoutMetrics.MasterWidth - MainLayoutMetrics.Padding;
 
         var overlayRect = new SKRect(overlayX, overlayY, overlayX + overlayWidth, overlayY + overlayHeight);
-        var overlayRound = new SKRoundRect(overlayRect, 6f);
+        using var overlayRound = new SKRoundRect(overlayRect, 6f);
 
         using var overlayBg = new SKPaint { Color = new SKColor(0x00, 0x00, 0x00, 0xE8), IsAntialias = true };
         canvas.DrawRoundRect(overlayRound, overlayBg);
@@ -61,15 +61,18 @@ internal sealed class MainDebugOverlayRenderer
         {
             float labelWidth = _paints.TextPaint.MeasureText(headerLabel);
             float copiedX = headerTextX + labelWidth + 8f;
-            canvas.DrawText("COPIED", copiedX, textY, MainRenderPrimitives.CreateTextPaint(_paints.Theme.Accent, 9f, SKFontStyle.Bold));
+            using var _p3 = MainRenderPrimitives.CreateTextPaint(_paints.Theme.Accent, 9f, SKFontStyle.Bold);
+            canvas.DrawText("COPIED", copiedX, textY, _p3);
         }
         textY += lineHeight + 4f;
 
         string outputStatus = diag.OutputActive ? "ACTIVE" : "INACTIVE";
         string monitorStatus = diag.MonitorActive ? "ACTIVE" : "INACTIVE";
 
-        var activeColor = MainRenderPrimitives.CreateTextPaint(new SKColor(0x00, 0xFF, 0x00), 9f);
-        var inactiveColor = MainRenderPrimitives.CreateTextPaint(new SKColor(0xFF, 0x66, 0x66), 9f);
+        using var _p4 = MainRenderPrimitives.CreateTextPaint(new SKColor(0x00, 0xFF, 0x00), 9f);
+        var activeColor = _p4;
+        using var _p5 = MainRenderPrimitives.CreateTextPaint(new SKColor(0xFF, 0x66, 0x66), 9f);
+        var inactiveColor = _p5;
 
         canvas.DrawText("Output:", col1X, textY, _paints.SmallTextPaint);
         canvas.DrawText(outputStatus, col1X + 50f, textY, diag.OutputActive ? activeColor : inactiveColor);
@@ -80,7 +83,8 @@ internal sealed class MainDebugOverlayRenderer
         canvas.DrawText($"Inputs: {activeInputs}/{inputCount} active", col1X, textY, _paints.SmallTextPaint);
         if (diag.IsRecovering)
         {
-            canvas.DrawText("RECOVERING...", col2X, textY, MainRenderPrimitives.CreateTextPaint(new SKColor(0xFF, 0xFF, 0x00), 9f, SKFontStyle.Bold));
+            using var _p6 = MainRenderPrimitives.CreateTextPaint(new SKColor(0xFF, 0xFF, 0x00), 9f, SKFontStyle.Bold);
+            canvas.DrawText("RECOVERING...", col2X, textY, _p6);
         }
         textY += lineHeight + 6f;
 
@@ -110,7 +114,8 @@ internal sealed class MainDebugOverlayRenderer
         canvas.DrawText("OUTPUT", col1X, textY, _paints.TextPaint);
         textY += lineHeight;
 
-        var dropColor = MainRenderPrimitives.CreateTextPaint(_paints.Theme.MeterClip, 9f);
+        using var _p7 = MainRenderPrimitives.CreateTextPaint(_paints.Theme.MeterClip, 9f);
+        var dropColor = _p7;
         var okColor = _paints.SmallTextPaint;
         string dropLine = $"Drops 30s: in-drop {viewModel.InputDrops30Sec} in-under {viewModel.InputUnderflowDrops30Sec} out {viewModel.OutputUnderflowDrops30Sec} total {viewModel.Drops30Sec}";
         canvas.DrawText(dropLine, col1X, textY, viewModel.Drops30Sec > 0 ? dropColor : okColor);

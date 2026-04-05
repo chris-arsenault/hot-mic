@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 namespace HotMic.Common.Configuration;
 
 public sealed class ChannelConfig
@@ -11,6 +12,6 @@ public sealed class ChannelConfig
     public float OutputGainDb { get; set; }
     public bool IsMuted { get; set; }
     public bool IsSoloed { get; set; }
-    public List<PluginConfig> Plugins { get; set; } = new();
-    public List<PluginContainerConfig> Containers { get; set; } = new();
+    public IList<PluginConfig> Plugins { get; } = new List<PluginConfig>();
+    public IList<PluginContainerConfig> Containers { get; } = new List<PluginContainerConfig>();
 }

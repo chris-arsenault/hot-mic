@@ -40,7 +40,7 @@ internal sealed class SileroVadInference : IDisposable
 
     public SileroVadInference(string modelPath)
     {
-        var options = new SessionOptions();
+        using var options = new SessionOptions();
         options.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
         options.InterOpNumThreads = 1;
         options.IntraOpNumThreads = 1;
@@ -603,7 +603,11 @@ internal sealed class SileroVadInference : IDisposable
                 {
                     value = Convert.ToInt32(convertible, CultureInfo.InvariantCulture);
                 }
-                catch (Exception)
+                catch (InvalidCastException)
+                {
+                    value = -1;
+                }
+                catch (OverflowException)
                 {
                     value = -1;
                 }

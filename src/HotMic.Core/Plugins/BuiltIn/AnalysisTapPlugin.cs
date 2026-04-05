@@ -4,6 +4,8 @@ using HotMic.Core.Analysis;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
+public readonly record struct AnalysisTapSignalInfo(AnalysisSignalId Signal, string Label);
+
 public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnalysisSignalBlocker, IResettablePlugin
 {
     private static readonly AnalysisTapSignalInfo[] SignalInfos =
@@ -308,6 +310,8 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float))
         {
             return;
@@ -679,13 +683,12 @@ public sealed class AnalysisTapPlugin : IPlugin, IAnalysisSignalProducer, IAnaly
         }
     }
 
-    public readonly record struct AnalysisTapSignalInfo(AnalysisSignalId Signal, string Label);
 }
 
 /// <summary>
 /// Snapshot of analysis tap profiling timings (Stopwatch ticks).
 /// </summary>
-public readonly struct AnalysisTapProfilingSnapshot
+public readonly record struct AnalysisTapProfilingSnapshot
 {
     /// <summary>
     /// Initializes a new profiling snapshot.

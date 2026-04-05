@@ -207,7 +207,7 @@ internal sealed class UpwardExpanderRenderer : IDisposable
         size = new SKSize(size.Width / dpiScale, size.Height / dpiScale);
 
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         DrawTitleBar(canvas, size, state);
@@ -315,7 +315,8 @@ internal sealed class UpwardExpanderRenderer : IDisposable
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr131 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr131);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -336,7 +337,7 @@ internal sealed class UpwardExpanderRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -356,7 +357,7 @@ internal sealed class UpwardExpanderRenderer : IDisposable
 
     private void DrawBandMeter(SKCanvas canvas, SKRect rect, float level, float gainDb, float thresholdDb, string label, SKPaint bandPaint)
     {
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _meterBackgroundPaint);
 
         float padding = 3f;

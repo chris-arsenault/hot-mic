@@ -3,7 +3,7 @@ namespace HotMic.Core.Dsp.Analysis.Speech;
 /// <summary>
 /// Stress classification for a syllable.
 /// </summary>
-public enum StressLevel : byte
+public enum StressLevel
 {
     Unstressed = 0,
     Secondary = 1,

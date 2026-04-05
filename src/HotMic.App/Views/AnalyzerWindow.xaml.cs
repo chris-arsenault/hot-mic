@@ -24,7 +24,7 @@ using WpfToolTip = System.Windows.Controls.ToolTip;
 
 namespace HotMic.App.Views;
 
-public partial class AnalyzerWindow : Window, IDisposable
+internal sealed partial class AnalyzerWindow : Window, IDisposable
 {
     private const int WmNcLButtonDown = 0x00A1;
     private const int HtCaption = 0x0002;
@@ -336,17 +336,15 @@ public partial class AnalyzerWindow : Window, IDisposable
 
     private bool TryCreateGpuCanvas()
     {
-        SKGLControl? glControl = null;
-        WindowsFormsHost? host = null;
         try
         {
-            glControl = new SKGLControl
+            var glControl = new SKGLControl
             {
                 Dock = System.Windows.Forms.DockStyle.Fill,
                 BackColor = System.Drawing.Color.FromArgb(10, 13, 18)
             };
             glControl.CreateControl();
-            host = new WindowsFormsHost
+            var host = new WindowsFormsHost
             {
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
                 VerticalAlignment = System.Windows.VerticalAlignment.Stretch,
@@ -365,10 +363,10 @@ public partial class AnalyzerWindow : Window, IDisposable
             AttachTooltip();
             return true;
         }
-        catch (Exception)
+        catch (InvalidOperationException)
         {
-            glControl?.Dispose();
-            host?.Dispose();
+            _glControl?.Dispose();
+            _glHost?.Dispose();
             _usingGpu = false;
             _glControl = null;
             _glHost = null;
@@ -593,7 +591,7 @@ public partial class AnalyzerWindow : Window, IDisposable
 
         bool dataUpdated = false;
         bool forceFullMap = false;
-        bool reassignActive = _orchestrator.Config.ReassignMode != SpectrogramReassignMode.Off;
+        bool reassignActive = _orchestrator.Config.ReassignMode != SpectrogramReassignMode.None;
         if (reassignActive != _lastReassignActive)
         {
             _lastCopiedFrameId = -1;
@@ -1484,9 +1482,11 @@ public partial class AnalyzerWindow : Window, IDisposable
     }
 
     [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern bool ReleaseCapture();
 
     [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
     private void HandlePointerMove(float x, float y, bool leftDown, bool shiftHeld = false)

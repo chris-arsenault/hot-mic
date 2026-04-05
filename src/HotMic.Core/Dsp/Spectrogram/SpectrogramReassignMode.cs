@@ -8,7 +8,7 @@ namespace HotMic.Core.Dsp.Spectrogram;
 [Flags]
 public enum SpectrogramReassignMode
 {
-    Off = 0,
+    None = 0,
     Frequency = 1,
     Time = 2,
     TimeFrequency = Frequency | Time

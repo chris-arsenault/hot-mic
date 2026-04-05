@@ -7,7 +7,7 @@ namespace HotMic.Core.Dsp.Filters;
 /// Plugins should choose a mode that matches the control semantics instead of
 /// multiplying audio directly by a step-held analysis value.
 /// </summary>
-public struct ControlSignalTransform
+public record struct ControlSignalTransform
 {
     private ControlSignalTransformMode _mode;
     private float _current;

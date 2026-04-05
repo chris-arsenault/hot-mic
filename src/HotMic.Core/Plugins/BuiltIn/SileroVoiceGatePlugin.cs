@@ -218,6 +218,8 @@ public sealed class SileroVoiceGatePlugin : IPlugin, IPluginStatusProvider, IAna
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float))
         {
             return;

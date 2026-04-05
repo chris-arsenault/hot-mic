@@ -104,6 +104,8 @@ public sealed class ChannelStrip
 
         if (TryGetOutputSendMode(out var sendMode))
         {
+            ArgumentNullException.ThrowIfNull(routingContext);
+
             routingContext.OutputBus.TryWrite(buffer, sendMode, latencySamples, sampleClock);
         }
 

@@ -5,7 +5,7 @@ using HotMic.Core.Dsp;
 
 namespace HotMic.App.ViewModels;
 
-public partial class PluginViewModel : ObservableObject
+internal sealed partial class PluginViewModel : ObservableObject
 {
     private Action? _action;
     private Action? _remove;
@@ -63,14 +63,14 @@ public partial class PluginViewModel : ObservableObject
 
     // Spectral delta data for the delta strip visualization (32 bands)
     [ObservableProperty]
-    private float[]? spectralDelta;
+    private ReadOnlyMemory<float>? spectralDelta;
 
     // Display mode for the delta strip (Full Spectrum vs Vocal Range)
     [ObservableProperty]
     private DeltaDisplayMode deltaDisplayMode = DeltaDisplayMode.VocalRange;
 
     // Elevated parameter definitions (from ElevatedParameterDefinitions)
-    public ElevatedParameterDefinitions.ParamDef[]? ElevatedParams { get; private set; }
+    public ParamDef[]? ElevatedParams { get; private set; }
 
     // Current values for the elevated parameters
     [ObservableProperty]

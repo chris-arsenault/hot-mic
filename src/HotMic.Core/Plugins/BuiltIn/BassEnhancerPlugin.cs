@@ -193,6 +193,8 @@ public sealed class BassEnhancerPlugin : IPlugin, IAnalysisSignalConsumer, IPlug
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float) * 2)
         {
             return;

@@ -1,3 +1,4 @@
+using HotMic.Common;
 using HotMic.Core.Plugins;
 
 namespace HotMic.Core.Presets;
@@ -71,7 +72,7 @@ public sealed class PluginPresetManager
             var containers = new List<ChainPresetContainer>();
             foreach (var container in stored.Containers)
             {
-                containers.Add(new ChainPresetContainer(container.Name, container.PluginIndices, container.IsBypassed));
+                containers.Add(new ChainPresetContainer(container.Name, container.PluginIndices.ToArray(), container.IsBypassed));
             }
 
             var preset = new ChainPreset(stored.Name, entries, IsBuiltIn: false)
@@ -138,21 +139,23 @@ public sealed class PluginPresetManager
             return false;
         }
 
-        var stored = new StoredChainPreset
+        var stored = new StoredChainPreset { Name = name };
+        stored.Plugins.AddRange(plugins.Select(p =>
         {
-            Name = name,
-            Plugins = plugins.Select(p => new StoredChainEntry
+            var entry = new StoredChainEntry { PluginId = p.pluginId };
+            foreach (var kvp in p.parameters)
+                entry.Parameters[kvp.Key] = kvp.Value;
+            return entry;
+        }));
+        if (containers is not null)
+        {
+            stored.Containers.AddRange(containers.Select(c =>
             {
-                PluginId = p.pluginId,
-                Parameters = new Dictionary<string, float>(p.parameters)
-            }).ToList(),
-            Containers = containers?.Select(c => new StoredChainContainer
-            {
-                Name = c.Name,
-                IsBypassed = c.IsBypassed,
-                PluginIndices = c.PluginIndices.ToList()
-            }).ToList() ?? new List<StoredChainContainer>()
-        };
+                var cc = new StoredChainContainer { Name = c.Name, IsBypassed = c.IsBypassed };
+                cc.PluginIndices.AddRange(c.PluginIndices);
+                return cc;
+            }));
+        }
 
         if (!_storage.SaveChainPreset(stored))
         {
@@ -248,6 +251,8 @@ public sealed class PluginPresetManager
 
     public PluginPreset GetDefaultPreset(IPlugin plugin)
     {
+        ArgumentNullException.ThrowIfNull(plugin);
+
         var parameters = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         foreach (var parameter in plugin.Parameters)
         {

@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 namespace HotMic.Common.Configuration;
 
 /// <summary>
@@ -11,7 +12,7 @@ public sealed class MidiConfig
 
     public int? FilterChannel { get; set; }
 
-    public List<MidiBinding> Bindings { get; set; } = new();
+    public IList<MidiBinding> Bindings { get; } = new List<MidiBinding>();
 }
 
 /// <summary>

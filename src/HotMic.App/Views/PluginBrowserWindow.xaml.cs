@@ -10,7 +10,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class PluginBrowserWindow : Window
+internal sealed partial class PluginBrowserWindow : Window
 {
     private readonly PluginBrowserRenderer _renderer = new();
     private readonly DispatcherTimer _renderTimer;

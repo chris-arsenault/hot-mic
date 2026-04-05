@@ -250,7 +250,7 @@ internal sealed class InputCaptureManager : IDisposable
 
             return capture;
         }
-        catch
+        catch (InvalidOperationException)
         {
             return null;
         }
@@ -263,7 +263,7 @@ internal sealed class InputCaptureManager : IDisposable
             int channels = device.AudioClient.MixFormat.Channels;
             return channels >= 2 ? 2 : 1;
         }
-        catch
+        catch (InvalidOperationException)
         {
             return 1;
         }
@@ -423,7 +423,7 @@ internal sealed class InputCaptureManager : IDisposable
                 CacheInputFormat(_capture, sampleRate);
                 Volatile.Write(ref _active, 1);
             }
-            catch
+            catch (InvalidOperationException)
             {
                 CleanupCapture();
                 Volatile.Write(ref _active, 0);

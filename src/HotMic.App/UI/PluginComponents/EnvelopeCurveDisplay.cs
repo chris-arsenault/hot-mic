@@ -80,7 +80,7 @@ internal sealed class EnvelopeCurveDisplay : IDisposable
         bool isGateOpen = false)
     {
         // Background
-        var roundRect = new SKRoundRect(rect, 6f);
+        using var roundRect = new SKRoundRect(rect, 6f);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Grid

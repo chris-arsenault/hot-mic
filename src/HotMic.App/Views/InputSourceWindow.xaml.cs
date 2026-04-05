@@ -11,7 +11,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class InputSourceWindow : Window, IDisposable
+internal sealed partial class InputSourceWindow : Window, IDisposable
 {
     private readonly InputSourceRenderer _renderer = new();
     private readonly IReadOnlyList<InputSourceDevice> _devices;

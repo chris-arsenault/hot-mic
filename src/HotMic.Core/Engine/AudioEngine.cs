@@ -53,6 +53,8 @@ public sealed class AudioEngine : IDisposable
 
     public AudioEngine(AudioSettingsConfig settings, int channelCount)
     {
+        ArgumentNullException.ThrowIfNull(settings);
+
         _sampleRate = settings.SampleRate;
         _blockSize = settings.BufferSize;
         _latencyMs = Math.Max(20, (int)(1000.0 * _blockSize / _sampleRate));
@@ -387,6 +389,8 @@ public sealed class AudioEngine : IDisposable
 
     public void QueuePluginDisposal(IPlugin plugin)
     {
+        ArgumentNullException.ThrowIfNull(plugin);
+
         long targetCallback = Interlocked.Read(ref _outputCallbackCount) + 1;
         _pluginDisposalQueue.Queue(plugin, targetCallback, Volatile.Read(ref _outputActive) == 1);
     }
@@ -429,6 +433,7 @@ public sealed class AudioEngine : IDisposable
         DrainPendingPluginDisposals(force: true);
         DisposeAllPlugins();
         _inputCaptureManager.Dispose();
+        _recoveryManager.Dispose();
     }
 
     private void DisposeAllPlugins()

@@ -317,10 +317,10 @@ public sealed class SpeechMetricsPipelineIntegrationTests
 
                 signalProcessor.ProcessBlock(analysisSource, blockSampleTime, default, requestedSignals);
 
-                fftProcessor.Compute(analysisPipeline.ProcessedBuffer, reassignEnabled: false);
+                fftProcessor.Compute(analysisPipeline.ProcessedBuffer.Span, reassignEnabled: false);
 
-                ReadOnlySpan<float> analysisRaw = analysisPipeline.RawBuffer.AsSpan(0, analysisSize);
-                ReadOnlySpan<float> magnitudes = fftProcessor.Magnitudes;
+                ReadOnlySpan<float> analysisRaw = analysisPipeline.RawBuffer.Span.Slice(0, analysisSize);
+                ReadOnlySpan<float> magnitudes = fftProcessor.Magnitudes.Span;
 
                 featureExtractor.Compute(magnitudes, out _, out float slope, out _);
 

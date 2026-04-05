@@ -86,7 +86,7 @@ internal sealed class PluginBrowserRenderer
         canvas.Scale(dpiScale);
         size = new SKSize(size.Width / dpiScale, size.Height / dpiScale);
 
-        var background = new SKRoundRect(new SKRect(0, 0, size.Width, size.Height), CornerRadius);
+        using var background = new SKRoundRect(new SKRect(0, 0, size.Width, size.Height), CornerRadius);
         canvas.DrawRoundRect(background, _backgroundPaint);
         canvas.DrawRoundRect(background, _borderPaint);
 
@@ -103,8 +103,10 @@ internal sealed class PluginBrowserRenderer
         // Search box
         float searchTop = TitleBarHeight + TabBarHeight + Padding;
         _searchBoxRect = new SKRect(Padding, searchTop, size.Width - Padding, searchTop + SearchBarHeight);
-        canvas.DrawRoundRect(new SKRoundRect(_searchBoxRect, 6f), _searchBgPaint);
-        canvas.DrawRoundRect(new SKRoundRect(_searchBoxRect, 6f), _borderPaint);
+        using var _rr53 = new SKRoundRect(_searchBoxRect, 6f);
+        canvas.DrawRoundRect(_rr53, _searchBgPaint);
+        using var _rr54 = new SKRoundRect(_searchBoxRect, 6f);
+        canvas.DrawRoundRect(_rr54, _borderPaint);
 
         // Search icon
         DrawSearchIcon(canvas, _searchBoxRect.Left + 14f, _searchBoxRect.MidY);
@@ -126,8 +128,10 @@ internal sealed class PluginBrowserRenderer
         float listHeight = MathF.Max(RowHeight, listBottom - listTop);
         var listRect = new SKRect(Padding, listTop, size.Width - Padding, listTop + listHeight);
 
-        canvas.DrawRoundRect(new SKRoundRect(listRect, 8f), _panelPaint);
-        canvas.DrawRoundRect(new SKRoundRect(listRect, 8f), _borderPaint);
+        using var _rr55 = new SKRoundRect(listRect, 8f);
+        canvas.DrawRoundRect(_rr55, _panelPaint);
+        using var _rr56 = new SKRoundRect(listRect, 8f);
+        canvas.DrawRoundRect(_rr56, _borderPaint);
 
         ListViewportHeight = listRect.Height;
 
@@ -147,7 +151,8 @@ internal sealed class PluginBrowserRenderer
             float scrollbarY = listRect.Top + (scrollOffset / ListContentHeight) * ListViewportHeight;
             var scrollbarRect = new SKRect(listRect.Right - 6f, scrollbarY, listRect.Right - 2f, scrollbarY + scrollbarHeight);
             using var scrollbarPaint = CreateFillPaint(new SKColor(0x60, 0x60, 0x68));
-            canvas.DrawRoundRect(new SKRoundRect(scrollbarRect, 2f), scrollbarPaint);
+            using var _rr57 = new SKRoundRect(scrollbarRect, 2f);
+            canvas.DrawRoundRect(_rr57, scrollbarPaint);
         }
 
         // Buttons
@@ -170,10 +175,12 @@ internal sealed class PluginBrowserRenderer
         // Built-in tab
         _builtInTabRect = new SKRect(startX, y + 4f, startX + tabWidth, y + 4f + tabHeight);
         bool builtInActive = viewModel.SelectedTab == PluginBrowserTab.BuiltIn;
-        canvas.DrawRoundRect(new SKRoundRect(_builtInTabRect, 6f), builtInActive ? _tabActivePaint : _tabInactivePaint);
+        using var _rr58 = new SKRoundRect(_builtInTabRect, 6f);
+        canvas.DrawRoundRect(_rr58, builtInActive ? _tabActivePaint : _tabInactivePaint);
         if (builtInActive)
         {
-            canvas.DrawRoundRect(new SKRoundRect(_builtInTabRect, 6f), _borderPaint);
+            using var _rr59 = new SKRoundRect(_builtInTabRect, 6f);
+            canvas.DrawRoundRect(_rr59, _borderPaint);
         }
         canvas.DrawText("Built-in", _builtInTabRect.MidX, _builtInTabRect.MidY + 4f, builtInActive ? _tabTextActivePaint : _tabTextPaint);
 
@@ -181,10 +188,12 @@ internal sealed class PluginBrowserRenderer
         float vstX = startX + tabWidth + 8f;
         _vstTabRect = new SKRect(vstX, y + 4f, vstX + tabWidth, y + 4f + tabHeight);
         bool vstActive = viewModel.SelectedTab == PluginBrowserTab.Vst;
-        canvas.DrawRoundRect(new SKRoundRect(_vstTabRect, 6f), vstActive ? _tabActivePaint : _tabInactivePaint);
+        using var _rr60 = new SKRoundRect(_vstTabRect, 6f);
+        canvas.DrawRoundRect(_rr60, vstActive ? _tabActivePaint : _tabInactivePaint);
         if (vstActive)
         {
-            canvas.DrawRoundRect(new SKRoundRect(_vstTabRect, 6f), _borderPaint);
+            using var _rr61 = new SKRoundRect(_vstTabRect, 6f);
+            canvas.DrawRoundRect(_rr61, _borderPaint);
         }
         canvas.DrawText("VST", _vstTabRect.MidX, _vstTabRect.MidY + 4f, vstActive ? _tabTextActivePaint : _tabTextPaint);
     }
@@ -243,7 +252,8 @@ internal sealed class PluginBrowserRenderer
 
                     if (isSelected)
                     {
-                        canvas.DrawRoundRect(new SKRoundRect(cellRect, 4f), _selectedPaint);
+                        using var _rr62 = new SKRoundRect(cellRect, 4f);
+                        canvas.DrawRoundRect(_rr62, _selectedPaint);
                     }
 
                     // Plugin name
@@ -358,13 +368,12 @@ internal sealed class PluginBrowserRenderer
 
     private void DrawButton(SKCanvas canvas, SKRect rect, string label, bool isActive)
     {
-        var round = new SKRoundRect(rect, 6f);
+        using var round = new SKRoundRect(rect, 6f);
         canvas.DrawRoundRect(round, isActive ? _buttonActivePaint : _buttonPaint);
         canvas.DrawRoundRect(round, _borderPaint);
 
-        var textPaint = isActive
-            ? CreateTextPaint(new SKColor(0x12, 0x12, 0x14), 12f, SKFontStyle.Bold, SKTextAlign.Center)
-            : _buttonTextPaint;
+        using var _p63 = CreateTextPaint(new SKColor(0x12, 0x12, 0x14), 12f, SKFontStyle.Bold, SKTextAlign.Center);
+        var textPaint = isActive ? _p63 : _buttonTextPaint;
         canvas.DrawText(label, rect.MidX, rect.MidY + 4f, textPaint);
     }
 
@@ -415,3 +424,4 @@ internal sealed class PluginBrowserRenderer
 
     private sealed record ItemRect(int Index, PluginChoice Plugin, SKRect Rect);
 }
+

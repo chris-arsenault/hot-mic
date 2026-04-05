@@ -13,7 +13,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class SpectralContrastWindow : Window, IDisposable
+internal sealed partial class SpectralContrastWindow : Window, IDisposable
 {
     private readonly SpectralContrastRenderer _renderer = new();
     private readonly SpectralContrastPlugin _plugin;

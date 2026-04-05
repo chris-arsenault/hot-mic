@@ -1,6 +1,6 @@
 namespace HotMic.App.Models;
 
-public sealed record PluginContainerInfo
+internal sealed record PluginContainerInfo
 {
     public int ContainerId { get; init; }
     public string Name { get; init; } = string.Empty;

@@ -2,7 +2,9 @@ using System.Windows;
 
 namespace HotMic.App.Views;
 
-public partial class InputDialog : Window
+#pragma warning disable CA1812 // Instantiated by callers via new InputDialog()
+internal sealed partial class InputDialog : Window
+#pragma warning restore CA1812
 {
     public string InputValue => InputTextBox.Text;
 

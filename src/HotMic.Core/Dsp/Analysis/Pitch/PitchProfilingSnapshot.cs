@@ -3,7 +3,7 @@ namespace HotMic.Core.Dsp.Analysis.Pitch;
 /// <summary>
 /// Profiling snapshot for pitch detection steps (Stopwatch ticks).
 /// </summary>
-public readonly struct PitchProfilingSnapshot
+public readonly record struct PitchProfilingSnapshot
 {
     /// <summary>
     /// Initializes a new pitch profiling snapshot.

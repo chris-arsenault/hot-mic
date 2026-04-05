@@ -116,7 +116,7 @@ internal sealed class RoutingSlotRenderer
         float height = rect.Height;
 
         // Background
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _inputBgPaint);
         canvas.DrawRoundRect(roundRect, _accentBorderPaint);
 
@@ -170,7 +170,7 @@ internal sealed class RoutingSlotRenderer
         float height = rect.Height;
 
         // Background
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _outputBgPaint);
         canvas.DrawRoundRect(roundRect, _accentBorderPaint);
 
@@ -195,7 +195,9 @@ internal sealed class RoutingSlotRenderer
         float badgeY = knobY + KnobSize + 2f;
         float badgeWidth = KnobSize + 2f;
         var badgeRect = new SKRect(badgeX, badgeY, badgeX + badgeWidth, badgeY + 12f);
-        canvas.DrawRoundRect(new SKRoundRect(badgeRect, 2f), CreateFillPaint(_theme.Accent));
+        using var _p156 = CreateFillPaint(_theme.Accent);
+        using var _badgeRR = new SKRoundRect(badgeRect, 2f);
+        canvas.DrawRoundRect(_badgeRR, _p156);
         canvas.DrawText(modeLabel, badgeRect.MidX, badgeRect.MidY + 3f, _badgePaint);
         _routingBadges.Add(new RoutingBadgeRect(channelIndex, slot.InstanceId, RoutingBadgeType.OutputSendMode, badgeRect));
 
@@ -224,7 +226,7 @@ internal sealed class RoutingSlotRenderer
         float height = rect.Height;
 
         // Background - subtle, as the bridge line is the main visual
-        var roundRect = new SKRoundRect(rect, 3f);
+        using var roundRect = new SKRoundRect(rect, 3f);
         canvas.DrawRoundRect(roundRect, _copyBgPaint);
         canvas.DrawRoundRect(roundRect, slot.IsBypassed ? _borderPaint : _accentBorderPaint);
 
@@ -232,7 +234,8 @@ internal sealed class RoutingSlotRenderer
         float arrowY = y + height / 2f - 8f;
         float arrowX = x + (width - 12f) / 2f;
         var arrowColor = slot.IsBypassed ? _theme.TextMuted : _theme.Accent;
-        var arrowPaint = CreateStrokePaint(arrowColor, 2f);
+        using var _p157 = CreateStrokePaint(arrowColor, 2f);
+        var arrowPaint = _p157;
         canvas.DrawLine(arrowX, arrowY + 4f, arrowX + 10f, arrowY + 4f, arrowPaint);
         canvas.DrawLine(arrowX + 6f, arrowY, arrowX + 10f, arrowY + 4f, arrowPaint);
         canvas.DrawLine(arrowX + 6f, arrowY + 8f, arrowX + 10f, arrowY + 4f, arrowPaint);
@@ -255,7 +258,8 @@ internal sealed class RoutingSlotRenderer
             float removeX = x + width - removeSize - 3f;
             float removeY = y + 3f;
             removeRect = new SKRect(removeX - 2f, removeY - 2f, removeX + removeSize + 2f, removeY + removeSize + 2f);
-            var removePaint = CreateStrokePaint(_theme.TextMuted, 1f);
+            using var _p158 = CreateStrokePaint(_theme.TextMuted, 1f);
+            var removePaint = _p158;
             canvas.DrawLine(removeX, removeY, removeX + removeSize, removeY + removeSize, removePaint);
             canvas.DrawLine(removeX + removeSize, removeY, removeX, removeY + removeSize, removePaint);
         }
@@ -273,7 +277,7 @@ internal sealed class RoutingSlotRenderer
         float height = rect.Height;
 
         // Background
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _mergeBgPaint);
         canvas.DrawRoundRect(roundRect, slot.IsBypassed ? _borderPaint : _accentBorderPaint);
 
@@ -283,17 +287,22 @@ internal sealed class RoutingSlotRenderer
         float bypassY = y + 2f;
         var bypassRect = new SKRect(bypassX, bypassY, bypassX + bypassW, bypassY + 10f);
         var bypassColor = slot.IsBypassed ? _theme.Bypass : _theme.Surface;
-        canvas.DrawRoundRect(new SKRoundRect(bypassRect, 2f), CreateFillPaint(bypassColor));
-        var bypassTextPaint = slot.IsBypassed
-            ? CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 6f, SKFontStyle.Bold)
-            : CreateCenteredTextPaint(_theme.TextMuted, 6f);
+        using var _p159 = CreateFillPaint(bypassColor);
+        using var _bypassRR = new SKRoundRect(bypassRect, 2f);
+        canvas.DrawRoundRect(_bypassRR, _p159);
+        using var _p160 = CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 6f, SKFontStyle.Bold);
+
+        using var _p161 = CreateCenteredTextPaint(_theme.TextMuted, 6f);
+
+        var bypassTextPaint = slot.IsBypassed ? _p160 : _p161;
         canvas.DrawText("BYP", bypassRect.MidX, bypassRect.MidY + 2f, bypassTextPaint);
 
         // Merge icon (junction symbol) - lines coming in from left, merging to center
         float iconX = x + 8f;
         float iconY = y + 18f;
         float lineSpacing = 10f;
-        var linePaint = CreateStrokePaint(slot.IsBypassed ? _theme.TextMuted : _theme.Accent, 1.5f);
+        using var _p162 = CreateStrokePaint(slot.IsBypassed ? _theme.TextMuted : _theme.Accent, 1.5f);
+        var linePaint = _p162;
 
         // Draw 3 merge lines pointing to center
         float centerX = x + width / 2f;
@@ -309,7 +318,8 @@ internal sealed class RoutingSlotRenderer
             2f => "=",      // equal power
             _ => "\u03A3"   // sigma for sum
         };
-        var sumPaint = CreateCenteredTextPaint(slot.IsBypassed ? _theme.TextMuted : _theme.Accent, 12f, SKFontStyle.Bold);
+        using var _p163 = CreateCenteredTextPaint(slot.IsBypassed ? _theme.TextMuted : _theme.Accent, 12f, SKFontStyle.Bold);
+        var sumPaint = _p163;
         canvas.DrawText(sumIcon, centerX + 6f, centerY + 4f, sumPaint);
 
         // Source count label at bottom
@@ -325,7 +335,8 @@ internal sealed class RoutingSlotRenderer
         float removeX = x + width - removeSize - 3f;
         float removeY = y + 3f;
         removeRect = new SKRect(removeX - 2f, removeY - 2f, removeX + removeSize + 2f, removeY + removeSize + 2f);
-        var removePaint = CreateStrokePaint(_theme.TextMuted, 1f);
+        using var _p164 = CreateStrokePaint(_theme.TextMuted, 1f);
+        var removePaint = _p164;
         canvas.DrawLine(removeX, removeY, removeX + removeSize, removeY + removeSize, removePaint);
         canvas.DrawLine(removeX + removeSize, removeY, removeX, removeY + removeSize, removePaint);
 
@@ -336,7 +347,8 @@ internal sealed class RoutingSlotRenderer
     private void DrawMiniKnob(SKCanvas canvas, float cx, float cy, float radius, float normalizedValue, bool dimmed)
     {
         var bgColor = dimmed ? _theme.Surface.WithAlpha(100) : _theme.Surface;
-        canvas.DrawCircle(cx, cy, radius, CreateFillPaint(bgColor));
+        using var _p165 = CreateFillPaint(bgColor);
+        canvas.DrawCircle(cx, cy, radius, _p165);
         canvas.DrawCircle(cx, cy, radius, _borderPaint);
 
         float startAngle = 135f;
@@ -344,23 +356,26 @@ internal sealed class RoutingSlotRenderer
         using var arc = new SKPath();
         arc.AddArc(new SKRect(cx - radius + 1.5f, cy - radius + 1.5f, cx + radius - 1.5f, cy + radius - 1.5f), startAngle, sweepAngle);
         var arcColor = dimmed ? _theme.Accent.WithAlpha(100) : _theme.Accent;
-        canvas.DrawPath(arc, CreateStrokePaint(arcColor, 2f));
+        using var _p166 = CreateStrokePaint(arcColor, 2f);
+        canvas.DrawPath(arc, _p166);
 
         // Pointer
         float angle = (startAngle + sweepAngle) * MathF.PI / 180f;
         float innerR = radius * 0.3f;
         float outerR = radius * 0.7f;
         var pointerColor = dimmed ? _theme.TextPrimary.WithAlpha(100) : _theme.TextPrimary;
+        using var _p167 = CreateStrokePaint(pointerColor, 1f);
         canvas.DrawLine(
             cx + MathF.Cos(angle) * innerR, cy + MathF.Sin(angle) * innerR,
             cx + MathF.Cos(angle) * outerR, cy + MathF.Sin(angle) * outerR,
-            CreateStrokePaint(pointerColor, 1f));
+            _p167);
     }
 
     private void DrawMiniMeter(SKCanvas canvas, float x, float y, float width, float height, float level, bool voxScale)
     {
         // Background
-        canvas.DrawRect(new SKRect(x, y, x + width, y + height), CreateFillPaint(_theme.MeterBackground));
+        using var _p168 = CreateFillPaint(_theme.MeterBackground);
+        canvas.DrawRect(new SKRect(x, y, x + width, y + height), _p168);
 
         if (level <= 0f)
         {
@@ -387,7 +402,8 @@ internal sealed class RoutingSlotRenderer
         else if (db > -18f) meterColor = _theme.MeterMid;
         else meterColor = _theme.MeterLow;
 
-        canvas.DrawRect(new SKRect(x, fillY, x + width, y + height), CreateFillPaint(meterColor));
+        using var _p169 = CreateFillPaint(meterColor);
+        canvas.DrawRect(new SKRect(x, fillY, x + width, y + height), _p169);
     }
 
     public RoutingKnobHit? HitTestKnob(float x, float y)
@@ -562,3 +578,4 @@ internal enum RoutingBadgeType
     InputChannelMode,
     OutputSendMode
 }
+

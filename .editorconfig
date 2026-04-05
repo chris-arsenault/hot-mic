@@ -24,6 +24,35 @@ dotnet_analyzer_diagnostic.category-Globalization.severity = suggestion
 dotnet_diagnostic.CA1822.severity = suggestion
 dotnet_diagnostic.CA1303.severity = silent
 
+# Correctness rules elevated to warning.
+dotnet_diagnostic.CA2000.severity = warning
+dotnet_diagnostic.CA1823.severity = warning
+dotnet_diagnostic.CA1508.severity = warning
+dotnet_diagnostic.CA1812.severity = warning
+dotnet_diagnostic.CA2213.severity = warning
+
+# Design/maintainability rules elevated to warning (fixes applied).
+dotnet_diagnostic.CA1002.severity = warning
+dotnet_diagnostic.CA1003.severity = warning
+dotnet_diagnostic.CA1008.severity = warning
+dotnet_diagnostic.CA1024.severity = warning
+dotnet_diagnostic.CA1028.severity = warning
+dotnet_diagnostic.CA1031.severity = warning
+dotnet_diagnostic.CA1034.severity = warning
+dotnet_diagnostic.CA1307.severity = warning
+dotnet_diagnostic.CA1308.severity = warning
+dotnet_diagnostic.CA1721.severity = warning
+dotnet_diagnostic.CA1724.severity = warning
+dotnet_diagnostic.CA1814.severity = warning
+dotnet_diagnostic.CA1815.severity = warning
+dotnet_diagnostic.CA1819.severity = warning
+dotnet_diagnostic.CA1852.severity = warning
+dotnet_diagnostic.CA1867.severity = warning
+dotnet_diagnostic.CA2216.severity = warning
+dotnet_diagnostic.CA2227.severity = warning
+dotnet_diagnostic.CA5392.severity = warning
+dotnet_diagnostic.CA5394.severity = warning
+
 # Minimal, low-churn style preferences.
 dotnet_sort_system_directives_first = true
 dotnet_separate_import_directive_groups = true

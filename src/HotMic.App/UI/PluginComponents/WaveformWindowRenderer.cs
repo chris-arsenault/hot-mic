@@ -142,7 +142,7 @@ internal sealed class WaveformWindowRenderer : IDisposable
         float waveformRight = width - Padding;
 
         var waveformRect = new SKRect(waveformLeft, waveformTop, waveformRight, waveformBottom);
-        var roundRect = new SKRoundRect(waveformRect, 6f);
+        using var roundRect = new SKRoundRect(waveformRect, 6f);
         canvas.DrawRoundRect(roundRect, _waveformAreaPaint);
         canvas.DrawRoundRect(roundRect, _borderPaint);
 

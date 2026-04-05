@@ -114,14 +114,15 @@ internal sealed class VoiceGateRenderer : IDisposable
 
         // Main background
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Title bar
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr135 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr135);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -136,7 +137,8 @@ internal sealed class VoiceGateRenderer : IDisposable
         // AI badge
         var badgeRect = new SKRect(Padding + 85, (TitleBarHeight - 16) / 2, Padding + 105, (TitleBarHeight + 16) / 2);
         using var badgePaint = new SKPaint { Color = new SKColor(0x80, 0x40, 0xFF), IsAntialias = true };
-        canvas.DrawRoundRect(new SKRoundRect(badgeRect, 3f), badgePaint);
+        using var _rr136 = new SKRoundRect(badgeRect, 3f);
+        canvas.DrawRoundRect(_rr136, badgePaint);
         using var badgeTextPaint = new SkiaTextPaint(SKColors.White, 8f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("AI", badgeRect.MidX, badgeRect.MidY + 3, badgeTextPaint);
 
@@ -152,7 +154,7 @@ internal sealed class VoiceGateRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 

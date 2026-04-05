@@ -48,6 +48,8 @@ public sealed partial class SignalGeneratorPlugin
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         int slotFloats = 18;
         int slotBytes = SlotCount * slotFloats * sizeof(float);
 

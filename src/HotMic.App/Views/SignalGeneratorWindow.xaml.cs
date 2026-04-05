@@ -13,7 +13,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class SignalGeneratorWindow : Window, IDisposable
+internal sealed partial class SignalGeneratorWindow : Window, IDisposable
 {
     private readonly SignalGeneratorRenderer _renderer;
     private readonly SignalGeneratorPlugin _plugin;
@@ -227,7 +227,7 @@ public partial class SignalGeneratorWindow : Window, IDisposable
         var size = new SKSize(e.Info.Width, e.Info.Height);
         float dpiScale = GetDpiScale();
 
-        var masterState = _plugin.GetMasterState();
+        var masterState = _plugin.MasterState;
         var state = new SignalGeneratorState
         {
             IsBypassed = _plugin.IsBypassed,
@@ -815,7 +815,7 @@ public partial class SignalGeneratorWindow : Window, IDisposable
             _parameterCallback(typeIndex, (float)GeneratorType.Sample);
             _presetHelper.MarkAsCustom();
         }
-        catch (Exception ex)
+        catch (IOException ex)
         {
             SkiaMessageDialog.ShowError(this, $"Failed to load sample: {ex.Message}", "Error");
         }
@@ -863,7 +863,7 @@ public partial class SignalGeneratorWindow : Window, IDisposable
             result[prefix + "Trim End"] = state.TrimEnd;
         }
 
-        var masterState = _plugin.GetMasterState();
+        var masterState = _plugin.MasterState;
         result["Master Gain"] = masterState.GainDb;
         result["Master Mute"] = masterState.Muted ? 1f : 0f;
         result["Headroom"] = (float)masterState.Headroom;
@@ -891,10 +891,10 @@ public partial class SignalGeneratorWindow : Window, IDisposable
     /// <summary>
     /// Called when a sample is loaded or captured - auto-save to config location.
     /// </summary>
-    private void OnSampleLoaded(int slotIndex)
+    private void OnSampleLoaded(object? sender, SampleLoadedEventArgs e)
     {
         // Dispatch to UI thread for safety
-        Dispatcher.BeginInvoke(() => AutoSaveSample(slotIndex));
+        Dispatcher.BeginInvoke(() => AutoSaveSample(e.SlotIndex));
     }
 
     private void AutoSaveSample(int slotIndex)
@@ -923,7 +923,7 @@ public partial class SignalGeneratorWindow : Window, IDisposable
             _lastSavedSlot = slotIndex;
             _lastSavedSampleRate = data.Value.SampleRate;
         }
-        catch
+        catch (IOException)
         {
             // Silently ignore save errors
         }
@@ -953,7 +953,7 @@ public partial class SignalGeneratorWindow : Window, IDisposable
             _lastSavedSlot = slotIndex;
             _lastSavedSampleRate = sampleRate;
         }
-        catch
+        catch (IOException)
         {
             // Silently ignore load errors
         }
@@ -985,7 +985,7 @@ public partial class SignalGeneratorWindow : Window, IDisposable
             using var writer = new WaveFileWriter(dialog.FileName, format);
             writer.WriteSamples(data.Value.Samples, 0, data.Value.Samples.Length);
         }
-        catch (Exception ex)
+        catch (IOException ex)
         {
             SkiaMessageDialog.ShowError(this, $"Failed to save sample: {ex.Message}", "Error");
         }
@@ -1026,7 +1026,7 @@ public partial class SignalGeneratorWindow : Window, IDisposable
             _parameterCallback(typeIndex, (float)GeneratorType.Sample);
             _presetHelper.MarkAsCustom();
         }
-        catch (Exception ex)
+        catch (IOException ex)
         {
             SkiaMessageDialog.ShowError(this, $"Failed to reload sample: {ex.Message}", "Error");
         }

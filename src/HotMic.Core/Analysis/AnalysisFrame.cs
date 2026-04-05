@@ -5,7 +5,7 @@ namespace HotMic.Core.Analysis;
 /// <summary>
 /// Per-frame analysis results. Stored in ring buffers.
 /// </summary>
-public struct AnalysisFrame
+public record struct AnalysisFrame
 {
     // Pitch
     public float PitchHz { get; set; }
@@ -27,7 +27,7 @@ public struct AnalysisFrame
 /// <summary>
 /// Harmonic data for a single frame (up to 24 harmonics).
 /// </summary>
-public struct HarmonicFrame
+public record struct HarmonicFrame
 {
     public const int MaxHarmonics = 24;
 
@@ -143,7 +143,7 @@ public struct HarmonicFrame
 /// <summary>
 /// Speech metrics for a single frame.
 /// </summary>
-public struct SpeechMetricsFrame
+public record struct SpeechMetricsFrame
 {
     public float SyllableRate { get; set; }
     public float ArticulationRate { get; set; }

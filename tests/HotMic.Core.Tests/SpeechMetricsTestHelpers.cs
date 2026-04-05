@@ -339,9 +339,9 @@ internal sealed class SpeechMetricsOfflineAnalyzer
             return;
         }
 
-        _fftProcessor.Compute(_analysisPipeline.ProcessedBuffer, reassignEnabled: false);
-        ReadOnlySpan<float> analysisRaw = _analysisPipeline.RawBuffer.AsSpan(0, _analysisSize);
-        ReadOnlySpan<float> magnitudes = _fftProcessor.Magnitudes;
+        _fftProcessor.Compute(_analysisPipeline.ProcessedBuffer.Span, reassignEnabled: false);
+        ReadOnlySpan<float> analysisRaw = _analysisPipeline.RawBuffer.Span.Slice(0, _analysisSize);
+        ReadOnlySpan<float> magnitudes = _fftProcessor.Magnitudes.Span;
 
         AnalysisSignalMask signals = AnalysisSignalMask.SpeechPresence |
                                      AnalysisSignalMask.PitchHz |

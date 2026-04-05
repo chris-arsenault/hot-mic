@@ -54,11 +54,11 @@ public sealed class AnalysisCaptureLink
         set => _orchestrator = value;
     }
 
-    public AnalysisSignalBus? SignalBus => Volatile.Read(ref _signalBusPlugin);
+    public AnalysisSignalBus? PluginSignalBus => Volatile.Read(ref _signalBusPlugin);
 
-    public int[] SignalProducers => Volatile.Read(ref _activeProducersPlugin);
+    public IReadOnlyList<int> PluginSignalProducers => Volatile.Read(ref _activeProducersPlugin);
 
-    public long WriteSampleTime => Interlocked.Read(ref _writeSampleTimePlugin);
+    public long PluginWriteSampleTime => Interlocked.Read(ref _writeSampleTimePlugin);
 
     public AnalysisSignalBus? GetSignalBus(AnalysisCaptureSource source)
         => source == AnalysisCaptureSource.Plugin ? Volatile.Read(ref _signalBusPlugin) : null;
@@ -82,7 +82,7 @@ public sealed class AnalysisCaptureLink
     public long DebugForwardedCountPlugin => Interlocked.Read(ref _forwardedToOrchestratorPlugin);
     public long DebugForwardedCountOutput => Interlocked.Read(ref _forwardedToOrchestratorOutput);
     public long DebugLastBufferLength => Interlocked.Read(ref _lastBufferLength);
-    public long LastCaptureSampleClock => Volatile.Read(ref _lastCaptureSampleClockPlugin);
+    public long PluginLastCaptureSampleClock => Volatile.Read(ref _lastCaptureSampleClockPlugin);
     public AnalysisCaptureSource LastCaptureSource => (AnalysisCaptureSource)Volatile.Read(ref _lastCaptureSource);
     public long GetLastCaptureSampleClock(AnalysisCaptureSource source)
         => source == AnalysisCaptureSource.Plugin

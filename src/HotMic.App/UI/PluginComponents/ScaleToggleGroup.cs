@@ -66,8 +66,10 @@ internal sealed class ScaleToggleGroup : IDisposable
         _toggleRect = new SKRect(x, y, x + Width, y + Height);
 
         _fillPaint.Color = _fillColors[index];
-        canvas.DrawRoundRect(new SKRoundRect(_toggleRect, CornerRadius), _fillPaint);
-        canvas.DrawRoundRect(new SKRoundRect(_toggleRect, CornerRadius), _borderPaint);
+        using var _rr114 = new SKRoundRect(_toggleRect, CornerRadius);
+        canvas.DrawRoundRect(_rr114, _fillPaint);
+        using var _rr115 = new SKRoundRect(_toggleRect, CornerRadius);
+        canvas.DrawRoundRect(_rr115, _borderPaint);
 
         _textPaint.Color = _textColors[index];
         _textPaint.DrawText(canvas, Labels[index], _toggleRect.MidX, _toggleRect.MidY + 3f);

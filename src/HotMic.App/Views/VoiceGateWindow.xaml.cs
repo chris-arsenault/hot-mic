@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class VoiceGateWindow : Window, IDisposable
+internal sealed partial class VoiceGateWindow : Window, IDisposable
 {
     private readonly VoiceGateRenderer _renderer = new();
     private readonly SileroVoiceGatePlugin _plugin;

@@ -328,6 +328,8 @@ public sealed class ConsonantTransientPlugin : IPlugin, IAnalysisSignalConsumer,
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float) * 2)
         {
             return;

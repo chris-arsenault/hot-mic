@@ -5,7 +5,7 @@ using HotMic.Vst3;
 
 namespace HotMic.App.Views;
 
-public partial class Vst3EditorWindow : Window, IDisposable
+internal sealed partial class Vst3EditorWindow : Window, IDisposable
 {
     private readonly Vst3PluginWrapper _plugin;
     private readonly DispatcherTimer _idleTimer;

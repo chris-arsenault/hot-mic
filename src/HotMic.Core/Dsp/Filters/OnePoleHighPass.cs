@@ -3,7 +3,7 @@ namespace HotMic.Core.Dsp.Filters;
 /// <summary>
 /// First-order high-pass filter for sidechain rumble control.
 /// </summary>
-public struct OnePoleHighPass
+public record struct OnePoleHighPass
 {
     private float _a;
     private float _prevInput;

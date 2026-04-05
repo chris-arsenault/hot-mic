@@ -13,7 +13,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class DynamicEqWindow : Window, IDisposable
+internal sealed partial class DynamicEqWindow : Window, IDisposable
 {
     private readonly DynamicEqRenderer _renderer = new();
     private readonly DynamicEqPlugin _plugin;

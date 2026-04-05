@@ -10,7 +10,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class PluginContainerWindow : Window, IDisposable
+internal sealed partial class PluginContainerWindow : Window, IDisposable
 {
     private const float DragThreshold = 6f;
     private readonly PluginContainerRenderer _renderer = new();

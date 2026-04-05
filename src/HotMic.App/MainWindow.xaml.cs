@@ -17,7 +17,9 @@ using MenuItem = System.Windows.Controls.MenuItem;
 
 namespace HotMic.App;
 
-public partial class MainWindow : Window, IDisposable
+#pragma warning disable CA1812 // Instantiated by XAML
+internal sealed partial class MainWindow : Window, IDisposable
+#pragma warning restore CA1812
 {
     private const float DragThreshold = 6f;
 
@@ -212,16 +214,6 @@ public partial class MainWindow : Window, IDisposable
         {
             SetActiveChannel(viewModel, pluginKnobHit.Value.ChannelIndex);
             StartPluginKnobDrag(viewModel, pluginKnobHit.Value, y);
-            SkiaCanvas.CaptureMouse();
-            e.Handled = true;
-            return;
-        }
-
-        var knobHit = _renderer.HitTestKnob(x, y);
-        if (knobHit.HasValue)
-        {
-            SetActiveChannel(viewModel, knobHit.Value.ChannelIndex);
-            StartKnobDrag(viewModel, knobHit.Value, y);
             SkiaCanvas.CaptureMouse();
             e.Handled = true;
             return;
@@ -431,15 +423,6 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
-        // Check regular knobs (input/output gain)
-        var knobHit = _renderer.HitTestKnob(x, y);
-        if (knobHit.HasValue)
-        {
-            ShowGainKnobContextMenu(viewModel, knobHit.Value, pos);
-            e.Handled = true;
-            return;
-        }
-
     }
 
     private void ShowKnobContextMenu(MainViewModel viewModel, PluginKnobHit hit, System.Windows.Point position)
@@ -468,23 +451,6 @@ public partial class MainWindow : Window, IDisposable
         ShowMidiContextMenu(viewModel, targetPath, paramLabel, paramDef.Min, paramDef.Max, position);
     }
 
-    private void ShowGainKnobContextMenu(MainViewModel viewModel, KnobHit hit, System.Windows.Point position)
-    {
-        string targetPath = hit.KnobType == KnobType.InputGain
-            ? $"channel{hit.ChannelIndex + 1}.inputGain"
-            : $"channel{hit.ChannelIndex + 1}.outputGain";
-
-        string label = hit.KnobType == KnobType.InputGain ? "Input Gain" : "Output Gain";
-        string channelName = "Channel";
-        var channel = GetChannel(viewModel, hit.ChannelIndex);
-        if (channel is not null)
-        {
-            channelName = string.IsNullOrWhiteSpace(channel.Name) ? $"Ch {hit.ChannelIndex + 1}" : channel.Name;
-        }
-
-        ShowMidiContextMenu(viewModel, targetPath, $"{channelName} {label}", -60f, 12f, position);
-    }
-
     private void ShowChannelRenameDialog(MainViewModel viewModel, int channelIndex)
     {
         var channel = GetChannel(viewModel, channelIndex);
@@ -495,7 +461,7 @@ public partial class MainWindow : Window, IDisposable
 
         string currentName = string.IsNullOrWhiteSpace(channel.Name) ? $"Channel {channelIndex + 1}" : channel.Name;
 
-        var dialog = new Views.SkiaInputDialog("Rename Channel", "Enter channel name:", currentName)
+        using var dialog = new Views.SkiaInputDialog("Rename Channel", "Enter channel name:", currentName)
         {
             Owner = this
         };
@@ -531,7 +497,7 @@ public partial class MainWindow : Window, IDisposable
 
         string currentName = string.IsNullOrWhiteSpace(container.Name) ? $"Container {containerId}" : container.Name;
 
-        var dialog = new Views.SkiaInputDialog("Rename Container", "Enter container name:", currentName)
+        using var dialog = new Views.SkiaInputDialog("Rename Container", "Enter container name:", currentName)
         {
             Owner = this
         };
@@ -880,21 +846,6 @@ public partial class MainWindow : Window, IDisposable
         }
 
         channel.PluginSlots[resolvedIndex].ActionCommand.Execute(null);
-    }
-
-    private void StartKnobDrag(MainViewModel viewModel, KnobHit hit, float startY)
-    {
-        var channel = GetChannel(viewModel, hit.ChannelIndex);
-        if (channel is null)
-        {
-            return;
-        }
-
-        float startValue = hit.KnobType == KnobType.InputGain
-            ? channel.InputGainDb
-            : channel.OutputGainDb;
-
-        _uiState.KnobDrag = new KnobDragState(hit.ChannelIndex, hit.KnobType, startValue, startY);
     }
 
     private void StartPluginKnobDrag(MainViewModel viewModel, PluginKnobHit hit, float startY)
@@ -1320,7 +1271,7 @@ public partial class MainWindow : Window, IDisposable
             System.Windows.Clipboard.SetText(text);
             viewModel.DebugOverlayCopyTicks = Environment.TickCount64;
         }
-        catch
+        catch (System.Runtime.InteropServices.ExternalException)
         {
         }
     }
@@ -1496,7 +1447,7 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
-        var dialog = new Views.SkiaInputDialog("Save Preset", "Enter preset name:", suggestedName ?? "My Preset")
+        using var dialog = new Views.SkiaInputDialog("Save Preset", "Enter preset name:", suggestedName ?? "My Preset")
         {
             Owner = this
         };

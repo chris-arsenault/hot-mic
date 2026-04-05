@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class LimiterWindow : Window, IDisposable
+internal sealed partial class LimiterWindow : Window, IDisposable
 {
     private readonly LimiterRenderer _renderer = new();
     private readonly LimiterPlugin _plugin;

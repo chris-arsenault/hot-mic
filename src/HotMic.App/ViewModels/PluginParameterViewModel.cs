@@ -2,7 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace HotMic.App.ViewModels;
 
-public partial class PluginParameterViewModel : ObservableObject
+internal sealed partial class PluginParameterViewModel : ObservableObject
 {
     private readonly Action<float>? _onChange;
     private readonly Func<float, string>? _formatValue;

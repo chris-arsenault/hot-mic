@@ -221,6 +221,8 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float) * 4)
         {
             return;
@@ -250,6 +252,8 @@ public sealed class NoiseGatePlugin : IPlugin, IQualityConfigurablePlugin
 
     public void ApplyQuality(AudioQualityProfile profile)
     {
+        ArgumentNullException.ThrowIfNull(profile);
+
         _sidechainHpfHz = MathF.Max(20f, profile.GateSidechainHpfHz);
         _gateRatio = MathF.Max(1f, profile.GateRatio);
         _maxRangeDb = MathF.Max(0f, profile.GateMaxRangeDb);

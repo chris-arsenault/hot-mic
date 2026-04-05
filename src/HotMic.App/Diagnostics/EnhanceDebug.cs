@@ -154,7 +154,7 @@ internal static class EnhanceDebug
         key = string.Empty;
         value = 0f;
 
-        int eq = token.IndexOf('=');
+        int eq = token.IndexOf('=', StringComparison.Ordinal);
         if (eq <= 0 || eq >= token.Length - 1)
         {
             return false;

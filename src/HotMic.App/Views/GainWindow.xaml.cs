@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class GainWindow : Window, IDisposable
+internal sealed partial class GainWindow : Window, IDisposable
 {
     private readonly GainRenderer _renderer = new();
     private readonly GainPlugin _plugin;

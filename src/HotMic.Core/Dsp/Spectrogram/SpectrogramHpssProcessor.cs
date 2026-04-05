@@ -76,6 +76,8 @@ public sealed class SpectrogramHpssProcessor
     /// </summary>
     public void Apply(float[] input, float[] output, float amount)
     {
+        ArgumentNullException.ThrowIfNull(input);
+
         Apply(input, output, amount, input.Length);
     }
 
@@ -84,6 +86,9 @@ public sealed class SpectrogramHpssProcessor
     /// </summary>
     public void Apply(float[] input, float[] output, float amount, int bins)
     {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(output);
+
         if (bins <= 0 || bins > input.Length)
         {
             return;

@@ -12,7 +12,7 @@ using SkiaSharp;
 
 namespace HotMic.App.Views;
 
-public partial class AnalysisTapWindow : Window, IDisposable
+internal sealed partial class AnalysisTapWindow : Window, IDisposable
 {
     private readonly AnalysisTapRenderer _renderer = new();
     private readonly AnalysisTapPlugin _plugin;

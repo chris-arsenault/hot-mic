@@ -1,46 +1,13 @@
 namespace HotMic.App.Models;
 
-/// <summary>
-/// Represents a plugin parameter elevated to the channel strip for quick access.
-/// </summary>
-internal sealed class ElevatedParameter
-{
-    public string PluginId { get; init; } = string.Empty;
-    public string PluginName { get; init; } = string.Empty;
-    public int ParameterIndex { get; init; }
-    public string ParameterName { get; init; } = string.Empty;
-    public float MinValue { get; init; }
-    public float MaxValue { get; init; } = 1f;
-    public float CurrentValue { get; set; }
-    public string Unit { get; init; } = string.Empty;
-    public string MidiPath { get; init; } = string.Empty;
-
-    public string DisplayValue => FormatValue();
-
-    private string FormatValue()
-    {
-        if (string.IsNullOrEmpty(Unit))
-        {
-            return $"{CurrentValue:0.0}";
-        }
-
-        return Unit switch
-        {
-            "%" => $"{CurrentValue:0}%",
-            "dB" => $"{CurrentValue:0.0} dB",
-            "ms" => $"{CurrentValue:0} ms",
-            _ => $"{CurrentValue:0.0} {Unit}"
-        };
-    }
-}
+internal record struct ParamDef(int Index, string Name, float Min, float Max, float Default, string Unit);
 
 /// <summary>
 /// Defines which parameters are elevated for each plugin type.
 /// Includes parameter index, name, min, max, default, and unit for proper UI display.
 /// </summary>
-public static class ElevatedParameterDefinitions
+internal static class ElevatedParameterDefinitions
 {
-    public record struct ParamDef(int Index, string Name, float Min, float Max, float Default, string Unit);
 
     public static readonly Dictionary<string, ParamDef[]> PluginElevations = new()
     {

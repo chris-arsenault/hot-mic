@@ -1,6 +1,6 @@
 namespace HotMic.App.Models;
 
-public sealed record PluginSlotInfo
+internal sealed record PluginSlotInfo
 {
     public string PluginId { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;

@@ -88,7 +88,7 @@ internal sealed class DeviceRecoveryManager : IDisposable
                         Interlocked.Exchange(ref _isRecovering, 0);
                         return;
                     }
-                    catch
+                    catch (InvalidOperationException)
                     {
                     }
                 }
@@ -146,7 +146,7 @@ internal sealed class DeviceRecoveryManager : IDisposable
             var defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console);
             return defaultDevice.ID;
         }
-        catch
+        catch (InvalidOperationException)
         {
             return string.Empty;
         }
@@ -164,7 +164,7 @@ internal sealed class DeviceRecoveryManager : IDisposable
             var defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console);
             return defaultDevice.ID;
         }
-        catch
+        catch (InvalidOperationException)
         {
             return string.Empty;
         }
@@ -182,7 +182,7 @@ internal sealed class DeviceRecoveryManager : IDisposable
             var device = enumerator.GetDevice(deviceId);
             return device.State == DeviceState.Active;
         }
-        catch
+        catch (InvalidOperationException)
         {
             return false;
         }

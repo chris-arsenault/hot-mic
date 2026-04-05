@@ -7,7 +7,6 @@ namespace HotMic.Core.Dsp.Filters;
 public sealed class DecimatingFilter
 {
     private const int DefaultOrder = 8;
-    private const float DefaultCutoff = 0.4f; // Relative to Nyquist
 
     private readonly float[] _coefficients;
     private readonly float[] _state;

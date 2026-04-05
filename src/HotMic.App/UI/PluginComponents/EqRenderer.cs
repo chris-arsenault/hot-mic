@@ -19,14 +19,10 @@ internal sealed class EqRenderer : IDisposable
     // Knob section layout
     private const float KnobRadius = 24f;
     private static readonly float[] ZeroLineDash = [4f, 4f];
-    private const float BandLabelHeight = 16f;
-    private const float KnobValueHeight = 14f;
     private const float KnobGap = 10f;
 
     // Calculated knob section height:
     // BandLabel(16) + Gap(6) + GainKnob(52) + ValueGap(4) + Value(14) + Gap(10) + FreqKnob(52) + ValueGap(4) + Value(14) + Bottom(8) = 180
-    private const float KnobSectionHeight = 180f;
-
     // Total window: Title(40) + Pad(14) + Spectrum(160) + LabelMargin(16) + Gap(10) + KnobSection(180) + Pad(10) = 430
     private const float WindowWidth = 620f;
     private const float WindowHeight = 430f;
@@ -238,14 +234,15 @@ internal sealed class EqRenderer : IDisposable
 
         // Main background
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Title bar
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr87 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr87);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -269,7 +266,7 @@ internal sealed class EqRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -397,7 +394,7 @@ internal sealed class EqRenderer : IDisposable
     private void DrawSpectrumAndCurve(SKCanvas canvas, SKRect rect, EqState state)
     {
         // Background
-        var roundRect = new SKRoundRect(rect, 6f);
+        using var roundRect = new SKRoundRect(rect, 6f);
         canvas.DrawRoundRect(roundRect, _spectrumBackgroundPaint);
 
         canvas.Save();

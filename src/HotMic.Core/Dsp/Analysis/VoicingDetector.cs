@@ -5,7 +5,7 @@ namespace HotMic.Core.Dsp.Analysis;
 /// <summary>
 /// Voicing classification for speech analysis.
 /// </summary>
-public enum VoicingState : byte
+public enum VoicingState
 {
     Silence = 0,
     Unvoiced = 1,

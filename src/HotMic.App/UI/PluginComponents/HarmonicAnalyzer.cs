@@ -254,7 +254,7 @@ internal sealed class HarmonicAnalyzer : IDisposable
     public void Render(SKCanvas canvas, SKRect rect)
     {
         // Background
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         float padding = 4f;

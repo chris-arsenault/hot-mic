@@ -326,7 +326,7 @@ public sealed class MergePlugin : IPlugin, IRoutingDependencyProvider
                 _sourceChannels[i] = ClampToInt(reader.ReadInt32(), 1, MaxSourceChannelId);
             }
         }
-        catch
+        catch (IOException)
         {
         }
     }

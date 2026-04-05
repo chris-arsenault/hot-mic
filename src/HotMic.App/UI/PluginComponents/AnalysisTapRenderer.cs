@@ -62,7 +62,7 @@ internal sealed class AnalysisTapRenderer : IDisposable
     private SKRect _closeButtonRect;
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
-    private SKRect[,] _modeToggleRects = new SKRect[0, 0];
+    private SKRect[][] _modeToggleRects = [];
 
     public AnalysisTapRenderer(PluginComponentTheme? theme = null)
     {
@@ -172,7 +172,7 @@ internal sealed class AnalysisTapRenderer : IDisposable
         size = new SKSize(size.Width / dpiScale, size.Height / dpiScale);
 
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         DrawTitleBar(canvas, size, state);
@@ -213,12 +213,12 @@ internal sealed class AnalysisTapRenderer : IDisposable
             return new AnalysisTapHitTest(AnalysisTapHitArea.BypassButton, -1, AnalysisTapMode.Generate);
         }
 
-        int rows = _modeToggleRects.GetLength(0);
+        int rows = _modeToggleRects.Length;
         for (int i = 0; i < rows; i++)
         {
             for (int j = 0; j < 3; j++)
             {
-                if (_modeToggleRects[i, j].Contains(x, y))
+                if (_modeToggleRects[i][j].Contains(x, y))
                 {
                     return new AnalysisTapHitTest(AnalysisTapHitArea.ModeToggle, i, ModeOrder[j]);
                 }
@@ -269,12 +269,14 @@ internal sealed class AnalysisTapRenderer : IDisposable
 
     private void EnsureModeRectCapacity(int count)
     {
-        if (_modeToggleRects.GetLength(0) == count)
+        if (_modeToggleRects.Length == count)
         {
             return;
         }
 
-        _modeToggleRects = new SKRect[count, 3];
+        _modeToggleRects = new SKRect[count][];
+        for (int i = 0; i < count; i++)
+            _modeToggleRects[i] = new SKRect[3];
     }
 
     private void DrawTitleBar(SKCanvas canvas, SKSize size, AnalysisTapState state)
@@ -282,7 +284,8 @@ internal sealed class AnalysisTapRenderer : IDisposable
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr65 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr65);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -299,7 +302,7 @@ internal sealed class AnalysisTapRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -327,14 +330,16 @@ internal sealed class AnalysisTapRenderer : IDisposable
         DrawIndicator(canvas, indicatorX + IndicatorWidth + IndicatorGap, indicatorY, signal.UsedLater, "USED");
 
         var meterRect = new SKRect(meterX, y, meterX + meterWidth, y + MeterHeight);
-        canvas.DrawRoundRect(new SKRoundRect(meterRect, 4f), _meterBackgroundPaint);
+        using var _rr66 = new SKRoundRect(meterRect, 4f);
+        canvas.DrawRoundRect(_rr66, _meterBackgroundPaint);
 
         float normalized = NormalizeSignal(signal.Signal, signal.Value);
         if (normalized > 0f)
         {
             float width = meterRect.Width * MathF.Min(1f, normalized);
             var fillRect = new SKRect(meterRect.Left, meterRect.Top, meterRect.Left + width, meterRect.Bottom);
-            canvas.DrawRoundRect(new SKRoundRect(fillRect, 4f), GetMeterPaint(signal.Signal));
+            using var _rr67 = new SKRoundRect(fillRect, 4f);
+            canvas.DrawRoundRect(_rr67, GetMeterPaint(signal.Signal));
         }
 
         string valueLabel = FormatValue(signal.Signal, signal.Value);
@@ -345,12 +350,14 @@ internal sealed class AnalysisTapRenderer : IDisposable
             float toggleLeft = toggleX + i * (ToggleWidth + ToggleGap);
             var toggleRect = new SKRect(toggleLeft, y + (MeterHeight - ToggleHeight) / 2f, toggleLeft + ToggleWidth,
                 y + (MeterHeight + ToggleHeight) / 2f);
-            _modeToggleRects[signalIndex, i] = toggleRect;
+            _modeToggleRects[signalIndex][i] = toggleRect;
 
             var mode = ModeOrder[i];
             var togglePaint = signal.Mode == mode ? GetModePaint(mode) : _toggleOffPaint;
-            canvas.DrawRoundRect(new SKRoundRect(toggleRect, 4f), togglePaint);
-            canvas.DrawRoundRect(new SKRoundRect(toggleRect, 4f), _borderPaint);
+            using var _rr68 = new SKRoundRect(toggleRect, 4f);
+            canvas.DrawRoundRect(_rr68, togglePaint);
+            using var _rr69 = new SKRoundRect(toggleRect, 4f);
+            canvas.DrawRoundRect(_rr69, _borderPaint);
             _toggleTextPaint.DrawText(canvas, ToggleLabels[i], toggleRect.MidX, toggleRect.MidY + 3);
         }
     }
@@ -358,7 +365,8 @@ internal sealed class AnalysisTapRenderer : IDisposable
     private void DrawIndicator(SKCanvas canvas, float x, float y, bool active, string label)
     {
         var rect = new SKRect(x, y, x + IndicatorWidth, y + IndicatorHeight);
-        canvas.DrawRoundRect(new SKRoundRect(rect, 4f), active ? _indicatorOnPaint : _indicatorOffPaint);
+        using var _rr70 = new SKRoundRect(rect, 4f);
+        canvas.DrawRoundRect(_rr70, active ? _indicatorOnPaint : _indicatorOffPaint);
         _indicatorTextPaint.DrawText(canvas, label, rect.MidX, rect.MidY + 3);
     }
 

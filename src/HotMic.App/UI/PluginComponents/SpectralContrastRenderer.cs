@@ -45,9 +45,6 @@ internal sealed class SpectralContrastRenderer : IDisposable
     private SKRect _bypassButtonRect;
     private SKRect _titleBarRect;
 
-    // Spectrum display buffers
-    private readonly float[] _displayMagnitudes = new float[256];
-
     public SpectralContrastRenderer(PluginComponentTheme? theme = null)
     {
         _theme = theme ?? PluginComponentTheme.Default;
@@ -173,7 +170,7 @@ internal sealed class SpectralContrastRenderer : IDisposable
         size = new SKSize(size.Width / dpiScale, size.Height / dpiScale);
 
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         DrawTitleBar(canvas, size, state);
@@ -250,7 +247,8 @@ internal sealed class SpectralContrastRenderer : IDisposable
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr117 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr117);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -271,7 +269,7 @@ internal sealed class SpectralContrastRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -291,7 +289,7 @@ internal sealed class SpectralContrastRenderer : IDisposable
 
     private void DrawSpectrum(SKCanvas canvas, SKRect rect, ReadOnlySpan<float> magnitudes, float strength)
     {
-        var roundRect = new SKRoundRect(rect, 6f);
+        using var roundRect = new SKRoundRect(rect, 6f);
         canvas.DrawRoundRect(roundRect, _spectrumBackgroundPaint);
 
         float padding = 6f;

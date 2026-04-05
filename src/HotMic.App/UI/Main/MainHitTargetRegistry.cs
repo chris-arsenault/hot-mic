@@ -5,7 +5,6 @@ namespace HotMic.App.UI;
 internal sealed class MainHitTargetRegistry
 {
     public Dictionary<MainButton, SKRect> TopButtons { get; } = new();
-    public List<KnobRect> Knobs { get; } = new();
     public List<ContainerSlotRect> ContainerSlots { get; } = new();
     public List<ToggleRect> Toggles { get; } = new();
     public List<PluginAreaRect> PluginAreas { get; } = new();
@@ -29,7 +28,6 @@ internal sealed class MainHitTargetRegistry
     public void Clear()
     {
         TopButtons.Clear();
-        Knobs.Clear();
         ContainerSlots.Clear();
         Toggles.Clear();
         PluginAreas.Clear();
@@ -51,7 +49,6 @@ internal sealed class MainHitTargetRegistry
     }
 }
 
-internal sealed record KnobRect(int ChannelIndex, KnobType KnobType, SKRect Rect);
 internal sealed record ContainerSlotRect(int ChannelIndex, int ContainerId, int SlotIndex, SKRect Rect, SKRect BypassRect, SKRect RemoveRect);
 internal sealed record PluginAreaRect(int ChannelIndex, SKRect Rect);
 internal sealed record ToggleRect(int ChannelIndex, ToggleType ToggleType, SKRect Rect);

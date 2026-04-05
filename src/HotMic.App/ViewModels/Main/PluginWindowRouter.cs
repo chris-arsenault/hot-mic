@@ -1,3 +1,4 @@
+using HotMic.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -65,7 +66,7 @@ internal sealed class PluginWindowRouter
         if (config.EnableVstPlugins)
         {
             var scanner = new Vst3Scanner();
-            foreach (var vst in scanner.Scan(config.Vst2SearchPaths, config.Vst3SearchPaths))
+            foreach (var vst in scanner.Scan(config.Vst2SearchPaths.ToArray(), config.Vst3SearchPaths.ToArray()))
             {
                 string prefix = vst.Format == VstPluginFormat.Vst2 ? "vst2:" : "vst3:";
                 string label = vst.Format == VstPluginFormat.Vst2 ? "VST2" : "VST3";
@@ -292,7 +293,7 @@ internal sealed class PluginWindowRouter
         var channel = request.Channels[channelIndex];
         string outputDeviceName = request.SelectedOutputDevice?.Name ?? "No Output";
 
-        var window = new OutputSendWindow(plugin,
+        using var window = new OutputSendWindow(plugin,
             outputDeviceName,
             () => channel.OutputPeakLevel,
             (paramIndex, value) =>
@@ -309,7 +310,7 @@ internal sealed class PluginWindowRouter
 
     public void ShowVst3Editor(Vst3PluginWrapper plugin)
     {
-        var window = new Vst3EditorWindow(plugin)
+        using var window = new Vst3EditorWindow(plugin)
         {
             Owner = System.Windows.Application.Current?.MainWindow,
             Title = plugin.Name
@@ -319,7 +320,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowNoiseGateWindow(int channelIndex, int pluginInstanceId, NoiseGatePlugin plugin, PluginWindowRequest request)
     {
-        var window = new NoiseGateWindow(plugin,
+        using var window = new NoiseGateWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -334,7 +335,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowCompressorWindow(int channelIndex, int pluginInstanceId, CompressorPlugin plugin, PluginWindowRequest request)
     {
-        var window = new CompressorWindow(plugin,
+        using var window = new CompressorWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -349,7 +350,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowSignalGeneratorWindow(int channelIndex, int pluginInstanceId, SignalGeneratorPlugin plugin, PluginWindowRequest request)
     {
-        var window = new SignalGeneratorWindow(plugin,
+        using var window = new SignalGeneratorWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -364,7 +365,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowGainWindow(int channelIndex, int pluginInstanceId, GainPlugin plugin, PluginWindowRequest request)
     {
-        var window = new GainWindow(plugin,
+        using var window = new GainWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -389,7 +390,7 @@ internal sealed class PluginWindowRouter
             .Select(d => new InputSourceDevice(d.Id, d.Name))
             .ToList();
 
-        var window = new InputSourceWindow(
+        using var window = new InputSourceWindow(
             devices,
             () => plugin.DeviceId,
             () => plugin.ChannelMode,
@@ -408,7 +409,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowEqWindow(int channelIndex, int pluginInstanceId, FiveBandEqPlugin plugin, PluginWindowRequest request)
     {
-        var window = new EqWindow(plugin,
+        using var window = new EqWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -423,7 +424,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowFFTNoiseWindow(int channelIndex, int pluginInstanceId, FFTNoiseRemovalPlugin plugin, PluginWindowRequest request)
     {
-        var window = new FFTNoiseWindow(plugin,
+        using var window = new FFTNoiseWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -439,7 +440,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowVoiceGateWindow(int channelIndex, int pluginInstanceId, SileroVoiceGatePlugin plugin, PluginWindowRequest request)
     {
-        var window = new VoiceGateWindow(plugin,
+        using var window = new VoiceGateWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -454,7 +455,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowRNNoiseWindow(int channelIndex, int pluginInstanceId, RNNoisePlugin plugin, PluginWindowRequest request)
     {
-        var window = new RNNoiseWindow(plugin,
+        using var window = new RNNoiseWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -469,7 +470,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowSpeechDenoiserWindow(int channelIndex, int pluginInstanceId, SpeechDenoiserPlugin plugin, PluginWindowRequest request)
     {
-        var window = new SpeechDenoiserWindow(plugin,
+        using var window = new SpeechDenoiserWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -484,7 +485,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowReverbWindow(int channelIndex, int pluginInstanceId, ConvolutionReverbPlugin plugin, PluginWindowRequest request)
     {
-        var window = new ReverbWindow(plugin,
+        using var window = new ReverbWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -499,7 +500,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowLimiterWindow(int channelIndex, int pluginInstanceId, LimiterPlugin plugin, PluginWindowRequest request)
     {
-        var window = new LimiterWindow(plugin,
+        using var window = new LimiterWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -514,7 +515,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowDeEsserWindow(int channelIndex, int pluginInstanceId, DeEsserPlugin plugin, PluginWindowRequest request)
     {
-        var window = new DeEsserWindow(plugin,
+        using var window = new DeEsserWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -529,7 +530,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowHighPassFilterWindow(int channelIndex, int pluginInstanceId, HighPassFilterPlugin plugin, PluginWindowRequest request)
     {
-        var window = new HighPassFilterWindow(plugin,
+        using var window = new HighPassFilterWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -544,7 +545,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowSaturationWindow(int channelIndex, int pluginInstanceId, SaturationPlugin plugin, PluginWindowRequest request)
     {
-        var window = new SaturationWindow(plugin,
+        using var window = new SaturationWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -559,7 +560,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowAirExciterWindow(int channelIndex, int pluginInstanceId, AirExciterPlugin plugin, PluginWindowRequest request)
     {
-        var window = new AirExciterWindow(plugin,
+        using var window = new AirExciterWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -574,7 +575,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowBassEnhancerWindow(int channelIndex, int pluginInstanceId, BassEnhancerPlugin plugin, PluginWindowRequest request)
     {
-        var window = new BassEnhancerWindow(plugin,
+        using var window = new BassEnhancerWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -589,7 +590,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowVitalizerWindow(int channelIndex, int pluginInstanceId, VitalizerMk2TPlugin plugin, PluginWindowRequest request)
     {
-        var window = new VitalizerWindow(plugin,
+        using var window = new VitalizerWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -604,7 +605,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowConsonantTransientWindow(int channelIndex, int pluginInstanceId, ConsonantTransientPlugin plugin, PluginWindowRequest request)
     {
-        var window = new ConsonantTransientWindow(plugin,
+        using var window = new ConsonantTransientWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -619,7 +620,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowDynamicEqWindow(int channelIndex, int pluginInstanceId, DynamicEqPlugin plugin, PluginWindowRequest request)
     {
-        var window = new DynamicEqWindow(plugin,
+        using var window = new DynamicEqWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -634,7 +635,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowRoomToneWindow(int channelIndex, int pluginInstanceId, RoomTonePlugin plugin, PluginWindowRequest request)
     {
-        var window = new RoomToneWindow(plugin,
+        using var window = new RoomToneWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -649,7 +650,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowAnalysisTapWindow(int channelIndex, int pluginInstanceId, AnalysisTapPlugin plugin, PluginWindowRequest request)
     {
-        var window = new AnalysisTapWindow(plugin,
+        using var window = new AnalysisTapWindow(plugin,
             channelIndex,
             pluginInstanceId,
             (paramIndex, value) =>
@@ -668,7 +669,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowSpectralContrastWindow(int channelIndex, int pluginInstanceId, SpectralContrastPlugin plugin, PluginWindowRequest request)
     {
-        var window = new SpectralContrastWindow(plugin,
+        using var window = new SpectralContrastWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);
@@ -683,7 +684,7 @@ internal sealed class PluginWindowRouter
 
     private void ShowUpwardExpanderWindow(int channelIndex, int pluginInstanceId, UpwardExpanderPlugin plugin, PluginWindowRequest request)
     {
-        var window = new UpwardExpanderWindow(plugin,
+        using var window = new UpwardExpanderWindow(plugin,
             (paramIndex, value) =>
             {
                 string paramName = GetParameterName(plugin, paramIndex);

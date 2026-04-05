@@ -2,6 +2,13 @@ using System.Collections.Concurrent;
 
 namespace HotMic.Core.Plugins.BuiltIn;
 
+/// <summary>Event arguments for sample loaded events.</summary>
+public sealed class SampleLoadedEventArgs : EventArgs
+{
+    public SampleLoadedEventArgs(int slotIndex) => SlotIndex = slotIndex;
+    public int SlotIndex { get; }
+}
+
 public sealed partial class SignalGeneratorPlugin
 {
     private readonly ConcurrentQueue<SampleLoadRequest> _loadQueue;
@@ -11,7 +18,7 @@ public sealed partial class SignalGeneratorPlugin
     /// <summary>
     /// Event raised when a sample is loaded or captured, for UI to trigger auto-save.
     /// </summary>
-    public event Action<int>? SampleLoaded;
+    public event EventHandler<SampleLoadedEventArgs>? SampleLoaded;
 
     /// <summary>
     /// Queue a sample file for loading into a slot (call from UI thread).
@@ -57,7 +64,7 @@ public sealed partial class SignalGeneratorPlugin
             if (request.SlotIndex >= 0 && request.SlotIndex < SlotCount)
             {
                 _slots[request.SlotIndex].LoadSample(request.Samples, request.SampleRate);
-                SampleLoaded?.Invoke(request.SlotIndex);
+                SampleLoaded?.Invoke(this, new SampleLoadedEventArgs(request.SlotIndex));
             }
         }
     }

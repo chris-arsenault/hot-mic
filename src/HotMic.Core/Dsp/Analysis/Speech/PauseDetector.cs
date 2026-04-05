@@ -5,7 +5,7 @@ namespace HotMic.Core.Dsp.Analysis.Speech;
 /// <summary>
 /// Type of pause detected.
 /// </summary>
-public enum PauseType : byte
+public enum PauseType
 {
     None = 0,
     Silent = 1,
@@ -15,7 +15,7 @@ public enum PauseType : byte
 /// <summary>
 /// Current state of the pause detector.
 /// </summary>
-public enum SpeakingState : byte
+public enum SpeakingState
 {
     Speaking = 0,
     SilentPause = 1,
@@ -25,7 +25,7 @@ public enum SpeakingState : byte
 /// <summary>
 /// Represents a completed pause event.
 /// </summary>
-public readonly struct PauseEvent
+public readonly record struct PauseEvent
 {
     public PauseType Type { get; }
     public long StartFrame { get; }

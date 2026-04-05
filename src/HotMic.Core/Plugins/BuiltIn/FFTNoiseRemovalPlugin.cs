@@ -124,6 +124,8 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin,
 
     public void ApplyQuality(AudioQualityProfile profile)
     {
+        ArgumentNullException.ThrowIfNull(profile);
+
         ConfigureQuality(profile.NoiseFftSize, profile.NoiseHopSize, profile.NoiseLearnFrames);
     }
 
@@ -211,6 +213,8 @@ public sealed class FFTNoiseRemovalPlugin : IPlugin, IQualityConfigurablePlugin,
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length >= sizeof(float))
         {
             _reduction = BitConverter.ToSingle(state, 0);

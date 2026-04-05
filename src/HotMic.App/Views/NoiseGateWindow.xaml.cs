@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class NoiseGateWindow : Window, IDisposable
+internal sealed partial class NoiseGateWindow : Window, IDisposable
 {
     private readonly NoiseGateRenderer _renderer = new();
     private readonly NoiseGatePlugin _plugin;

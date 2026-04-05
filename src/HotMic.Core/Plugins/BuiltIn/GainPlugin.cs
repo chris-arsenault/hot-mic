@@ -128,6 +128,8 @@ public sealed class GainPlugin : IPlugin, IQualityConfigurablePlugin
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float))
         {
             return;
@@ -147,6 +149,8 @@ public sealed class GainPlugin : IPlugin, IQualityConfigurablePlugin
 
     public void ApplyQuality(AudioQualityProfile profile)
     {
+        ArgumentNullException.ThrowIfNull(profile);
+
         _smoothingMs = MathF.Max(1f, profile.GainSmoothingMs);
     }
 

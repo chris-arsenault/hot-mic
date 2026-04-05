@@ -28,19 +28,6 @@ internal sealed class MainHitTester
         return null;
     }
 
-    public KnobHit? HitTestKnob(float x, float y)
-    {
-        foreach (var knob in _targets.Knobs)
-        {
-            if (knob.Rect.Contains(x, y))
-            {
-                return new KnobHit(knob.ChannelIndex, knob.KnobType);
-            }
-        }
-
-        return null;
-    }
-
     public PluginKnobHit? HitTestPluginKnob(float x, float y) => _pluginShellRenderer.HitTestKnob(x, y);
 
     public PluginSlotHit? HitTestPluginSlot(float x, float y, out PluginSlotRegion region) =>

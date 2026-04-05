@@ -6,14 +6,14 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public enum SkiaMessageType
+internal enum SkiaMessageType
 {
     Information,
     Warning,
     Error
 }
 
-public partial class SkiaMessageDialog : Window, IDisposable
+internal sealed partial class SkiaMessageDialog : Window, IDisposable
 {
     private const float CornerRadius = 8f;
     private const float TitleBarHeight = 32f;
@@ -73,7 +73,7 @@ public partial class SkiaMessageDialog : Window, IDisposable
 
     public static void Show(Window owner, string message, string title, SkiaMessageType messageType = SkiaMessageType.Information)
     {
-        var dialog = new SkiaMessageDialog(title, message, messageType)
+        using var dialog = new SkiaMessageDialog(title, message, messageType)
         {
             Owner = owner
         };
@@ -104,7 +104,7 @@ public partial class SkiaMessageDialog : Window, IDisposable
         canvas.Clear(SKColors.Transparent);
 
         // Background with rounded corners
-        var bgRect = new SKRoundRect(new SKRect(0, 0, width, height), CornerRadius);
+        using var bgRect = new SKRoundRect(new SKRect(0, 0, width, height), CornerRadius);
         canvas.DrawRoundRect(bgRect, _backgroundPaint);
         canvas.DrawRoundRect(bgRect, _borderPaint);
 
@@ -112,7 +112,7 @@ public partial class SkiaMessageDialog : Window, IDisposable
         _titleBarRect = new SKRect(0, 0, width, TitleBarHeight);
         using (var clipPath = new SKPath())
         {
-            var titleClipRect = new SKRoundRect(new SKRect(0, 0, width, TitleBarHeight + CornerRadius), CornerRadius);
+            using var titleClipRect = new SKRoundRect(new SKRect(0, 0, width, TitleBarHeight + CornerRadius), CornerRadius);
             clipPath.AddRoundRect(titleClipRect);
             canvas.Save();
             canvas.ClipPath(clipPath);
@@ -141,7 +141,8 @@ public partial class SkiaMessageDialog : Window, IDisposable
 
         _okButtonRect = new SKRect(buttonX, buttonY, buttonX + ButtonWidth, buttonY + ButtonHeight);
         var okPaint = _okHovered ? _buttonHoverPaint : _buttonPaint;
-        canvas.DrawRoundRect(new SKRoundRect(_okButtonRect, 4f), okPaint);
+        using var _rr179 = new SKRoundRect(_okButtonRect, 4f);
+        canvas.DrawRoundRect(_rr179, okPaint);
         canvas.DrawText("OK", _okButtonRect.MidX, _okButtonRect.MidY + 4f, _buttonTextPaint);
     }
 
@@ -172,13 +173,15 @@ public partial class SkiaMessageDialog : Window, IDisposable
                     canvas.DrawPath(path, _iconPaint);
                 }
                 canvas.DrawLine(cx, cy - 2f, cx, cy + 2f, _iconPaint);
-                canvas.DrawCircle(cx, cy + 6f, 1.5f, new SKPaint { Color = _iconPaint.Color, IsAntialias = true, Style = SKPaintStyle.Fill });
+                using (var dotPaint = new SKPaint { Color = _iconPaint.Color, IsAntialias = true, Style = SKPaintStyle.Fill })
+                    canvas.DrawCircle(cx, cy + 6f, 1.5f, dotPaint);
                 break;
 
             default:
                 // Circle with i
                 canvas.DrawCircle(cx, cy, r, _iconPaint);
-                canvas.DrawCircle(cx, cy - 4f, 1.5f, new SKPaint { Color = _iconPaint.Color, IsAntialias = true, Style = SKPaintStyle.Fill });
+                using (var dotPaint2 = new SKPaint { Color = _iconPaint.Color, IsAntialias = true, Style = SKPaintStyle.Fill })
+                    canvas.DrawCircle(cx, cy - 4f, 1.5f, dotPaint2);
                 canvas.DrawLine(cx, cy, cx, cy + 6f, _iconPaint);
                 break;
         }

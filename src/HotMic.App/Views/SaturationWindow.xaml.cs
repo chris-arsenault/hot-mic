@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class SaturationWindow : Window, IDisposable
+internal sealed partial class SaturationWindow : Window, IDisposable
 {
     private readonly SaturationRenderer _renderer = new();
     private readonly SaturationPlugin _plugin;

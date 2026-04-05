@@ -331,7 +331,7 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
             _irPreset = 5;
             return true;
         }
-        catch (Exception ex)
+        catch (IOException ex)
         {
             _statusMessage = $"Error: {ex.Message}";
             return false;
@@ -412,29 +412,35 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
                 _statusMessage = "Plate";
                 break;
             case 5:
-                if (_loadedIrPath == null)
-                {
-                    _irLoaded = false;
-                    _statusMessage = "Select IR file...";
-                    ResetProcessingState();
-                }
+                _irLoaded = false;
+                _statusMessage = "Select IR file...";
+                ResetProcessingState();
                 break;
         }
+    }
+
+    /// <summary>Simple xorshift32 PRNG for deterministic IR generation (not security-sensitive).</summary>
+    private static float NextFloat(ref uint state)
+    {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        return (state & 0x7FFFFFu) / (float)0x800000u;
     }
 
     private void GenerateRoomIr(float durationSec, float density)
     {
         int irLength = Math.Max(1, (int)(durationSec * _sampleRate));
         var ir = new float[irLength];
-        var random = new Random(42);
+        uint rngState = 42u;
 
         int earlyCount = Math.Min((int)(0.05f * _sampleRate), irLength);
         for (int i = 0; i < earlyCount; i++)
         {
-            if (random.NextSingle() < density * 0.1f)
+            if (NextFloat(ref rngState) < density * 0.1f)
             {
                 float amp = 0.5f * MathF.Exp(-i / (0.02f * _sampleRate));
-                ir[i] = (random.NextSingle() * 2f - 1f) * amp;
+                ir[i] = (NextFloat(ref rngState) * 2f - 1f) * amp;
             }
         }
 
@@ -442,7 +448,7 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
         for (int i = earlyCount; i < irLength; i++)
         {
             float amp = MathF.Exp(-i * decayRate) * density;
-            ir[i] = (random.NextSingle() * 2f - 1f) * amp;
+            ir[i] = (NextFloat(ref rngState) * 2f - 1f) * amp;
         }
 
         NormalizeImpulse(ir, targetPeak: 0.5f);
@@ -453,7 +459,7 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
     {
         int irLength = Math.Max(1, (int)(durationSec * _sampleRate));
         var ir = new float[irLength];
-        var random = new Random(123);
+        uint rngState = 123u;
 
         float decayRate = 4f / (_sampleRate * durationSec);
         for (int i = 0; i < irLength; i++)
@@ -461,7 +467,7 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
             float t = (float)i / _sampleRate;
             float amp = MathF.Exp(-i * decayRate);
             float hfRolloff = MathF.Exp(-t * 8f);
-            float noise = random.NextSingle() * 2f - 1f;
+            float noise = NextFloat(ref rngState) * 2f - 1f;
             ir[i] = noise * amp * density * (0.3f + 0.7f * hfRolloff);
         }
 
@@ -587,6 +593,8 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length == 0)
         {
             return;
@@ -614,7 +622,7 @@ public sealed class ConvolutionReverbPlugin : IPlugin, IQualityConfigurablePlugi
                 ApplyIrPreset(_irPreset);
             }
         }
-        catch
+        catch (InvalidOperationException)
         {
         }
     }

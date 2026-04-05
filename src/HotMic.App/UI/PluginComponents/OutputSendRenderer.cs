@@ -120,14 +120,15 @@ internal sealed class OutputSendRenderer : IDisposable
 
         // Main background
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Title bar
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr101 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr101);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -146,7 +147,7 @@ internal sealed class OutputSendRenderer : IDisposable
             (TitleBarHeight - 22) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 22) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -165,7 +166,7 @@ internal sealed class OutputSendRenderer : IDisposable
 
         float deviceTop = contentTop + 18;
         var deviceRect = new SKRect(Padding, deviceTop, size.Width - Padding - MeterWidth - 8, deviceTop + 28);
-        var deviceRound = new SKRoundRect(deviceRect, 4f);
+        using var deviceRound = new SKRoundRect(deviceRect, 4f);
         canvas.DrawRoundRect(deviceRound, _deviceBackgroundPaint);
         canvas.DrawRoundRect(deviceRound, _borderPaint);
 
@@ -204,7 +205,7 @@ internal sealed class OutputSendRenderer : IDisposable
 
     private void DrawModeButton(SKCanvas canvas, SKRect rect, string label, bool isActive)
     {
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, isActive ? _modeButtonActivePaint : _modeButtonPaint);
         canvas.DrawRoundRect(roundRect, _borderPaint);
         canvas.DrawText(label, rect.MidX, rect.MidY + 4, isActive ? _modeButtonActiveTextPaint : _modeButtonTextPaint);

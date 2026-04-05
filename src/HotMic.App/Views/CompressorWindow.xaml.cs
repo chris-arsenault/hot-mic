@@ -11,7 +11,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class CompressorWindow : Window, IDisposable
+internal sealed partial class CompressorWindow : Window, IDisposable
 {
     private readonly CompressorRenderer _renderer = new();
     private readonly CompressorPlugin _plugin;

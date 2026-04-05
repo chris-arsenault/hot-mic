@@ -9,6 +9,8 @@ public sealed class PluginPresetBank
 
     public PluginPresetBank(string pluginId, IReadOnlyList<PluginPreset> presets)
     {
+        ArgumentNullException.ThrowIfNull(presets);
+
         PluginId = pluginId;
         _presetLookup = new Dictionary<string, PluginPreset>(StringComparer.OrdinalIgnoreCase);
         _presetNames = new List<string>(presets.Count);

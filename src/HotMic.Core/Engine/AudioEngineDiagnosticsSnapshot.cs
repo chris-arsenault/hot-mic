@@ -1,6 +1,6 @@
 namespace HotMic.Core.Engine;
 
-public readonly struct AudioEngineDiagnosticsSnapshot
+public readonly record struct AudioEngineDiagnosticsSnapshot
 {
     public AudioEngineDiagnosticsSnapshot(
         bool outputActive,
@@ -56,7 +56,7 @@ public readonly struct AudioEngineDiagnosticsSnapshot
     public IReadOnlyList<InputDiagnosticsSnapshot> Inputs { get; }
 }
 
-public readonly struct InputDiagnosticsSnapshot
+public readonly record struct InputDiagnosticsSnapshot
 {
     public InputDiagnosticsSnapshot(
         int channelId,

@@ -130,7 +130,7 @@ internal sealed class TooltipManager : IDisposable
         if (y + boxHeight > bounds.Height - Padding) y = bounds.Height - Padding - boxHeight;
 
         var rect = new SKRect(x, y, x + boxWidth, y + boxHeight);
-        var rrect = new SKRoundRect(rect, CornerRadius);
+        using var rrect = new SKRoundRect(rect, CornerRadius);
 
         // Draw background and border
         canvas.DrawRoundRect(rrect, _backgroundPaint);

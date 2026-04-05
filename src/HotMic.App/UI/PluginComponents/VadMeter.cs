@@ -79,7 +79,7 @@ internal sealed class VadMeter : IDisposable
         float displayValue = Math.Clamp(_smoothedValue, 0f, 1f);
 
         // Background
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Meter fill

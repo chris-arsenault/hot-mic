@@ -13,7 +13,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class UpwardExpanderWindow : Window, IDisposable
+internal sealed partial class UpwardExpanderWindow : Window, IDisposable
 {
     private readonly UpwardExpanderRenderer _renderer = new();
     private readonly UpwardExpanderPlugin _plugin;

@@ -84,7 +84,7 @@ public sealed class InputPlugin : IPlugin, IChannelInputPlugin
             SetChannelMode((InputChannelMode)mode);
             SetDeviceId(deviceId);
         }
-        catch
+        catch (InvalidOperationException)
         {
         }
     }

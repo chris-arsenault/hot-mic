@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -9,21 +10,21 @@ namespace HotMic.Core.Presets;
 public sealed class StoredChainPreset
 {
     public string Name { get; set; } = string.Empty;
-    public List<StoredChainEntry> Plugins { get; set; } = new();
-    public List<StoredChainContainer> Containers { get; set; } = new();
+    public IList<StoredChainEntry> Plugins { get; } = new List<StoredChainEntry>();
+    public IList<StoredChainContainer> Containers { get; } = new List<StoredChainContainer>();
 }
 
 public sealed class StoredChainEntry
 {
     public string PluginId { get; set; } = string.Empty;
-    public Dictionary<string, float> Parameters { get; set; } = new();
+    public Dictionary<string, float> Parameters { get; } = new();
 }
 
 public sealed class StoredChainContainer
 {
     public string Name { get; set; } = string.Empty;
     public bool IsBypassed { get; set; }
-    public List<int> PluginIndices { get; set; } = new();
+    public IList<int> PluginIndices { get; } = new List<int>();
 }
 
 /// <summary>
@@ -49,7 +50,7 @@ public sealed class UserPresetStorage
     /// <summary>
     /// Loads all user chain presets from disk.
     /// </summary>
-    public List<StoredChainPreset> LoadChainPresets()
+    public IReadOnlyList<StoredChainPreset> LoadChainPresets()
     {
         var presets = new List<StoredChainPreset>();
         var chainDir = Path.Combine(_presetsDirectory, "chains");
@@ -70,7 +71,7 @@ public sealed class UserPresetStorage
                     presets.Add(preset);
                 }
             }
-            catch
+            catch (IOException)
             {
                 // Skip invalid preset files
             }
@@ -84,6 +85,8 @@ public sealed class UserPresetStorage
     /// </summary>
     public bool SaveChainPreset(StoredChainPreset preset)
     {
+        ArgumentNullException.ThrowIfNull(preset);
+
         if (string.IsNullOrWhiteSpace(preset.Name))
         {
             return false;
@@ -101,7 +104,7 @@ public sealed class UserPresetStorage
             File.WriteAllText(path, json);
             return true;
         }
-        catch
+        catch (IOException)
         {
             return false;
         }
@@ -142,7 +145,11 @@ public sealed class UserPresetStorage
                         return true;
                     }
                 }
-                catch
+                catch (IOException)
+                {
+                    // Skip invalid files
+                }
+                catch (JsonException)
                 {
                     // Skip invalid files
                 }
@@ -150,7 +157,7 @@ public sealed class UserPresetStorage
 
             return false;
         }
-        catch
+        catch (IOException)
         {
             return false;
         }

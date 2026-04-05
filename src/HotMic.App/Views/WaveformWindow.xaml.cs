@@ -6,7 +6,7 @@ using SkiaSharp;
 
 namespace HotMic.App.Views;
 
-public partial class WaveformWindow : AnalysisWindowBase
+internal sealed partial class WaveformWindow : AnalysisWindowBase
 {
     private readonly WaveformWindowRenderer _renderer = new();
 

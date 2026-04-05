@@ -1,3 +1,4 @@
+using HotMic.Common;
 using HotMic.Common.Configuration;
 using HotMic.Core.Presets;
 
@@ -83,7 +84,8 @@ public sealed class PluginGraph
 
         if (orderedConfigs.Count != config.Plugins.Count)
         {
-            config.Plugins = orderedConfigs;
+            config.Plugins.Clear();
+            config.Plugins.AddRange(orderedConfigs);
             changed = true;
         }
 
@@ -327,7 +329,8 @@ public sealed class PluginGraph
             }
         }
 
-        container.PluginInstanceIds = reorderedIds;
+        container.PluginInstanceIds.Clear();
+        container.PluginInstanceIds.AddRange(reorderedIds);
         _chain.ReplaceAll(newSlots);
         SyncConfigOrder();
         NormalizeContainers();
@@ -559,8 +562,8 @@ public sealed class PluginGraph
     /// </summary>
     public IReadOnlyList<PluginContainerConfig> GetContainers()
     {
-        IReadOnlyList<PluginContainerConfig>? containers = _config?.Containers;
-        return containers ?? Array.Empty<PluginContainerConfig>();
+        var containers = _config?.Containers;
+        return containers is IReadOnlyList<PluginContainerConfig> roList ? roList : containers?.ToArray() ?? Array.Empty<PluginContainerConfig>();
     }
 
     /// <summary>
@@ -706,7 +709,8 @@ public sealed class PluginGraph
 
         if (changed)
         {
-            _config.Plugins = ordered;
+            _config.Plugins.Clear();
+            _config.Plugins.AddRange(ordered);
         }
 
         _configById.Clear();
@@ -805,7 +809,8 @@ public sealed class PluginGraph
 
             if (!ordered.SequenceEqual(container.PluginInstanceIds))
             {
-                container.PluginInstanceIds = ordered;
+                container.PluginInstanceIds.Clear();
+                container.PluginInstanceIds.AddRange(ordered);
                 changed = true;
             }
         }
@@ -815,15 +820,17 @@ public sealed class PluginGraph
 
     private static PluginConfig CreateConfigFromSlot(PluginSlot slot)
     {
-        return new PluginConfig
+        var config = new PluginConfig
         {
             InstanceId = slot.InstanceId,
             Type = slot.Plugin.Id,
             IsBypassed = slot.Plugin.IsBypassed,
             PresetName = PluginPresetManager.CustomPresetName,
-            Parameters = slot.Plugin.Parameters.ToDictionary(p => p.Name, p => p.DefaultValue, StringComparer.OrdinalIgnoreCase),
             State = slot.Plugin.GetState()
         };
+        foreach (var p in slot.Plugin.Parameters)
+            config.Parameters[p.Name] = p.DefaultValue;
+        return config;
     }
 
     private PluginContainerConfig? FindContainer(int containerId)

@@ -124,7 +124,7 @@ internal sealed class WaveformDisplay : IDisposable
         waveformBuffer.CopyTo(_levelBuffer, _gateBuffer);
 
         // Background
-        var roundRect = new SKRoundRect(rect, 6f);
+        using var roundRect = new SKRoundRect(rect, 6f);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Draw grid lines at -12, -24, -36, -48 dB
@@ -192,7 +192,8 @@ internal sealed class WaveformDisplay : IDisposable
         };
         float textWidth = _labelPaint.MeasureText(thresholdText);
         var labelRect = new SKRect(labelX - textWidth - 6, labelY - 11, labelX, labelY + 3);
-        canvas.DrawRoundRect(new SKRoundRect(labelRect, 3f), labelBgPaint);
+        using var _rr137 = new SKRoundRect(labelRect, 3f);
+        canvas.DrawRoundRect(_rr137, labelBgPaint);
 
         _labelPaint.TextAlign = SKTextAlign.Right;
         _labelPaint.Color = _theme.ThresholdLine;

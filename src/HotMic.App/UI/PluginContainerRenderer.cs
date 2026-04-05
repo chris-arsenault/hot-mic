@@ -68,7 +68,7 @@ internal sealed class PluginContainerRenderer : IDisposable
 
     private void DrawBackground(SKCanvas canvas, SKSize size)
     {
-        var rect = new SKRoundRect(new SKRect(0, 0, size.Width, size.Height), CornerRadius);
+        using var rect = new SKRoundRect(new SKRect(0, 0, size.Width, size.Height), CornerRadius);
         canvas.DrawRoundRect(rect, _backgroundPaint);
         canvas.DrawRoundRect(rect, _borderPaint);
     }

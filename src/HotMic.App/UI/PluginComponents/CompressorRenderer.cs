@@ -218,14 +218,15 @@ internal sealed class CompressorRenderer : IDisposable
 
         // Main background
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Title bar
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr83 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr83);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -249,7 +250,7 @@ internal sealed class CompressorRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -343,7 +344,7 @@ internal sealed class CompressorRenderer : IDisposable
     private void DrawTransferCurve(SKCanvas canvas, SKRect rect, CompressorState state)
     {
         // Background
-        var roundRect = new SKRoundRect(rect, 6f);
+        using var roundRect = new SKRoundRect(rect, 6f);
         canvas.DrawRoundRect(roundRect, _grBackgroundPaint);
 
         float padding = 8f;
@@ -464,7 +465,7 @@ internal sealed class CompressorRenderer : IDisposable
 
     private void DrawToggle(SKCanvas canvas, SKRect rect, string label, bool active)
     {
-        var round = new SKRoundRect(rect, 4f);
+        using var round = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(round, active ? _toggleActivePaint : _togglePaint);
         canvas.DrawRoundRect(round, _borderPaint);
 
@@ -485,7 +486,7 @@ internal sealed class CompressorRenderer : IDisposable
     private void DrawGainReductionMeter(SKCanvas canvas, SKRect rect, float grDb)
     {
         // Background
-        var roundRect = new SKRoundRect(rect, 6f);
+        using var roundRect = new SKRoundRect(rect, 6f);
         canvas.DrawRoundRect(roundRect, _grBackgroundPaint);
 
         float meterPadding = 6f;
@@ -502,7 +503,7 @@ internal sealed class CompressorRenderer : IDisposable
 
         // Draw meter bar (from top down for GR)
         var barRect = new SKRect(meterLeft, meterTop, meterRight, meterTop + barHeight);
-        var barRound = new SKRoundRect(barRect, 3f);
+        using var barRound = new SKRoundRect(barRect, 3f);
         canvas.DrawRoundRect(barRound, _grBarPaint);
 
         // Draw tick marks

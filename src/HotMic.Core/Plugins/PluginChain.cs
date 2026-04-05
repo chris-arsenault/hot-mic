@@ -271,6 +271,8 @@ public sealed class PluginChain
 
     public void ReplaceAll(PluginSlot?[] newSlots)
     {
+        ArgumentNullException.ThrowIfNull(newSlots);
+
         Interlocked.Exchange(ref _slots, newSlots);
         UpdateNextInstanceId(newSlots);
         RebuildIdIndexMap(newSlots);

@@ -162,6 +162,8 @@ public sealed class IntelligibilityAnalyzer
     /// <returns>Number of bins copied.</returns>
     public int GetModulationSpectrum(float[] spectrum)
     {
+        ArgumentNullException.ThrowIfNull(spectrum);
+
         int count = Math.Min(spectrum.Length, _modulationSpectrum.Length);
         Array.Copy(_modulationSpectrum, spectrum, count);
         return count;

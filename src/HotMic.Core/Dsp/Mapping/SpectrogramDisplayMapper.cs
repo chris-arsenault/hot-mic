@@ -64,6 +64,8 @@ public sealed class SpectrogramDisplayMapper
         float maxFrequencyHz,
         FrequencyScale scale)
     {
+        ArgumentNullException.ThrowIfNull(analysis);
+
         int analysisBins = analysis.BinCount;
         if (analysisBins <= 0)
         {

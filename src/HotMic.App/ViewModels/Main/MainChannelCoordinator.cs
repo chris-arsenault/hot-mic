@@ -1,3 +1,4 @@
+using HotMic.Common;
 using System;
 using System.Collections.Generic;
 using HotMic.App.UI;
@@ -189,15 +190,9 @@ internal sealed class MainChannelCoordinator
         var channelConfig = new ChannelConfig
         {
             Id = channelIndex + 1,
-            Name = $"Copy {sourceChannelIndex + 1} -> {channelIndex + 1}",
-            Plugins =
-            [
-                new PluginConfig
-                {
-                    Type = "builtin:bus-input"
-                }
-            ]
+            Name = $"Copy {sourceChannelIndex + 1} -> {channelIndex + 1}"
         };
+        channelConfig.Plugins.Add(new PluginConfig { Type = "builtin:bus-input" });
 
         config.Channels.Add(channelConfig);
         _getAudioEngine().EnsureChannelCount(config.Channels.Count);
@@ -342,18 +337,9 @@ internal sealed class MainChannelCoordinator
 
     private static ChannelConfig CreateDefaultChannelConfig(int id)
     {
-        return new ChannelConfig
-        {
-            Id = id,
-            Name = $"Channel {id}",
-            Plugins =
-            [
-                new PluginConfig
-                {
-                    Type = "builtin:input"
-                }
-            ]
-        };
+        var cfg = new ChannelConfig { Id = id, Name = $"Channel {id}" };
+        cfg.Plugins.Add(new PluginConfig { Type = "builtin:input" });
+        return cfg;
     }
 
     private static void ResequenceChannelIds(AppConfig config)
@@ -379,9 +365,10 @@ internal sealed class MainChannelCoordinator
                 var pluginConfig = channel.Plugins[j];
                 if (string.Equals(pluginConfig.Type, "builtin:copy", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (pluginConfig.State is { Length: >= 4 } state)
+                    if (pluginConfig.State is { Count: >= 4 } state)
                     {
-                        int target = BitConverter.ToInt32(state, 0);
+                        var stateArr = state.ToArray();
+                        int target = BitConverter.ToInt32(stateArr, 0);
                         int remapped = RemapChannelId(target, removedChannelId, newChannelCount);
                         if (remapped != target)
                         {
@@ -411,7 +398,7 @@ internal sealed class MainChannelCoordinator
                         }
                     }
 
-                    if (changed && pluginConfig.State is { Length: > 0 })
+                    if (changed && pluginConfig.State is { Count: > 0 })
                     {
                         pluginConfig.State = null;
                     }

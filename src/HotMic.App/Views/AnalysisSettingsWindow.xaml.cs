@@ -10,7 +10,7 @@ using SkiaSharp.Views.Desktop;
 
 namespace HotMic.App.Views;
 
-public partial class AnalysisSettingsWindow : AnalysisWindowBase
+internal sealed partial class AnalysisSettingsWindow : AnalysisWindowBase
 {
     private readonly AnalysisSettingsRenderer _renderer = new();
 

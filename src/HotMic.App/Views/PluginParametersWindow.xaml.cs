@@ -10,7 +10,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class PluginParametersWindow : Window
+internal sealed partial class PluginParametersWindow : Window
 {
     private readonly PluginParametersRenderer _renderer = new();
     private readonly DispatcherTimer _renderTimer;

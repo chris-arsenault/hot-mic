@@ -29,16 +29,25 @@ public sealed class FftTransformProcessor
     public int FftSize => _fftSize;
     public float BinResolution => _binResolution;
     public float Normalization => _normalization;
-    public float[] Magnitudes => _magnitudes;
-    public float[] FftReal => _fftReal;
-    public float[] FftImag => _fftImag;
-    public float[] FftTimeReal => _fftTimeReal;
-    public float[] FftTimeImag => _fftTimeImag;
-    public float[] FftDerivReal => _fftDerivReal;
-    public float[] FftDerivImag => _fftDerivImag;
-    public float[] Window => _window;
-    public float[] WindowTime => _windowTime;
-    public float[] WindowDerivative => _windowDerivative;
+    public ReadOnlyMemory<float> Magnitudes => _magnitudes;
+    public ReadOnlyMemory<float> FftReal => _fftReal;
+    public ReadOnlyMemory<float> FftImag => _fftImag;
+    public ReadOnlyMemory<float> FftTimeReal => _fftTimeReal;
+    public ReadOnlyMemory<float> FftTimeImag => _fftTimeImag;
+    public ReadOnlyMemory<float> FftDerivReal => _fftDerivReal;
+    public ReadOnlyMemory<float> FftDerivImag => _fftDerivImag;
+    public ReadOnlyMemory<float> Window => _window;
+    public ReadOnlyMemory<float> WindowTime => _windowTime;
+    public ReadOnlyMemory<float> WindowDerivative => _windowDerivative;
+
+    internal float[] GetMagnitudesArray() => _magnitudes;
+    internal float[] GetFftRealArray() => _fftReal;
+    internal float[] GetFftImagArray() => _fftImag;
+    internal float[] GetFftTimeRealArray() => _fftTimeReal;
+    internal float[] GetFftTimeImagArray() => _fftTimeImag;
+    internal float[] GetFftDerivRealArray() => _fftDerivReal;
+    internal float[] GetFftDerivImagArray() => _fftDerivImag;
+    internal float[] GetWindowArray() => _window;
 
     public void Configure(int sampleRate, int fftSize, WindowFunction windowFunction)
     {

@@ -11,7 +11,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class OutputSendWindow : Window, IDisposable
+internal sealed partial class OutputSendWindow : Window, IDisposable
 {
     private readonly OutputSendRenderer _renderer = new();
     private readonly OutputSendPlugin _plugin;

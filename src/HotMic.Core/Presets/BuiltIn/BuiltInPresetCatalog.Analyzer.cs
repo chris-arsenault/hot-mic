@@ -22,7 +22,7 @@ internal static partial class BuiltInPresetCatalog
             ["Pre-Emphasis"] = 1f,
             ["HPF Enabled"] = 1f,
             ["HPF Cutoff"] = 60f,
-            ["Reassign"] = (float)SpectrogramReassignMode.Off,
+            ["Reassign"] = (float)SpectrogramReassignMode.None,
             ["Reassign Threshold"] = -60f,
             ["Reassign Spread"] = 1f,
             ["Clarity Mode"] = (float)ClarityProcessingMode.Full,

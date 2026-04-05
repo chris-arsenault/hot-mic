@@ -3,7 +3,7 @@ using HotMic.Core.Engine;
 
 namespace HotMic.Core.Plugins;
 
-public readonly struct PluginProcessContext
+public readonly record struct PluginProcessContext
 {
     public PluginProcessContext(int sampleRate, int blockSize, long sampleClock, long sampleTime,
         int slotIndex, int cumulativeLatencySamples, int channelId, bool profilingEnabled, IRoutingContext routingContext,

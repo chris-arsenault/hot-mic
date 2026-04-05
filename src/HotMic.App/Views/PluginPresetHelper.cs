@@ -136,7 +136,7 @@ internal sealed class PluginPresetHelper
 
     private void ShowSaveDialog(Window owner, string? suggestedName)
     {
-        var dialog = new SkiaInputDialog("Save Preset", "Enter preset name:", suggestedName ?? "My Preset")
+        using var dialog = new SkiaInputDialog("Save Preset", "Enter preset name:", suggestedName ?? "My Preset")
         {
             Owner = owner
         };

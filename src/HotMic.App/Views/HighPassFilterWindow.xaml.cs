@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class HighPassFilterWindow : Window, IDisposable
+internal sealed partial class HighPassFilterWindow : Window, IDisposable
 {
     private readonly HighPassFilterRenderer _renderer = new();
     private readonly HighPassFilterPlugin _plugin;

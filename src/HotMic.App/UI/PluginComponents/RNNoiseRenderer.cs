@@ -114,14 +114,15 @@ internal sealed class RNNoiseRenderer : IDisposable
 
         // Main background
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Title bar
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr102 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr102);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -142,7 +143,8 @@ internal sealed class RNNoiseRenderer : IDisposable
         float badgeX = presetBarX + PluginPresetBar.TotalWidth + 8f;
         var badgeRect = new SKRect(badgeX, (TitleBarHeight - 16) / 2, badgeX + 20, (TitleBarHeight + 16) / 2);
         using var badgePaint = new SKPaint { Color = new SKColor(0x40, 0xA0, 0xFF), IsAntialias = true };
-        canvas.DrawRoundRect(new SKRoundRect(badgeRect, 3f), badgePaint);
+        using var _rr103 = new SKRoundRect(badgeRect, 3f);
+        canvas.DrawRoundRect(_rr103, badgePaint);
         using var badgeTextPaint = new SkiaTextPaint(SKColors.White, 8f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("AI", badgeRect.MidX, badgeRect.MidY + 3, badgeTextPaint);
 
@@ -160,7 +162,7 @@ internal sealed class RNNoiseRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -230,8 +232,10 @@ internal sealed class RNNoiseRenderer : IDisposable
             state.VadProbability >= state.VadThreshold / 100f ? new SKColor(0x40, 0xC0, 0x40) : new SKColor(0x40, 0x80, 0xFF);
 
         using var barPaint = new SKPaint { Color = barColor.WithAlpha(100), IsAntialias = true };
-        canvas.DrawRoundRect(new SKRoundRect(statusBarRect, 4f), barPaint);
-        canvas.DrawRoundRect(new SKRoundRect(statusBarRect, 4f), _borderPaint);
+        using var _rr104 = new SKRoundRect(statusBarRect, 4f);
+        canvas.DrawRoundRect(_rr104, barPaint);
+        using var _rr105 = new SKRoundRect(statusBarRect, 4f);
+        canvas.DrawRoundRect(_rr105, _borderPaint);
 
         using var statusTextPaint = new SkiaTextPaint(_theme.TextPrimary, 10f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText(statusText, statusBarRect.MidX, statusBarRect.MidY + 4, statusTextPaint);

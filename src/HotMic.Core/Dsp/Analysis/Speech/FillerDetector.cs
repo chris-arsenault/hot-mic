@@ -5,7 +5,7 @@ namespace HotMic.Core.Dsp.Analysis.Speech;
 /// <summary>
 /// Type of filler word detected.
 /// </summary>
-public enum FillerType : byte
+public enum FillerType
 {
     None = 0,
     Uh = 1,      // "uh", "ah" - schwa-like
@@ -17,7 +17,7 @@ public enum FillerType : byte
 /// <summary>
 /// Represents a detected filler word event.
 /// </summary>
-public readonly struct FillerEvent
+public readonly record struct FillerEvent
 {
     public FillerType Type { get; }
     public long StartFrame { get; }

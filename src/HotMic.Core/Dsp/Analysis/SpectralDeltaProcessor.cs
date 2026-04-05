@@ -70,7 +70,7 @@ public sealed class SpectralDeltaProcessor
     /// The computed band deltas in dB. Positive = boost, negative = cut.
     /// Safe to read from UI thread.
     /// </summary>
-    public float[] BandDeltas => _bandDeltas;
+    public ReadOnlyMemory<float> BandDeltas => _bandDeltas;
 
     /// <summary>
     /// Whether new delta data is available since last read.

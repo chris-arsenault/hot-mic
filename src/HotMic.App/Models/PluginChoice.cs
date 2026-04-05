@@ -2,7 +2,7 @@ using HotMic.Vst3;
 
 namespace HotMic.App.Models;
 
-public enum PluginCategory
+internal enum PluginCategory
 {
     Utility,
     Routing,
@@ -15,7 +15,7 @@ public enum PluginCategory
     Vst
 }
 
-public sealed record PluginChoice
+internal sealed record PluginChoice
 {
     public string Id { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;

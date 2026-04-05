@@ -136,6 +136,8 @@ public sealed class LimiterPlugin : IPlugin
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float))
         {
             return;

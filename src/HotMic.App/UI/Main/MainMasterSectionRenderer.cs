@@ -25,8 +25,9 @@ internal sealed class MainMasterSectionRenderer
 
     public void Render(SKCanvas canvas, SKRect rect, MainViewModel viewModel)
     {
-        var roundRect = new SKRoundRect(rect, 6f);
-        canvas.DrawRoundRect(roundRect, MainRenderPrimitives.CreateFillPaint(_paints.Theme.MasterSection));
+        using var roundRect = new SKRoundRect(rect, 6f);
+        using var _p27 = MainRenderPrimitives.CreateFillPaint(_paints.Theme.MasterSection);
+        canvas.DrawRoundRect(roundRect, _p27);
         canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
 
         canvas.DrawText("MASTER", rect.Left + 6f, rect.Top + 12f, _paints.SmallTextPaint);
@@ -135,7 +136,7 @@ internal sealed class MainMasterSectionRenderer
 
     private void DrawVisualizerButton(SKCanvas canvas, SKRect rect)
     {
-        var roundRect = new SKRoundRect(rect, 3f);
+        using var roundRect = new SKRoundRect(rect, 3f);
         canvas.DrawRoundRect(roundRect, _paints.ButtonPaint);
         canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
 
@@ -163,7 +164,7 @@ internal sealed class MainMasterSectionRenderer
 
     private void DrawSettingsButton(SKCanvas canvas, SKRect rect)
     {
-        var roundRect = new SKRoundRect(rect, 3f);
+        using var roundRect = new SKRoundRect(rect, 3f);
         canvas.DrawRoundRect(roundRect, _paints.ButtonPaint);
         canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
 
@@ -203,7 +204,7 @@ internal sealed class MainMasterSectionRenderer
 
     private void DrawWaveformButton(SKCanvas canvas, SKRect rect)
     {
-        var roundRect = new SKRoundRect(rect, 3f);
+        using var roundRect = new SKRoundRect(rect, 3f);
         canvas.DrawRoundRect(roundRect, _paints.ButtonPaint);
         canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
 
@@ -239,7 +240,7 @@ internal sealed class MainMasterSectionRenderer
 
     private void DrawSpeechCoachButton(SKCanvas canvas, SKRect rect)
     {
-        var roundRect = new SKRoundRect(rect, 3f);
+        using var roundRect = new SKRoundRect(rect, 3f);
         canvas.DrawRoundRect(roundRect, _paints.ButtonPaint);
         canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
 
@@ -259,7 +260,8 @@ internal sealed class MainMasterSectionRenderer
 
         // Bubble body
         var bubbleRect = new SKRect(cx - w, cy - h, cx + w, cy + h);
-        canvas.DrawRoundRect(new SKRoundRect(bubbleRect, 3f), iconPaint);
+        using var _rr28 = new SKRoundRect(bubbleRect, 3f);
+        canvas.DrawRoundRect(_rr28, iconPaint);
 
         // Tail
         using var tailPath = new SKPath();

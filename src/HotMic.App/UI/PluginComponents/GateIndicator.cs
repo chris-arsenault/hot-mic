@@ -114,7 +114,7 @@ internal sealed class GateIndicator : IDisposable
         bool isOpen,
         string? label = null)
     {
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
 
         // Background
         using var bgPaint = new SKPaint

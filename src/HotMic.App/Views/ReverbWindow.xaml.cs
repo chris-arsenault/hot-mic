@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class ReverbWindow : Window, IDisposable
+internal sealed partial class ReverbWindow : Window, IDisposable
 {
     private readonly ReverbRenderer _renderer = new();
     private readonly ConvolutionReverbPlugin _plugin;

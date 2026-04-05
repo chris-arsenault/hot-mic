@@ -191,6 +191,8 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float))
         {
             return;
@@ -213,9 +215,15 @@ public sealed class RNNoisePlugin : IPlugin, IQualityConfigurablePlugin, IPlugin
         // RNNoise frame size is fixed; quality mode has no effect.
     }
 
+    ~RNNoisePlugin()
+    {
+        ReleaseState();
+    }
+
     public void Dispose()
     {
         ReleaseState();
+        GC.SuppressFinalize(this);
     }
 
     private bool ProcessCore(Span<float> buffer)

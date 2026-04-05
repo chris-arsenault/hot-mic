@@ -156,6 +156,8 @@ public sealed class HarmonicCombEnhancer
     /// </summary>
     public float Apply(float[] magnitudes, float amount)
     {
+        ArgumentNullException.ThrowIfNull(magnitudes);
+
         return Apply(magnitudes, amount, magnitudes.Length);
     }
 
@@ -164,6 +166,8 @@ public sealed class HarmonicCombEnhancer
     /// </summary>
     public float Apply(float[] magnitudes, float amount, int bins)
     {
+        ArgumentNullException.ThrowIfNull(magnitudes);
+
         if (!_maskActive || bins <= 0 || bins > magnitudes.Length)
         {
             return 0f;

@@ -26,8 +26,14 @@ public sealed class AnalysisBufferPipeline
     public int HopSize => _hopSize;
     public int AnalysisSize => _analysisSize;
     public int Filled => _filled;
-    public float[] RawBuffer => _rawBuffer;
-    public float[] ProcessedBuffer => _processedBuffer;
+    public ReadOnlyMemory<float> RawBuffer => _rawBuffer;
+    public ReadOnlyMemory<float> ProcessedBuffer => _processedBuffer;
+
+    /// <summary>Returns the raw buffer as a writable array for internal DSP use.</summary>
+    internal float[] GetRawBufferArray() => _rawBuffer;
+
+    /// <summary>Returns the processed buffer as a writable array for internal DSP use.</summary>
+    internal float[] GetProcessedBufferArray() => _processedBuffer;
     public float LastProcessedMax { get; private set; }
 
     public void Configure(

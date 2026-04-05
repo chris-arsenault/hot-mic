@@ -118,7 +118,7 @@ internal sealed class NullDifferenceScope : IDisposable
     public void Render(SKCanvas canvas, SKRect rect, Func<float[], int> getSamples)
     {
         // Background
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         float padding = 4f;

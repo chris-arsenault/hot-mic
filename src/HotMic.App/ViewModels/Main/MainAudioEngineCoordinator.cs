@@ -93,7 +93,7 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         }
 
         AudioEngine.Dispose();
-        var engine = new AudioEngine(config.AudioSettings, config.Channels.Count);
+        using var engine = new AudioEngine(config.AudioSettings, config.Channels.Count);
         _setAudioEngine(engine);
         AttachAnalysisOrchestrator(engine, config.AudioSettings.SampleRate);
     }
@@ -150,7 +150,7 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
             AudioEngine.Start();
             AudioEngine.SetMasterMute(_viewModel.MasterMuted);
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
         {
             _viewModel.StatusMessage = $"Audio start failed: {ex.Message}";
         }
@@ -180,7 +180,7 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         AudioEngine.Dispose();
 
         var config = _getConfig();
-        var engine = new AudioEngine(config.AudioSettings, Math.Max(1, config.Channels.Count));
+        using var engine = new AudioEngine(config.AudioSettings, Math.Max(1, config.Channels.Count));
         _setAudioEngine(engine);
 
         AttachAnalysisOrchestrator(engine, config.AudioSettings.SampleRate);
@@ -215,7 +215,7 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
             engine.Start();
             _viewModel.StatusMessage = string.Empty;
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
         {
             _viewModel.StatusMessage = $"Audio start failed: {ex.Message}";
         }
@@ -261,7 +261,7 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         AudioEngine.Dispose();
 
         var config = _getConfig();
-        var engine = new AudioEngine(config.AudioSettings, Math.Max(1, config.Channels.Count));
+        using var engine = new AudioEngine(config.AudioSettings, Math.Max(1, config.Channels.Count));
         _setAudioEngine(engine);
         AttachAnalysisOrchestrator(engine, config.AudioSettings.SampleRate);
 
@@ -1383,9 +1383,9 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         }
     }
 
-    private void HandleRequestedSignalsChanged(AnalysisSignalMask requestedSignals)
+    private void HandleRequestedSignalsChanged(object? sender, RequestedSignalsChangedEventArgs e)
     {
-        _analysisVisualRequestedSignals = requestedSignals;
+        _analysisVisualRequestedSignals = e.Signals;
         UpdateVisualRequestedSignals();
     }
 

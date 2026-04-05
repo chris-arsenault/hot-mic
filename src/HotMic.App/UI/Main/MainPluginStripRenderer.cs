@@ -18,8 +18,9 @@ internal sealed class MainPluginStripRenderer
 
     public void Render(SKCanvas canvas, SKRect bounds, IReadOnlyList<PluginViewModel> slots, int channelIndex, bool voxScale)
     {
-        var roundRect = new SKRoundRect(bounds, 4f);
-        canvas.DrawRoundRect(roundRect, MainRenderPrimitives.CreateFillPaint(_paints.Theme.ChannelPlugins));
+        using var roundRect = new SKRoundRect(bounds, 4f);
+        using var _p44 = MainRenderPrimitives.CreateFillPaint(_paints.Theme.ChannelPlugins);
+        canvas.DrawRoundRect(roundRect, _p44);
         canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
 
         float slotX = bounds.Left + 4f;

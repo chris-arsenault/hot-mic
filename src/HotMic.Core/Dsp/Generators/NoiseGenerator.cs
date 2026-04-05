@@ -4,7 +4,7 @@ namespace HotMic.Core.Dsp.Generators;
 /// Noise generator with white, pink, brown (red), and blue noise types.
 /// Uses Voss-McCartney algorithm for pink noise and IIR filtering for colored noise.
 /// </summary>
-public struct NoiseGenerator
+public record struct NoiseGenerator
 {
     // Random state (xorshift128+)
     private ulong _s0;

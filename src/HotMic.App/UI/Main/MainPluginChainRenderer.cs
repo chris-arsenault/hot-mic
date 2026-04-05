@@ -31,10 +31,11 @@ internal sealed class MainPluginChainRenderer
         _routingSlotRenderer = routingSlotRenderer;
     }
 
-    public void Render(SKCanvas canvas, SKRect rect, ChannelStripViewModel channel, int channelIndex, bool voxScale, IList<CopyBridgeRect> copyBridges, IList<MergeBridgeRect> mergeBridges)
+    public void Render(SKCanvas canvas, SKRect rect, ChannelStripViewModel channel, int channelIndex, bool voxScale, IList<CopyBridgeRect> copyBridges)
     {
-        var roundRect = new SKRoundRect(rect, 4f);
-        canvas.DrawRoundRect(roundRect, MainRenderPrimitives.CreateFillPaint(_paints.Theme.ChannelPlugins));
+        using var roundRect = new SKRoundRect(rect, 4f);
+        using var _p35 = MainRenderPrimitives.CreateFillPaint(_paints.Theme.ChannelPlugins);
+        canvas.DrawRoundRect(roundRect, _p35);
         canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
         _hitTargets.PluginAreas.Add(new PluginAreaRect(channelIndex, rect));
 
@@ -155,7 +156,7 @@ internal sealed class MainPluginChainRenderer
     private void DrawContainerSlot(SKCanvas canvas, float x, float y, float width, float height, PluginContainerViewModel container, int channelIndex, int slotIndex)
     {
         var rect = new SKRect(x, y, x + width, y + height);
-        var roundRect = new SKRoundRect(rect, 3f);
+        using var roundRect = new SKRoundRect(rect, 3f);
 
         SKPaint bgPaint = container.IsEmpty ? _paints.PluginSlotEmptyPaint :
             container.IsBypassed ? _paints.PluginSlotBypassedPaint : _paints.PluginSlotFilledPaint;
@@ -175,8 +176,9 @@ internal sealed class MainPluginChainRenderer
             canvas.DrawLine(centerX - 6f, centerY, centerX + 6f, centerY, _paints.IconPaint);
             canvas.DrawLine(centerX, centerY - 6f, centerX, centerY + 6f, _paints.IconPaint);
 
+            using var _p36 = MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextMuted, 8f);
             _primitives.DrawEllipsizedText(canvas, container.ActionLabel, centerX, y + height - 10f, width - 8f,
-                MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextMuted, 8f));
+                _p36);
         }
         else
         {
@@ -186,10 +188,14 @@ internal sealed class MainPluginChainRenderer
             float bypassX = x + 3f;
             bypassRect = new SKRect(bypassX, topRowY, bypassX + bypassW, topRowY + topRowH);
             var bypassColor = container.IsBypassed ? _paints.Theme.Bypass : _paints.Theme.Surface;
-            canvas.DrawRoundRect(new SKRoundRect(bypassRect, 2f), MainRenderPrimitives.CreateFillPaint(bypassColor));
-            var bypassTextPaint = container.IsBypassed
-                ? MainRenderPrimitives.CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 7f, SKFontStyle.Bold)
-                : MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextMuted, 7f);
+            using var _p37 = MainRenderPrimitives.CreateFillPaint(bypassColor);
+            using var _bypassRR = new SKRoundRect(bypassRect, 2f);
+            canvas.DrawRoundRect(_bypassRR, _p37);
+            using var _p38 = MainRenderPrimitives.CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 7f, SKFontStyle.Bold);
+
+            using var _p39 = MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextMuted, 7f);
+
+            var bypassTextPaint = container.IsBypassed ? _p38 : _p39;
             canvas.DrawText("BYP", bypassRect.MidX, bypassRect.MidY + 2.5f, bypassTextPaint);
 
             float removeSize = 8f;
@@ -204,20 +210,25 @@ internal sealed class MainPluginChainRenderer
             float nameRight = removeX - 4f;
             float nameY = topRowY + topRowH - 2f;
             float nameCenterX = nameLeft + (nameRight - nameLeft) / 2f;
-            var namePaint = container.IsBypassed
-                ? MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextMuted, 8f)
-                : MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextSecondary, 8f);
+            using var _p40 = MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextMuted, 8f);
+
+            using var _p41 = MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextSecondary, 8f);
+
+            var namePaint = container.IsBypassed ? _p40 : _p41;
             _primitives.DrawEllipsizedText(canvas, displayName, nameCenterX, nameY, nameRight - nameLeft, namePaint);
 
             int pluginCount = container.PluginInstanceIds.Count;
             string countText = pluginCount == 1 ? "1 plugin" : $"{pluginCount} plugins";
+            using var _p42 = MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextMuted, 8f);
             _primitives.DrawEllipsizedText(canvas, countText, x + width / 2f, y + height / 2f + 6f, width - 8f,
-                MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextMuted, 8f));
+                _p42);
 
+            using var _p43 = MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextMuted, 8f);
             _primitives.DrawEllipsizedText(canvas, container.ActionLabel, x + width / 2f, y + height - 10f, width - 8f,
-                MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextMuted, 8f));
+                _p43);
         }
 
         _hitTargets.ContainerSlots.Add(new ContainerSlotRect(channelIndex, container.ContainerId, slotIndex, rect, bypassRect, removeRect));
     }
 }
+

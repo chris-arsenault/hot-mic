@@ -89,6 +89,8 @@ public sealed class SpectrogramNoiseReducer
     /// </summary>
     public void Apply(float[] magnitudes, float amount, VoicingState voicing)
     {
+        ArgumentNullException.ThrowIfNull(magnitudes);
+
         Apply(magnitudes, amount, voicing, magnitudes.Length);
     }
 
@@ -97,6 +99,8 @@ public sealed class SpectrogramNoiseReducer
     /// </summary>
     public void Apply(float[] magnitudes, float amount, VoicingState voicing, int bins)
     {
+        ArgumentNullException.ThrowIfNull(magnitudes);
+
         if (bins <= 0 || bins > magnitudes.Length || amount <= 0f)
         {
             return;

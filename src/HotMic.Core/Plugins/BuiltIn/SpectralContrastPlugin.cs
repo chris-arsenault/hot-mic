@@ -241,6 +241,8 @@ public sealed class SpectralContrastPlugin : IPlugin, IAnalysisSignalConsumer, I
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float) * 2)
         {
             return;

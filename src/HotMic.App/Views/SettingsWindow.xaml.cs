@@ -8,7 +8,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class SettingsWindow : Window
+internal sealed partial class SettingsWindow : Window
 {
     private readonly SettingsRenderer _renderer = new();
     private readonly SettingsUiState _uiState = new();
@@ -23,9 +23,9 @@ public partial class SettingsWindow : Window
         viewModel.CloseRequested += OnCloseRequested;
     }
 
-    private void OnCloseRequested(bool result)
+    private void OnCloseRequested(object? sender, CloseRequestedEventArgs e)
     {
-        DialogResult = result;
+        DialogResult = e.Result;
         Close();
     }
 

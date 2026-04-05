@@ -8,7 +8,7 @@ namespace HotMic.Core.Dsp.Analysis.Speech;
 /// <summary>
 /// Aggregated speech metrics for a single frame.
 /// </summary>
-public struct SpeechMetrics
+public record struct SpeechMetrics
 {
     // Rate metrics (updated periodically, not every frame)
     public float SyllableRate { get; set; }        // syllables/min (including pauses)

@@ -188,14 +188,15 @@ internal sealed class HighPassFilterRenderer : IDisposable
 
         // Main background
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Title bar
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr95 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr95);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -219,7 +220,7 @@ internal sealed class HighPassFilterRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -273,14 +274,14 @@ internal sealed class HighPassFilterRenderer : IDisposable
         bool is18dB = state.SlopeDbOct >= 18f;
 
         // 18 dB button
-        var slope18Round = new SKRoundRect(_slope18ButtonRect, 4f);
+        using var slope18Round = new SKRoundRect(_slope18ButtonRect, 4f);
         canvas.DrawRoundRect(slope18Round, is18dB ? _slopeButtonActivePaint : _slopeButtonPaint);
         canvas.DrawRoundRect(slope18Round, _borderPaint);
         using var slope18TextPaint = new SkiaTextPaint(is18dB ? _theme.PanelBackground : _theme.TextSecondary, 11f, SKFontStyle.Bold, SKTextAlign.Center);
         canvas.DrawText("18dB", _slope18ButtonRect.MidX, _slope18ButtonRect.MidY + 4, slope18TextPaint);
 
         // 12 dB button
-        var slope12Round = new SKRoundRect(_slope12ButtonRect, 4f);
+        using var slope12Round = new SKRoundRect(_slope12ButtonRect, 4f);
         canvas.DrawRoundRect(slope12Round, !is18dB ? _slopeButtonActivePaint : _slopeButtonPaint);
         canvas.DrawRoundRect(slope12Round, _borderPaint);
         using var slope12TextPaint = new SkiaTextPaint(!is18dB ? _theme.PanelBackground : _theme.TextSecondary, 11f, SKFontStyle.Bold, SKTextAlign.Center);
@@ -298,7 +299,7 @@ internal sealed class HighPassFilterRenderer : IDisposable
     private void DrawFilterCurve(SKCanvas canvas, SKRect rect, HighPassFilterState state)
     {
         // Background
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _curveBackgroundPaint);
 
         // Frequency range: 20Hz to 500Hz (log scale)

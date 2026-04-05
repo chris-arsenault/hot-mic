@@ -1,3 +1,4 @@
+using HotMic.Common;
 using System.Collections.Concurrent;
 using NAudio.Midi;
 using HotMic.Common.Configuration;
@@ -69,6 +70,8 @@ public sealed class MidiManager : IDisposable
 
     public void ApplyConfig(MidiConfig config)
     {
+        ArgumentNullException.ThrowIfNull(config);
+
         lock (_lock)
         {
             bool deviceChanged = _config.DeviceName != config.DeviceName;
@@ -92,6 +95,8 @@ public sealed class MidiManager : IDisposable
 
     public void AddBinding(MidiBinding binding)
     {
+        ArgumentNullException.ThrowIfNull(binding);
+
         _bindings[binding.TargetPath] = binding;
         _config.Bindings.RemoveAll(b => b.TargetPath == binding.TargetPath);
         _config.Bindings.Add(binding);
@@ -184,7 +189,7 @@ public sealed class MidiManager : IDisposable
             DeviceChanged?.Invoke(this, new MidiDeviceEventArgs(GetDeviceName(deviceIndex), true));
             return true;
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
         {
             DeviceChanged?.Invoke(this, new MidiDeviceEventArgs(null, false, ex.Message));
             return false;
@@ -203,7 +208,7 @@ public sealed class MidiManager : IDisposable
                 _midiIn.Stop();
                 _midiIn.Dispose();
             }
-            catch { }
+            catch (InvalidOperationException) { }
             finally
             {
                 _midiIn = null;

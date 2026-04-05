@@ -91,7 +91,7 @@ internal sealed class GainReductionMeter : IDisposable
 
         // Background
         var barRect = new SKRect(rect.Left, rect.Top + 4f, rect.Right, rect.Bottom);
-        var roundRect = new SKRoundRect(barRect, 4f);
+        using var roundRect = new SKRoundRect(barRect, 4f);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Current level fill (responsive bar)
@@ -112,7 +112,8 @@ internal sealed class GainReductionMeter : IDisposable
                 [0f, 0.5f, 1f],
                 SKShaderTileMode.Clamp);
 
-            canvas.DrawRoundRect(new SKRoundRect(currentRect, 2f), _currentFillPaint);
+            using var _rr93 = new SKRoundRect(currentRect, 2f);
+            canvas.DrawRoundRect(_rr93, _currentFillPaint);
             _currentFillPaint.Shader = null;
         }
 

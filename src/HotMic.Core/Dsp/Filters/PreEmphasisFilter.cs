@@ -3,7 +3,7 @@ namespace HotMic.Core.Dsp.Filters;
 /// <summary>
 /// Simple pre-emphasis filter (y[n] = x[n] - alpha * x[n-1]).
 /// </summary>
-public struct PreEmphasisFilter
+public record struct PreEmphasisFilter
 {
     private float _alpha;
     private float _prev;

@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class RNNoiseWindow : Window, IDisposable
+internal sealed partial class RNNoiseWindow : Window, IDisposable
 {
     private readonly RNNoiseRenderer _renderer = new();
     private readonly RNNoisePlugin _plugin;

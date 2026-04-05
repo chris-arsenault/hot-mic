@@ -209,8 +209,8 @@ public sealed class BassEnhancerArtifactTests
                 float midPeak = ComputePeak(preBlock);
                 if (midPipeline.ProcessHop(preBlock, out _, out _))
                 {
-                    midFft.Compute(midPipeline.ProcessedBuffer, reassignEnabled: false);
-                    hasMid = TryComputeHighBandStats(midFft.Magnitudes, midFft.BinResolution, out midRatio, out midFlatness);
+                    midFft.Compute(midPipeline.ProcessedBuffer.Span, reassignEnabled: false);
+                    hasMid = TryComputeHighBandStats(midFft.Magnitudes.Span, midFft.BinResolution, out midRatio, out midFlatness);
                     if (hasMid)
                     {
                         midStats.Add(midRatio, midFlatness);
@@ -223,8 +223,8 @@ public sealed class BassEnhancerArtifactTests
                 float endPeak = ComputePeak(endBlock);
                 if (endPipeline.ProcessHop(endBlock, out _, out _))
                 {
-                    endFft.Compute(endPipeline.ProcessedBuffer, reassignEnabled: false);
-                    hasEnd = TryComputeHighBandStats(endFft.Magnitudes, endFft.BinResolution, out endRatio, out endFlatness);
+                    endFft.Compute(endPipeline.ProcessedBuffer.Span, reassignEnabled: false);
+                    hasEnd = TryComputeHighBandStats(endFft.Magnitudes.Span, endFft.BinResolution, out endRatio, out endFlatness);
                     if (hasEnd)
                     {
                         endStats.Add(endRatio, endFlatness);
@@ -286,8 +286,8 @@ public sealed class BassEnhancerArtifactTests
                 continue;
             }
 
-            fft.Compute(pipeline.ProcessedBuffer, reassignEnabled: false);
-            if (TryComputeHighBandStats(fft.Magnitudes, fft.BinResolution, out float ratio, out float flatness))
+            fft.Compute(pipeline.ProcessedBuffer.Span, reassignEnabled: false);
+            if (TryComputeHighBandStats(fft.Magnitudes.Span, fft.BinResolution, out float ratio, out float flatness))
             {
                 stats.Add(ratio, flatness);
             }
@@ -312,7 +312,7 @@ public sealed class BassEnhancerArtifactTests
         return pipeline;
     }
 
-    private static bool TryComputeHighBandStats(float[] magnitudes, float binResolution, out float ratio, out float flatness)
+    private static bool TryComputeHighBandStats(ReadOnlySpan<float> magnitudes, float binResolution, out float ratio, out float flatness)
     {
         double totalEnergy = 0.0;
         double highBandEnergy = 0.0;

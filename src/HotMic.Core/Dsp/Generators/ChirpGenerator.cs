@@ -4,7 +4,7 @@ namespace HotMic.Core.Dsp.Generators;
 /// Chirp generator for frequency response testing.
 /// Generates logarithmic frequency sweeps with smooth envelope.
 /// </summary>
-public struct ChirpGenerator
+public record struct ChirpGenerator
 {
     private int _sampleRate;
     private float _startHz;

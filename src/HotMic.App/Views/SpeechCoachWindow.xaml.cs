@@ -7,7 +7,7 @@ using SkiaSharp;
 
 namespace HotMic.App.Views;
 
-public partial class SpeechCoachWindow : AnalysisWindowBase
+internal sealed partial class SpeechCoachWindow : AnalysisWindowBase
 {
     private readonly SpeechCoachRenderer _renderer = new();
 

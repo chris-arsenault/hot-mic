@@ -22,7 +22,8 @@ internal sealed class MainTitleBarRenderer
         _hitTargets.TitleBarRect = layout.TitleBarRect;
 
         using var clip = new SKPath();
-        clip.AddRoundRect(new SKRoundRect(new SKRect(0, 0, layout.Size.Width, MainLayoutMetrics.TitleBarHeight + MainLayoutMetrics.CornerRadius), MainLayoutMetrics.CornerRadius));
+        using var _rr50 = new SKRoundRect(new SKRect(0, 0, layout.Size.Width, MainLayoutMetrics.TitleBarHeight + MainLayoutMetrics.CornerRadius), MainLayoutMetrics.CornerRadius);
+        clip.AddRoundRect(_rr50);
         clip.AddRect(new SKRect(0, MainLayoutMetrics.TitleBarHeight, layout.Size.Width, MainLayoutMetrics.TitleBarHeight + MainLayoutMetrics.CornerRadius));
         canvas.Save();
         canvas.ClipPath(clip);
@@ -34,7 +35,8 @@ internal sealed class MainTitleBarRenderer
 
         if (!string.IsNullOrWhiteSpace(viewModel.StatusMessage))
         {
-            var statusPaint = MainRenderPrimitives.CreateTextPaint(_paints.Theme.Accent, 10f);
+            using var _p51 = MainRenderPrimitives.CreateTextPaint(_paints.Theme.Accent, 10f);
+            var statusPaint = _p51;
             canvas.DrawText(viewModel.StatusMessage, 70f, MainLayoutMetrics.TitleBarHeight / 2f + 3f, statusPaint);
         }
 
@@ -72,7 +74,7 @@ internal sealed class MainTitleBarRenderer
 
     private void DrawIconButton(SKCanvas canvas, SKRect rect, MainButton button, bool isActive, IconType icon)
     {
-        var roundRect = new SKRoundRect(rect, 3f);
+        using var roundRect = new SKRoundRect(rect, 3f);
         canvas.DrawRoundRect(roundRect, isActive ? _paints.AccentPaint : _paints.ButtonPaint);
 
         float cx = rect.MidX;
@@ -108,10 +110,11 @@ internal sealed class MainTitleBarRenderer
 
     private void DrawTextButton(SKCanvas canvas, SKRect rect, string text, MainButton button)
     {
-        var roundRect = new SKRoundRect(rect, 3f);
+        using var roundRect = new SKRoundRect(rect, 3f);
         canvas.DrawRoundRect(roundRect, _paints.ButtonPaint);
         canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
-        canvas.DrawText(text, rect.MidX, rect.MidY + 3f, MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextSecondary, 9f));
+        using var _p52 = MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextSecondary, 9f);
+        canvas.DrawText(text, rect.MidX, rect.MidY + 3f, _p52);
         _hitTargets.TopButtons[button] = rect;
     }
 

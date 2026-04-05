@@ -1,6 +1,6 @@
 namespace HotMic.Core.Plugins;
 
-public readonly struct AnalysisSignalSource
+public readonly record struct AnalysisSignalSource
 {
     private static readonly float[] EmptyBuffer = new float[1];
     private readonly float[] _buffer;
@@ -26,7 +26,7 @@ public readonly struct AnalysisSignalSource
     }
 }
 
-public readonly struct AnalysisSignalWriter
+public readonly record struct AnalysisSignalWriter
 {
     private readonly AnalysisSignalBus? _bus;
     private readonly int _producerIndex;

@@ -36,7 +36,7 @@ public sealed class Vst3Scanner
                     return cached.Plugins;
                 }
             }
-            catch
+            catch (InvalidOperationException)
             {
             }
         }
@@ -155,7 +155,7 @@ public sealed class Vst3Scanner
                 });
             }
         }
-        catch
+        catch (InvalidOperationException)
         {
         }
     }

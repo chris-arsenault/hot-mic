@@ -156,6 +156,8 @@ public sealed class DeEsserPlugin : IPlugin, IAnalysisSignalProducer
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float) * 3)
         {
             return;
@@ -197,6 +199,8 @@ public sealed class DeEsserPlugin : IPlugin, IAnalysisSignalProducer
     /// </summary>
     public void GetSpectrum(float[] spectrum)
     {
+        ArgumentNullException.ThrowIfNull(spectrum);
+
         if (spectrum.Length < SpectrumBins)
         {
             return;

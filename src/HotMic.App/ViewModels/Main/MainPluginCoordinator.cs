@@ -1,3 +1,9 @@
+// CA2000: Plugin instances are created here and ownership is transferred to the audio engine
+// (PluginChain/PluginGraph), which is responsible for disposing them. The analyzer cannot
+// track cross-object ownership transfer.
+#pragma warning disable CA2000
+
+using HotMic.Common;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -257,7 +263,9 @@ internal sealed class MainPluginCoordinator
                     !IsCustomPreset(pluginConfig.PresetName) &&
                     _presetManager.TryGetPreset(plugin.Id, pluginConfig.PresetName, out var preset))
                 {
-                    pluginConfig.Parameters = ApplyPresetParameters(plugin, preset);
+                    pluginConfig.Parameters.Clear();
+                    foreach (var kvp in ApplyPresetParameters(plugin, preset))
+                        pluginConfig.Parameters[kvp.Key] = kvp.Value;
                     appliedPreset = true;
                 }
 
@@ -316,9 +324,15 @@ internal sealed class MainPluginCoordinator
                 return;
             }
 
-            IPlugin? newPlugin = choice.IsVst3
-                ? new Vst3PluginWrapper(new Vst3PluginInfo { Name = choice.Name, Path = choice.Path, Format = choice.Format })
-                : PluginFactory.Create(choice.Id);
+            IPlugin? newPlugin;
+            if (choice.IsVst3)
+            {
+                newPlugin = new Vst3PluginWrapper(new Vst3PluginInfo { Name = choice.Name, Path = choice.Path, Format = choice.Format });
+            }
+            else
+            {
+                newPlugin = PluginFactory.Create(choice.Id);
+            }
 
             if (newPlugin is null)
             {
@@ -475,9 +489,15 @@ internal sealed class MainPluginCoordinator
             return;
         }
 
-        IPlugin? newPlugin = choice.IsVst3
-            ? new Vst3PluginWrapper(new Vst3PluginInfo { Name = choice.Name, Path = choice.Path, Format = choice.Format })
-            : PluginFactory.Create(choice.Id);
+        IPlugin? newPlugin;
+        if (choice.IsVst3)
+        {
+            newPlugin = new Vst3PluginWrapper(new Vst3PluginInfo { Name = choice.Name, Path = choice.Path, Format = choice.Format });
+        }
+        else
+        {
+            newPlugin = PluginFactory.Create(choice.Id);
+        }
 
         if (newPlugin is null)
         {
@@ -896,7 +916,7 @@ internal sealed class MainPluginCoordinator
 
         viewModel.UpdateName(container.Name);
         viewModel.MeterScaleVox = _getMeterScaleVox();
-        viewModel.UpdatePlugins(slotInfos, container.PluginInstanceIds);
+        viewModel.UpdatePlugins(slotInfos, container.PluginInstanceIds.ToArray());
     }
 
     public void UpdateOpenContainerWindows(int channelIndex, IReadOnlyList<PluginSlotInfo> slotInfos)
@@ -930,7 +950,7 @@ internal sealed class MainPluginCoordinator
             }
 
             entry.ViewModel.UpdateName(container.Name);
-            entry.ViewModel.UpdatePlugins(slotInfos, container.PluginInstanceIds);
+            entry.ViewModel.UpdatePlugins(slotInfos, container.PluginInstanceIds.ToArray());
         }
     }
 
@@ -1406,7 +1426,7 @@ internal sealed class MainPluginCoordinator
             return;
         }
 
-        var outputSend = new OutputSendPlugin();
+        using var outputSend = new OutputSendPlugin();
         outputSend.Initialize(AudioEngine.SampleRate, AudioEngine.BlockSize);
 
         int insertIndex = AudioEngine.Channels[channelIndex].PluginChain.Count;
@@ -1732,15 +1752,17 @@ internal sealed class MainPluginCoordinator
 
                 int instanceId = ++nextInstanceId;
                 pluginSlots.Add(new PluginSlot(instanceId, plugin, AudioEngine.SampleRate));
-                pluginConfigs.Add(new PluginConfig
+                var pc = new PluginConfig
                 {
                     InstanceId = instanceId,
                     Type = plugin.Id,
                     IsBypassed = plugin.IsBypassed,
                     PresetName = entry.PresetName,
-                    Parameters = parameterMap,
                     State = plugin.GetState()
-                });
+                };
+                foreach (var kvp in parameterMap)
+                    pc.Parameters[kvp.Key] = kvp.Value;
+                pluginConfigs.Add(pc);
             }
 
             var containerConfigs = new List<PluginContainerConfig>();
@@ -1760,13 +1782,14 @@ internal sealed class MainPluginCoordinator
                         }
                     }
 
-                    containerConfigs.Add(new PluginContainerConfig
+                    var cc = new PluginContainerConfig
                     {
                         Id = ++nextContainerId,
                         Name = container.Name,
-                        IsBypassed = container.IsBypassed,
-                        PluginInstanceIds = ids
-                    });
+                        IsBypassed = container.IsBypassed
+                    };
+                    cc.PluginInstanceIds.AddRange(ids);
+                    containerConfigs.Add(cc);
                 }
             }
 
@@ -1812,8 +1835,10 @@ internal sealed class MainPluginCoordinator
             QueueRemovedPlugins(oldSlots, newSlots);
 
             config.PresetName = chainPreset.Name;
-            config.Plugins = pluginConfigs;
-            config.Containers = containerConfigs;
+            config.Plugins.Clear();
+            config.Plugins.AddRange(pluginConfigs);
+            config.Containers.Clear();
+            config.Containers.AddRange(containerConfigs);
             GetGraph(channelIndex)?.SyncWithChain(config);
             NormalizeInputPluginOrder(channelIndex, config);
             _configManager.Save(Config);

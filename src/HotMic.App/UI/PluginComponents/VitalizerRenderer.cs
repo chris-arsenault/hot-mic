@@ -170,7 +170,7 @@ internal sealed class VitalizerRenderer : IDisposable
         size = new SKSize(size.Width / dpiScale, size.Height / dpiScale);
 
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         DrawTitleBar(canvas, size, state);
@@ -326,7 +326,8 @@ internal sealed class VitalizerRenderer : IDisposable
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr132 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr132);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -347,7 +348,7 @@ internal sealed class VitalizerRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -368,8 +369,10 @@ internal sealed class VitalizerRenderer : IDisposable
     private void DrawToggle(SKCanvas canvas, SKRect rect, string label, bool isOn)
     {
         var fill = isOn ? _toggleActivePaint : _toggleFillPaint;
-        canvas.DrawRoundRect(new SKRoundRect(rect, 6f), fill);
-        canvas.DrawRoundRect(new SKRoundRect(rect, 6f), _toggleBorderPaint);
+        using var _rr133 = new SKRoundRect(rect, 6f);
+        canvas.DrawRoundRect(_rr133, fill);
+        using var _rr134 = new SKRoundRect(rect, 6f);
+        canvas.DrawRoundRect(_rr134, _toggleBorderPaint);
 
         _toggleTextPaint.Color = isOn ? _theme.TextPrimary : _theme.TextMuted;
         _toggleTextPaint.DrawText(canvas, label, rect.MidX, rect.MidY + 3f, SKTextAlign.Center);

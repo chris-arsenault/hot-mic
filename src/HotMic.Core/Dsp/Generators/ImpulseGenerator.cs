@@ -4,7 +4,7 @@ namespace HotMic.Core.Dsp.Generators;
 /// Impulse generator for transient testing (clicks at configurable intervals).
 /// Generates DC-free bipolar pulses.
 /// </summary>
-public struct ImpulseGenerator
+public record struct ImpulseGenerator
 {
     private int _sampleRate;
     private int _intervalSamples;

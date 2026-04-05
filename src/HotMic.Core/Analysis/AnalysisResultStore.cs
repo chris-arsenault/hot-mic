@@ -112,6 +112,8 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         SpectrogramTransformType transformType,
         AnalysisConfiguration config)
     {
+        ArgumentNullException.ThrowIfNull(config);
+
         Interlocked.Increment(ref _dataVersion);
 
         // Check if display dimensions changed (requires buffer reallocation)
@@ -518,6 +520,8 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         out int availableFrames,
         out bool fullCopy)
     {
+        ArgumentNullException.ThrowIfNull(magnitudes);
+
         return TryGetRangeInternal(
             sinceFrameId,
             _spectrogramBuffer,
@@ -538,6 +542,8 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         out int availableFrames,
         out bool fullCopy)
     {
+        ArgumentNullException.ThrowIfNull(magnitudes);
+
         analysisBins = _analysisBins;
         binResolutionHz = _binResolutionHz;
         transformType = _transformType;
@@ -561,6 +567,10 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         out int availableFrames,
         out bool fullCopy)
     {
+        ArgumentNullException.ThrowIfNull(confidences);
+        ArgumentNullException.ThrowIfNull(pitches);
+        ArgumentNullException.ThrowIfNull(voicing);
+
         latestFrameId = -1;
         availableFrames = 0;
         fullCopy = false;
@@ -624,6 +634,9 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         out int availableFrames,
         out bool fullCopy)
     {
+        ArgumentNullException.ThrowIfNull(frequencies);
+        ArgumentNullException.ThrowIfNull(magnitudes);
+
         latestFrameId = -1;
         availableFrames = 0;
         fullCopy = false;
@@ -656,6 +669,9 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         out int availableFrames,
         out bool fullCopy)
     {
+        ArgumentNullException.ThrowIfNull(max);
+        ArgumentNullException.ThrowIfNull(min);
+
         latestFrameId = -1;
         availableFrames = 0;
         fullCopy = false;
@@ -719,6 +735,13 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         out int availableFrames,
         out bool fullCopy)
     {
+        ArgumentNullException.ThrowIfNull(cpp);
+        ArgumentNullException.ThrowIfNull(flux);
+        ArgumentNullException.ThrowIfNull(hnr);
+
+        ArgumentNullException.ThrowIfNull(centroid);
+        ArgumentNullException.ThrowIfNull(slope);
+
         latestFrameId = -1;
         availableFrames = 0;
         fullCopy = false;
@@ -789,6 +812,8 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         out int availableFrames,
         out bool fullCopy)
     {
+        ArgumentNullException.ThrowIfNull(values);
+
         latestFrameId = -1;
         availableFrames = 0;
         fullCopy = false;
@@ -838,6 +863,41 @@ public sealed class AnalysisResultStore : IAnalysisResultStore
         out int availableFrames,
         out bool fullCopy)
     {
+        ArgumentNullException.ThrowIfNull(emphasisMarkers);
+
+        ArgumentNullException.ThrowIfNull(speakingState);
+        ArgumentNullException.ThrowIfNull(syllableMarkers);
+
+        ArgumentNullException.ThrowIfNull(bandHighRatio);
+        ArgumentNullException.ThrowIfNull(clarityRatio);
+
+        ArgumentNullException.ThrowIfNull(bandMidRatio);
+        ArgumentNullException.ThrowIfNull(bandPresenceRatio);
+
+        ArgumentNullException.ThrowIfNull(bandLowRatio);
+        ArgumentNullException.ThrowIfNull(intelligibility);
+
+        ArgumentNullException.ThrowIfNull(clarityScore);
+        ArgumentNullException.ThrowIfNull(monotoneScore);
+
+        ArgumentNullException.ThrowIfNull(pauseLongCount);
+        ArgumentNullException.ThrowIfNull(pauseMediumCount);
+
+        ArgumentNullException.ThrowIfNull(pauseMicroCount);
+        ArgumentNullException.ThrowIfNull(pauseShortCount);
+
+        ArgumentNullException.ThrowIfNull(filledPauseRatio);
+        ArgumentNullException.ThrowIfNull(pausesPerMinute);
+
+        ArgumentNullException.ThrowIfNull(meanPauseDurationMs);
+        ArgumentNullException.ThrowIfNull(pauseRatio);
+
+        ArgumentNullException.ThrowIfNull(articulationWpm);
+        ArgumentNullException.ThrowIfNull(wordsPerMinute);
+
+        ArgumentNullException.ThrowIfNull(articulationRate);
+        ArgumentNullException.ThrowIfNull(syllableRate);
+
         latestFrameId = -1;
         availableFrames = 0;
         fullCopy = false;

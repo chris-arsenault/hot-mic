@@ -83,7 +83,7 @@ internal sealed class DynamicTransferCurveDisplay : IDisposable
         Func<float[], float[], float[], int> getSamples)
     {
         // Background
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         float padding = 4f;

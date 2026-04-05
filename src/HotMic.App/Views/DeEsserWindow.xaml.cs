@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class DeEsserWindow : Window, IDisposable
+internal sealed partial class DeEsserWindow : Window, IDisposable
 {
     private readonly DeEsserRenderer _renderer = new();
     private readonly DeEsserPlugin _plugin;

@@ -11,7 +11,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class EqWindow : Window, IDisposable
+internal sealed partial class EqWindow : Window, IDisposable
 {
     private readonly EqRenderer _renderer = new();
     private readonly FiveBandEqPlugin _plugin;

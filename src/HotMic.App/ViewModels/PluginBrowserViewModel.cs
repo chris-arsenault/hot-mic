@@ -5,13 +5,19 @@ using HotMic.App.Models;
 
 namespace HotMic.App.ViewModels;
 
-public enum PluginBrowserTab
+internal sealed class CloseRequestedEventArgs : EventArgs
+{
+    public CloseRequestedEventArgs(bool result) => Result = result;
+    public bool Result { get; }
+}
+
+internal enum PluginBrowserTab
 {
     BuiltIn,
     Vst
 }
 
-public partial class PluginBrowserViewModel : ObservableObject
+internal sealed partial class PluginBrowserViewModel : ObservableObject
 {
     private readonly IReadOnlyList<PluginChoice> _allChoices;
 
@@ -19,8 +25,8 @@ public partial class PluginBrowserViewModel : ObservableObject
     {
         _allChoices = choices;
         FilteredChoices = new ObservableCollection<PluginChoice>();
-        OkCommand = new RelayCommand(() => CloseRequested?.Invoke(true), () => SelectedChoice is not null);
-        CancelCommand = new RelayCommand(() => CloseRequested?.Invoke(false));
+        OkCommand = new RelayCommand(() => CloseRequested?.Invoke(this, new CloseRequestedEventArgs(true)), () => SelectedChoice is not null);
+        CancelCommand = new RelayCommand(() => CloseRequested?.Invoke(this, new CloseRequestedEventArgs(false)));
         ApplyFilter();
     }
 
@@ -43,7 +49,7 @@ public partial class PluginBrowserViewModel : ObservableObject
 
     public IRelayCommand CancelCommand { get; }
 
-    public event Action<bool>? CloseRequested;
+    public event EventHandler<CloseRequestedEventArgs>? CloseRequested;
 
     partial void OnSelectedChoiceChanged(PluginChoice? value)
     {
@@ -63,7 +69,7 @@ public partial class PluginBrowserViewModel : ObservableObject
     private void ApplyFilter()
     {
         FilteredChoices.Clear();
-        var searchLower = SearchText.Trim().ToLowerInvariant();
+        var searchNorm = SearchText.Trim().ToUpperInvariant();
 
         foreach (var choice in _allChoices)
         {
@@ -74,9 +80,9 @@ public partial class PluginBrowserViewModel : ObservableObject
             if (SelectedTab == PluginBrowserTab.Vst && !isVst)
                 continue;
 
-            if (string.IsNullOrEmpty(searchLower) ||
-                choice.Name.Contains(searchLower, StringComparison.OrdinalIgnoreCase) ||
-                choice.Description.Contains(searchLower, StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrEmpty(searchNorm) ||
+                choice.Name.Contains(searchNorm, StringComparison.OrdinalIgnoreCase) ||
+                choice.Description.Contains(searchNorm, StringComparison.OrdinalIgnoreCase))
             {
                 FilteredChoices.Add(choice);
             }
@@ -135,7 +141,7 @@ public partial class PluginBrowserViewModel : ObservableObject
     };
 }
 
-public sealed class PluginCategoryGroup
+internal sealed class PluginCategoryGroup
 {
     public PluginCategoryGroup(string name, IReadOnlyList<PluginChoice> plugins)
     {

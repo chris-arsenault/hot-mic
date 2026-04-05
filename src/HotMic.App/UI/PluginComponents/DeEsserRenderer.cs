@@ -235,14 +235,15 @@ internal sealed class DeEsserRenderer : IDisposable
 
         // Main background
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Title bar
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr85 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr85);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -286,7 +287,7 @@ internal sealed class DeEsserRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -377,7 +378,7 @@ internal sealed class DeEsserRenderer : IDisposable
     private void DrawFrequencyBandDisplay(SKCanvas canvas, SKRect rect, DeEsserState state)
     {
         // Background
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _freqDisplayBackgroundPaint);
 
         // Frequency range: 1kHz to 16kHz (log scale) - matches plugin spectrum analysis
@@ -464,7 +465,7 @@ internal sealed class DeEsserRenderer : IDisposable
 
     private void DrawMeter(SKCanvas canvas, SKRect rect, float level, string label, SKPaint fillPaint)
     {
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _meterBackgroundPaint);
 
         // Use -48 to 0 dB range for better visibility at typical voice levels
@@ -492,7 +493,7 @@ internal sealed class DeEsserRenderer : IDisposable
 
     private void DrawGainReductionMeter(SKCanvas canvas, SKRect rect, float grDb)
     {
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _meterBackgroundPaint);
 
         // Show GR from 0 to -12 dB (typical de-esser range)

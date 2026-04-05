@@ -273,6 +273,8 @@ public sealed class UpwardExpanderPlugin : IPlugin, IAnalysisSignalConsumer, IPl
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float) * 2)
         {
             return;

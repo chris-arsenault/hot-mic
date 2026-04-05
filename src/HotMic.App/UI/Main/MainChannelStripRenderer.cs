@@ -33,11 +33,10 @@ internal sealed class MainChannelStripRenderer
         bool canDelete,
         bool voxScale,
         IDictionary<int, SKRect> channelHeaderRects,
-        IList<CopyBridgeRect> copyBridges,
-        IList<MergeBridgeRect> mergeBridges)
+        IList<CopyBridgeRect> copyBridges)
     {
         var stripRect = new SKRect(x, y, x + width, y + height);
-        var stripRound = new SKRoundRect(stripRect, 6f);
+        using var stripRound = new SKRoundRect(stripRect, 6f);
         canvas.DrawRoundRect(stripRound, _paints.SectionPaint);
         canvas.DrawRoundRect(stripRound, _paints.BorderPaint);
 
@@ -52,20 +51,22 @@ internal sealed class MainChannelStripRenderer
         sectionX += MainLayoutMetrics.ChannelHeaderWidth + MainLayoutMetrics.ChannelStripHeaderGap;
         float pluginAreaWidth = width - MainLayoutMetrics.ChannelHeaderWidth - MainLayoutMetrics.ChannelStripExtraWidth;
         var pluginRect = new SKRect(sectionX, sectionY, sectionX + pluginAreaWidth, sectionY + sectionHeight);
-        _pluginChainRenderer.Render(canvas, pluginRect, channel, channelIndex, voxScale, copyBridges, mergeBridges);
+        _pluginChainRenderer.Render(canvas, pluginRect, channel, channelIndex, voxScale, copyBridges);
     }
 
     private void DrawChannelHeader(SKCanvas canvas, SKRect rect, ChannelStripViewModel channel, int channelIndex, bool canDelete)
     {
-        var roundRect = new SKRoundRect(rect, 4f);
-        canvas.DrawRoundRect(roundRect, MainRenderPrimitives.CreateFillPaint(_paints.Theme.ChannelInput));
+        using var roundRect = new SKRoundRect(rect, 4f);
+        using var _p0 = MainRenderPrimitives.CreateFillPaint(_paints.Theme.ChannelInput);
+        canvas.DrawRoundRect(roundRect, _p0);
         canvas.DrawRoundRect(roundRect, _paints.BorderPaint);
 
         string displayName = string.IsNullOrWhiteSpace(channel.Name) ? $"CH{channelIndex + 1}" : channel.Name;
         float nameMaxWidth = rect.Width - 8f;
         var nameRect = new SKRect(rect.Left + 2f, rect.Top + 2f, rect.Right - 2f, rect.Top + 18f);
+        using var _p1 = MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextSecondary, 8f);
         _primitives.DrawEllipsizedText(canvas, displayName, rect.MidX, rect.Top + 13f, nameMaxWidth,
-            MainRenderPrimitives.CreateCenteredTextPaint(_paints.Theme.TextSecondary, 8f));
+            _p1);
         _hitTargets.ChannelNames[channelIndex] = nameRect;
 
         float deleteSize = 10f;
@@ -74,7 +75,8 @@ internal sealed class MainChannelStripRenderer
         var deleteRect = new SKRect(deleteX, deleteY, deleteX + deleteSize, deleteY + deleteSize);
         if (canDelete)
         {
-            var deletePaint = MainRenderPrimitives.CreateStrokePaint(_paints.Theme.TextMuted, 1f);
+            using var _p2 = MainRenderPrimitives.CreateStrokePaint(_paints.Theme.TextMuted, 1f);
+            var deletePaint = _p2;
             canvas.DrawLine(deleteX + 2f, deleteY + 2f, deleteX + deleteSize - 2f, deleteY + deleteSize - 2f, deletePaint);
             canvas.DrawLine(deleteX + deleteSize - 2f, deleteY + 2f, deleteX + 2f, deleteY + deleteSize - 2f, deletePaint);
         }
@@ -92,3 +94,4 @@ internal sealed class MainChannelStripRenderer
         _hitTargets.Toggles.Add(new ToggleRect(channelIndex, ToggleType.Solo, soloRect));
     }
 }
+

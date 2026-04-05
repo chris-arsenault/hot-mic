@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class VitalizerWindow : Window, IDisposable
+internal sealed partial class VitalizerWindow : Window, IDisposable
 {
     private readonly VitalizerRenderer _renderer = new();
     private readonly VitalizerMk2TPlugin _plugin;

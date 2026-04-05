@@ -12,7 +12,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class SpeechDenoiserWindow : Window, IDisposable
+internal sealed partial class SpeechDenoiserWindow : Window, IDisposable
 {
     private readonly SpeechDenoiserRenderer _renderer = new();
     private readonly SpeechDenoiserPlugin _plugin;

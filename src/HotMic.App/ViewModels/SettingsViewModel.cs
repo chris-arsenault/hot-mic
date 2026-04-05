@@ -7,9 +7,9 @@ using HotMic.Common.Models;
 
 namespace HotMic.App.ViewModels;
 
-public partial class SettingsViewModel : ObservableObject
+internal sealed partial class SettingsViewModel : ObservableObject
 {
-    public event Action<bool>? CloseRequested;
+    public event EventHandler<CloseRequestedEventArgs>? CloseRequested;
 
     public SettingsViewModel(
         IReadOnlyList<AudioDevice> outputDevices,
@@ -37,8 +37,8 @@ public partial class SettingsViewModel : ObservableObject
     public ObservableCollection<AudioDevice> OutputDevices { get; }
     public ObservableCollection<string> MidiDevices { get; }
 
-    public List<int> SampleRateOptions { get; } = [44100, 48000];
-    public List<int> BufferSizeOptions { get; } = [128, 256, 512, 1024];
+    public IReadOnlyList<int> SampleRateOptions { get; } = [44100, 48000];
+    public IReadOnlyList<int> BufferSizeOptions { get; } = [128, 256, 512, 1024];
 
     [ObservableProperty]
     private AudioDevice? _selectedOutputDevice;
@@ -64,12 +64,12 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private void Apply()
     {
-        CloseRequested?.Invoke(true);
+        CloseRequested?.Invoke(this, new CloseRequestedEventArgs(true));
     }
 
     [RelayCommand]
     private void Cancel()
     {
-        CloseRequested?.Invoke(false);
+        CloseRequested?.Invoke(this, new CloseRequestedEventArgs(false));
     }
 }

@@ -153,7 +153,7 @@ internal sealed class MainDragOverlayRenderer : IDisposable
     private void DrawSourceMarker(SKCanvas canvas, SKRect sourceRect)
     {
         // Dim overlay
-        var roundRect = new SKRoundRect(sourceRect, 3f);
+        using var roundRect = new SKRoundRect(sourceRect, 3f);
         canvas.DrawRoundRect(roundRect, _sourceDimPaint);
 
         // Dashed border
@@ -170,7 +170,7 @@ internal sealed class MainDragOverlayRenderer : IDisposable
         // Draw glow on target slot
         if (!target.TargetRect.IsEmpty)
         {
-            var targetRound = new SKRoundRect(target.TargetRect, 3f);
+            using var targetRound = new SKRoundRect(target.TargetRect, 3f);
             canvas.DrawRoundRect(targetRound, _targetGlowPaint);
         }
 
@@ -212,7 +212,7 @@ internal sealed class MainDragOverlayRenderer : IDisposable
         float ghostY = cursorY - 10f; // Slight upward offset so cursor is visible
 
         var ghostRect = new SKRect(ghostX, ghostY, ghostX + ghostWidth, ghostY + ghostHeight);
-        var ghostRound = new SKRoundRect(ghostRect, 3f);
+        using var ghostRound = new SKRoundRect(ghostRect, 3f);
 
         // Background
         canvas.DrawRoundRect(ghostRound, _ghostFillPaint);

@@ -13,7 +13,9 @@ using HotMic.Core.Presets;
 
 namespace HotMic.App.ViewModels;
 
-public partial class MainViewModel : ObservableObject, IDisposable
+#pragma warning disable CA1812 // Instantiated by XAML DataContext binding
+internal sealed partial class MainViewModel : ObservableObject, IDisposable
+#pragma warning restore CA1812
 {
     private readonly ConfigManager _configManager = new();
     private readonly DeviceManager _deviceManager = new();
@@ -126,9 +128,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<AudioDevice> OutputDevices { get; }
 
-    public List<int> SampleRateOptions { get; } = [44100, 48000];
+    public IReadOnlyList<int> SampleRateOptions { get; } = [44100, 48000];
 
-    public List<int> BufferSizeOptions { get; } = [128, 256, 512, 1024];
+    public IReadOnlyList<int> BufferSizeOptions { get; } = [128, 256, 512, 1024];
 
     [ObservableProperty]
     private AudioDevice? selectedOutputDevice;
@@ -526,22 +528,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _config.Channels.Add(new ChannelConfig
-        {
-            Id = 1,
-            Name = "Mic 1",
-            Plugins =
-            [
-                new PluginConfig
-                {
-                    Type = "builtin:input"
-                },
-                new PluginConfig
-                {
-                    Type = "builtin:output-send"
-                }
-            ]
-        });
+        var defaultChannel = new ChannelConfig { Id = 1, Name = "Mic 1" };
+        defaultChannel.Plugins.Add(new PluginConfig { Type = "builtin:input" });
+        defaultChannel.Plugins.Add(new PluginConfig { Type = "builtin:output-send" });
+        _config.Channels.Add(defaultChannel);
     }
 
     private AudioQualityProfile GetQualityProfile()
@@ -553,18 +543,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         while (_config.Channels.Count <= channelIndex)
         {
-            _config.Channels.Add(new ChannelConfig
+            var ch = new ChannelConfig
             {
                 Id = _config.Channels.Count + 1,
-                Name = $"Channel {_config.Channels.Count + 1}",
-                Plugins =
-                [
-                    new PluginConfig
-                    {
-                        Type = "builtin:input"
-                    }
-                ]
-            });
+                Name = $"Channel {_config.Channels.Count + 1}"
+            };
+            ch.Plugins.Add(new PluginConfig { Type = "builtin:input" });
+            _config.Channels.Add(ch);
         }
 
         return _config.Channels[channelIndex];

@@ -78,6 +78,8 @@ public sealed class DereverbPlugin : IPlugin, IQualityConfigurablePlugin
 
     public void ApplyQuality(AudioQualityProfile profile)
     {
+        ArgumentNullException.ThrowIfNull(profile);
+
         ConfigureQuality(profile.DereverbFftSize, profile.DereverbHopSize,
             profile.DereverbTaps, profile.DereverbDelay, profile.DereverbAlpha);
     }
@@ -123,6 +125,8 @@ public sealed class DereverbPlugin : IPlugin, IQualityConfigurablePlugin
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length >= sizeof(float))
             _reduction = BitConverter.ToSingle(state, 0);
     }

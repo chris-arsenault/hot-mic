@@ -39,7 +39,7 @@ public sealed class AnalysisConfiguration
     private bool _preEmphasis = true;
     private bool _highPassEnabled = true;
     private float _highPassCutoff = 60f;
-    private SpectrogramReassignMode _reassignMode = SpectrogramReassignMode.Off;
+    private SpectrogramReassignMode _reassignMode = SpectrogramReassignMode.None;
     private float _reassignThreshold = -60f;
     private float _reassignSpread = 1f;
     private SpectrogramNormalizationMode _normalizationMode = SpectrogramNormalizationMode.None;

@@ -17,7 +17,7 @@ namespace HotMic.App.Views;
 /// Base class for analysis windows providing shared Skia surface initialization,
 /// render timer management, and analysis subscription handling.
 /// </summary>
-public abstract class AnalysisWindowBase : Window, IDisposable
+internal abstract class AnalysisWindowBase : Window, IDisposable
 {
     private readonly AnalysisOrchestrator _orchestrator;
     private readonly IAnalysisResultStore _store;
@@ -81,17 +81,15 @@ public abstract class AnalysisWindowBase : Window, IDisposable
     {
         if (_hostGrid is null) return false;
 
-        SKGLControl? glControl = null;
-        WindowsFormsHost? host = null;
         try
         {
-            glControl = new SKGLControl
+            var glControl = new SKGLControl
             {
                 Dock = System.Windows.Forms.DockStyle.Fill,
                 BackColor = System.Drawing.Color.FromArgb(10, 13, 18)
             };
             glControl.CreateControl();
-            host = new WindowsFormsHost
+            var host = new WindowsFormsHost
             {
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch,
                 VerticalAlignment = System.Windows.VerticalAlignment.Stretch,
@@ -109,10 +107,10 @@ public abstract class AnalysisWindowBase : Window, IDisposable
             _hostGrid.Children.Add(host);
             return true;
         }
-        catch (Exception)
+        catch (InvalidOperationException)
         {
-            glControl?.Dispose();
-            host?.Dispose();
+            _glControl?.Dispose();
+            _glHost?.Dispose();
             _usingGpu = false;
             _glControl = null;
             _glHost = null;
@@ -220,9 +218,11 @@ public abstract class AnalysisWindowBase : Window, IDisposable
     private const int HT_CAPTION = 0x2;
 
     [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern int SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
 
     [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern bool ReleaseCapture();
 
     /// <summary>

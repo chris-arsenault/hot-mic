@@ -47,7 +47,8 @@ internal sealed class MainMeterRenderer
             {
                 float segDb = voxScale ? VoxMeterPositionLinearToDb(threshold) : -60f + threshold * 60f;
                 SKColor color = voxScale ? GetVoxMeterColor(segDb) : GetMeterSegmentColor(threshold);
-                canvas.DrawRect(segRect, MainRenderPrimitives.CreateFillPaint(color));
+                using var _p29 = MainRenderPrimitives.CreateFillPaint(color);
+                canvas.DrawRect(segRect, _p29);
             }
             else
             {
@@ -59,7 +60,8 @@ internal sealed class MainMeterRenderer
         if (peakPos > 0.01f)
         {
             var peakColor = peakDb > -6f ? _paints.Theme.MeterClip : _paints.Theme.TextPrimary;
-            canvas.DrawLine(x, peakY, x + width, peakY, MainRenderPrimitives.CreateStrokePaint(peakColor, 1.5f));
+            using var _p30 = MainRenderPrimitives.CreateStrokePaint(peakColor, 1.5f);
+            canvas.DrawLine(x, peakY, x + width, peakY, _p30);
         }
 
         if (voxScale)
@@ -67,7 +69,8 @@ internal sealed class MainMeterRenderer
             float targetDb = voxTargetDb ?? -18f;
             float targetPos = DbToVoxMeterPosition(targetDb);
             float targetY = y + height - height * targetPos;
-            canvas.DrawLine(x, targetY, x + width, targetY, MainRenderPrimitives.CreateStrokePaint(_paints.Theme.Accent, 1f));
+            using var _p31 = MainRenderPrimitives.CreateStrokePaint(_paints.Theme.Accent, 1f);
+            canvas.DrawLine(x, targetY, x + width, targetY, _p31);
         }
     }
 
@@ -84,14 +87,16 @@ internal sealed class MainMeterRenderer
             var fillRect = new SKRect(x + 1f, y + height - fillHeight, x + width - 1f, y + height);
 
             SKColor color = voxScale ? GetVoxMeterColor(db) : GetMeterSegmentColor(pos);
-            canvas.DrawRect(fillRect, MainRenderPrimitives.CreateFillPaint(color));
+            using var _p32 = MainRenderPrimitives.CreateFillPaint(color);
+            canvas.DrawRect(fillRect, _p32);
         }
 
         if (voxScale)
         {
             float targetPos = DbToVoxMeterPosition(-18f);
             float targetY = y + height - height * targetPos;
-            canvas.DrawLine(x, targetY, x + width, targetY, MainRenderPrimitives.CreateStrokePaint(_paints.Theme.Accent, 1f));
+            using var _p33 = MainRenderPrimitives.CreateStrokePaint(_paints.Theme.Accent, 1f);
+            canvas.DrawLine(x, targetY, x + width, targetY, _p33);
         }
     }
 
@@ -120,7 +125,8 @@ internal sealed class MainMeterRenderer
         if (peak > 0.01f)
         {
             var peakColor = peak >= 0.95f ? _paints.Theme.MeterClip : _paints.Theme.TextPrimary;
-            canvas.DrawLine(peakX, y, peakX, y + height, MainRenderPrimitives.CreateStrokePaint(peakColor, 1.5f));
+            using var _p34 = MainRenderPrimitives.CreateStrokePaint(peakColor, 1.5f);
+            canvas.DrawLine(peakX, y, peakX, y + height, _p34);
         }
     }
 

@@ -353,6 +353,8 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float))
         {
             return;
@@ -388,6 +390,8 @@ public sealed class SaturationPlugin : IPlugin, IQualityConfigurablePlugin
 
     public void ApplyQuality(AudioQualityProfile profile)
     {
+        ArgumentNullException.ThrowIfNull(profile);
+
         int targetFactor = profile.Mode == AudioQualityMode.QualityPriority ? 8 : 4;
         if (_oversampleFactor == targetFactor)
         {

@@ -412,6 +412,8 @@ public sealed class VitalizerMk2TPlugin : IPlugin
 
     public void SetState(byte[] state)
     {
+        ArgumentNullException.ThrowIfNull(state);
+
         if (state.Length < sizeof(float) * 6)
         {
             return;

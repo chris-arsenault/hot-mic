@@ -5,7 +5,7 @@ using HotMic.App.Models;
 
 namespace HotMic.App.ViewModels;
 
-public partial class PluginContainerWindowViewModel : ObservableObject
+internal sealed partial class PluginContainerWindowViewModel : ObservableObject
 {
     private readonly Action<int, int>? _pluginActionSink;
     private readonly Action<int>? _pluginRemoveSink;

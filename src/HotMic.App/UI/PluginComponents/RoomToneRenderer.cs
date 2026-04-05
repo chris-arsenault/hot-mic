@@ -158,7 +158,7 @@ internal sealed class RoomToneRenderer : IDisposable
         size = new SKSize(size.Width / dpiScale, size.Height / dpiScale);
 
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         DrawTitleBar(canvas, size, state);
@@ -229,7 +229,8 @@ internal sealed class RoomToneRenderer : IDisposable
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr112 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr112);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -250,7 +251,7 @@ internal sealed class RoomToneRenderer : IDisposable
             (TitleBarHeight - 24) / 2,
             size.Width - Padding - 30 - 8,
             (TitleBarHeight + 24) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -270,7 +271,7 @@ internal sealed class RoomToneRenderer : IDisposable
 
     private void DrawLevelMeter(SKCanvas canvas, SKRect rect, float noiseLevel, float levelDb)
     {
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _levelMeterBackgroundPaint);
 
         // Normalize noise level for display
@@ -288,7 +289,7 @@ internal sealed class RoomToneRenderer : IDisposable
 
     private void DrawDuckMeter(SKCanvas canvas, SKRect rect, float duckAmount)
     {
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _duckMeterBackgroundPaint);
 
         // Duck shows as "reduction" from top
@@ -305,7 +306,7 @@ internal sealed class RoomToneRenderer : IDisposable
 
     private void DrawNoiseSpectrum(SKCanvas canvas, SKRect rect, float toneHz)
     {
-        var roundRect = new SKRoundRect(rect, 4f);
+        using var roundRect = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(roundRect, _spectrumBackgroundPaint);
 
         // Draw shaped noise spectrum (highpass at 80Hz, lowpass at toneHz)

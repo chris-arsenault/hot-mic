@@ -30,7 +30,11 @@ public sealed class ConfigManager
             var config = JsonSerializer.Deserialize<AppConfig>(json, SerializerOptions);
             return config ?? CreateDefault();
         }
-        catch
+        catch (IOException)
+        {
+            return CreateDefault();
+        }
+        catch (JsonException)
         {
             return CreateDefault();
         }

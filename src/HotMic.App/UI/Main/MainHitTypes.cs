@@ -1,6 +1,5 @@
 namespace HotMic.App.UI;
 
-internal readonly record struct KnobHit(int ChannelIndex, KnobType KnobType);
 internal readonly record struct PluginKnobHit(int ChannelIndex, int PluginInstanceId, int ParamIndex, float MinValue, float MaxValue);
 internal readonly record struct PluginSlotHit(int ChannelIndex, int PluginInstanceId, int SlotIndex);
 internal enum PluginSlotRegion { None, Action, Bypass, Remove, Knob, DeltaStrip }

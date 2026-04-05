@@ -13,7 +13,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class ConsonantTransientWindow : Window, IDisposable
+internal sealed partial class ConsonantTransientWindow : Window, IDisposable
 {
     private readonly ConsonantTransientRenderer _renderer = new();
     private readonly ConsonantTransientPlugin _plugin;

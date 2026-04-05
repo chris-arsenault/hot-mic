@@ -4,7 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace HotMic.App.ViewModels;
 
-public partial class PluginParametersViewModel : ObservableObject
+internal sealed partial class PluginParametersViewModel : ObservableObject
 {
     public PluginParametersViewModel(
         string pluginName,
@@ -24,7 +24,7 @@ public partial class PluginParametersViewModel : ObservableObject
         LatencyMs = latencyMs;
         StatusMessage = statusMessage;
         VadProbabilityProvider = vadProbabilityProvider;
-        CloseCommand = new RelayCommand(() => CloseRequested?.Invoke());
+        CloseCommand = new RelayCommand(() => CloseRequested?.Invoke(this, EventArgs.Empty));
     }
 
     public string PluginName { get; }
@@ -45,5 +45,5 @@ public partial class PluginParametersViewModel : ObservableObject
 
     public IRelayCommand CloseCommand { get; }
 
-    public event Action? CloseRequested;
+    public event EventHandler? CloseRequested;
 }

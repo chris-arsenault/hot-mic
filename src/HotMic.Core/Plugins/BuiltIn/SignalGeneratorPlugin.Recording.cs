@@ -88,7 +88,7 @@ public sealed partial class SignalGeneratorPlugin
         if (read > 0)
         {
             _slots[slotIndex].LoadSample(temp.AsSpan(0, read), _sampleRate);
-            SampleLoaded?.Invoke(slotIndex);
+            SampleLoaded?.Invoke(this, new SampleLoadedEventArgs(slotIndex));
         }
     }
 }

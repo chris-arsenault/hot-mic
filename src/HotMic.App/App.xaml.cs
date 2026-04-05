@@ -2,6 +2,6 @@ using System.Windows;
 
 namespace HotMic.App;
 
-public partial class App : System.Windows.Application
+internal sealed partial class HotMicApplication : System.Windows.Application
 {
 }

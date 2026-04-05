@@ -165,7 +165,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
 
         // Main background
         var backgroundRect = new SKRect(0, 0, size.Width, size.Height);
-        var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
+        using var roundRect = new SKRoundRect(backgroundRect, CornerRadius);
         canvas.DrawRoundRect(roundRect, _backgroundPaint);
 
         // Title bar
@@ -194,7 +194,8 @@ internal sealed class SignalGeneratorRenderer : IDisposable
         _titleBarRect = new SKRect(0, 0, size.Width, TitleBarHeight);
         using (var titleClip = new SKPath())
         {
-            titleClip.AddRoundRect(new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius));
+            using var _rr116 = new SKRoundRect(_titleBarRect, CornerRadius, CornerRadius);
+            titleClip.AddRoundRect(_rr116);
             titleClip.AddRect(new SKRect(0, CornerRadius, size.Width, TitleBarHeight));
             canvas.Save();
             canvas.ClipPath(titleClip);
@@ -218,7 +219,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
             (TitleBarHeight - 20) / 2,
             size.Width - Padding - 24 - 6,
             (TitleBarHeight + 20) / 2);
-        var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
+        using var bypassRound = new SKRoundRect(_bypassButtonRect, 4f);
         canvas.DrawRoundRect(bypassRound, state.IsBypassed ? _bypassActivePaint : _bypassPaint);
         canvas.DrawRoundRect(bypassRound, _borderPaint);
 
@@ -234,7 +235,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
     private void RenderSlotRow(SKCanvas canvas, int slotIndex, SKRect rect, SlotRenderState slot)
     {
         // Row background
-        var slotRound = new SKRoundRect(rect, 4f);
+        using var slotRound = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(slotRound, _slotBackgroundPaint);
 
         float x = rect.Left + 6;
@@ -248,7 +249,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
         // Type dropdown
         float typeWidth = 70f;
         _slotTypeSelectorRects[slotIndex] = new SKRect(x, centerY - 10, x + typeWidth, centerY + 10);
-        var typeRound = new SKRoundRect(_slotTypeSelectorRects[slotIndex], 3f);
+        using var typeRound = new SKRoundRect(_slotTypeSelectorRects[slotIndex], 3f);
         canvas.DrawRoundRect(typeRound, _dropdownPaint);
         canvas.DrawRoundRect(typeRound, _borderPaint);
 
@@ -281,7 +282,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
         float recX = rect.Right - 68;
         float recWidth = 24f;
         _slotRecordRects[slotIndex] = new SKRect(recX, centerY - 8, recX + recWidth, centerY + 8);
-        var recRound = new SKRoundRect(_slotRecordRects[slotIndex], 3f);
+        using var recRound = new SKRoundRect(_slotRecordRects[slotIndex], 3f);
 
         // Highlight background when recording
         if (slot.IsRecording)
@@ -306,7 +307,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
         float buttonWidth = 18f;
 
         _slotMuteRects[slotIndex] = new SKRect(buttonX, centerY - 8, buttonX + buttonWidth, centerY + 8);
-        var muteRound = new SKRoundRect(_slotMuteRects[slotIndex], 3f);
+        using var muteRound = new SKRoundRect(_slotMuteRects[slotIndex], 3f);
         canvas.DrawRoundRect(muteRound, slot.IsMuted ? _mutedPaint : _mutePaint);
         canvas.DrawRoundRect(muteRound, _borderPaint);
         using var muteTextPaint = new SkiaTextPaint(slot.IsMuted ? _theme.TextPrimary : _theme.TextSecondary, 9f, SKFontStyle.Bold, SKTextAlign.Center);
@@ -314,7 +315,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
 
         buttonX += buttonWidth + 3;
         _slotSoloRects[slotIndex] = new SKRect(buttonX, centerY - 8, buttonX + buttonWidth, centerY + 8);
-        var soloRound = new SKRoundRect(_slotSoloRects[slotIndex], 3f);
+        using var soloRound = new SKRoundRect(_slotSoloRects[slotIndex], 3f);
         canvas.DrawRoundRect(soloRound, slot.IsSolo ? _soloedPaint : _soloPaint);
         canvas.DrawRoundRect(soloRound, _borderPaint);
         using var soloTextPaint = new SkiaTextPaint(slot.IsSolo ? _theme.PanelBackground : _theme.TextSecondary, 9f, SKFontStyle.Bold, SKTextAlign.Center);
@@ -386,7 +387,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
         // Sweep toggle
         float toggleWidth = 36f;
         _slotSweepToggleRects[slotIndex] = new SKRect(x, centerY - 8, x + toggleWidth, centerY + 8);
-        var toggleRound = new SKRoundRect(_slotSweepToggleRects[slotIndex], 3f);
+        using var toggleRound = new SKRoundRect(_slotSweepToggleRects[slotIndex], 3f);
         canvas.DrawRoundRect(toggleRound, slot.SweepEnabled ? _toggleOnPaint : _toggleOffPaint);
         canvas.DrawRoundRect(toggleRound, _borderPaint);
         using var sweepTextPaint = new SkiaTextPaint(slot.SweepEnabled ? _theme.TextPrimary : _theme.TextSecondary, 8f, SKFontStyle.Normal, SKTextAlign.Center);
@@ -460,7 +461,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
         // Loop mode dropdown
         float loopWidth = 50f;
         _slotLoopModeRects[slotIndex] = new SKRect(x, centerY - 8, x + loopWidth, centerY + 8);
-        var loopRound = new SKRoundRect(_slotLoopModeRects[slotIndex], 3f);
+        using var loopRound = new SKRoundRect(_slotLoopModeRects[slotIndex], 3f);
         canvas.DrawRoundRect(loopRound, _dropdownPaint);
         canvas.DrawRoundRect(loopRound, _borderPaint);
         string loopLabel = slot.LoopMode switch
@@ -480,7 +481,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
 
         // Save button
         _slotSaveSampleRects[slotIndex] = new SKRect(x, btnY, x + btnWidth, btnY + btnHeight);
-        var saveRound = new SKRoundRect(_slotSaveSampleRects[slotIndex], 2f);
+        using var saveRound = new SKRoundRect(_slotSaveSampleRects[slotIndex], 2f);
         canvas.DrawRoundRect(saveRound, slot.HasSample ? _toggleOnPaint : _toggleOffPaint);
         canvas.DrawRoundRect(saveRound, _borderPaint);
         using (var savePaint = new SkiaTextPaint(slot.HasSample ? _theme.TextPrimary : _theme.TextMuted, 7f, SKFontStyle.Bold, SKTextAlign.Center))
@@ -489,7 +490,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
 
         // Load button
         _slotLoadSampleRects[slotIndex] = new SKRect(x, btnY, x + btnWidth, btnY + btnHeight);
-        var loadRound = new SKRoundRect(_slotLoadSampleRects[slotIndex], 2f);
+        using var loadRound = new SKRoundRect(_slotLoadSampleRects[slotIndex], 2f);
         canvas.DrawRoundRect(loadRound, _dropdownPaint);
         canvas.DrawRoundRect(loadRound, _borderPaint);
         using (var loadPaint = new SkiaTextPaint(_theme.TextSecondary, 7f, SKFontStyle.Bold, SKTextAlign.Center))
@@ -498,7 +499,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
 
         // Reload button
         _slotReloadSampleRects[slotIndex] = new SKRect(x, btnY, x + btnWidth, btnY + btnHeight);
-        var reloadRound = new SKRoundRect(_slotReloadSampleRects[slotIndex], 2f);
+        using var reloadRound = new SKRoundRect(_slotReloadSampleRects[slotIndex], 2f);
         canvas.DrawRoundRect(reloadRound, _dropdownPaint);
         canvas.DrawRoundRect(reloadRound, _borderPaint);
         using (var reloadPaint = new SkiaTextPaint(_theme.TextSecondary, 7f, SKFontStyle.Bold, SKTextAlign.Center))
@@ -532,7 +533,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
     private void RenderMasterRow(SKCanvas canvas, float x, float y, float width, float height, SignalGeneratorState state)
     {
         var rect = new SKRect(x, y, x + width, y + height);
-        var masterRound = new SKRoundRect(rect, 4f);
+        using var masterRound = new SKRoundRect(rect, 4f);
         canvas.DrawRoundRect(masterRound, _slotBackgroundPaint);
 
         float centerY = rect.MidY;
@@ -560,7 +561,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
         // Headroom dropdown
         float hrWidth = 65f;
         _masterHeadroomRect = new SKRect(px, centerY - 9, px + hrWidth, centerY + 9);
-        var hrRound = new SKRoundRect(_masterHeadroomRect, 3f);
+        using var hrRound = new SKRoundRect(_masterHeadroomRect, 3f);
         canvas.DrawRoundRect(hrRound, _dropdownPaint);
         canvas.DrawRoundRect(hrRound, _borderPaint);
         string hrLabel = state.HeadroomMode switch
@@ -720,7 +721,7 @@ internal sealed class SignalGeneratorRenderer : IDisposable
 /// <summary>
 /// State data for rendering the Signal Generator UI.
 /// </summary>
-internal class SignalGeneratorState
+internal sealed class SignalGeneratorState
 {
     public bool IsBypassed { get; set; }
     public string PresetName { get; set; } = "Custom";

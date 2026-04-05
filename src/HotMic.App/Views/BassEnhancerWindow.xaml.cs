@@ -13,7 +13,7 @@ using SkiaSharp.Views.WPF;
 
 namespace HotMic.App.Views;
 
-public partial class BassEnhancerWindow : Window, IDisposable
+internal sealed partial class BassEnhancerWindow : Window, IDisposable
 {
     private readonly BassEnhancerRenderer _renderer = new();
     private readonly BassEnhancerPlugin _plugin;

@@ -4,7 +4,7 @@ namespace HotMic.Core.Dsp.Generators;
 /// Core oscillator implementation with anti-aliased waveforms via PolyBLEP.
 /// Supports sine, square, saw, and triangle with frequency sweep.
 /// </summary>
-public struct OscillatorCore
+public record struct OscillatorCore
 {
     private double _phase;
     private double _phaseIncrement;

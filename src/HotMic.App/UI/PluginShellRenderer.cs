@@ -49,7 +49,7 @@ internal sealed class PluginShellRenderer
         float height = rect.Height;
         bool isPinned = slot.PluginId == "builtin:bus-input";
 
-        var roundRect = new SKRoundRect(rect, 3f);
+        using var roundRect = new SKRoundRect(rect, 3f);
 
         SKPaint bgPaint = slot.IsEmpty ? _pluginSlotEmptyPaint :
                           slot.IsBypassed ? _pluginSlotBypassedPaint : _pluginSlotFilledPaint;
@@ -74,10 +74,14 @@ internal sealed class PluginShellRenderer
             float bypassX = x + 3f;
             var bypassRect = new SKRect(bypassX, topRowY, bypassX + bypassW, topRowY + topRowH);
             var bypassColor = slot.IsBypassed ? _theme.Bypass : _theme.Surface;
-            canvas.DrawRoundRect(new SKRoundRect(bypassRect, 2f), CreateFillPaint(bypassColor));
-            var bypassTextPaint = slot.IsBypassed
-                ? CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 7f, SKFontStyle.Bold)
-                : CreateCenteredTextPaint(_theme.TextMuted, 7f);
+            using var _rr142 = new SKRoundRect(bypassRect, 2f);
+            using var _bypassFill = CreateFillPaint(bypassColor);
+            canvas.DrawRoundRect(_rr142, _bypassFill);
+            using var _p143 = CreateCenteredTextPaint(new SKColor(0x12, 0x12, 0x14), 7f, SKFontStyle.Bold);
+
+            using var _p144 = CreateCenteredTextPaint(_theme.TextMuted, 7f);
+
+            var bypassTextPaint = slot.IsBypassed ? _p143 : _p144;
             canvas.DrawText("BYP", bypassRect.MidX, bypassRect.MidY + 2.5f, bypassTextPaint);
 
             float removeSize = 8f;
@@ -85,7 +89,8 @@ internal sealed class PluginShellRenderer
             float removeY = topRowY + (topRowH - removeSize) / 2f;
             if (!isPinned)
             {
-                var removeIconPaint = CreateStrokePaint(_theme.TextMuted, 1.2f);
+                using var _p145 = CreateStrokePaint(_theme.TextMuted, 1.2f);
+                var removeIconPaint = _p145;
                 canvas.DrawLine(removeX, removeY, removeX + removeSize, removeY + removeSize, removeIconPaint);
                 canvas.DrawLine(removeX + removeSize, removeY, removeX, removeY + removeSize, removeIconPaint);
             }
@@ -99,9 +104,11 @@ internal sealed class PluginShellRenderer
             }
 
             string displayText = $"{slotIndex + 1}. {slot.DisplayName}";
-            var namePaint = slot.IsBypassed
-                ? CreateCenteredTextPaint(_theme.TextMuted, 8f)
-                : CreateCenteredTextPaint(_theme.TextSecondary, 8f);
+            using var _p146 = CreateCenteredTextPaint(_theme.TextMuted, 8f);
+
+            using var _p147 = CreateCenteredTextPaint(_theme.TextSecondary, 8f);
+
+            var namePaint = slot.IsBypassed ? _p146 : _p147;
             float nameY = topRowY + topRowH - 2f;
             float nameLeftEdge = bypassX + bypassW + 4f;
             float nameRightEdge = removeX - 4f;
@@ -151,7 +158,8 @@ internal sealed class PluginShellRenderer
 
             float deltaY = y + height - DeltaStripHeight - 2f;
             string modeChar = slot.DeltaDisplayMode == DeltaDisplayMode.VocalRange ? "V" : "F";
-            var modePaint = CreateCenteredTextPaint(_theme.TextMuted, 7f);
+            using var _p148 = CreateCenteredTextPaint(_theme.TextMuted, 7f);
+            var modePaint = _p148;
             float modeX = x + 8f;
             float modeY = deltaY - 3f;
             canvas.DrawText(modeChar, modeX, modeY, modePaint);
@@ -263,7 +271,8 @@ internal sealed class PluginShellRenderer
     private void DrawPluginKnob(SKCanvas canvas, float cx, float cy, float radius, float normalizedValue, string label, bool dimmed)
     {
         var bgColor = dimmed ? _theme.Surface.WithAlpha(100) : _theme.Surface;
-        canvas.DrawCircle(cx, cy, radius, CreateFillPaint(bgColor));
+        using var _p149 = CreateFillPaint(bgColor);
+        canvas.DrawCircle(cx, cy, radius, _p149);
         canvas.DrawCircle(cx, cy, radius, _borderPaint);
 
         float startAngle = 135f;
@@ -271,43 +280,49 @@ internal sealed class PluginShellRenderer
         using var arc = new SKPath();
         arc.AddArc(new SKRect(cx - radius + 2f, cy - radius + 2f, cx + radius - 2f, cy + radius - 2f), startAngle, sweepAngle);
         var arcColor = dimmed ? _theme.Accent.WithAlpha(100) : _theme.Accent;
-        canvas.DrawPath(arc, CreateStrokePaint(arcColor, 2f));
+        using var _p150 = CreateStrokePaint(arcColor, 2f);
+        canvas.DrawPath(arc, _p150);
 
         float angle = (startAngle + sweepAngle) * MathF.PI / 180f;
         float innerR = radius * 0.3f;
         float outerR = radius * 0.7f;
         var pointerColor = dimmed ? _theme.TextPrimary.WithAlpha(100) : _theme.TextPrimary;
+        using var _p151 = CreateStrokePaint(pointerColor, 1f);
         canvas.DrawLine(
             cx + MathF.Cos(angle) * innerR, cy + MathF.Sin(angle) * innerR,
             cx + MathF.Cos(angle) * outerR, cy + MathF.Sin(angle) * outerR,
-            CreateStrokePaint(pointerColor, 1f));
+            _p151);
 
         var labelColor = dimmed ? _theme.TextMuted.WithAlpha(100) : _theme.TextMuted;
-        var labelPaint = CreateCenteredTextPaint(labelColor, 6f);
+        using var _p152 = CreateCenteredTextPaint(labelColor, 6f);
+        var labelPaint = _p152;
         canvas.DrawText(label, cx, cy + radius + 7f, labelPaint);
     }
 
     private void DrawDeltaStrip(SKCanvas canvas, float x, float y, float width, float height,
-        float[]? deltas, DeltaDisplayMode mode, bool bypassed)
+        ReadOnlyMemory<float>? deltas, DeltaDisplayMode mode, bool bypassed)
     {
         var bgColor = bypassed ? _theme.DeltaNeutral.WithAlpha(100) : _theme.DeltaNeutral;
-        canvas.DrawRect(new SKRect(x, y, x + width, y + height), CreateFillPaint(bgColor));
+        using var _p153 = CreateFillPaint(bgColor);
+        canvas.DrawRect(new SKRect(x, y, x + width, y + height), _p153);
 
         if (deltas is null || bypassed)
         {
             return;
         }
 
+        var deltaSpan = deltas.Value.Span;
         const int numBands = 32;
         float bandWidth = width / numBands;
         float centerY = y + height / 2f;
         float maxBarHeight = (height - 2f) / 2f;
 
-        canvas.DrawLine(x, centerY, x + width, centerY, CreateStrokePaint(_theme.DeltaCenterLine, 0.5f));
+        using var _p154 = CreateStrokePaint(_theme.DeltaCenterLine, 0.5f);
+        canvas.DrawLine(x, centerY, x + width, centerY, _p154);
 
-        for (int i = 0; i < numBands && i < deltas.Length; i++)
+        for (int i = 0; i < numBands && i < deltaSpan.Length; i++)
         {
-            float delta = deltas[i];
+            float delta = deltaSpan[i];
             if (MathF.Abs(delta) < 0.5f)
             {
                 continue;
@@ -331,7 +346,8 @@ internal sealed class PluginShellRenderer
                 barY = centerY;
             }
 
-            canvas.DrawRect(new SKRect(barX, barY, barX + barW, barY + barHeight), CreateFillPaint(color));
+            using var _p155 = CreateFillPaint(color);
+            canvas.DrawRect(new SKRect(barX, barY, barX + barW, barY + barHeight), _p155);
         }
     }
 
@@ -349,3 +365,4 @@ internal sealed class PluginShellRenderer
 
     private sealed record PluginKnobRect(int ChannelIndex, int PluginInstanceId, int ParamIndex, SKRect Rect, float MinValue, float MaxValue);
 }
+

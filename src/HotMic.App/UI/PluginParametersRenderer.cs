@@ -64,7 +64,7 @@ internal sealed class PluginParametersRenderer
         canvas.Scale(dpiScale);
         size = new SKSize(size.Width / dpiScale, size.Height / dpiScale);
 
-        var background = new SKRoundRect(new SKRect(0, 0, size.Width, size.Height), CornerRadius);
+        using var background = new SKRoundRect(new SKRect(0, 0, size.Width, size.Height), CornerRadius);
         canvas.DrawRoundRect(background, _backgroundPaint);
         canvas.DrawRoundRect(background, _borderPaint);
 
@@ -105,8 +105,10 @@ internal sealed class PluginParametersRenderer
         float listHeight = MathF.Max(RowHeight, listBottom - listTop);
         var listRect = new SKRect(Padding, listTop, size.Width - Padding, listTop + listHeight);
 
-        canvas.DrawRoundRect(new SKRoundRect(listRect, 8f), _panelPaint);
-        canvas.DrawRoundRect(new SKRoundRect(listRect, 8f), _borderPaint);
+        using var _rr138 = new SKRoundRect(listRect, 8f);
+        canvas.DrawRoundRect(_rr138, _panelPaint);
+        using var _rr139 = new SKRoundRect(listRect, 8f);
+        canvas.DrawRoundRect(_rr139, _borderPaint);
 
         ListViewportHeight = listRect.Height;
         ListContentHeight = viewModel.Parameters.Count * RowHeight;
@@ -170,7 +172,8 @@ internal sealed class PluginParametersRenderer
     private void DrawParameterRow(SKCanvas canvas, SKRect rowRect, PluginParameterViewModel parameter, int index)
     {
         canvas.DrawText(parameter.Name, rowRect.Left + 10f, rowRect.Top + 18f, _textPaint);
-        canvas.DrawText(parameter.DisplayValue, rowRect.Right - 10f, rowRect.Top + 18f, CreateTextPaint(_theme.TextSecondary, 11f, align: SKTextAlign.Right));
+        using var _p140 = CreateTextPaint(_theme.TextSecondary, 11f, align: SKTextAlign.Right);
+        canvas.DrawText(parameter.DisplayValue, rowRect.Right - 10f, rowRect.Top + 18f, _p140);
 
         float sliderLeft = rowRect.Left + 10f;
         float sliderRight = rowRect.Right - 10f;
@@ -190,7 +193,7 @@ internal sealed class PluginParametersRenderer
     private void DrawHeader(SKCanvas canvas, SKRect rect, PluginParametersViewModel viewModel, bool showGain, bool showGate, bool showLearn, bool showVad)
     {
         _learnButtonRect = SKRect.Empty;
-        var round = new SKRoundRect(rect, 8f);
+        using var round = new SKRoundRect(rect, 8f);
         canvas.DrawRoundRect(round, _panelPaint);
         canvas.DrawRoundRect(round, _borderPaint);
 
@@ -230,7 +233,8 @@ internal sealed class PluginParametersRenderer
             var fillRect = new SKRect(barRect.Left, barRect.Top, barRect.Left + barRect.Width * vad, barRect.Bottom);
             canvas.DrawRect(fillRect, _sliderFillPaint);
             canvas.DrawRect(barRect, _borderPaint);
-            canvas.DrawText($"{vad * 100f:0}%", barRect.Right + 8f, y + 18f, CreateTextPaint(_theme.TextSecondary, 10f));
+            using var _p141 = CreateTextPaint(_theme.TextSecondary, 10f);
+            canvas.DrawText($"{vad * 100f:0}%", barRect.Right + 8f, y + 18f, _p141);
             x += 190f;
         }
 
@@ -244,7 +248,7 @@ internal sealed class PluginParametersRenderer
 
     private void DrawStatusMessage(SKCanvas canvas, SKRect rect, string message)
     {
-        var round = new SKRoundRect(rect, 8f);
+        using var round = new SKRoundRect(rect, 8f);
         canvas.DrawRoundRect(round, _panelPaint);
         canvas.DrawRoundRect(round, _borderPaint);
 
@@ -254,7 +258,7 @@ internal sealed class PluginParametersRenderer
 
     private void DrawButton(SKCanvas canvas, SKRect rect, string label, bool isActive)
     {
-        var round = new SKRoundRect(rect, 6f);
+        using var round = new SKRoundRect(rect, 6f);
         canvas.DrawRoundRect(round, isActive ? _buttonActivePaint : _buttonPaint);
         canvas.DrawRoundRect(round, _borderPaint);
         canvas.DrawText(label, rect.MidX, rect.MidY + 4f, _buttonTextPaint);

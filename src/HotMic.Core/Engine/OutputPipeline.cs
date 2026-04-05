@@ -276,9 +276,11 @@ internal sealed class OutputPipeline : IWaveProvider
     }
 
     [DllImport("kernel32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern IntPtr GetCurrentThread();
 
     [DllImport("kernel32.dll", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern bool GetThreadTimes(
         IntPtr hThread,
         out FILETIME lpCreationTime,
