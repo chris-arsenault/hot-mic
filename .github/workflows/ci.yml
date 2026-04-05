@@ -32,6 +32,20 @@ jobs:
             src/**/packages.lock.json
             tests/**/packages.lock.json
 
+      # SonarQube — begin before build so the scanner instruments compilation
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.OIDC_ROLE }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+          aws-region: us-east-1
+
+      - id: sonar
+        uses: chris-arsenault/platform/.github/actions/sonar-scan-dotnet-begin@main
+        continue-on-error: true
+        with:
+          project-key: hot-mic
+          exclusions: "**/bin/**,**/obj/**"
+
       - name: Restore Core Tests
         run: dotnet restore tests/HotMic.Core.Tests/HotMic.Core.Tests.csproj
 
@@ -51,20 +65,10 @@ jobs:
           --collect:"XPlat Code Coverage"
           -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
 
-      # SonarQube
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ secrets.OIDC_ROLE }}
-          role-session-name: GitHubActions-${{ github.run_id }}
-          aws-region: us-east-1
-
-      - uses: chris-arsenault/platform/.github/actions/sonar-scan@main
+      - uses: chris-arsenault/platform/.github/actions/sonar-scan-dotnet-end@main
         continue-on-error: true
         with:
-          project-key: hot-mic
-          sources: src
-          exclusions: "**/bin/**,**/obj/**"
-          extra-args: -Dsonar.cs.opencover.reportPaths=tests/HotMic.Core.Tests/TestResults/*/coverage.opencover.xml
+          token: ${{ steps.sonar.outputs.token }}
 
   desktop:
     runs-on: windows-latest
