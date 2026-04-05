@@ -1,0 +1,4 @@
+project: hot-mic
+prefix: hot-mic
+stack:
+  - dotnet
