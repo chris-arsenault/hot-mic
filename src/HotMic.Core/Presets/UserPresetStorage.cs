@@ -10,21 +10,21 @@ namespace HotMic.Core.Presets;
 public sealed class StoredChainPreset
 {
     public string Name { get; set; } = string.Empty;
-    public IList<StoredChainEntry> Plugins { get; } = new List<StoredChainEntry>();
-    public IList<StoredChainContainer> Containers { get; } = new List<StoredChainContainer>();
+    public IList<StoredChainEntry> Plugins { get; set; } = new List<StoredChainEntry>();
+    public IList<StoredChainContainer> Containers { get; set; } = new List<StoredChainContainer>();
 }
 
 public sealed class StoredChainEntry
 {
     public string PluginId { get; set; } = string.Empty;
-    public Dictionary<string, float> Parameters { get; } = new();
+    public Dictionary<string, float> Parameters { get; set; } = new();
 }
 
 public sealed class StoredChainContainer
 {
     public string Name { get; set; } = string.Empty;
     public bool IsBypassed { get; set; }
-    public IList<int> PluginIndices { get; } = new List<int>();
+    public IList<int> PluginIndices { get; set; } = new List<int>();
 }
 
 /// <summary>
