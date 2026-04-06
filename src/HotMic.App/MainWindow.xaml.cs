@@ -461,7 +461,7 @@ internal sealed partial class MainWindow : Window, IDisposable
 
         string currentName = string.IsNullOrWhiteSpace(channel.Name) ? $"Channel {channelIndex + 1}" : channel.Name;
 
-        using var dialog = new Views.SkiaInputDialog("Rename Channel", "Enter channel name:", currentName)
+        var dialog = new Views.SkiaInputDialog("Rename Channel", "Enter channel name:", currentName)
         {
             Owner = this
         };
@@ -497,7 +497,7 @@ internal sealed partial class MainWindow : Window, IDisposable
 
         string currentName = string.IsNullOrWhiteSpace(container.Name) ? $"Container {containerId}" : container.Name;
 
-        using var dialog = new Views.SkiaInputDialog("Rename Container", "Enter container name:", currentName)
+        var dialog = new Views.SkiaInputDialog("Rename Container", "Enter container name:", currentName)
         {
             Owner = this
         };
@@ -1447,7 +1447,7 @@ internal sealed partial class MainWindow : Window, IDisposable
             return;
         }
 
-        using var dialog = new Views.SkiaInputDialog("Save Preset", "Enter preset name:", suggestedName ?? "My Preset")
+        var dialog = new Views.SkiaInputDialog("Save Preset", "Enter preset name:", suggestedName ?? "My Preset")
         {
             Owner = this
         };

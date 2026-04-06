@@ -73,7 +73,7 @@ internal sealed partial class SkiaMessageDialog : Window, IDisposable
 
     public static void Show(Window owner, string message, string title, SkiaMessageType messageType = SkiaMessageType.Information)
     {
-        using var dialog = new SkiaMessageDialog(title, message, messageType)
+        var dialog = new SkiaMessageDialog(title, message, messageType)
         {
             Owner = owner
         };

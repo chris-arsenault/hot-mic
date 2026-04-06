@@ -18,7 +18,7 @@ internal sealed class MainWindowRouter
 
     public void ShowAnalyzerWindow(AnalysisOrchestrator orchestrator)
     {
-        using var window = new AnalyzerWindow(orchestrator)
+        var window = new AnalyzerWindow(orchestrator)
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
@@ -27,7 +27,7 @@ internal sealed class MainWindowRouter
 
     public void ShowAnalysisSettingsWindow(AnalysisOrchestrator orchestrator)
     {
-        using var window = new AnalysisSettingsWindow(orchestrator)
+        var window = new AnalysisSettingsWindow(orchestrator)
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
@@ -36,7 +36,7 @@ internal sealed class MainWindowRouter
 
     public void ShowWaveformWindow(AnalysisOrchestrator orchestrator)
     {
-        using var window = new WaveformWindow(orchestrator)
+        var window = new WaveformWindow(orchestrator)
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
@@ -45,7 +45,7 @@ internal sealed class MainWindowRouter
 
     public void ShowSpeechCoachWindow(AnalysisOrchestrator orchestrator)
     {
-        using var window = new SpeechCoachWindow(orchestrator)
+        var window = new SpeechCoachWindow(orchestrator)
         {
             Owner = System.Windows.Application.Current?.MainWindow
         };
