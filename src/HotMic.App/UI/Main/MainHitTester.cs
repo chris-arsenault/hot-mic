@@ -15,6 +15,19 @@ internal sealed class MainHitTester
         _routingSlotRenderer = routingSlotRenderer;
     }
 
+    public KnobHit? HitTestKnob(float x, float y)
+    {
+        foreach (var knob in _targets.Knobs)
+        {
+            if (knob.Rect.Contains(x, y))
+            {
+                return new KnobHit(knob.ChannelIndex, knob.KnobType);
+            }
+        }
+
+        return null;
+    }
+
     public MainButton? HitTestTopButton(float x, float y)
     {
         foreach (var (button, rect) in _targets.TopButtons)

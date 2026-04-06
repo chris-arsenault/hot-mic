@@ -7,6 +7,7 @@ internal sealed class MainHitTargetRegistry
     public Dictionary<MainButton, SKRect> TopButtons { get; } = new();
     public List<ContainerSlotRect> ContainerSlots { get; } = new();
     public List<ToggleRect> Toggles { get; } = new();
+    public List<KnobRect> Knobs { get; } = new();
     public List<PluginAreaRect> PluginAreas { get; } = new();
     public Dictionary<int, SKRect> ChannelNames { get; } = new();
     public List<ChannelDeleteRect> ChannelDeletes { get; } = new();
@@ -29,6 +30,7 @@ internal sealed class MainHitTargetRegistry
     {
         TopButtons.Clear();
         ContainerSlots.Clear();
+        Knobs.Clear();
         Toggles.Clear();
         PluginAreas.Clear();
         ChannelNames.Clear();
@@ -53,3 +55,4 @@ internal sealed record ContainerSlotRect(int ChannelIndex, int ContainerId, int 
 internal sealed record PluginAreaRect(int ChannelIndex, SKRect Rect);
 internal sealed record ToggleRect(int ChannelIndex, ToggleType ToggleType, SKRect Rect);
 internal sealed record ChannelDeleteRect(int ChannelIndex, SKRect Rect, bool IsEnabled);
+internal sealed record KnobRect(int ChannelIndex, KnobType KnobType, SKRect Rect);

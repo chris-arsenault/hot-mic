@@ -219,6 +219,16 @@ internal sealed partial class MainWindow : Window, IDisposable
             return;
         }
 
+        var knobHit = _renderer.HitTestKnob(x, y);
+        if (knobHit.HasValue)
+        {
+            SetActiveChannel(viewModel, knobHit.Value.ChannelIndex);
+            StartKnobDrag(viewModel, knobHit.Value, y);
+            SkiaCanvas.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+
         var toggleHit = _renderer.HitTestToggle(x, y);
         if (toggleHit.HasValue)
         {
@@ -423,6 +433,14 @@ internal sealed partial class MainWindow : Window, IDisposable
             return;
         }
 
+        // Check regular knobs (input/output gain)
+        var knobHit = _renderer.HitTestKnob(x, y);
+        if (knobHit.HasValue)
+        {
+            ShowGainKnobContextMenu(viewModel, knobHit.Value, pos);
+            e.Handled = true;
+            return;
+        }
     }
 
     private void ShowKnobContextMenu(MainViewModel viewModel, PluginKnobHit hit, System.Windows.Point position)
@@ -449,6 +467,38 @@ internal sealed partial class MainWindow : Window, IDisposable
         string paramLabel = $"{slot.DisplayName} - {paramDef.Name}";
 
         ShowMidiContextMenu(viewModel, targetPath, paramLabel, paramDef.Min, paramDef.Max, position);
+    }
+
+    private void ShowGainKnobContextMenu(MainViewModel viewModel, KnobHit hit, System.Windows.Point position)
+    {
+        string targetPath = hit.KnobType == KnobType.InputGain
+            ? $"channel{hit.ChannelIndex + 1}.inputGain"
+            : $"channel{hit.ChannelIndex + 1}.outputGain";
+
+        string label = hit.KnobType == KnobType.InputGain ? "Input Gain" : "Output Gain";
+        string channelName = "Channel";
+        var channel = GetChannel(viewModel, hit.ChannelIndex);
+        if (channel is not null)
+        {
+            channelName = string.IsNullOrWhiteSpace(channel.Name) ? $"Ch {hit.ChannelIndex + 1}" : channel.Name;
+        }
+
+        ShowMidiContextMenu(viewModel, targetPath, $"{channelName} {label}", -60f, 12f, position);
+    }
+
+    private void StartKnobDrag(MainViewModel viewModel, KnobHit hit, float startY)
+    {
+        var channel = GetChannel(viewModel, hit.ChannelIndex);
+        if (channel is null)
+        {
+            return;
+        }
+
+        float startValue = hit.KnobType == KnobType.InputGain
+            ? channel.InputGainDb
+            : channel.OutputGainDb;
+
+        _uiState.KnobDrag = new KnobDragState(hit.ChannelIndex, hit.KnobType, startValue, startY);
     }
 
     private void ShowChannelRenameDialog(MainViewModel viewModel, int channelIndex)
