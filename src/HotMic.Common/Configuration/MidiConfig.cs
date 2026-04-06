@@ -12,7 +12,7 @@ public sealed class MidiConfig
 
     public int? FilterChannel { get; set; }
 
-    public IList<MidiBinding> Bindings { get; } = new List<MidiBinding>();
+    public IList<MidiBinding> Bindings { get; set; } = new List<MidiBinding>();
 }
 
 /// <summary>
