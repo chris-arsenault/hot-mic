@@ -347,6 +347,13 @@ internal sealed class OutputPipeline : IWaveProvider
         if (channel.PluginChain.TryGetSlotById(pluginInstanceId, out var slot, out _)
             && slot is not null)
         {
+            var parameters = slot.Plugin.Parameters;
+            if ((uint)parameterIndex < (uint)parameters.Count)
+            {
+                var param = parameters[parameterIndex];
+                value = Math.Clamp(value, param.MinValue, param.MaxValue);
+            }
+
             slot.Plugin.SetParameter(parameterIndex, value);
         }
     }

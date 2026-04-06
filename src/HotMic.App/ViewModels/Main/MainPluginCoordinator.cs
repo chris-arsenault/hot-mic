@@ -275,6 +275,7 @@ internal sealed class MainPluginCoordinator
                     {
                         if (pluginConfig.Parameters.TryGetValue(parameter.Name, out var value))
                         {
+                            value = Math.Clamp(value, parameter.MinValue, parameter.MaxValue);
                             plugin.SetParameter(parameter.Index, value);
                         }
                     }
@@ -1869,6 +1870,7 @@ internal sealed class MainPluginCoordinator
         {
             if (preset.Parameters.TryGetValue(parameter.Name, out var value))
             {
+                value = Math.Clamp(value, parameter.MinValue, parameter.MaxValue);
                 plugin.SetParameter(parameter.Index, value);
                 parameters[parameter.Name] = value;
             }

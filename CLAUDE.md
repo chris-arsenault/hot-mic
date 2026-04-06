@@ -23,11 +23,12 @@ Do not duplicate spec content here. When behavior changes, update the relevant d
 
 See `AGENTS.md` Testing Policy for full guidance. Key points:
 
-- **No long-term behavior tests** - Don't rely on unit tests to control behavior
-- **Math verification allowed** - Testing DSP algorithms against pre-computed reference values is encouraged
-- **Pre-computed, not re-implemented** - Expected values must come from external tools (Python/NumPy), not from re-implementing the formula in the test
-- **Direct production outputs** - Call the production method under test and compare to constants; no roundtrips or internal consistency checks
-- **Deterministic and specific** - Use fixed inputs and assert against concrete expected values, not just presence checks
+- **Interface & workflow tests encouraged** - Test real user workflows: plugin lifecycle, config roundtrips, chain operations, preset loading, parameter clamping
+- **Tests encode correct behavior** - When a test fails, fix the production code, not the test
+- **Math verification** - DSP algorithms tested against pre-computed reference values (Python/NumPy)
+- **Pre-computed, not re-implemented** - Expected values from external tools, not re-implementing the formula
+- **Concurrency smoke tests** - Verify thread safety of lock-free patterns under concurrent access
+- **Deterministic and specific** - Fixed inputs, concrete expected values, not just presence checks
 
 ## Pre-commit CI check
 

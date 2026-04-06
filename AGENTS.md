@@ -393,11 +393,40 @@ HotMic/
 
 ## Testing Policy
 
-This project should not rely on long-term unit or integration tests to control behavior.
-Temporary, isolated verification tests are allowed (for example, DSP math or FFT correctness), but should be clearly scoped and may be removed once validated.
-Do not run tests unless the user explicitly directs you to do so.
+Tests should verify real behavior and catch real bugs. Three categories of tests are encouraged:
 
-Still document complex DSP or UI behavior with concise inline comments near the relevant code so intent and assumptions are captured in context.
+### Interface & Workflow Tests
+
+High-value tests that exercise real user workflows and verify correct behavior at component boundaries. These are the primary way to find and prevent bugs.
+
+**What to test:**
+- **Plugin lifecycle**: create → initialize → add to chain → reorder → bypass → remove → dispose
+- **Configuration roundtrips**: save config → reload → verify state matches exactly
+- **Plugin chain operations**: insert, remove, reorder, swap, container management
+- **Preset system**: load preset → apply → save → reload → compare
+- **Parameter management**: set → clamp → serialize → deserialize → verify clamped value persists
+- **State transitions**: engine start/stop, preset load nesting, device switching
+
+**How to write them:**
+- Test production code directly — call the real methods, check real outputs
+- Assert concrete expected state, not just "doesn't throw"
+- When a test fails, **fix the bug in production code**, don't weaken the test
+- Tests encode correct behavior; if the code disagrees, the code is wrong
+- Keep tests deterministic — fixed inputs, no timing dependencies for logic tests
+
+### Concurrency Smoke Tests
+
+Tests that verify thread-safety of lock-free patterns by running operations concurrently.
+
+**What to test:**
+- Plugin chain modifications while audio processing runs
+- Parameter changes while processing
+- Map/index consistency after concurrent mutations
+
+**How to write them:**
+- Spawn threads that simulate audio callback + UI mutations
+- Run many iterations to increase chance of catching races
+- Assert invariants: no crashes, no out-of-bounds, consistent state after operations complete
 
 ### Mathematical Accuracy Tests
 
