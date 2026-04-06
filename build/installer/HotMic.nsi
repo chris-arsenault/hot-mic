@@ -36,6 +36,8 @@ Name "${PRODUCT_NAME}"
 OutFile "${OUTPUT_NAME}"
 InstallDir "$LOCALAPPDATA\HotMic"
 RequestExecutionLevel user
+!define MUI_ICON "${PUBLISH_DIR}\Assets\hotmic.ico"
+!define MUI_UNICON "${PUBLISH_DIR}\Assets\hotmic.ico"
 
 VIProductVersion "${APP_FILE_VERSION}"
 VIAddVersionKey "ProductName" "${PRODUCT_NAME}"

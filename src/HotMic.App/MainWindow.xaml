@@ -5,6 +5,7 @@
         xmlns:skia="clr-namespace:SkiaSharp.Views.WPF;assembly=SkiaSharp.Views.WPF"
         xmlns:vm="clr-namespace:HotMic.App.ViewModels"
         Title="HotMic"
+        Icon="Assets/hotmic.ico"
         Width="{Binding WindowWidth, Mode=TwoWay}" Height="{Binding WindowHeight, Mode=TwoWay}"
         Left="{Binding WindowX}" Top="{Binding WindowY}"
         WindowStartupLocation="Manual"

@@ -7,6 +7,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Version>1.0.0</Version>
+    <ApplicationIcon>Assets\hotmic.ico</ApplicationIcon>
+    <AssemblyTitle>HotMic</AssemblyTitle>
+    <Product>HotMic</Product>
+    <Description>Low-latency audio routing and processing for Windows</Description>
+    <Company>Chris Arsenault</Company>
+    <Copyright>Copyright © 2025-2026 Chris Arsenault</Copyright>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <UseRidGraph>true</UseRidGraph>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -27,6 +33,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="Assets/hotmic.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="Assets/Native/librnnoise.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
