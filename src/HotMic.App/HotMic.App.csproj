@@ -11,8 +11,8 @@
     <AssemblyTitle>HotMic</AssemblyTitle>
     <Product>HotMic</Product>
     <Description>Low-latency audio routing and processing for Windows</Description>
-    <Company>Chris Arsenault</Company>
-    <Copyright>Copyright © 2025-2026 Chris Arsenault</Copyright>
+    <Company>Ahara</Company>
+    <Copyright>Copyright © 2025-2026 Ahara</Copyright>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <UseRidGraph>true</UseRidGraph>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

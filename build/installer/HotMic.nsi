@@ -5,7 +5,7 @@
 !endif
 
 !ifndef PUBLISHER
-  !define PUBLISHER "HotMic"
+  !define PUBLISHER "Ahara"
 !endif
 
 !ifndef WEBSITE
