@@ -365,10 +365,9 @@ internal sealed class MainChannelCoordinator
                 var pluginConfig = channel.Plugins[j];
                 if (string.Equals(pluginConfig.Type, "builtin:copy", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (pluginConfig.State is { Count: >= 4 } state)
+                    if (pluginConfig.State is { Length: >= 4 } state)
                     {
-                        var stateArr = state.ToArray();
-                        int target = BitConverter.ToInt32(stateArr, 0);
+                        int target = BitConverter.ToInt32(state, 0);
                         int remapped = RemapChannelId(target, removedChannelId, newChannelCount);
                         if (remapped != target)
                         {
@@ -398,7 +397,7 @@ internal sealed class MainChannelCoordinator
                         }
                     }
 
-                    if (changed && pluginConfig.State is { Count: > 0 })
+                    if (changed && pluginConfig.State is { Length: > 0 })
                     {
                         pluginConfig.State = null;
                     }
