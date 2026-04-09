@@ -4,3 +4,7 @@
 
 # Local build outputs
 .artifacts/
+.serena/
+.drift-audit/
+.claude/
+drift-output.txt
