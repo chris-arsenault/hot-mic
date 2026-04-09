@@ -23,7 +23,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: chris-arsenault/platform/.github/actions/governance-check@main
+      - uses: chris-arsenault/ahara/.github/actions/governance-check@main
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -42,7 +42,7 @@ jobs:
           aws-region: us-east-1
 
       - id: sonar
-        uses: chris-arsenault/platform/.github/actions/sonar-scan-dotnet-begin@main
+        uses: chris-arsenault/ahara/.github/actions/sonar-scan-dotnet-begin@main
         continue-on-error: true
         with:
           project-key: hot-mic
@@ -67,7 +67,7 @@ jobs:
           --collect:"XPlat Code Coverage"
           -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
 
-      - uses: chris-arsenault/platform/.github/actions/sonar-scan-dotnet-end@main
+      - uses: chris-arsenault/ahara/.github/actions/sonar-scan-dotnet-end@main
         continue-on-error: true
         with:
           token: ${{ steps.sonar.outputs.token }}
@@ -223,4 +223,4 @@ jobs:
           role-session-name: GitHubActions-${{ github.run_id }}
           aws-region: us-east-1
 
-      - uses: chris-arsenault/platform/.github/actions/report-build@main
+      - uses: chris-arsenault/ahara/.github/actions/report-build@main
