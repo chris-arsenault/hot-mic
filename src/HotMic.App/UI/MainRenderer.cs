@@ -87,6 +87,8 @@ internal sealed class MainRenderer : IDisposable
 
     public MainButton? HitTestTopButton(float x, float y) => _hitTester.HitTestTopButton(x, y);
 
+    public KnobHit? HitTestKnob(float x, float y) => _hitTester.HitTestKnob(x, y);
+
     public PluginKnobHit? HitTestPluginKnob(float x, float y) => _hitTester.HitTestPluginKnob(x, y);
 
     public PluginSlotHit? HitTestPluginSlot(float x, float y, out PluginSlotRegion region) => _hitTester.HitTestPluginSlot(x, y, out region);
