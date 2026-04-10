@@ -28,7 +28,9 @@ public sealed class ConfigManager
         {
             var json = File.ReadAllText(_configPath);
             var config = JsonSerializer.Deserialize<AppConfig>(json, SerializerOptions);
-            return config ?? CreateDefault();
+            if (config is null) return CreateDefault();
+            MigrateChannels(config);
+            return config;
         }
         catch (IOException)
         {
@@ -89,19 +91,34 @@ public sealed class ConfigManager
             InputChannel = InputChannelMode.Sum
         };
 
-        config.Plugins.Add(new PluginConfig
-        {
-            Type = "builtin:input"
-        });
+        config.Nodes.Add(new PluginNodeConfig { Type = "builtin:input" });
 
         if (includeOutputSend)
         {
-            config.Plugins.Add(new PluginConfig
-            {
-                Type = "builtin:output-send"
-            });
+            config.Nodes.Add(new PluginNodeConfig { Type = "builtin:output-send" });
         }
 
         return config;
+    }
+
+    /// <summary>
+    /// Migrate channels from legacy Plugins+Containers format to Nodes format.
+    /// </summary>
+    private static void MigrateChannels(AppConfig config)
+    {
+        foreach (var channel in config.Channels)
+        {
+            if (channel.Nodes.Count > 0)
+                continue; // Already in new format
+
+#pragma warning disable CS0618 // Accessing obsolete Plugins/Containers for migration
+            if (channel.Plugins.Count == 0)
+                continue;
+
+            channel.Nodes = ChainNodeHelpers.MigrateFromLegacy(channel.Plugins, channel.Containers);
+            channel.Plugins.Clear();
+            channel.Containers.Clear();
+#pragma warning restore CS0618
+        }
     }
 }

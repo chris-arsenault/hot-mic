@@ -224,7 +224,7 @@ public class ConfigRoundtripTests
                 AudioSettings = new AudioSettingsConfig { SampleRate = 96000, BufferSize = 128 }
             };
             original.Channels.Add(new ChannelConfig { Id = 1, Name = "Test" });
-            original.Channels[0].Plugins.Add(new PluginConfig
+            original.Channels[0].Nodes.Add(new PluginNodeConfig
             {
                 InstanceId = 5, Type = "builtin:compressor",
                 State = new byte[] { 1, 2, 3 }
@@ -236,13 +236,157 @@ public class ConfigRoundtripTests
             Assert.Equal(96000, restored.AudioSettings.SampleRate);
             Assert.Single(restored.Channels);
             Assert.Equal("Test", restored.Channels[0].Name);
-            Assert.Single(restored.Channels[0].Plugins);
-            Assert.Equal("builtin:compressor", restored.Channels[0].Plugins[0].Type);
-            Assert.Equal(new byte[] { 1, 2, 3 }, restored.Channels[0].Plugins[0].State);
+            Assert.Single(restored.Channels[0].Nodes);
+            var plug = Assert.IsType<PluginNodeConfig>(restored.Channels[0].Nodes[0]);
+            Assert.Equal("builtin:compressor", plug.Type);
+            Assert.Equal(new byte[] { 1, 2, 3 }, plug.State);
         }
         finally
         {
             File.Delete(tempPath);
         }
+    }
+
+    [Fact]
+    public void NodeTree_PluginAndContainer_Roundtrip()
+    {
+        var config = new ChannelConfig { Id = 1, Name = "Test" };
+        config.Nodes.Add(new PluginNodeConfig { InstanceId = 1, Type = "builtin:input" });
+        config.Nodes.Add(new ContainerNodeConfig
+        {
+            ContainerId = 1,
+            Name = "Noise Removal",
+            IsBypassed = true,
+            Plugins =
+            {
+                new PluginNodeConfig { InstanceId = 2, Type = "builtin:hpf" },
+                new PluginNodeConfig { InstanceId = 3, Type = "builtin:speechdenoiser" }
+            }
+        });
+        config.Nodes.Add(new PluginNodeConfig { InstanceId = 4, Type = "builtin:compressor" });
+        config.Nodes.Add(new PluginNodeConfig { InstanceId = 5, Type = "builtin:output-send" });
+
+        var restored = Roundtrip(config);
+
+        Assert.Equal(4, restored.Nodes.Count);
+
+        // Node 0: standalone plugin
+        var n0 = Assert.IsType<PluginNodeConfig>(restored.Nodes[0]);
+        Assert.Equal("builtin:input", n0.Type);
+        Assert.Equal(1, n0.InstanceId);
+
+        // Node 1: container with 2 children
+        var n1 = Assert.IsType<ContainerNodeConfig>(restored.Nodes[1]);
+        Assert.Equal("Noise Removal", n1.Name);
+        Assert.True(n1.IsBypassed);
+        Assert.Equal(2, n1.Plugins.Count);
+        Assert.Equal("builtin:hpf", n1.Plugins[0].Type);
+        Assert.Equal("builtin:speechdenoiser", n1.Plugins[1].Type);
+
+        // Node 2: standalone
+        var n2 = Assert.IsType<PluginNodeConfig>(restored.Nodes[2]);
+        Assert.Equal("builtin:compressor", n2.Type);
+
+        // Node 3: standalone
+        var n3 = Assert.IsType<PluginNodeConfig>(restored.Nodes[3]);
+        Assert.Equal("builtin:output-send", n3.Type);
+    }
+
+    [Fact]
+    public void NodeTree_FlattenPlugins_CorrectOrder()
+    {
+        var nodes = new List<ChainNodeConfig>
+        {
+            new PluginNodeConfig { InstanceId = 1, Type = "A" },
+            new ContainerNodeConfig { ContainerId = 1, Name = "C1", Plugins =
+            {
+                new PluginNodeConfig { InstanceId = 2, Type = "B" },
+                new PluginNodeConfig { InstanceId = 3, Type = "C" }
+            }},
+            new PluginNodeConfig { InstanceId = 4, Type = "D" }
+        };
+
+        var flat = ChainNodeHelpers.FlattenPlugins(nodes);
+
+        Assert.Equal(4, flat.Count);
+        Assert.Equal("A", flat[0].Type);
+        Assert.Equal("B", flat[1].Type);
+        Assert.Equal("C", flat[2].Type);
+        Assert.Equal("D", flat[3].Type);
+    }
+
+    [Fact]
+    public void NodeTree_MigrateFromLegacy_PreservesOrderAndContainers()
+    {
+#pragma warning disable CS0618
+        var plugins = new List<PluginConfig>
+        {
+            new() { InstanceId = 1, Type = "builtin:input" },
+            new() { InstanceId = 2, Type = "builtin:hpf" },
+            new() { InstanceId = 3, Type = "builtin:denoiser" },
+            new() { InstanceId = 4, Type = "builtin:compressor" },
+            new() { InstanceId = 5, Type = "builtin:output-send" }
+        };
+        var containers = new List<PluginContainerConfig>
+        {
+            new() { Id = 1, Name = "Noise", PluginInstanceIds = { 2, 3 } }
+        };
+#pragma warning restore CS0618
+
+        var nodes = ChainNodeHelpers.MigrateFromLegacy(plugins, containers);
+
+        // Should be: Input, Container(HPF, Denoiser), Compressor, OutputSend
+        Assert.Equal(4, nodes.Count);
+
+        Assert.IsType<PluginNodeConfig>(nodes[0]);
+        Assert.Equal("builtin:input", ((PluginNodeConfig)nodes[0]).Type);
+
+        var container = Assert.IsType<ContainerNodeConfig>(nodes[1]);
+        Assert.Equal("Noise", container.Name);
+        Assert.Equal(2, container.Plugins.Count);
+        Assert.Equal("builtin:hpf", container.Plugins[0].Type);
+        Assert.Equal("builtin:denoiser", container.Plugins[1].Type);
+
+        Assert.Equal("builtin:compressor", ((PluginNodeConfig)nodes[2]).Type);
+        Assert.Equal("builtin:output-send", ((PluginNodeConfig)nodes[3]).Type);
+    }
+
+    [Fact]
+    public void NodeTree_RemovePlugin_FromContainer()
+    {
+        var nodes = new List<ChainNodeConfig>
+        {
+            new PluginNodeConfig { InstanceId = 1, Type = "A" },
+            new ContainerNodeConfig { ContainerId = 1, Name = "C1", Plugins =
+            {
+                new PluginNodeConfig { InstanceId = 2, Type = "B" },
+                new PluginNodeConfig { InstanceId = 3, Type = "C" }
+            }},
+            new PluginNodeConfig { InstanceId = 4, Type = "D" }
+        };
+
+        Assert.True(ChainNodeHelpers.RemovePlugin(nodes, 2, out var removed));
+        Assert.Equal("B", removed!.Type);
+
+        // Container should now have 1 child
+        var container = Assert.IsType<ContainerNodeConfig>(nodes[1]);
+        Assert.Single(container.Plugins);
+        Assert.Equal("C", container.Plugins[0].Type);
+    }
+
+    [Fact]
+    public void NodeTree_FindContainerForPlugin_ReturnsCorrectContainer()
+    {
+        var nodes = new List<ChainNodeConfig>
+        {
+            new PluginNodeConfig { InstanceId = 1, Type = "A" },
+            new ContainerNodeConfig { ContainerId = 10, Name = "C1", Plugins =
+            {
+                new PluginNodeConfig { InstanceId = 2, Type = "B" },
+            }},
+        };
+
+        Assert.Null(ChainNodeHelpers.FindContainerForPlugin(nodes, 1));
+        Assert.Equal(10, ChainNodeHelpers.FindContainerForPlugin(nodes, 2)!.ContainerId);
     }
 }
