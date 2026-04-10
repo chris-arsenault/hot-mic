@@ -117,7 +117,8 @@ internal sealed class MainPluginCoordinator
         var graphs = new PluginGraph[channelCount];
         for (int i = 0; i < channelCount; i++)
         {
-            graphs[i] = new PluginGraph(AudioEngine.Channels[i].PluginChain);
+            var config = _getOrCreateChannelConfig(i);
+            graphs[i] = new PluginGraph(AudioEngine.Channels[i].PluginChain, config);
         }
 
         _pluginGraphs = graphs;
@@ -140,7 +141,7 @@ internal sealed class MainPluginCoordinator
         {
             var graph = _pluginGraphs[i];
             var config = _getOrCreateChannelConfig(i);
-            if (graph.SyncNodesFromChain(config))
+            if (graph.SyncNodesFromChain())
             {
                 changed = true;
             }
@@ -1652,7 +1653,7 @@ internal sealed class MainPluginCoordinator
 
         if (changed)
         {
-            graph.SyncNodesFromChain(config);
+            graph.SyncNodesFromChain();
         }
 
         return changed;
@@ -1907,7 +1908,7 @@ internal sealed class MainPluginCoordinator
             }
 
             config.Nodes = nodeTree;
-            GetGraph(channelIndex)?.SyncNodesFromChain(config);
+            GetGraph(channelIndex)?.SyncNodesFromChain();
             NormalizeInputPluginOrder(channelIndex, config);
             _configManager.Save(Config);
 

@@ -12,13 +12,14 @@ namespace HotMic.Core.Plugins;
 public sealed class PluginGraph
 {
     private readonly PluginChain _chain;
-    private ChannelConfig? _config;
+    private ChannelConfig _config;
     private readonly Dictionary<int, PluginSlot> _slotById = new();
     private int _nextInstanceId;
 
-    public PluginGraph(PluginChain chain)
+    public PluginGraph(PluginChain chain, ChannelConfig config)
     {
         _chain = chain ?? throw new ArgumentNullException(nameof(chain));
+        _config = config ?? throw new ArgumentNullException(nameof(config));
     }
 
     public PluginSlot?[] GetSlotsSnapshot() => _chain.GetSnapshot();
@@ -111,7 +112,7 @@ public sealed class PluginGraph
     public bool TryGetPluginConfig(int instanceId, out PluginNodeConfig config)
     {
         config = null!;
-        if (_config is null || instanceId <= 0) return false;
+        if (instanceId <= 0) return false;
         config = ChainNodeHelpers.FindPlugin(_config.Nodes, instanceId)!;
         return config is not null;
     }
@@ -122,7 +123,6 @@ public sealed class PluginGraph
     public int InsertPlugin(IPlugin plugin, int insertIndex)
     {
         ArgumentNullException.ThrowIfNull(plugin);
-        if (_config is null) return 0;
 
         int instanceId = ++_nextInstanceId;
         var node = CreatePluginNode(instanceId, plugin);
@@ -140,7 +140,6 @@ public sealed class PluginGraph
     public int InsertPluginIntoContainer(IPlugin plugin, int containerId, int containerIndex)
     {
         ArgumentNullException.ThrowIfNull(plugin);
-        if (_config is null) return 0;
 
         var container = ChainNodeHelpers.FindContainer(_config.Nodes, containerId);
         if (container is null) return 0;
@@ -162,7 +161,7 @@ public sealed class PluginGraph
     public bool RemovePlugin(int instanceId, out PluginSlot? removedSlot)
     {
         removedSlot = null;
-        if (_config is null || instanceId <= 0) return false;
+        if (instanceId <= 0) return false;
 
         if (!ChainNodeHelpers.RemovePlugin(_config.Nodes, instanceId, out _))
             return false;
@@ -179,7 +178,7 @@ public sealed class PluginGraph
     /// </summary>
     public bool MovePlugin(int instanceId, int targetIndex)
     {
-        if (_config is null || instanceId <= 0) return false;
+        if (instanceId <= 0) return false;
 
         int currentIndex = ChainNodeHelpers.FlatIndex(_config.Nodes, instanceId);
         if (currentIndex < 0 || currentIndex == targetIndex) return false;
@@ -199,7 +198,7 @@ public sealed class PluginGraph
     /// </summary>
     public bool MovePluginWithinContainer(int instanceId, int containerId, int targetIndex)
     {
-        if (_config is null || instanceId <= 0 || containerId <= 0) return false;
+        if (instanceId <= 0 || containerId <= 0) return false;
 
         var container = ChainNodeHelpers.FindContainer(_config.Nodes, containerId);
         if (container is null || container.Plugins.Count <= 1) return false;
@@ -230,7 +229,6 @@ public sealed class PluginGraph
     /// </summary>
     public int CreateContainer(string name)
     {
-        if (_config is null) throw new InvalidOperationException("Graph is not initialized.");
 
         int nextId = 1;
         foreach (var node in _config.Nodes)
@@ -256,7 +254,7 @@ public sealed class PluginGraph
     /// </summary>
     public bool RemoveContainer(int containerId)
     {
-        if (_config is null || containerId <= 0) return false;
+        if (containerId <= 0) return false;
 
         for (int i = 0; i < _config.Nodes.Count; i++)
         {
@@ -280,7 +278,7 @@ public sealed class PluginGraph
     /// </summary>
     public bool SetContainerBypass(int containerId, bool bypassed)
     {
-        if (_config is null || containerId <= 0) return false;
+        if (containerId <= 0) return false;
 
         var container = ChainNodeHelpers.FindContainer(_config.Nodes, containerId);
         if (container is null) return false;
@@ -300,7 +298,7 @@ public sealed class PluginGraph
     /// </summary>
     public bool RenameContainer(int containerId, string newName)
     {
-        if (_config is null || containerId <= 0) return false;
+        if (containerId <= 0) return false;
 
         var container = ChainNodeHelpers.FindContainer(_config.Nodes, containerId);
         if (container is null) return false;
@@ -314,7 +312,7 @@ public sealed class PluginGraph
     /// </summary>
     public bool AssignPluginToContainer(int instanceId, int containerId)
     {
-        if (_config is null || instanceId <= 0) return false;
+        if (instanceId <= 0) return false;
 
         // Remove from current location
         if (!ChainNodeHelpers.RemovePlugin(_config.Nodes, instanceId, out var pluginNode) || pluginNode is null)
@@ -350,7 +348,7 @@ public sealed class PluginGraph
     /// </summary>
     public bool MoveContainer(int containerId, int targetIndex)
     {
-        if (_config is null || containerId <= 0) return false;
+        if (containerId <= 0) return false;
 
         // Find and remove the container
         ContainerNodeConfig? moving = null;
@@ -402,7 +400,6 @@ public sealed class PluginGraph
     /// </summary>
     public IReadOnlyList<ContainerNodeConfig> GetContainers()
     {
-        if (_config is null) return Array.Empty<ContainerNodeConfig>();
         var result = new List<ContainerNodeConfig>();
         foreach (var node in _config.Nodes)
         {
@@ -448,11 +445,8 @@ public sealed class PluginGraph
     /// Synchronize the node tree from the current chain state.
     /// Used after external chain modifications (e.g., preset load via ReplaceAll).
     /// </summary>
-    public bool SyncNodesFromChain(ChannelConfig? config = null)
+    public bool SyncNodesFromChain()
     {
-        if (config is not null)
-            _config = config;
-        if (_config is null) return false;
 
         var slots = _chain.GetSnapshot();
         var nodePlugins = ChainNodeHelpers.FlattenPlugins(_config.Nodes);
@@ -491,7 +485,6 @@ public sealed class PluginGraph
     /// </summary>
     private void FlattenToChain()
     {
-        if (_config is null) return;
 
         var flattened = ChainNodeHelpers.FlattenPlugins(_config.Nodes);
         var slots = new PluginSlot?[flattened.Count];
@@ -588,7 +581,6 @@ public sealed class PluginGraph
     /// </summary>
     public IReadOnlyList<ChainPresetContainer> BuildPresetContainers()
     {
-        if (_config is null) return Array.Empty<ChainPresetContainer>();
 
         var flat = ChainNodeHelpers.FlattenPlugins(_config.Nodes);
         var indexMap = new Dictionary<int, int>(flat.Count);
@@ -617,7 +609,6 @@ public sealed class PluginGraph
     /// </summary>
     public void SyncLegacyConfigFromNodes()
     {
-        if (_config is null) return;
 
         _config.Plugins.Clear();
         _config.Containers.Clear();
