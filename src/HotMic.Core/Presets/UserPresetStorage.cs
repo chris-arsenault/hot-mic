@@ -18,6 +18,8 @@ public sealed class StoredChainEntry
 {
     public string PluginId { get; set; } = string.Empty;
     public Dictionary<string, float> Parameters { get; set; } = new();
+    public string? ContainerName { get; set; }
+    public bool ContainerBypassed { get; set; }
 }
 
 public sealed class StoredChainContainer

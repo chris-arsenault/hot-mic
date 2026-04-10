@@ -51,7 +51,12 @@ public sealed class PluginPresetBank
     }
 }
 
-public sealed record ChainPresetEntry(string PluginId, string PresetName, IReadOnlyDictionary<string, float>? Parameters = null);
+public sealed record ChainPresetEntry(
+    string PluginId,
+    string PresetName,
+    IReadOnlyDictionary<string, float>? Parameters = null,
+    string? ContainerName = null,
+    bool ContainerBypassed = false);
 
 public sealed record ChainPresetContainer(string Name, IReadOnlyList<int> PluginIndices, bool IsBypassed = false);
 

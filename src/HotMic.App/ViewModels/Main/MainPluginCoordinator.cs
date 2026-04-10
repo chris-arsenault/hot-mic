@@ -1713,7 +1713,7 @@ internal sealed class MainPluginCoordinator
             var profile = _getQualityProfile();
             int extraSlotCount = preservedInputSlot is null ? 0 : 1;
             var pluginSlots = new List<PluginSlot>(chainPreset.Entries.Count + extraSlotCount);
-            var pluginConfigs = new List<PluginConfig>(chainPreset.Entries.Count);
+            var pluginConfigs = new List<(PluginConfig Config, ChainPresetEntry Entry)>(chainPreset.Entries.Count);
             int nextInstanceId = 0;
 
             if (preservedInputSlot is not null)
@@ -1721,11 +1721,6 @@ internal sealed class MainPluginCoordinator
                 pluginSlots.Add(preservedInputSlot);
                 nextInstanceId = Math.Max(nextInstanceId, preservedInputSlot.InstanceId);
             }
-
-            // Map from original preset entry index → pluginConfigs index.
-            // Entries may be skipped (preserved input, factory failure), so
-            // container PluginIndices must be remapped.
-            var entryIndexToConfigIndex = new Dictionary<int, int>();
 
             for (int entryIdx = 0; entryIdx < chainPreset.Entries.Count; entryIdx++)
             {
@@ -1771,13 +1766,39 @@ internal sealed class MainPluginCoordinator
                 foreach (var kvp in parameterMap)
                     pc.Parameters[kvp.Key] = kvp.Value;
 
-                entryIndexToConfigIndex[entryIdx] = pluginConfigs.Count;
-                pluginConfigs.Add(pc);
+                pluginConfigs.Add((pc, entry));
             }
 
+            // Build containers by grouping entries that share a ContainerName.
+            // Each pluginConfig is paired with its source entry, so no index mapping needed.
             var containerConfigs = new List<PluginContainerConfig>();
-            if (chainPreset.Containers.Count > 0)
+            bool hasEntryContainers = pluginConfigs.Any(p => !string.IsNullOrEmpty(p.Entry.ContainerName));
+
+            if (hasEntryContainers)
             {
+                int nextContainerId = 0;
+                var containerMap = new Dictionary<string, PluginContainerConfig>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (config, sourceEntry) in pluginConfigs)
+                {
+                    if (string.IsNullOrEmpty(sourceEntry.ContainerName)) continue;
+
+                    if (!containerMap.TryGetValue(sourceEntry.ContainerName, out var cc))
+                    {
+                        cc = new PluginContainerConfig
+                        {
+                            Id = ++nextContainerId,
+                            Name = sourceEntry.ContainerName,
+                            IsBypassed = sourceEntry.ContainerBypassed
+                        };
+                        containerMap[sourceEntry.ContainerName] = cc;
+                        containerConfigs.Add(cc);
+                    }
+                    cc.PluginInstanceIds.Add(config.InstanceId);
+                }
+            }
+            else if (chainPreset.Containers.Count > 0)
+            {
+                // Legacy fallback: use PluginIndices (old saved presets)
                 int nextContainerId = 0;
                 for (int i = 0; i < chainPreset.Containers.Count; i++)
                 {
@@ -1785,11 +1806,10 @@ internal sealed class MainPluginCoordinator
                     var ids = new List<int>();
                     for (int j = 0; j < container.PluginIndices.Count; j++)
                     {
-                        int presetIndex = container.PluginIndices[j];
-                        if (entryIndexToConfigIndex.TryGetValue(presetIndex, out int configIndex)
-                            && (uint)configIndex < (uint)pluginConfigs.Count)
+                        int index = container.PluginIndices[j];
+                        if ((uint)index < (uint)pluginConfigs.Count)
                         {
-                            ids.Add(pluginConfigs[configIndex].InstanceId);
+                            ids.Add(pluginConfigs[index].Config.InstanceId);
                         }
                     }
 
@@ -1833,9 +1853,9 @@ internal sealed class MainPluginCoordinator
 
                     for (int i = 0; i < pluginConfigs.Count; i++)
                     {
-                        if (bypassed.Contains(pluginConfigs[i].InstanceId))
+                        if (bypassed.Contains(pluginConfigs[i].Config.InstanceId))
                         {
-                            pluginConfigs[i].IsBypassed = true;
+                            pluginConfigs[i].Config.IsBypassed = true;
                         }
                     }
                 }
@@ -1847,7 +1867,7 @@ internal sealed class MainPluginCoordinator
 
             config.PresetName = chainPreset.Name;
             config.Plugins.Clear();
-            config.Plugins.AddRange(pluginConfigs);
+            config.Plugins.AddRange(pluginConfigs.Select(p => p.Config));
             config.Containers.Clear();
             config.Containers.AddRange(containerConfigs);
             GetGraph(channelIndex)?.SyncWithChain(config);

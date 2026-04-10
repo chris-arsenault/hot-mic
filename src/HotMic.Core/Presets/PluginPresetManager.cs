@@ -66,13 +66,43 @@ public sealed class PluginPresetManager
             foreach (var plugin in stored.Plugins)
             {
                 var parameters = new Dictionary<string, float>(plugin.Parameters, StringComparer.OrdinalIgnoreCase);
-                entries.Add(new ChainPresetEntry(plugin.PluginId, CustomPresetName, parameters));
+                entries.Add(new ChainPresetEntry(plugin.PluginId, CustomPresetName, parameters,
+                    plugin.ContainerName, plugin.ContainerBypassed));
             }
 
+            // Build containers from per-entry ContainerName (new format).
+            // Fall back to legacy PluginIndices if no entries have ContainerName.
+            bool hasEntryContainers = entries.Any(e => !string.IsNullOrEmpty(e.ContainerName));
             var containers = new List<ChainPresetContainer>();
-            foreach (var container in stored.Containers)
+
+            if (hasEntryContainers)
             {
-                containers.Add(new ChainPresetContainer(container.Name, container.PluginIndices.ToArray(), container.IsBypassed));
+                // New format: group entries by ContainerName
+                var seen = new Dictionary<string, (List<int> Indices, bool Bypassed)>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < entries.Count; i++)
+                {
+                    var entry = entries[i];
+                    if (string.IsNullOrEmpty(entry.ContainerName))
+                        continue;
+                    if (!seen.TryGetValue(entry.ContainerName, out var group))
+                    {
+                        group = (new List<int>(), entry.ContainerBypassed);
+                        seen[entry.ContainerName] = group;
+                    }
+                    group.Indices.Add(i);
+                }
+                foreach (var (name, (indices, bypassed)) in seen)
+                {
+                    containers.Add(new ChainPresetContainer(name, indices, bypassed));
+                }
+            }
+            else
+            {
+                // Legacy format: PluginIndices on separate container objects
+                foreach (var container in stored.Containers)
+                {
+                    containers.Add(new ChainPresetContainer(container.Name, container.PluginIndices.ToArray(), container.IsBypassed));
+                }
             }
 
             var preset = new ChainPreset(stored.Name, entries, IsBuiltIn: false)
@@ -139,32 +169,48 @@ public sealed class PluginPresetManager
             return false;
         }
 
-        var stored = new StoredChainPreset { Name = name };
-        stored.Plugins.AddRange(plugins.Select(p =>
+        // Build index → container lookup from the container list
+        var indexToContainer = new Dictionary<int, (string Name, bool Bypassed)>();
+        if (containers is not null)
         {
+            foreach (var c in containers)
+            {
+                foreach (int idx in c.PluginIndices)
+                    indexToContainer[idx] = (c.Name, c.IsBypassed);
+            }
+        }
+
+        var stored = new StoredChainPreset { Name = name };
+        for (int i = 0; i < plugins.Count; i++)
+        {
+            var p = plugins[i];
             var entry = new StoredChainEntry { PluginId = p.pluginId };
             foreach (var kvp in p.parameters)
                 entry.Parameters[kvp.Key] = kvp.Value;
-            return entry;
-        }));
-        if (containers is not null)
-        {
-            stored.Containers.AddRange(containers.Select(c =>
+            if (indexToContainer.TryGetValue(i, out var container))
             {
-                var cc = new StoredChainContainer { Name = c.Name, IsBypassed = c.IsBypassed };
-                cc.PluginIndices.AddRange(c.PluginIndices);
-                return cc;
-            }));
+                entry.ContainerName = container.Name;
+                entry.ContainerBypassed = container.Bypassed;
+            }
+            stored.Plugins.Add(entry);
         }
+        // No longer write separate Containers list — container membership
+        // is embedded in each entry via ContainerName.
 
         if (!_storage.SaveChainPreset(stored))
         {
             return false;
         }
 
-        // Update in-memory cache
-        var entries = plugins.Select(p =>
-            new ChainPresetEntry(p.pluginId, CustomPresetName, p.parameters)).ToList();
+        // Update in-memory cache with container membership on each entry
+        var entries = new List<ChainPresetEntry>(plugins.Count);
+        for (int i = 0; i < plugins.Count; i++)
+        {
+            var p = plugins[i];
+            indexToContainer.TryGetValue(i, out var c);
+            entries.Add(new ChainPresetEntry(p.pluginId, CustomPresetName, p.parameters,
+                c.Name, c.Bypassed));
+        }
         var preset = new ChainPreset(name, entries, IsBuiltIn: false)
         {
             Containers = containers ?? Array.Empty<ChainPresetContainer>()
