@@ -140,7 +140,7 @@ internal sealed class MainPluginCoordinator
         {
             var graph = _pluginGraphs[i];
             var config = _getOrCreateChannelConfig(i);
-            if (graph.SyncNodesFromChain())
+            if (graph.SyncNodesFromChain(config))
             {
                 changed = true;
             }
@@ -1652,7 +1652,7 @@ internal sealed class MainPluginCoordinator
 
         if (changed)
         {
-            graph.SyncNodesFromChain();
+            graph.SyncNodesFromChain(config);
         }
 
         return changed;
@@ -1907,7 +1907,7 @@ internal sealed class MainPluginCoordinator
             }
 
             config.Nodes = nodeTree;
-            GetGraph(channelIndex)?.SyncNodesFromChain();
+            GetGraph(channelIndex)?.SyncNodesFromChain(config);
             NormalizeInputPluginOrder(channelIndex, config);
             _configManager.Save(Config);
 

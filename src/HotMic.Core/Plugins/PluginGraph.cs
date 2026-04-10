@@ -448,8 +448,10 @@ public sealed class PluginGraph
     /// Synchronize the node tree from the current chain state.
     /// Used after external chain modifications (e.g., preset load via ReplaceAll).
     /// </summary>
-    public bool SyncNodesFromChain()
+    public bool SyncNodesFromChain(ChannelConfig? config = null)
     {
+        if (config is not null)
+            _config = config;
         if (_config is null) return false;
 
         var slots = _chain.GetSnapshot();
