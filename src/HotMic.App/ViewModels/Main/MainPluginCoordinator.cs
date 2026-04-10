@@ -1722,8 +1722,15 @@ internal sealed class MainPluginCoordinator
                 nextInstanceId = Math.Max(nextInstanceId, preservedInputSlot.InstanceId);
             }
 
-            foreach (var entry in chainPreset.Entries)
+            // Map from original preset entry index → pluginConfigs index.
+            // Entries may be skipped (preserved input, factory failure), so
+            // container PluginIndices must be remapped.
+            var entryIndexToConfigIndex = new Dictionary<int, int>();
+
+            for (int entryIdx = 0; entryIdx < chainPreset.Entries.Count; entryIdx++)
             {
+                var entry = chainPreset.Entries[entryIdx];
+
                 if (preservedInputSlot is not null &&
                     (string.Equals(entry.PluginId, "builtin:input", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(entry.PluginId, "builtin:bus-input", StringComparison.OrdinalIgnoreCase)))
@@ -1763,6 +1770,8 @@ internal sealed class MainPluginCoordinator
                 };
                 foreach (var kvp in parameterMap)
                     pc.Parameters[kvp.Key] = kvp.Value;
+
+                entryIndexToConfigIndex[entryIdx] = pluginConfigs.Count;
                 pluginConfigs.Add(pc);
             }
 
@@ -1776,10 +1785,11 @@ internal sealed class MainPluginCoordinator
                     var ids = new List<int>();
                     for (int j = 0; j < container.PluginIndices.Count; j++)
                     {
-                        int index = container.PluginIndices[j];
-                        if ((uint)index < (uint)pluginConfigs.Count)
+                        int presetIndex = container.PluginIndices[j];
+                        if (entryIndexToConfigIndex.TryGetValue(presetIndex, out int configIndex)
+                            && (uint)configIndex < (uint)pluginConfigs.Count)
                         {
-                            ids.Add(pluginConfigs[index].InstanceId);
+                            ids.Add(pluginConfigs[configIndex].InstanceId);
                         }
                     }
 
