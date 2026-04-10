@@ -414,6 +414,11 @@ public sealed class PluginChain
 
                 plugin.Process(buffer, context);
 
+                // Protect the chain from NaN/Inf propagation.
+                // A single bad sample from any plugin would poison every
+                // downstream plugin and the output. Replace with silence.
+                SanitizeBuffer(buffer);
+
                 if (profilingEnabled)
                 {
                     long elapsedTicks = Stopwatch.GetTimestamp() - startTicks;
@@ -799,6 +804,26 @@ public sealed class PluginChain
         for (int i = 0; i < slots.Length; i++)
         {
             slots[i]?.ResetProfiling();
+        }
+    }
+
+    /// <summary>
+    /// Replace NaN, Infinity, and denormal values with zero.
+    /// Prevents a single misbehaving plugin from poisoning downstream processing.
+    /// </summary>
+    private static void SanitizeBuffer(Span<float> buffer)
+    {
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            float v = buffer[i];
+            // Catch NaN, +/-Inf, and denormals in one check.
+            // A normal float has bits in the exponent; denormals and specials don't
+            // pass the finite + magnitude check.
+            if (!float.IsFinite(v) || MathF.Abs(v) > 10f)
+            {
+                // Hard-clip to +/-10 (≈+20dBFS). NaN/Inf → 0.
+                buffer[i] = float.IsFinite(v) ? MathF.CopySign(10f, v) : 0f;
+            }
         }
     }
 }

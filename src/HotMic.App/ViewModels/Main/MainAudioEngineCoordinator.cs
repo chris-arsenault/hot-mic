@@ -93,7 +93,7 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         }
 
         AudioEngine.Dispose();
-        using var engine = new AudioEngine(config.AudioSettings, config.Channels.Count);
+        var engine = new AudioEngine(config.AudioSettings, config.Channels.Count);
         _setAudioEngine(engine);
         AttachAnalysisOrchestrator(engine, config.AudioSettings.SampleRate);
     }
@@ -180,7 +180,7 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         AudioEngine.Dispose();
 
         var config = _getConfig();
-        using var engine = new AudioEngine(config.AudioSettings, Math.Max(1, config.Channels.Count));
+        var engine = new AudioEngine(config.AudioSettings, Math.Max(1, config.Channels.Count));
         _setAudioEngine(engine);
 
         AttachAnalysisOrchestrator(engine, config.AudioSettings.SampleRate);
@@ -261,7 +261,7 @@ internal sealed class MainAudioEngineCoordinator : IDisposable
         AudioEngine.Dispose();
 
         var config = _getConfig();
-        using var engine = new AudioEngine(config.AudioSettings, Math.Max(1, config.Channels.Count));
+        var engine = new AudioEngine(config.AudioSettings, Math.Max(1, config.Channels.Count));
         _setAudioEngine(engine);
         AttachAnalysisOrchestrator(engine, config.AudioSettings.SampleRate);
 

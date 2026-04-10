@@ -230,7 +230,7 @@ public sealed class DereverbPlugin : IPlugin, IQualityConfigurablePlugin
 
             float zMag2 = zR * zR + zI * zI;
             _power[f] = alpha * _power[f] + (1f - alpha) * zMag2;
-            float pwr = _power[f];
+            float pwr = MathF.Max(_power[f], 1e-8f);
 
             float[] covR = _invCovReal[f], covI = _invCovImag[f];
             for (int i = 0; i < taps; i++)
@@ -265,6 +265,7 @@ public sealed class DereverbPlugin : IPlugin, IQualityConfigurablePlugin
             }
 
             float invAlpha = 1f / alpha;
+            bool covBlown = false;
             for (int i = 0; i < taps; i++)
             {
                 int row = i * taps;
@@ -273,9 +274,36 @@ public sealed class DereverbPlugin : IPlugin, IQualityConfigurablePlugin
                 {
                     float outerR = kR * _numR[j] + kI * _numI[j];
                     float outerI = kI * _numR[j] - kR * _numI[j];
-                    covR[row + j] = (covR[row + j] - outerR) * invAlpha;
-                    covI[row + j] = (covI[row + j] - outerI) * invAlpha;
+                    float newR = (covR[row + j] - outerR) * invAlpha;
+                    float newI = (covI[row + j] - outerI) * invAlpha;
+                    // Detect divergence: if any entry is NaN/Inf or absurdly large, reset
+                    if (!float.IsFinite(newR) || !float.IsFinite(newI) ||
+                        MathF.Abs(newR) > 1e6f || MathF.Abs(newI) > 1e6f)
+                    {
+                        covBlown = true;
+                        break;
+                    }
+                    covR[row + j] = newR;
+                    covI[row + j] = newI;
                 }
+                if (covBlown) break;
+            }
+
+            if (covBlown)
+            {
+                // Reset this bin's state to identity — the filter will re-converge
+                Array.Clear(covR);
+                Array.Clear(covI);
+                for (int i = 0; i < taps; i++)
+                    covR[i * taps + i] = 1f;
+                Array.Clear(tR);
+                Array.Clear(tI);
+                _power[f] = 1e-6f;
+                _frameBufReal[_frameIdx][f] = yR;
+                _frameBufImag[_frameIdx][f] = yI;
+                outReal[f] = yR;
+                outImag[f] = yI;
+                continue;
             }
 
             for (int k = 0; k < taps; k++)
