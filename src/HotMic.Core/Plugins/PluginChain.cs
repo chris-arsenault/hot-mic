@@ -37,6 +37,8 @@ public sealed class PluginChain
         RebuildInputStageIndex(_slots);
     }
 
+    public int SampleRate => _sampleRate;
+
     public int Count => Volatile.Read(ref _slots).Length;
 
     public int ActiveCount

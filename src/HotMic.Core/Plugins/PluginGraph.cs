@@ -6,889 +6,664 @@ namespace HotMic.Core.Plugins;
 
 /// <summary>
 /// Canonical manager for plugin order and container grouping for a single channel.
+/// The node tree (config.Nodes) is the single source of truth. The flat PluginChain
+/// is derived from it on every mutation via FlattenToChain().
 /// </summary>
 public sealed class PluginGraph
 {
     private readonly PluginChain _chain;
     private ChannelConfig? _config;
-    private readonly Dictionary<int, PluginConfig> _configById = new();
-    private readonly Dictionary<int, PluginContainerConfig> _containersById = new();
+    private readonly Dictionary<int, PluginSlot> _slotById = new();
+    private int _nextInstanceId;
 
-    /// <summary>
-    /// Creates a new graph bound to the provided plugin chain.
-    /// </summary>
-    /// <param name="chain">The audio plugin chain to keep in sync.</param>
     public PluginGraph(PluginChain chain)
     {
         _chain = chain ?? throw new ArgumentNullException(nameof(chain));
     }
 
-    /// <summary>
-    /// Gets the current plugin chain snapshot.
-    /// </summary>
     public PluginSlot?[] GetSlotsSnapshot() => _chain.GetSnapshot();
 
     /// <summary>
-    /// Loads plugins from config using the provided slot factory and updates the chain.
-    /// Returns true if the config was normalized or modified.
+    /// Loads plugins from the node tree in config, creating slots via the factory.
+    /// Handles migration from legacy Plugins+Containers format.
     /// </summary>
-    public bool LoadFromConfig(ChannelConfig config, Func<PluginConfig, PluginSlot?> slotFactory)
+    public bool LoadFromConfig(ChannelConfig config, Func<PluginNodeConfig, PluginSlot?> slotFactory)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(slotFactory);
 
         _config = config;
 
-        bool changed = false;
-        int nextInstanceId = 0;
-        for (int i = 0; i < config.Plugins.Count; i++)
+        // Migrate legacy format if needed
+#pragma warning disable CS0618
+        if (config.Nodes.Count == 0 && config.Plugins.Count > 0)
         {
-            if (config.Plugins[i].InstanceId > nextInstanceId)
-            {
-                nextInstanceId = config.Plugins[i].InstanceId;
-            }
-        }
-
-        var usedIds = new HashSet<int>();
-        var slots = new List<PluginSlot>(config.Plugins.Count);
-        var orderedConfigs = new List<PluginConfig>(config.Plugins.Count);
-
-        for (int i = 0; i < config.Plugins.Count; i++)
-        {
-            var pluginConfig = config.Plugins[i];
-            if (string.IsNullOrWhiteSpace(pluginConfig.Type))
-            {
-                changed = true;
-                continue;
-            }
-
-            int instanceId = pluginConfig.InstanceId;
-            if (instanceId <= 0 || usedIds.Contains(instanceId))
-            {
-                instanceId = ++nextInstanceId;
-                pluginConfig.InstanceId = instanceId;
-                changed = true;
-            }
-            usedIds.Add(instanceId);
-
-            var slot = slotFactory(pluginConfig);
-            if (slot is null)
-            {
-                changed = true;
-                continue;
-            }
-
-            slots.Add(slot);
-            orderedConfigs.Add(pluginConfig);
-        }
-
-        if (orderedConfigs.Count != config.Plugins.Count)
-        {
+            config.Nodes = ChainNodeHelpers.MigrateFromLegacy(config.Plugins, config.Containers);
             config.Plugins.Clear();
-            config.Plugins.AddRange(orderedConfigs);
-            changed = true;
+            config.Containers.Clear();
+        }
+#pragma warning restore CS0618
+
+        bool changed = false;
+        var usedIds = new HashSet<int>();
+        _nextInstanceId = 0;
+        _slotById.Clear();
+
+        // Assign IDs and create slots for all plugins in the tree
+        foreach (var pluginNode in ChainNodeHelpers.FlattenPlugins(config.Nodes))
+        {
+            if (string.IsNullOrWhiteSpace(pluginNode.Type))
+            {
+                changed = true;
+                continue;
+            }
+
+            if (pluginNode.InstanceId <= 0 || usedIds.Contains(pluginNode.InstanceId))
+            {
+                pluginNode.InstanceId = ++_nextInstanceId;
+                changed = true;
+            }
+            else if (pluginNode.InstanceId > _nextInstanceId)
+            {
+                _nextInstanceId = pluginNode.InstanceId;
+            }
+            usedIds.Add(pluginNode.InstanceId);
+
+            var slot = slotFactory(pluginNode);
+            if (slot is not null)
+            {
+                _slotById[pluginNode.InstanceId] = slot;
+            }
+            else
+            {
+                changed = true;
+            }
         }
 
-        _chain.ReplaceAll(slots.ToArray());
-        changed |= SyncWithChain(config);
+        // Remove nodes for plugins that failed to create
+        PruneFailedPlugins(config.Nodes);
+
+        // Assign container IDs
+        int nextContainerId = 0;
+        foreach (var node in config.Nodes)
+        {
+            if (node is ContainerNodeConfig c)
+            {
+                if (c.ContainerId <= 0)
+                {
+                    c.ContainerId = ++nextContainerId;
+                    changed = true;
+                }
+                else if (c.ContainerId > nextContainerId)
+                {
+                    nextContainerId = c.ContainerId;
+                }
+            }
+        }
+
+        FlattenToChain();
         return changed;
     }
 
     /// <summary>
-    /// Synchronizes config ordering and container state from the current chain snapshot.
-    /// Returns true if the config was normalized or modified.
+    /// Looks up a plugin node config by instance ID in the current tree.
     /// </summary>
-    public bool SyncWithChain(ChannelConfig config)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-
-        _config = config;
-        bool configChanged = SyncConfigOrder();
-        bool containersChanged = NormalizeContainers();
-        return configChanged || containersChanged;
-    }
-
-    /// <summary>
-    /// Attempts to resolve a plugin config by instance id.
-    /// </summary>
-    public bool TryGetPluginConfig(int instanceId, out PluginConfig config)
+    public bool TryGetPluginConfig(int instanceId, out PluginNodeConfig config)
     {
         config = null!;
-        if (instanceId <= 0)
-        {
-            return false;
-        }
-
-        if (_configById.TryGetValue(instanceId, out var found) && found is not null)
-        {
-            config = found;
-            return true;
-        }
-
-        if (_config is null)
-        {
-            return false;
-        }
-
-        SyncConfigOrder();
-        if (_configById.TryGetValue(instanceId, out var refreshed) && refreshed is not null)
-        {
-            config = refreshed;
-            return true;
-        }
-
-        return false;
+        if (_config is null || instanceId <= 0) return false;
+        config = ChainNodeHelpers.FindPlugin(_config.Nodes, instanceId)!;
+        return config is not null;
     }
 
     /// <summary>
-    /// Inserts a plugin into the chain at the requested index and updates config.
+    /// Inserts a plugin at the given flat chain index.
     /// </summary>
     public int InsertPlugin(IPlugin plugin, int insertIndex)
     {
         ArgumentNullException.ThrowIfNull(plugin);
+        if (_config is null) return 0;
 
-        int instanceId = _chain.InsertSlot(insertIndex, plugin);
-        if (instanceId <= 0)
-        {
-            return 0;
-        }
+        int instanceId = ++_nextInstanceId;
+        var node = CreatePluginNode(instanceId, plugin);
+        var slot = new PluginSlot(instanceId, plugin, _chain.SampleRate);
+        _slotById[instanceId] = slot;
 
-        SyncConfigOrder();
-        NormalizeContainers();
+        InsertNodeAtFlatIndex(_config.Nodes, node, insertIndex);
+        FlattenToChain();
         return instanceId;
     }
 
     /// <summary>
-    /// Inserts a plugin into the specified container at the container-relative index.
+    /// Inserts a plugin into a container at the container-relative index.
     /// </summary>
     public int InsertPluginIntoContainer(IPlugin plugin, int containerId, int containerIndex)
     {
         ArgumentNullException.ThrowIfNull(plugin);
+        if (_config is null) return 0;
 
-        int insertIndex = ResolveContainerInsertIndex(containerId, containerIndex);
-        int instanceId = InsertPlugin(plugin, insertIndex);
-        if (instanceId <= 0)
-        {
-            return 0;
-        }
+        var container = ChainNodeHelpers.FindContainer(_config.Nodes, containerId);
+        if (container is null) return 0;
 
-        AssignPluginToContainer(instanceId, containerId);
+        int instanceId = ++_nextInstanceId;
+        var node = CreatePluginNode(instanceId, plugin);
+        var slot = new PluginSlot(instanceId, plugin, _chain.SampleRate);
+        _slotById[instanceId] = slot;
+
+        int idx = Math.Clamp(containerIndex, 0, container.Plugins.Count);
+        container.Plugins.Insert(idx, node);
+        FlattenToChain();
         return instanceId;
     }
 
     /// <summary>
-    /// Removes the plugin with the given instance id from the chain and config.
+    /// Removes a plugin from anywhere in the tree.
     /// </summary>
     public bool RemovePlugin(int instanceId, out PluginSlot? removedSlot)
     {
         removedSlot = null;
-        if (instanceId <= 0)
-        {
+        if (_config is null || instanceId <= 0) return false;
+
+        if (!ChainNodeHelpers.RemovePlugin(_config.Nodes, instanceId, out _))
             return false;
-        }
 
-        if (!_chain.TryGetSlotById(instanceId, out var slot, out int slotIndex) || slot is null)
-        {
-            return false;
-        }
+        if (_slotById.Remove(instanceId, out var slot))
+            removedSlot = slot;
 
-        removedSlot = _chain.RemoveSlot(slotIndex);
-        if (_config is null)
-        {
-            return true;
-        }
-
-        _configById.Remove(instanceId);
-        for (int i = 0; i < _config.Containers.Count; i++)
-        {
-            _config.Containers[i].PluginInstanceIds.Remove(instanceId);
-        }
-
-        SyncConfigOrder();
-        NormalizeContainers();
+        FlattenToChain();
         return true;
     }
 
     /// <summary>
-    /// Moves the plugin with the given instance id to the requested chain index.
+    /// Moves a plugin to a new flat chain index.
     /// </summary>
     public bool MovePlugin(int instanceId, int targetIndex)
     {
-        if (instanceId <= 0)
-        {
+        if (_config is null || instanceId <= 0) return false;
+
+        int currentIndex = ChainNodeHelpers.FlatIndex(_config.Nodes, instanceId);
+        if (currentIndex < 0 || currentIndex == targetIndex) return false;
+
+        // Remove from current position
+        if (!ChainNodeHelpers.RemovePlugin(_config.Nodes, instanceId, out var node) || node is null)
             return false;
-        }
 
-        var slots = _chain.GetSnapshot();
-        if (slots.Length == 0)
-        {
-            return false;
-        }
-
-        if (!_chain.TryGetSlotById(instanceId, out var slot, out int fromIndex) || slot is null)
-        {
-            return false;
-        }
-
-        if (targetIndex < 0)
-        {
-            targetIndex = 0;
-        }
-        else if (targetIndex >= slots.Length)
-        {
-            targetIndex = slots.Length - 1;
-        }
-
-        if (fromIndex == targetIndex)
-        {
-            return false;
-        }
-
-        var reordered = new List<PluginSlot?>(slots);
-        var item = reordered[fromIndex];
-        reordered.RemoveAt(fromIndex);
-        reordered.Insert(targetIndex, item);
-
-        _chain.ReplaceAll(reordered.ToArray());
-        SyncConfigOrder();
-        NormalizeContainers();
+        // Insert at target flat index
+        InsertNodeAtFlatIndex(_config.Nodes, node, targetIndex);
+        FlattenToChain();
         return true;
     }
 
     /// <summary>
-    /// Moves the plugin within its container relative order without changing other plugins.
+    /// Moves a plugin within its container.
     /// </summary>
     public bool MovePluginWithinContainer(int instanceId, int containerId, int targetIndex)
     {
-        if (_config is null || instanceId <= 0 || containerId <= 0)
-        {
-            return false;
-        }
+        if (_config is null || instanceId <= 0 || containerId <= 0) return false;
 
-        var container = FindContainer(containerId);
-        if (container is null)
-        {
-            return false;
-        }
+        var container = ChainNodeHelpers.FindContainer(_config.Nodes, containerId);
+        if (container is null || container.Plugins.Count <= 1) return false;
 
-        var pluginIds = container.PluginInstanceIds;
-        int count = pluginIds.Count;
-        if (count <= 1)
+        int fromIndex = -1;
+        for (int i = 0; i < container.Plugins.Count; i++)
         {
-            return false;
-        }
-
-        int fromIndex = pluginIds.IndexOf(instanceId);
-        if (fromIndex < 0)
-        {
-            return false;
-        }
-
-        if (targetIndex < 0)
-        {
-            targetIndex = 0;
-        }
-        else if (targetIndex >= count)
-        {
-            targetIndex = count - 1;
-        }
-
-        if (fromIndex == targetIndex)
-        {
-            return false;
-        }
-
-        var reorderedIds = new List<int>(pluginIds);
-        reorderedIds.RemoveAt(fromIndex);
-        reorderedIds.Insert(targetIndex, instanceId);
-
-        var slots = _chain.GetSnapshot();
-        var slotById = new Dictionary<int, PluginSlot>(slots.Length);
-        for (int i = 0; i < slots.Length; i++)
-        {
-            if (slots[i] is { } slot)
+            if (container.Plugins[i].InstanceId == instanceId)
             {
-                slotById[slot.InstanceId] = slot;
+                fromIndex = i;
+                break;
             }
         }
+        if (fromIndex < 0) return false;
 
-        var containerIdSet = new HashSet<int>(pluginIds);
-        int reorderPos = 0;
-        var newSlots = new PluginSlot?[slots.Length];
-        for (int i = 0; i < slots.Length; i++)
-        {
-            var slot = slots[i];
-            if (slot is not null && containerIdSet.Contains(slot.InstanceId))
-            {
-                int nextId = reorderedIds[reorderPos++];
-                newSlots[i] = slotById[nextId];
-            }
-            else
-            {
-                newSlots[i] = slot;
-            }
-        }
+        targetIndex = Math.Clamp(targetIndex, 0, container.Plugins.Count - 1);
+        if (fromIndex == targetIndex) return false;
 
-        container.PluginInstanceIds.Clear();
-        container.PluginInstanceIds.AddRange(reorderedIds);
-        _chain.ReplaceAll(newSlots);
-        SyncConfigOrder();
-        NormalizeContainers();
+        var plugin = container.Plugins[fromIndex];
+        container.Plugins.RemoveAt(fromIndex);
+        container.Plugins.Insert(targetIndex, plugin);
+        FlattenToChain();
         return true;
     }
 
     /// <summary>
-    /// Creates a new container with the provided name and returns its id.
+    /// Creates a new empty container.
     /// </summary>
     public int CreateContainer(string name)
     {
-        if (_config is null)
-        {
-            throw new InvalidOperationException("Graph is not initialized.");
-        }
+        if (_config is null) throw new InvalidOperationException("Graph is not initialized.");
 
         int nextId = 1;
-        for (int i = 0; i < _config.Containers.Count; i++)
+        foreach (var node in _config.Nodes)
         {
-            if (_config.Containers[i].Id >= nextId)
-            {
-                nextId = _config.Containers[i].Id + 1;
-            }
+            if (node is ContainerNodeConfig c && c.ContainerId >= nextId)
+                nextId = c.ContainerId + 1;
         }
 
-        var container = new PluginContainerConfig
+        var container = new ContainerNodeConfig
         {
-            Id = nextId,
+            ContainerId = nextId,
             Name = name ?? string.Empty,
             IsBypassed = false
         };
 
-        _config.Containers.Add(container);
-        NormalizeContainers();
-        return container.Id;
+        _config.Nodes.Add(container);
+        // No FlattenToChain needed — empty container has no audio impact
+        return container.ContainerId;
     }
 
     /// <summary>
-    /// Removes the container with the given id.
+    /// Removes a container, promoting its children to standalone nodes.
     /// </summary>
     public bool RemoveContainer(int containerId)
     {
-        if (_config is null || containerId <= 0)
-        {
-            return false;
-        }
+        if (_config is null || containerId <= 0) return false;
 
-        int index = _config.Containers.FindIndex(c => c.Id == containerId);
-        if (index < 0)
+        for (int i = 0; i < _config.Nodes.Count; i++)
         {
-            return false;
+            if (_config.Nodes[i] is ContainerNodeConfig c && c.ContainerId == containerId)
+            {
+                // Replace container with its children
+                _config.Nodes.RemoveAt(i);
+                for (int j = c.Plugins.Count - 1; j >= 0; j--)
+                {
+                    _config.Nodes.Insert(i, c.Plugins[j]);
+                }
+                FlattenToChain();
+                return true;
+            }
         }
-
-        _config.Containers.RemoveAt(index);
-        NormalizeContainers();
-        return true;
+        return false;
     }
 
     /// <summary>
-    /// Updates container bypass state and applies it to child plugins.
+    /// Toggles container bypass, applying it to all children.
     /// </summary>
     public bool SetContainerBypass(int containerId, bool bypassed)
     {
-        if (_config is null || containerId <= 0)
-        {
-            return false;
-        }
+        if (_config is null || containerId <= 0) return false;
 
-        var container = FindContainer(containerId);
-        if (container is null)
-        {
-            return false;
-        }
+        var container = ChainNodeHelpers.FindContainer(_config.Nodes, containerId);
+        if (container is null) return false;
 
         bool changed = container.IsBypassed != bypassed;
         container.IsBypassed = bypassed;
 
-        for (int i = 0; i < container.PluginInstanceIds.Count; i++)
+        foreach (var child in container.Plugins)
         {
-            SetPluginBypass(container.PluginInstanceIds[i], bypassed);
+            SetPluginBypass(child.InstanceId, bypassed);
         }
-
         return changed;
     }
 
     /// <summary>
-    /// Renames the container with the given id.
+    /// Renames a container.
     /// </summary>
     public bool RenameContainer(int containerId, string newName)
     {
-        if (_config is null || containerId <= 0)
-        {
-            return false;
-        }
+        if (_config is null || containerId <= 0) return false;
 
-        var container = FindContainer(containerId);
-        if (container is null)
-        {
-            return false;
-        }
+        var container = ChainNodeHelpers.FindContainer(_config.Nodes, containerId);
+        if (container is null) return false;
 
         container.Name = newName ?? string.Empty;
         return true;
     }
 
     /// <summary>
-    /// Assigns a plugin to the requested container (or clears assignment if containerId is 0).
+    /// Assigns a plugin to a container (removes from current container first).
     /// </summary>
     public bool AssignPluginToContainer(int instanceId, int containerId)
     {
-        if (_config is null || instanceId <= 0)
-        {
+        if (_config is null || instanceId <= 0) return false;
+
+        // Remove from current location
+        if (!ChainNodeHelpers.RemovePlugin(_config.Nodes, instanceId, out var pluginNode) || pluginNode is null)
             return false;
-        }
 
-        bool changed = false;
-        for (int i = 0; i < _config.Containers.Count; i++)
+        if (containerId <= 0)
         {
-            if (_config.Containers[i].PluginInstanceIds.Remove(instanceId))
+            // Ungroup: add as standalone at the end
+            _config.Nodes.Add(pluginNode);
+        }
+        else
+        {
+            var container = ChainNodeHelpers.FindContainer(_config.Nodes, containerId);
+            if (container is null)
             {
-                changed = true;
-            }
-        }
-
-        if (containerId > 0 && FindContainer(containerId) is { } container)
-        {
-            if (!container.PluginInstanceIds.Contains(instanceId))
-            {
-                container.PluginInstanceIds.Add(instanceId);
-                changed = true;
-            }
-
-            if (container.IsBypassed)
-            {
-                SetPluginBypass(instanceId, true);
-            }
-        }
-
-        if (changed)
-        {
-            NormalizeContainers();
-        }
-
-        return changed;
-    }
-
-    /// <summary>
-    /// Moves a container's plugins as a block to a new chain index.
-    /// </summary>
-    public bool MoveContainer(int containerId, int targetIndex)
-    {
-        if (_config is null || containerId <= 0)
-        {
-            return false;
-        }
-
-        var container = FindContainer(containerId);
-        if (container is null || container.PluginInstanceIds.Count == 0)
-        {
-            return false;
-        }
-
-        var slots = _chain.GetSnapshot();
-        if (slots.Length == 0)
-        {
-            return false;
-        }
-
-        if (targetIndex < 0)
-        {
-            targetIndex = 0;
-        }
-        else if (targetIndex > slots.Length)
-        {
-            targetIndex = slots.Length;
-        }
-
-        var movingIds = new HashSet<int>(container.PluginInstanceIds);
-        var moving = new List<PluginSlot?>(container.PluginInstanceIds.Count);
-        var remaining = new List<PluginSlot?>(slots.Length);
-        int movingBeforeTarget = 0;
-
-        for (int i = 0; i < slots.Length; i++)
-        {
-            var slot = slots[i];
-            if (slot is null)
-            {
-                continue;
-            }
-
-            if (movingIds.Contains(slot.InstanceId))
-            {
-                moving.Add(slot);
-                if (i < targetIndex)
-                {
-                    movingBeforeTarget++;
-                }
+                // Container not found, add standalone
+                _config.Nodes.Add(pluginNode);
             }
             else
             {
-                remaining.Add(slot);
+                container.Plugins.Add(pluginNode);
+                if (container.IsBypassed)
+                    SetPluginBypass(instanceId, true);
             }
         }
 
-        if (moving.Count == 0)
-        {
-            return false;
-        }
-
-        int insertIndex = targetIndex - movingBeforeTarget;
-        if (insertIndex < 0)
-        {
-            insertIndex = 0;
-        }
-        else if (insertIndex > remaining.Count)
-        {
-            insertIndex = remaining.Count;
-        }
-
-        remaining.InsertRange(insertIndex, moving);
-        _chain.ReplaceAll(remaining.ToArray());
-        SyncConfigOrder();
-        NormalizeContainers();
+        FlattenToChain();
         return true;
     }
 
     /// <summary>
-    /// Returns the ordered list of container configs.
+    /// Moves a container (and all its children) to a new position in the node list.
     /// </summary>
-    public IReadOnlyList<PluginContainerConfig> GetContainers()
+    public bool MoveContainer(int containerId, int targetIndex)
     {
-        var containers = _config?.Containers;
-        return containers is IReadOnlyList<PluginContainerConfig> roList ? roList : containers?.ToArray() ?? Array.Empty<PluginContainerConfig>();
+        if (_config is null || containerId <= 0) return false;
+
+        // Find and remove the container
+        ContainerNodeConfig? moving = null;
+        int fromIndex = -1;
+        for (int i = 0; i < _config.Nodes.Count; i++)
+        {
+            if (_config.Nodes[i] is ContainerNodeConfig c && c.ContainerId == containerId)
+            {
+                moving = c;
+                fromIndex = i;
+                break;
+            }
+        }
+        if (moving is null || moving.Plugins.Count == 0) return false;
+
+        // Convert target flat index to node index
+        int flatCount = 0;
+        int nodeInsertIndex = _config.Nodes.Count;
+        for (int i = 0; i < _config.Nodes.Count; i++)
+        {
+            if (flatCount >= targetIndex && i != fromIndex)
+            {
+                nodeInsertIndex = i;
+                break;
+            }
+            if (i == fromIndex) continue; // Skip the container being moved
+            switch (_config.Nodes[i])
+            {
+                case PluginNodeConfig:
+                    flatCount++;
+                    break;
+                case ContainerNodeConfig cc:
+                    flatCount += cc.Plugins.Count;
+                    break;
+            }
+        }
+
+        _config.Nodes.RemoveAt(fromIndex);
+        if (nodeInsertIndex > fromIndex) nodeInsertIndex--;
+        nodeInsertIndex = Math.Clamp(nodeInsertIndex, 0, _config.Nodes.Count);
+        _config.Nodes.Insert(nodeInsertIndex, moving);
+
+        FlattenToChain();
+        return true;
     }
 
     /// <summary>
-    /// Updates a plugin bypass state in both chain and config.
+    /// Returns containers from the node tree.
     /// </summary>
+    public IReadOnlyList<ContainerNodeConfig> GetContainers()
+    {
+        if (_config is null) return Array.Empty<ContainerNodeConfig>();
+        var result = new List<ContainerNodeConfig>();
+        foreach (var node in _config.Nodes)
+        {
+            if (node is ContainerNodeConfig c)
+                result.Add(c);
+        }
+        return result;
+    }
+
     public bool SetPluginBypass(int instanceId, bool bypassed)
     {
-        if (instanceId <= 0)
-        {
-            return false;
-        }
+        if (instanceId <= 0) return false;
 
         if (_chain.TryGetSlotById(instanceId, out var slot, out _) && slot is not null)
-        {
             slot.Plugin.IsBypassed = bypassed;
-        }
 
         if (TryGetPluginConfig(instanceId, out var config))
-        {
             config.IsBypassed = bypassed;
-        }
 
         return true;
     }
 
-    /// <summary>
-    /// Updates a plugin parameter value in config.
-    /// </summary>
     public void SetPluginParameter(int instanceId, string parameterName, float value)
     {
-        if (string.IsNullOrWhiteSpace(parameterName))
-        {
-            return;
-        }
+        if (string.IsNullOrWhiteSpace(parameterName)) return;
 
         if (TryGetPluginConfig(instanceId, out var config))
-        {
             config.Parameters[parameterName] = value;
-        }
     }
 
-    /// <summary>
-    /// Updates a plugin serialized state in config.
-    /// </summary>
     public void SetPluginState(int instanceId)
     {
-        if (instanceId <= 0)
-        {
-            return;
-        }
+        if (instanceId <= 0) return;
 
         if (_chain.TryGetSlotById(instanceId, out var slot, out _) && slot is not null)
         {
             if (TryGetPluginConfig(instanceId, out var config))
-            {
                 config.State = slot.Plugin.GetState();
-            }
         }
     }
 
     /// <summary>
-    /// Builds container definitions suitable for saving presets.
+    /// Synchronize the node tree from the current chain state.
+    /// Used after external chain modifications (e.g., preset load via ReplaceAll).
     /// </summary>
-    public IReadOnlyList<ChainPresetContainer> BuildPresetContainers()
+    public bool SyncNodesFromChain()
     {
-        if (_config is null || _config.Containers.Count == 0)
-        {
-            return Array.Empty<ChainPresetContainer>();
-        }
-
-        var indexMap = new Dictionary<int, int>();
-        for (int i = 0; i < _config.Plugins.Count; i++)
-        {
-            int instanceId = _config.Plugins[i].InstanceId;
-            if (instanceId > 0 && !indexMap.ContainsKey(instanceId))
-            {
-                indexMap[instanceId] = i;
-            }
-        }
-
-        var containers = new List<ChainPresetContainer>(_config.Containers.Count);
-        for (int i = 0; i < _config.Containers.Count; i++)
-        {
-            var container = _config.Containers[i];
-            var indices = new List<int>();
-            for (int j = 0; j < container.PluginInstanceIds.Count; j++)
-            {
-                if (indexMap.TryGetValue(container.PluginInstanceIds[j], out int idx))
-                {
-                    indices.Add(idx);
-                }
-            }
-
-            containers.Add(new ChainPresetContainer(container.Name, indices, container.IsBypassed));
-        }
-
-        return containers;
-    }
-
-    private bool SyncConfigOrder()
-    {
-        if (_config is null)
-        {
-            return false;
-        }
+        if (_config is null) return false;
 
         var slots = _chain.GetSnapshot();
-        var configLookup = BuildConfigLookup(_config);
+        var nodePlugins = ChainNodeHelpers.FlattenPlugins(_config.Nodes);
 
-        var ordered = new List<PluginConfig>(slots.Length);
-        bool created = false;
-
-        for (int i = 0; i < slots.Length; i++)
+        // Check if chain order matches node tree flattened order
+        bool inSync = slots.Length == nodePlugins.Count;
+        if (inSync)
         {
-            if (slots[i] is not { } slot)
+            for (int i = 0; i < slots.Length; i++)
             {
-                continue;
-            }
-
-            if (configLookup.TryGetValue(slot.InstanceId, out var existing))
-            {
-                ordered.Add(existing);
-            }
-            else
-            {
-                ordered.Add(CreateConfigFromSlot(slot));
-                created = true;
-            }
-        }
-
-        bool changed = created || ordered.Count != _config.Plugins.Count;
-        if (!changed)
-        {
-            for (int i = 0; i < ordered.Count; i++)
-            {
-                if (!ReferenceEquals(_config.Plugins[i], ordered[i]))
+                if (slots[i] is null || slots[i]!.InstanceId != nodePlugins[i].InstanceId)
                 {
-                    changed = true;
+                    inSync = false;
                     break;
                 }
             }
         }
 
-        if (changed)
-        {
-            _config.Plugins.Clear();
-            _config.Plugins.AddRange(ordered);
-        }
+        if (inSync) return false;
 
-        _configById.Clear();
-        for (int i = 0; i < ordered.Count; i++)
+        // Rebuild nodes from chain — all containers lost (they'll be rebuilt by caller)
+        _config.Nodes.Clear();
+        foreach (var slot in slots)
         {
-            int instanceId = ordered[i].InstanceId;
-            if (instanceId > 0 && !_configById.ContainsKey(instanceId))
-            {
-                _configById[instanceId] = ordered[i];
-            }
+            if (slot is null) continue;
+            _config.Nodes.Add(CreatePluginNode(slot.InstanceId, slot.Plugin));
+            _slotById[slot.InstanceId] = slot;
         }
-
-        return changed;
+        return true;
     }
 
-    private static Dictionary<int, PluginConfig> BuildConfigLookup(ChannelConfig config)
+    // ---- Internal helpers ----
+
+    /// <summary>
+    /// Flatten the node tree to the PluginChain's slot array. Called after every tree mutation.
+    /// </summary>
+    private void FlattenToChain()
     {
-        var lookup = new Dictionary<int, PluginConfig>();
-        for (int i = 0; i < config.Plugins.Count; i++)
+        if (_config is null) return;
+
+        var flattened = ChainNodeHelpers.FlattenPlugins(_config.Nodes);
+        var slots = new PluginSlot?[flattened.Count];
+        for (int i = 0; i < flattened.Count; i++)
         {
-            var pluginConfig = config.Plugins[i];
-            if (pluginConfig.InstanceId <= 0 || string.IsNullOrWhiteSpace(pluginConfig.Type))
-            {
-                continue;
-            }
-
-            if (!lookup.ContainsKey(pluginConfig.InstanceId))
-            {
-                lookup[pluginConfig.InstanceId] = pluginConfig;
-            }
+            _slotById.TryGetValue(flattened[i].InstanceId, out var slot);
+            slots[i] = slot;
         }
-
-        return lookup;
+        _chain.ReplaceAll(slots);
     }
 
-    private bool NormalizeContainers()
+    /// <summary>
+    /// Insert a plugin node at a given flat processing index in the node tree.
+    /// </summary>
+    private static void InsertNodeAtFlatIndex(IList<ChainNodeConfig> nodes, PluginNodeConfig node, int flatIndex)
     {
-        if (_config is null)
-        {
-            return false;
-        }
+        if (flatIndex < 0) flatIndex = 0;
 
-        var slots = _chain.GetSnapshot();
-        var indexMap = new Dictionary<int, int>(slots.Length);
-        for (int i = 0; i < slots.Length; i++)
+        int currentFlat = 0;
+        for (int i = 0; i < nodes.Count; i++)
         {
-            if (slots[i] is { } slot)
+            switch (nodes[i])
             {
-                indexMap[slot.InstanceId] = i;
+                case PluginNodeConfig:
+                    if (currentFlat == flatIndex)
+                    {
+                        nodes.Insert(i, node);
+                        return;
+                    }
+                    currentFlat++;
+                    break;
+                case ContainerNodeConfig c:
+                    if (currentFlat + c.Plugins.Count > flatIndex)
+                    {
+                        // Insert inside this container
+                        int containerOffset = flatIndex - currentFlat;
+                        c.Plugins.Insert(containerOffset, node);
+                        return;
+                    }
+                    currentFlat += c.Plugins.Count;
+                    break;
             }
         }
+        // Past the end — append
+        nodes.Add(node);
+    }
 
-        _containersById.Clear();
-        bool changed = false;
+    private static PluginNodeConfig CreatePluginNode(int instanceId, IPlugin plugin)
+    {
+        var node = new PluginNodeConfig
+        {
+            InstanceId = instanceId,
+            Type = plugin.Id,
+            IsBypassed = plugin.IsBypassed,
+            PresetName = PluginPresetManager.CustomPresetName,
+            State = plugin.GetState()
+        };
+        foreach (var p in plugin.Parameters)
+            node.Parameters[p.Name] = p.DefaultValue;
+        return node;
+    }
+
+    /// <summary>
+    /// Remove plugin nodes that don't have a corresponding slot (factory returned null).
+    /// </summary>
+    private void PruneFailedPlugins(IList<ChainNodeConfig> nodes)
+    {
+        for (int i = nodes.Count - 1; i >= 0; i--)
+        {
+            switch (nodes[i])
+            {
+                case PluginNodeConfig p:
+                    if (!_slotById.ContainsKey(p.InstanceId))
+                        nodes.RemoveAt(i);
+                    break;
+                case ContainerNodeConfig c:
+                    for (int j = c.Plugins.Count - 1; j >= 0; j--)
+                    {
+                        if (!_slotById.ContainsKey(c.Plugins[j].InstanceId))
+                            c.Plugins.RemoveAt(j);
+                    }
+                    // Remove empty containers
+                    if (c.Plugins.Count == 0)
+                        nodes.RemoveAt(i);
+                    break;
+            }
+        }
+    }
+
+    // ---- Legacy compatibility ----
+
+    /// <summary>
+    /// Builds container definitions suitable for saving presets (legacy format).
+    /// </summary>
+    public IReadOnlyList<ChainPresetContainer> BuildPresetContainers()
+    {
+        if (_config is null) return Array.Empty<ChainPresetContainer>();
+
+        var flat = ChainNodeHelpers.FlattenPlugins(_config.Nodes);
+        var indexMap = new Dictionary<int, int>(flat.Count);
+        for (int i = 0; i < flat.Count; i++)
+            indexMap[flat[i].InstanceId] = i;
+
+        var containers = new List<ChainPresetContainer>();
+        foreach (var node in _config.Nodes)
+        {
+            if (node is not ContainerNodeConfig c || c.Plugins.Count == 0) continue;
+            var indices = new List<int>(c.Plugins.Count);
+            foreach (var child in c.Plugins)
+            {
+                if (indexMap.TryGetValue(child.InstanceId, out int idx))
+                    indices.Add(idx);
+            }
+            containers.Add(new ChainPresetContainer(c.Name, indices, c.IsBypassed));
+        }
+        return containers;
+    }
+
+#pragma warning disable CS0618 // Legacy compat: callers still reference these until fully migrated
+    /// <summary>
+    /// Legacy: sync old-format Plugins/Containers properties from node tree.
+    /// Called before config save to maintain backwards compatibility.
+    /// </summary>
+    public void SyncLegacyConfigFromNodes()
+    {
+        if (_config is null) return;
+
+        _config.Plugins.Clear();
+        _config.Containers.Clear();
+
         int nextContainerId = 0;
-        for (int i = 0; i < _config.Containers.Count; i++)
+        foreach (var node in _config.Nodes)
         {
-            var container = _config.Containers[i];
-            if (container.Id > nextContainerId)
+            switch (node)
             {
-                nextContainerId = container.Id;
+                case PluginNodeConfig p:
+                    _config.Plugins.Add(ToPluginConfig(p));
+                    break;
+                case ContainerNodeConfig c:
+                    var container = new PluginContainerConfig
+                    {
+                        Id = c.ContainerId > 0 ? c.ContainerId : ++nextContainerId,
+                        Name = c.Name,
+                        IsBypassed = c.IsBypassed
+                    };
+                    foreach (var child in c.Plugins)
+                    {
+                        _config.Plugins.Add(ToPluginConfig(child));
+                        container.PluginInstanceIds.Add(child.InstanceId);
+                    }
+                    _config.Containers.Add(container);
+                    break;
             }
         }
-
-        var assigned = new HashSet<int>();
-        for (int i = 0; i < _config.Containers.Count; i++)
-        {
-            var container = _config.Containers[i];
-            if (container.Id <= 0 || _containersById.ContainsKey(container.Id))
-            {
-                container.Id = ++nextContainerId;
-                changed = true;
-            }
-
-            _containersById[container.Id] = container;
-
-            var ordered = new List<int>();
-            for (int j = 0; j < container.PluginInstanceIds.Count; j++)
-            {
-                int instanceId = container.PluginInstanceIds[j];
-                if (!indexMap.ContainsKey(instanceId))
-                {
-                    changed = true;
-                    continue;
-                }
-                if (!assigned.Add(instanceId))
-                {
-                    changed = true;
-                    continue;
-                }
-
-                ordered.Add(instanceId);
-            }
-
-            ordered.Sort((a, b) => indexMap[a].CompareTo(indexMap[b]));
-
-            if (!ordered.SequenceEqual(container.PluginInstanceIds))
-            {
-                container.PluginInstanceIds.Clear();
-                container.PluginInstanceIds.AddRange(ordered);
-                changed = true;
-            }
-        }
-
-        return changed;
     }
 
-    private static PluginConfig CreateConfigFromSlot(PluginSlot slot)
+    private static PluginConfig ToPluginConfig(PluginNodeConfig node)
     {
         var config = new PluginConfig
         {
-            InstanceId = slot.InstanceId,
-            Type = slot.Plugin.Id,
-            IsBypassed = slot.Plugin.IsBypassed,
-            PresetName = PluginPresetManager.CustomPresetName,
-            State = slot.Plugin.GetState()
+            InstanceId = node.InstanceId,
+            Type = node.Type,
+            IsBypassed = node.IsBypassed,
+            PresetName = node.PresetName,
+            State = node.State
         };
-        foreach (var p in slot.Plugin.Parameters)
-            config.Parameters[p.Name] = p.DefaultValue;
+        foreach (var kvp in node.Parameters)
+            config.Parameters[kvp.Key] = kvp.Value;
         return config;
     }
+#pragma warning restore CS0618
 
-    private PluginContainerConfig? FindContainer(int containerId)
-    {
-        if (containerId <= 0)
-        {
-            return null;
-        }
-
-        if (_containersById.TryGetValue(containerId, out var container))
-        {
-            return container;
-        }
-
-        if (_config is null)
-        {
-            return null;
-        }
-
-        NormalizeContainers();
-        return _containersById.TryGetValue(containerId, out container) ? container : null;
-    }
-
-    private int ResolveContainerInsertIndex(int containerId, int containerIndex)
-    {
-        if (_config is null || containerId <= 0)
-        {
-            return _chain.Count;
-        }
-
-        var container = FindContainer(containerId);
-        if (container is null || container.PluginInstanceIds.Count == 0)
-        {
-            return _chain.Count;
-        }
-
-        var slots = _chain.GetSnapshot();
-        var indexMap = new Dictionary<int, int>(slots.Length);
-        for (int i = 0; i < slots.Length; i++)
-        {
-            if (slots[i] is { } slot)
-            {
-                indexMap[slot.InstanceId] = i;
-            }
-        }
-
-        var pluginIds = container.PluginInstanceIds;
-        int count = pluginIds.Count;
-        if (containerIndex <= 0)
-        {
-            return indexMap.TryGetValue(pluginIds[0], out int idx) ? idx : _chain.Count;
-        }
-
-        if (containerIndex >= count)
-        {
-            return indexMap.TryGetValue(pluginIds[count - 1], out int idx) ? idx + 1 : _chain.Count;
-        }
-
-        return indexMap.TryGetValue(pluginIds[containerIndex], out int target) ? target : _chain.Count;
-    }
+    /// <summary>
+    /// Exposes the chain's SampleRate for slot creation.
+    /// </summary>
+    internal int SampleRate => _chain.SampleRate;
 }

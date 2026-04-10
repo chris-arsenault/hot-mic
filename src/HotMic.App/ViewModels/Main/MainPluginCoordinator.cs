@@ -140,7 +140,7 @@ internal sealed class MainPluginCoordinator
         {
             var graph = _pluginGraphs[i];
             var config = _getOrCreateChannelConfig(i);
-            if (graph.SyncWithChain(config))
+            if (graph.SyncNodesFromChain())
             {
                 changed = true;
             }
@@ -187,18 +187,11 @@ internal sealed class MainPluginCoordinator
         var strip = AudioEngine.Channels[channelIndex];
         var profile = _getQualityProfile();
         var bypassedByContainer = new HashSet<int>();
-        for (int i = 0; i < config.Containers.Count; i++)
+        foreach (var node in config.Nodes)
         {
-            var container = config.Containers[i];
-            if (!container.IsBypassed)
-            {
-                continue;
-            }
-
-            for (int j = 0; j < container.PluginInstanceIds.Count; j++)
-            {
-                bypassedByContainer.Add(container.PluginInstanceIds[j]);
-            }
+            if (node is not ContainerNodeConfig { IsBypassed: true } c) continue;
+            foreach (var child in c.Plugins)
+                bypassedByContainer.Add(child.InstanceId);
         }
 
         var oldSlots = strip.PluginChain.GetSnapshot();
@@ -671,7 +664,7 @@ internal sealed class MainPluginCoordinator
 
         var config = _getOrCreateChannelConfig(channelIndex);
         int containerId = graph.CreateContainer(string.Empty);
-        var container = graph.GetContainers().FirstOrDefault(c => c.Id == containerId);
+        var container = graph.GetContainers().FirstOrDefault(c => c.ContainerId == containerId);
         if (container is not null && string.IsNullOrWhiteSpace(container.Name))
         {
             container.Name = $"Container {containerId}";
@@ -817,7 +810,7 @@ internal sealed class MainPluginCoordinator
             return;
         }
 
-        var container = graph.GetContainers().FirstOrDefault(c => c.Id == containerId);
+        var container = graph.GetContainers().FirstOrDefault(c => c.ContainerId == containerId);
         if (container is null)
         {
             return;
@@ -839,7 +832,7 @@ internal sealed class MainPluginCoordinator
         _containerWindows.OpenWindow(channelIndex, containerId, viewModel);
     }
 
-    public void UpdateContainerWindowViewModel(PluginContainerWindowViewModel viewModel, int channelIndex, PluginContainerConfig container)
+    public void UpdateContainerWindowViewModel(PluginContainerWindowViewModel viewModel, int channelIndex, ContainerNodeConfig container)
     {
         var strip = AudioEngine.Channels[channelIndex];
         var slots = strip.PluginChain.GetSnapshot();
@@ -917,7 +910,7 @@ internal sealed class MainPluginCoordinator
 
         viewModel.UpdateName(container.Name);
         viewModel.MeterScaleVox = _getMeterScaleVox();
-        viewModel.UpdatePlugins(slotInfos, container.PluginInstanceIds.ToArray());
+        viewModel.UpdatePlugins(slotInfos, container.Plugins.Select(p => p.InstanceId).ToArray());
     }
 
     public void UpdateOpenContainerWindows(int channelIndex, IReadOnlyList<PluginSlotInfo> slotInfos)
@@ -943,7 +936,7 @@ internal sealed class MainPluginCoordinator
                 continue;
             }
 
-            var container = containers.FirstOrDefault(c => c.Id == entry.ContainerId);
+            var container = containers.FirstOrDefault(c => c.ContainerId == entry.ContainerId);
             if (container is null)
             {
                 _containerWindows.CloseWindow(entry.ChannelIndex, entry.ContainerId);
@@ -951,7 +944,7 @@ internal sealed class MainPluginCoordinator
             }
 
             entry.ViewModel.UpdateName(container.Name);
-            entry.ViewModel.UpdatePlugins(slotInfos, container.PluginInstanceIds.ToArray());
+            entry.ViewModel.UpdatePlugins(slotInfos, container.Plugins.Select(p => p.InstanceId).ToArray());
         }
     }
 
@@ -1321,10 +1314,10 @@ internal sealed class MainPluginCoordinator
             var container = containers[i];
             list.Add(new PluginContainerInfo
             {
-                ContainerId = container.Id,
+                ContainerId = container.ContainerId,
                 Name = container.Name,
                 IsBypassed = container.IsBypassed,
-                PluginInstanceIds = container.PluginInstanceIds.ToArray()
+                PluginInstanceIds = container.Plugins.Select(p => p.InstanceId).ToArray()
             });
         }
 
@@ -1659,7 +1652,7 @@ internal sealed class MainPluginCoordinator
 
         if (changed)
         {
-            graph.SyncWithChain(config);
+            graph.SyncNodesFromChain();
         }
 
         return changed;
@@ -1778,7 +1771,7 @@ internal sealed class MainPluginCoordinator
             {
                 int nextContainerId = 0;
                 var containerMap = new Dictionary<string, PluginContainerConfig>(StringComparer.OrdinalIgnoreCase);
-                foreach (var (config, sourceEntry) in pluginConfigs)
+                foreach (var (pluginCfg, sourceEntry) in pluginConfigs)
                 {
                     if (string.IsNullOrEmpty(sourceEntry.ContainerName)) continue;
 
@@ -1793,7 +1786,7 @@ internal sealed class MainPluginCoordinator
                         containerMap[sourceEntry.ContainerName] = cc;
                         containerConfigs.Add(cc);
                     }
-                    cc.PluginInstanceIds.Add(config.InstanceId);
+                    cc.PluginInstanceIds.Add(pluginCfg.InstanceId);
                 }
             }
             else if (chainPreset.Containers.Count > 0)
@@ -1866,11 +1859,55 @@ internal sealed class MainPluginCoordinator
             QueueRemovedPlugins(oldSlots, newSlots);
 
             config.PresetName = chainPreset.Name;
-            config.Plugins.Clear();
-            config.Plugins.AddRange(pluginConfigs.Select(p => p.Config));
-            config.Containers.Clear();
-            config.Containers.AddRange(containerConfigs);
-            GetGraph(channelIndex)?.SyncWithChain(config);
+
+            // Build node tree from pluginConfigs + containerConfigs
+            var nodeTree = new List<ChainNodeConfig>();
+            var containerNodeMap = new Dictionary<string, ContainerNodeConfig>(StringComparer.OrdinalIgnoreCase);
+            foreach (var cc in containerConfigs)
+            {
+                var containerNode = new ContainerNodeConfig
+                {
+                    ContainerId = cc.Id,
+                    Name = cc.Name,
+                    IsBypassed = cc.IsBypassed
+                };
+                containerNodeMap[cc.Name] = containerNode;
+            }
+
+            var assignedToContainer = new HashSet<int>();
+            foreach (var cc in containerConfigs)
+            {
+                foreach (int id in cc.PluginInstanceIds)
+                    assignedToContainer.Add(id);
+            }
+
+            // Place plugins into nodes, grouping by container
+            var emittedContainers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (pc, _) in pluginConfigs)
+            {
+                if (assignedToContainer.Contains(pc.InstanceId))
+                {
+                    // Find which container owns this plugin
+                    var ownerCc = containerConfigs.FirstOrDefault(c => c.PluginInstanceIds.Contains(pc.InstanceId));
+                    if (ownerCc is not null && containerNodeMap.TryGetValue(ownerCc.Name, out var cn))
+                    {
+                        cn.Plugins.Add(ToPluginNodeConfig(pc));
+                        if (emittedContainers.Add(ownerCc.Name))
+                            nodeTree.Add(cn);
+                    }
+                    else
+                    {
+                        nodeTree.Add(ToPluginNodeConfig(pc));
+                    }
+                }
+                else
+                {
+                    nodeTree.Add(ToPluginNodeConfig(pc));
+                }
+            }
+
+            config.Nodes = nodeTree;
+            GetGraph(channelIndex)?.SyncNodesFromChain();
             NormalizeInputPluginOrder(channelIndex, config);
             _configManager.Save(Config);
 
@@ -2069,5 +2106,20 @@ internal sealed class MainPluginCoordinator
         format = VstPluginFormat.Vst3;
         path = string.Empty;
         return false;
+    }
+
+    private static PluginNodeConfig ToPluginNodeConfig(PluginConfig pc)
+    {
+        var node = new PluginNodeConfig
+        {
+            InstanceId = pc.InstanceId,
+            Type = pc.Type,
+            IsBypassed = pc.IsBypassed,
+            PresetName = pc.PresetName,
+            State = pc.State
+        };
+        foreach (var kvp in pc.Parameters)
+            node.Parameters[kvp.Key] = kvp.Value;
+        return node;
     }
 }
