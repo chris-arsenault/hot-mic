@@ -28,9 +28,7 @@ public sealed class ConfigManager
         {
             var json = File.ReadAllText(_configPath);
             var config = JsonSerializer.Deserialize<AppConfig>(json, SerializerOptions);
-            if (config is null) return CreateDefault();
-            MigrateChannels(config);
-            return config;
+            return config ?? CreateDefault();
         }
         catch (IOException)
         {
@@ -101,24 +99,4 @@ public sealed class ConfigManager
         return config;
     }
 
-    /// <summary>
-    /// Migrate channels from legacy Plugins+Containers format to Nodes format.
-    /// </summary>
-    private static void MigrateChannels(AppConfig config)
-    {
-        foreach (var channel in config.Channels)
-        {
-            if (channel.Nodes.Count > 0)
-                continue; // Already in new format
-
-#pragma warning disable CS0618 // Accessing obsolete Plugins/Containers for migration
-            if (channel.Plugins.Count == 0)
-                continue;
-
-            channel.Nodes = ChainNodeHelpers.MigrateFromLegacy(channel.Plugins, channel.Containers);
-            channel.Plugins.Clear();
-            channel.Containers.Clear();
-#pragma warning restore CS0618
-        }
-    }
 }

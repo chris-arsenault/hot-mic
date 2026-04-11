@@ -178,7 +178,7 @@ internal sealed class MainPluginCoordinator
             return;
         }
 
-        if (config.Plugins.Count == 0 &&
+        if (config.Nodes.Count == 0 &&
             !IsCustomPreset(config.PresetName))
         {
             ApplyChannelPreset(channelIndex, config.PresetName);
@@ -1707,7 +1707,7 @@ internal sealed class MainPluginCoordinator
             var profile = _getQualityProfile();
             int extraSlotCount = preservedInputSlot is null ? 0 : 1;
             var pluginSlots = new List<PluginSlot>(chainPreset.Entries.Count + extraSlotCount);
-            var pluginConfigs = new List<(PluginConfig Config, ChainPresetEntry Entry)>(chainPreset.Entries.Count);
+            var pluginConfigs = new List<(PluginNodeConfig Config, ChainPresetEntry Entry)>(chainPreset.Entries.Count);
             int nextInstanceId = 0;
 
             if (preservedInputSlot is not null)
@@ -1749,7 +1749,7 @@ internal sealed class MainPluginCoordinator
 
                 int instanceId = ++nextInstanceId;
                 pluginSlots.Add(new PluginSlot(instanceId, plugin, AudioEngine.SampleRate));
-                var pc = new PluginConfig
+                var pc = new PluginNodeConfig
                 {
                     InstanceId = instanceId,
                     Type = plugin.Id,
@@ -1763,95 +1763,49 @@ internal sealed class MainPluginCoordinator
                 pluginConfigs.Add((pc, entry));
             }
 
-            // Build containers by grouping entries that share a ContainerName.
-            // Each pluginConfig is paired with its source entry, so no index mapping needed.
-            var containerConfigs = new List<PluginContainerConfig>();
-            bool hasEntryContainers = pluginConfigs.Any(p => !string.IsNullOrEmpty(p.Entry.ContainerName));
+            // Build node tree directly from plugin configs + entry container info
+            int nextContainerId = 0;
+            var nodeTree = new List<ChainNodeConfig>();
+            var containerMap = new Dictionary<string, ContainerNodeConfig>(StringComparer.OrdinalIgnoreCase);
 
-            if (hasEntryContainers)
+            foreach (var (pc, sourceEntry) in pluginConfigs)
             {
-                int nextContainerId = 0;
-                var containerMap = new Dictionary<string, PluginContainerConfig>(StringComparer.OrdinalIgnoreCase);
-                foreach (var (pluginCfg, sourceEntry) in pluginConfigs)
+                var pluginNode = new PluginNodeConfig
                 {
-                    if (string.IsNullOrEmpty(sourceEntry.ContainerName)) continue;
+                    InstanceId = pc.InstanceId,
+                    Type = pc.Type,
+                    IsBypassed = pc.IsBypassed,
+                    PresetName = pc.PresetName,
+                    State = pc.State
+                };
+                foreach (var kvp in pc.Parameters)
+                    pluginNode.Parameters[kvp.Key] = kvp.Value;
 
-                    if (!containerMap.TryGetValue(sourceEntry.ContainerName, out var cc))
+                if (!string.IsNullOrEmpty(sourceEntry.ContainerName))
+                {
+                    if (!containerMap.TryGetValue(sourceEntry.ContainerName, out var cn))
                     {
-                        cc = new PluginContainerConfig
+                        cn = new ContainerNodeConfig
                         {
-                            Id = ++nextContainerId,
+                            ContainerId = ++nextContainerId,
                             Name = sourceEntry.ContainerName,
                             IsBypassed = sourceEntry.ContainerBypassed
                         };
-                        containerMap[sourceEntry.ContainerName] = cc;
-                        containerConfigs.Add(cc);
+                        containerMap[sourceEntry.ContainerName] = cn;
+                        nodeTree.Add(cn);
                     }
-                    cc.PluginInstanceIds.Add(pluginCfg.InstanceId);
-                }
-            }
-            else if (chainPreset.Containers.Count > 0)
-            {
-                // Legacy fallback: use PluginIndices (old saved presets)
-                int nextContainerId = 0;
-                for (int i = 0; i < chainPreset.Containers.Count; i++)
-                {
-                    var container = chainPreset.Containers[i];
-                    var ids = new List<int>();
-                    for (int j = 0; j < container.PluginIndices.Count; j++)
-                    {
-                        int index = container.PluginIndices[j];
-                        if ((uint)index < (uint)pluginConfigs.Count)
-                        {
-                            ids.Add(pluginConfigs[index].Config.InstanceId);
-                        }
-                    }
+                    cn.Plugins.Add(pluginNode);
 
-                    var cc = new PluginContainerConfig
+                    if (cn.IsBypassed)
                     {
-                        Id = ++nextContainerId,
-                        Name = container.Name,
-                        IsBypassed = container.IsBypassed
-                    };
-                    cc.PluginInstanceIds.AddRange(ids);
-                    containerConfigs.Add(cc);
-                }
-            }
-
-            if (containerConfigs.Count > 0)
-            {
-                var bypassed = new HashSet<int>();
-                for (int i = 0; i < containerConfigs.Count; i++)
-                {
-                    if (!containerConfigs[i].IsBypassed)
-                    {
-                        continue;
-                    }
-
-                    for (int j = 0; j < containerConfigs[i].PluginInstanceIds.Count; j++)
-                    {
-                        bypassed.Add(containerConfigs[i].PluginInstanceIds[j]);
+                        pluginNode.IsBypassed = true;
+                        var slot = pluginSlots.FirstOrDefault(s => s.InstanceId == pc.InstanceId);
+                        if (slot is not null) slot.Plugin.IsBypassed = true;
                     }
                 }
-
-                if (bypassed.Count > 0)
+                else
                 {
-                    for (int i = 0; i < pluginSlots.Count; i++)
-                    {
-                        var slot = pluginSlots[i];
-                        if (bypassed.Contains(slot.InstanceId))
-                        {
-                            slot.Plugin.IsBypassed = true;
-                        }
-                    }
-
-                    for (int i = 0; i < pluginConfigs.Count; i++)
-                    {
-                        if (bypassed.Contains(pluginConfigs[i].Config.InstanceId))
-                        {
-                            pluginConfigs[i].Config.IsBypassed = true;
-                        }
-                    }
+                    nodeTree.Add(pluginNode);
                 }
             }
 
@@ -1860,53 +1814,6 @@ internal sealed class MainPluginCoordinator
             QueueRemovedPlugins(oldSlots, newSlots);
 
             config.PresetName = chainPreset.Name;
-
-            // Build node tree from pluginConfigs + containerConfigs
-            var nodeTree = new List<ChainNodeConfig>();
-            var containerNodeMap = new Dictionary<string, ContainerNodeConfig>(StringComparer.OrdinalIgnoreCase);
-            foreach (var cc in containerConfigs)
-            {
-                var containerNode = new ContainerNodeConfig
-                {
-                    ContainerId = cc.Id,
-                    Name = cc.Name,
-                    IsBypassed = cc.IsBypassed
-                };
-                containerNodeMap[cc.Name] = containerNode;
-            }
-
-            var assignedToContainer = new HashSet<int>();
-            foreach (var cc in containerConfigs)
-            {
-                foreach (int id in cc.PluginInstanceIds)
-                    assignedToContainer.Add(id);
-            }
-
-            // Place plugins into nodes, grouping by container
-            var emittedContainers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (pc, _) in pluginConfigs)
-            {
-                if (assignedToContainer.Contains(pc.InstanceId))
-                {
-                    // Find which container owns this plugin
-                    var ownerCc = containerConfigs.FirstOrDefault(c => c.PluginInstanceIds.Contains(pc.InstanceId));
-                    if (ownerCc is not null && containerNodeMap.TryGetValue(ownerCc.Name, out var cn))
-                    {
-                        cn.Plugins.Add(ToPluginNodeConfig(pc));
-                        if (emittedContainers.Add(ownerCc.Name))
-                            nodeTree.Add(cn);
-                    }
-                    else
-                    {
-                        nodeTree.Add(ToPluginNodeConfig(pc));
-                    }
-                }
-                else
-                {
-                    nodeTree.Add(ToPluginNodeConfig(pc));
-                }
-            }
-
             config.Nodes = nodeTree;
             GetGraph(channelIndex)?.SyncNodesFromChain();
             NormalizeInputPluginOrder(channelIndex, config);
@@ -2109,18 +2016,4 @@ internal sealed class MainPluginCoordinator
         return false;
     }
 
-    private static PluginNodeConfig ToPluginNodeConfig(PluginConfig pc)
-    {
-        var node = new PluginNodeConfig
-        {
-            InstanceId = pc.InstanceId,
-            Type = pc.Type,
-            IsBypassed = pc.IsBypassed,
-            PresetName = pc.PresetName,
-            State = pc.State
-        };
-        foreach (var kvp in pc.Parameters)
-            node.Parameters[kvp.Key] = kvp.Value;
-        return node;
-    }
 }

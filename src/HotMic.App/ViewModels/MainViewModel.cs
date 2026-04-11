@@ -529,8 +529,8 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var defaultChannel = new ChannelConfig { Id = 1, Name = "Mic 1" };
-        defaultChannel.Plugins.Add(new PluginConfig { Type = "builtin:input" });
-        defaultChannel.Plugins.Add(new PluginConfig { Type = "builtin:output-send" });
+        defaultChannel.Nodes.Add(new PluginNodeConfig { Type = "builtin:input" });
+        defaultChannel.Nodes.Add(new PluginNodeConfig { Type = "builtin:output-send" });
         _config.Channels.Add(defaultChannel);
     }
 
@@ -548,7 +548,7 @@ internal sealed partial class MainViewModel : ObservableObject, IDisposable
                 Id = _config.Channels.Count + 1,
                 Name = $"Channel {_config.Channels.Count + 1}"
             };
-            ch.Plugins.Add(new PluginConfig { Type = "builtin:input" });
+            ch.Nodes.Add(new PluginNodeConfig { Type = "builtin:input" });
             _config.Channels.Add(ch);
         }
 

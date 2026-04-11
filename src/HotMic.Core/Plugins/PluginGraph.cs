@@ -34,17 +34,6 @@ public sealed class PluginGraph
         ArgumentNullException.ThrowIfNull(slotFactory);
 
         _config = config;
-
-        // Migrate legacy format if needed
-#pragma warning disable CS0618
-        if (config.Nodes.Count == 0 && config.Plugins.Count > 0)
-        {
-            config.Nodes = ChainNodeHelpers.MigrateFromLegacy(config.Plugins, config.Containers);
-            config.Plugins.Clear();
-            config.Containers.Clear();
-        }
-#pragma warning restore CS0618
-
         bool changed = false;
         var usedIds = new HashSet<int>();
         _nextInstanceId = 0;
@@ -601,59 +590,6 @@ public sealed class PluginGraph
         }
         return containers;
     }
-
-#pragma warning disable CS0618 // Legacy compat: callers still reference these until fully migrated
-    /// <summary>
-    /// Legacy: sync old-format Plugins/Containers properties from node tree.
-    /// Called before config save to maintain backwards compatibility.
-    /// </summary>
-    public void SyncLegacyConfigFromNodes()
-    {
-
-        _config.Plugins.Clear();
-        _config.Containers.Clear();
-
-        int nextContainerId = 0;
-        foreach (var node in _config.Nodes)
-        {
-            switch (node)
-            {
-                case PluginNodeConfig p:
-                    _config.Plugins.Add(ToPluginConfig(p));
-                    break;
-                case ContainerNodeConfig c:
-                    var container = new PluginContainerConfig
-                    {
-                        Id = c.ContainerId > 0 ? c.ContainerId : ++nextContainerId,
-                        Name = c.Name,
-                        IsBypassed = c.IsBypassed
-                    };
-                    foreach (var child in c.Plugins)
-                    {
-                        _config.Plugins.Add(ToPluginConfig(child));
-                        container.PluginInstanceIds.Add(child.InstanceId);
-                    }
-                    _config.Containers.Add(container);
-                    break;
-            }
-        }
-    }
-
-    private static PluginConfig ToPluginConfig(PluginNodeConfig node)
-    {
-        var config = new PluginConfig
-        {
-            InstanceId = node.InstanceId,
-            Type = node.Type,
-            IsBypassed = node.IsBypassed,
-            PresetName = node.PresetName,
-            State = node.State
-        };
-        foreach (var kvp in node.Parameters)
-            config.Parameters[kvp.Key] = kvp.Value;
-        return config;
-    }
-#pragma warning restore CS0618
 
     /// <summary>
     /// Exposes the chain's SampleRate for slot creation.

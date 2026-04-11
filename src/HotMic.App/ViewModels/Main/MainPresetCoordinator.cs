@@ -60,15 +60,15 @@ internal sealed class MainPresetCoordinator
 
         var plugins = new List<(string pluginId, Dictionary<string, float> parameters)>();
 
-        foreach (var pluginConfig in config.Plugins)
+        foreach (var pluginNode in ChainNodeHelpers.FlattenPlugins(config.Nodes))
         {
-            if (string.IsNullOrWhiteSpace(pluginConfig.Type))
+            if (string.IsNullOrWhiteSpace(pluginNode.Type))
             {
                 continue;
             }
 
-            var parameters = new Dictionary<string, float>(pluginConfig.Parameters, StringComparer.OrdinalIgnoreCase);
-            plugins.Add((pluginConfig.Type, parameters));
+            var parameters = new Dictionary<string, float>(pluginNode.Parameters, StringComparer.OrdinalIgnoreCase);
+            plugins.Add((pluginNode.Type, parameters));
         }
 
         var containers = graph.BuildPresetContainers();

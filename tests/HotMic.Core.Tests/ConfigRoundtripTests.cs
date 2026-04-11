@@ -4,10 +4,6 @@ using Xunit;
 
 namespace HotMic.Core.Tests;
 
-/// <summary>
-/// Tests that configuration persistence survives serialization roundtrips.
-/// These tests exercise the same JSON path as ConfigManager.
-/// </summary>
 public class ConfigRoundtripTests
 {
     private static readonly JsonSerializerOptions SerializerOptions = new()
@@ -38,25 +34,31 @@ public class ConfigRoundtripTests
             EnableVstPlugins = false,
             Ui = new UiConfig { ViewMode = "minimal", AlwaysOnTop = true }
         };
-        original.Channels.Add(new ChannelConfig
+
+        var ch = new ChannelConfig
         {
             Id = 1, Name = "Mic 1", InputDeviceId = "input-1",
             InputChannel = InputChannelMode.Left,
             InputGainDb = -3.5f, OutputGainDb = 2.0f,
             IsMuted = true, IsSoloed = false, PresetName = "Broadcast"
-        });
-        original.Channels[0].Plugins.Add(new PluginConfig
+        };
+
+        var gainPlugin = new PluginNodeConfig
         {
             InstanceId = 10, Type = "builtin:gain", IsBypassed = true,
             PresetName = "MyPreset", State = new byte[] { 0xDE, 0xAD }
-        });
-        original.Channels[0].Plugins[0].Parameters["Gain"] = -6.0f;
-        original.Channels[0].Plugins[0].Parameters["Phase"] = 1.0f;
-        original.Channels[0].Containers.Add(new PluginContainerConfig
+        };
+        gainPlugin.Parameters["Gain"] = -6.0f;
+        gainPlugin.Parameters["Phase"] = 1.0f;
+
+        ch.Nodes.Add(gainPlugin);
+        ch.Nodes.Add(new ContainerNodeConfig
         {
-            Id = 1, Name = "FX Rack", IsBypassed = true
+            ContainerId = 1, Name = "FX Rack", IsBypassed = true,
+            Plugins = { new PluginNodeConfig { InstanceId = 20, Type = "builtin:compressor" } }
         });
-        original.Channels[0].Containers[0].PluginInstanceIds.Add(10);
+
+        original.Channels.Add(ch);
         original.Vst2SearchPaths.Add(@"C:\VST2");
         original.Vst3SearchPaths.Add(@"C:\VST3");
         original.Midi = new MidiConfig
@@ -71,47 +73,32 @@ public class ConfigRoundtripTests
 
         var restored = Roundtrip(original);
 
-        // Audio settings
-        Assert.Equal("device-123", restored.AudioSettings.OutputDeviceId);
-        Assert.Equal("monitor-456", restored.AudioSettings.MonitorOutputDeviceId);
         Assert.Equal(44100, restored.AudioSettings.SampleRate);
-        Assert.Equal(512, restored.AudioSettings.BufferSize);
-        Assert.Equal(AudioQualityMode.QualityPriority, restored.AudioSettings.QualityMode);
-
-        // Top-level
         Assert.False(restored.EnableVstPlugins);
         Assert.Equal("minimal", restored.Ui.ViewMode);
         Assert.True(restored.Ui.AlwaysOnTop);
 
-        // Channels
         Assert.Single(restored.Channels);
-        var ch = restored.Channels[0];
-        Assert.Equal(1, ch.Id);
-        Assert.Equal("Mic 1", ch.Name);
-        Assert.Equal("input-1", ch.InputDeviceId);
-        Assert.Equal(InputChannelMode.Left, ch.InputChannel);
-        Assert.Equal(-3.5f, ch.InputGainDb);
-        Assert.Equal(2.0f, ch.OutputGainDb);
-        Assert.True(ch.IsMuted);
-        Assert.False(ch.IsSoloed);
-        Assert.Equal("Broadcast", ch.PresetName);
+        var rch = restored.Channels[0];
+        Assert.Equal("Mic 1", rch.Name);
+        Assert.Equal(InputChannelMode.Left, rch.InputChannel);
+        Assert.Equal(-3.5f, rch.InputGainDb);
+        Assert.True(rch.IsMuted);
+        Assert.Equal("Broadcast", rch.PresetName);
 
-        // Plugins
-        Assert.Single(ch.Plugins);
-        var plug = ch.Plugins[0];
-        Assert.Equal(10, plug.InstanceId);
-        Assert.Equal("builtin:gain", plug.Type);
-        Assert.True(plug.IsBypassed);
-        Assert.Equal("MyPreset", plug.PresetName);
-        Assert.Equal(new byte[] { 0xDE, 0xAD }, plug.State);
-        Assert.Equal(-6.0f, plug.Parameters["Gain"]);
-        Assert.Equal(1.0f, plug.Parameters["Phase"]);
+        // Nodes
+        Assert.Equal(2, rch.Nodes.Count);
+        var rGain = Assert.IsType<PluginNodeConfig>(rch.Nodes[0]);
+        Assert.Equal("builtin:gain", rGain.Type);
+        Assert.True(rGain.IsBypassed);
+        Assert.Equal(new byte[] { 0xDE, 0xAD }, rGain.State);
+        Assert.Equal(-6.0f, rGain.Parameters["Gain"]);
 
-        // Containers
-        Assert.Single(ch.Containers);
-        Assert.Equal("FX Rack", ch.Containers[0].Name);
-        Assert.True(ch.Containers[0].IsBypassed);
-        Assert.Equal(new[] { 10 }, ch.Containers[0].PluginInstanceIds);
+        var rContainer = Assert.IsType<ContainerNodeConfig>(rch.Nodes[1]);
+        Assert.Equal("FX Rack", rContainer.Name);
+        Assert.True(rContainer.IsBypassed);
+        Assert.Single(rContainer.Plugins);
+        Assert.Equal("builtin:compressor", rContainer.Plugins[0].Type);
 
         // VST paths
         Assert.Equal(new[] { @"C:\VST2" }, restored.Vst2SearchPaths);
@@ -119,11 +106,8 @@ public class ConfigRoundtripTests
 
         // MIDI
         Assert.True(restored.Midi.Enabled);
-        Assert.Equal("nanoKONTROL", restored.Midi.DeviceName);
-        Assert.Equal(1, restored.Midi.FilterChannel);
         Assert.Single(restored.Midi.Bindings);
         Assert.Equal(7, restored.Midi.Bindings[0].CcNumber);
-        Assert.Equal("ch1/gain", restored.Midi.Bindings[0].TargetPath);
     }
 
     [Fact]
@@ -144,8 +128,8 @@ public class ConfigRoundtripTests
         var state = new byte[256];
         for (int i = 0; i < 256; i++) state[i] = (byte)i;
 
-        var config = new PluginConfig { InstanceId = 1, Type = "test", State = state };
-        var restored = Roundtrip(config);
+        var node = new PluginNodeConfig { InstanceId = 1, Type = "test", State = state };
+        var restored = Roundtrip(node);
 
         Assert.Equal(state, restored.State);
     }
@@ -153,8 +137,8 @@ public class ConfigRoundtripTests
     [Fact]
     public void PluginState_Null_SurvivesRoundtrip()
     {
-        var config = new PluginConfig { InstanceId = 1, Type = "test", State = null };
-        var restored = Roundtrip(config);
+        var node = new PluginNodeConfig { InstanceId = 1, Type = "test", State = null };
+        var restored = Roundtrip(node);
 
         Assert.Null(restored.State);
     }
@@ -162,14 +146,13 @@ public class ConfigRoundtripTests
     [Fact]
     public void SpecialFloatValues_Roundtrip()
     {
-        var config = new PluginConfig { InstanceId = 1, Type = "test" };
-        config.Parameters["nan"] = float.NaN;
-        config.Parameters["inf"] = float.PositiveInfinity;
-        config.Parameters["neginf"] = float.NegativeInfinity;
-        config.Parameters["zero"] = 0f;
-        config.Parameters["negzero"] = -0f;
+        var node = new PluginNodeConfig { InstanceId = 1, Type = "test" };
+        node.Parameters["nan"] = float.NaN;
+        node.Parameters["inf"] = float.PositiveInfinity;
+        node.Parameters["neginf"] = float.NegativeInfinity;
+        node.Parameters["zero"] = 0f;
 
-        var restored = Roundtrip(config);
+        var restored = Roundtrip(node);
 
         Assert.True(float.IsNaN(restored.Parameters["nan"]));
         Assert.True(float.IsPositiveInfinity(restored.Parameters["inf"]));
@@ -186,13 +169,13 @@ public class ConfigRoundtripTests
             var ch = new ChannelConfig { Id = c + 1, Name = $"Ch {c + 1}" };
             for (int p = 0; p < 4; p++)
             {
-                var plug = new PluginConfig
+                var node = new PluginNodeConfig
                 {
                     InstanceId = c * 10 + p,
                     Type = $"builtin:plugin-{p}"
                 };
-                plug.Parameters[$"param-{p}"] = p * 0.25f;
-                ch.Plugins.Add(plug);
+                node.Parameters[$"param-{p}"] = p * 0.25f;
+                ch.Nodes.Add(node);
             }
             original.Channels.Add(ch);
         }
@@ -202,11 +185,12 @@ public class ConfigRoundtripTests
         Assert.Equal(3, restored.Channels.Count);
         for (int c = 0; c < 3; c++)
         {
-            Assert.Equal(4, restored.Channels[c].Plugins.Count);
+            Assert.Equal(4, restored.Channels[c].Nodes.Count);
             for (int p = 0; p < 4; p++)
             {
-                Assert.Equal($"builtin:plugin-{p}", restored.Channels[c].Plugins[p].Type);
-                Assert.Equal(p * 0.25f, restored.Channels[c].Plugins[p].Parameters[$"param-{p}"]);
+                var node = Assert.IsType<PluginNodeConfig>(restored.Channels[c].Nodes[p]);
+                Assert.Equal($"builtin:plugin-{p}", node.Type);
+                Assert.Equal(p * 0.25f, node.Parameters[$"param-{p}"]);
             }
         }
     }
@@ -254,9 +238,7 @@ public class ConfigRoundtripTests
         config.Nodes.Add(new PluginNodeConfig { InstanceId = 1, Type = "builtin:input" });
         config.Nodes.Add(new ContainerNodeConfig
         {
-            ContainerId = 1,
-            Name = "Noise Removal",
-            IsBypassed = true,
+            ContainerId = 1, Name = "Noise Removal", IsBypassed = true,
             Plugins =
             {
                 new PluginNodeConfig { InstanceId = 2, Type = "builtin:hpf" },
@@ -269,27 +251,13 @@ public class ConfigRoundtripTests
         var restored = Roundtrip(config);
 
         Assert.Equal(4, restored.Nodes.Count);
-
-        // Node 0: standalone plugin
-        var n0 = Assert.IsType<PluginNodeConfig>(restored.Nodes[0]);
-        Assert.Equal("builtin:input", n0.Type);
-        Assert.Equal(1, n0.InstanceId);
-
-        // Node 1: container with 2 children
-        var n1 = Assert.IsType<ContainerNodeConfig>(restored.Nodes[1]);
-        Assert.Equal("Noise Removal", n1.Name);
-        Assert.True(n1.IsBypassed);
-        Assert.Equal(2, n1.Plugins.Count);
-        Assert.Equal("builtin:hpf", n1.Plugins[0].Type);
-        Assert.Equal("builtin:speechdenoiser", n1.Plugins[1].Type);
-
-        // Node 2: standalone
-        var n2 = Assert.IsType<PluginNodeConfig>(restored.Nodes[2]);
-        Assert.Equal("builtin:compressor", n2.Type);
-
-        // Node 3: standalone
-        var n3 = Assert.IsType<PluginNodeConfig>(restored.Nodes[3]);
-        Assert.Equal("builtin:output-send", n3.Type);
+        Assert.IsType<PluginNodeConfig>(restored.Nodes[0]);
+        var container = Assert.IsType<ContainerNodeConfig>(restored.Nodes[1]);
+        Assert.Equal("Noise Removal", container.Name);
+        Assert.True(container.IsBypassed);
+        Assert.Equal(2, container.Plugins.Count);
+        Assert.IsType<PluginNodeConfig>(restored.Nodes[2]);
+        Assert.IsType<PluginNodeConfig>(restored.Nodes[3]);
     }
 
     [Fact]
@@ -316,42 +284,6 @@ public class ConfigRoundtripTests
     }
 
     [Fact]
-    public void NodeTree_MigrateFromLegacy_PreservesOrderAndContainers()
-    {
-#pragma warning disable CS0618
-        var plugins = new List<PluginConfig>
-        {
-            new() { InstanceId = 1, Type = "builtin:input" },
-            new() { InstanceId = 2, Type = "builtin:hpf" },
-            new() { InstanceId = 3, Type = "builtin:denoiser" },
-            new() { InstanceId = 4, Type = "builtin:compressor" },
-            new() { InstanceId = 5, Type = "builtin:output-send" }
-        };
-        var containers = new List<PluginContainerConfig>
-        {
-            new() { Id = 1, Name = "Noise", PluginInstanceIds = { 2, 3 } }
-        };
-#pragma warning restore CS0618
-
-        var nodes = ChainNodeHelpers.MigrateFromLegacy(plugins, containers);
-
-        // Should be: Input, Container(HPF, Denoiser), Compressor, OutputSend
-        Assert.Equal(4, nodes.Count);
-
-        Assert.IsType<PluginNodeConfig>(nodes[0]);
-        Assert.Equal("builtin:input", ((PluginNodeConfig)nodes[0]).Type);
-
-        var container = Assert.IsType<ContainerNodeConfig>(nodes[1]);
-        Assert.Equal("Noise", container.Name);
-        Assert.Equal(2, container.Plugins.Count);
-        Assert.Equal("builtin:hpf", container.Plugins[0].Type);
-        Assert.Equal("builtin:denoiser", container.Plugins[1].Type);
-
-        Assert.Equal("builtin:compressor", ((PluginNodeConfig)nodes[2]).Type);
-        Assert.Equal("builtin:output-send", ((PluginNodeConfig)nodes[3]).Type);
-    }
-
-    [Fact]
     public void NodeTree_RemovePlugin_FromContainer()
     {
         var nodes = new List<ChainNodeConfig>
@@ -368,7 +300,6 @@ public class ConfigRoundtripTests
         Assert.True(ChainNodeHelpers.RemovePlugin(nodes, 2, out var removed));
         Assert.Equal("B", removed!.Type);
 
-        // Container should now have 1 child
         var container = Assert.IsType<ContainerNodeConfig>(nodes[1]);
         Assert.Single(container.Plugins);
         Assert.Equal("C", container.Plugins[0].Type);

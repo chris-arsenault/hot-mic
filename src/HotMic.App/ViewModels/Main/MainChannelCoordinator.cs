@@ -192,7 +192,7 @@ internal sealed class MainChannelCoordinator
             Id = channelIndex + 1,
             Name = $"Copy {sourceChannelIndex + 1} -> {channelIndex + 1}"
         };
-        channelConfig.Plugins.Add(new PluginConfig { Type = "builtin:bus-input" });
+        channelConfig.Nodes.Add(new PluginNodeConfig { Type = "builtin:bus-input" });
 
         config.Channels.Add(channelConfig);
         _getAudioEngine().EnsureChannelCount(config.Channels.Count);
@@ -286,7 +286,7 @@ internal sealed class MainChannelCoordinator
     private static ChannelConfig CreateDefaultChannelConfig(int id)
     {
         var cfg = new ChannelConfig { Id = id, Name = $"Channel {id}" };
-        cfg.Plugins.Add(new PluginConfig { Type = "builtin:input" });
+        cfg.Nodes.Add(new PluginNodeConfig { Type = "builtin:input" });
         return cfg;
     }
 
@@ -308,9 +308,10 @@ internal sealed class MainChannelCoordinator
         for (int i = 0; i < config.Channels.Count; i++)
         {
             var channel = config.Channels[i];
-            for (int j = 0; j < channel.Plugins.Count; j++)
+            var flatPlugins = ChainNodeHelpers.FlattenPlugins(channel.Nodes);
+            for (int j = 0; j < flatPlugins.Count; j++)
             {
-                var pluginConfig = channel.Plugins[j];
+                var pluginConfig = flatPlugins[j];
                 if (string.Equals(pluginConfig.Type, "builtin:copy", StringComparison.OrdinalIgnoreCase))
                 {
                     if (pluginConfig.State is { Length: >= 4 } state)
