@@ -274,64 +274,12 @@ internal sealed class MainChannelCoordinator
 
     private int GetVisibleSlotCount(int channelIndex)
     {
-        if ((uint)channelIndex >= (uint)_getAudioEngine().Channels.Count)
-        {
-            return 1;
-        }
-
-        var strip = _getAudioEngine().Channels[channelIndex];
-        var slots = strip.PluginChain.GetSnapshot();
         var config = _getOrCreateChannelConfig(channelIndex);
-        if (config.Containers.Count == 0)
-        {
-            return Math.Max(1, slots.Length + 1);
-        }
 
-        var containerIndexByPluginId = new Dictionary<int, int>();
-        for (int i = 0; i < config.Containers.Count; i++)
-        {
-            var container = config.Containers[i];
-            var pluginIds = container.PluginInstanceIds;
-            for (int j = 0; j < pluginIds.Count; j++)
-            {
-                int instanceId = pluginIds[j];
-                if (instanceId > 0 && !containerIndexByPluginId.ContainsKey(instanceId))
-                {
-                    containerIndexByPluginId[instanceId] = i;
-                }
-            }
-        }
-
-        var countedContainers = new HashSet<int>();
-        int visibleCount = 0;
-        for (int i = 0; i < slots.Length; i++)
-        {
-            if (slots[i] is not { } slot)
-            {
-                continue;
-            }
-
-            if (containerIndexByPluginId.TryGetValue(slot.InstanceId, out int containerIndex))
-            {
-                if (countedContainers.Add(containerIndex))
-                {
-                    visibleCount++;
-                }
-            }
-            else
-            {
-                visibleCount++;
-            }
-        }
-
-        for (int i = 0; i < config.Containers.Count; i++)
-        {
-            if (config.Containers[i].PluginInstanceIds.Count == 0)
-            {
-                visibleCount++;
-            }
-        }
-
+        // Each top-level node is one visual slot:
+        // PluginNodeConfig = 1 slot, ContainerNodeConfig = 1 slot (regardless of child count)
+        // Plus 1 for the "add plugin" placeholder
+        int visibleCount = config.Nodes.Count;
         return Math.Max(1, visibleCount + 1);
     }
 
